@@ -30,12 +30,21 @@ Add a multiplier field to channels that adjusts the final importance score:
 
 ```sql
 ALTER TABLE channels ADD COLUMN importance_weight FLOAT DEFAULT 1.0;
--- Range: 0.1 to 2.0
--- 1.0 = neutral (no change)
--- 0.5 = halve importance (de-prioritize)
--- 1.5 = boost importance by 50%
--- 2.0 = double importance (high-priority source)
 ```
+
+### Weight Ranges
+
+| Source | Range | Description |
+|--------|-------|-------------|
+| **Manual override** | 0.1 – 2.0 | Full range for admin control |
+| **Auto-calculated** | 0.5 – 1.5 | Conservative range to prevent extreme swings |
+| **Default** | 1.0 | Neutral (no change) |
+
+Examples:
+- `0.5` = halve importance (de-prioritize noisy channel)
+- `1.0` = neutral (no change)
+- `1.5` = boost importance by 50%
+- `2.0` = double importance (high-priority source, manual only)
 
 ### Score Calculation
 
@@ -43,10 +52,15 @@ ALTER TABLE channels ADD COLUMN importance_weight FLOAT DEFAULT 1.0;
 final_importance = llm_importance * channel_importance_weight
 ```
 
-Capped at 1.0 to maintain the 0-1 scale:
+The final score is capped at 1.0 to maintain the 0-1 scale. This means weights > 1.0 provide a boost but cannot push a 0.6 importance item above 1.0:
+
 ```go
 finalScore := min(1.0, llmScore * channel.ImportanceWeight)
+// Example: 0.6 * 1.5 = 0.9 (boosted but still valid)
+// Example: 0.8 * 1.5 = 1.0 (capped, not 1.2)
 ```
+
+**Note**: The cap creates a "saturation effect" where high-importance items from boosted channels hit the ceiling. This is intentional—it prevents any single channel from dominating the digest.
 
 ---
 
@@ -65,10 +79,9 @@ CREATE TABLE channel_stats (
     items_created        INT DEFAULT 0,    -- Passed relevance filter
     items_digested       INT DEFAULT 0,    -- Included in digest
 
-    -- Quality metrics
-    avg_importance       FLOAT,
-    avg_relevance        FLOAT,
-    digest_inclusion_rate FLOAT,  -- items_digested / items_created
+    -- Quality metrics (nullable for new channels)
+    avg_importance       FLOAT,            -- Average importance of digested items
+    avg_relevance        FLOAT,            -- Average relevance score
 
     -- Engagement (future)
     digest_clicks        INT DEFAULT 0,    -- If tracking
@@ -83,25 +96,45 @@ CREATE TABLE channel_stats (
 Calculate weekly, based on rolling 30-day stats:
 
 ```go
-func CalculateAutoWeight(stats ChannelStats) float32 {
-    // Base components (each 0-1, weighted)
+const (
+    // Minimum messages required before auto-weighting applies
+    MinMessagesForAutoWeight = 10
+    // Expected messages per day for consistency scoring (configurable)
+    DefaultExpectedFrequency = 5.0
+)
 
-    // 1. Digest inclusion rate (40% weight)
-    // How often does this channel's content make it to digest?
-    inclusionScore := stats.DigestInclusionRate  // 0-1
+func CalculateAutoWeight(stats ChannelStats, expectedFrequency float32) float32 {
+    // Guard: insufficient data - return neutral weight
+    if stats.MessagesReceived < MinMessagesForAutoWeight {
+        return 1.0
+    }
 
-    // 2. Average importance of digested items (30% weight)
-    // Do items from this channel tend to be high-importance?
-    importanceScore := stats.AvgImportanceOfDigested  // 0-1
+    // Calculate derived metrics with null/zero guards
+    var inclusionScore float32 = 0.0
+    if stats.ItemsCreated > 0 {
+        inclusionScore = float32(stats.ItemsDigested) / float32(stats.ItemsCreated)
+    }
 
-    // 3. Consistency (20% weight)
-    // Does channel produce content regularly?
-    // Penalize very sporadic channels
-    consistencyScore := min(1.0, stats.MessagesPerDay / expectedFrequency)
+    // Use avg_importance directly (already 0-1 scale)
+    // Default to 0.5 (neutral) if no data
+    importanceScore := stats.AvgImportance
+    if importanceScore == 0 || stats.ItemsDigested == 0 {
+        importanceScore = 0.5
+    }
 
-    // 4. Signal-to-noise ratio (10% weight)
-    // What % of messages pass relevance filter?
-    signalScore := stats.ItemsCreated / stats.MessagesReceived
+    // Calculate messages per day from period
+    days := stats.PeriodEnd.Sub(stats.PeriodStart).Hours() / 24
+    if days < 1 {
+        days = 1
+    }
+    messagesPerDay := float32(stats.MessagesReceived) / float32(days)
+    consistencyScore := min(1.0, messagesPerDay/expectedFrequency)
+
+    // Signal-to-noise with divide-by-zero guard
+    var signalScore float32 = 0.0
+    if stats.MessagesReceived > 0 {
+        signalScore = float32(stats.ItemsCreated) / float32(stats.MessagesReceived)
+    }
 
     // Weighted sum
     rawScore := (inclusionScore * 0.4) +
@@ -109,7 +142,8 @@ func CalculateAutoWeight(stats ChannelStats) float32 {
                 (consistencyScore * 0.2) +
                 (signalScore * 0.1)
 
-    // Map to weight range [0.5, 1.5]
+    // Map to AUTO weight range [0.5, 1.5]
+    // Note: Manual weights can go wider (0.1-2.0)
     // Score 0.0 -> weight 0.5 (de-prioritize poor channels)
     // Score 0.5 -> weight 1.0 (neutral)
     // Score 1.0 -> weight 1.5 (boost excellent channels)
@@ -122,7 +156,8 @@ func CalculateAutoWeight(stats ChannelStats) float32 {
 ### Auto-Update Schedule
 
 - Run weekly (e.g., Sunday midnight)
-- Only update if `auto_weight_enabled = true` for channel
+- Only update channels where `auto_weight_enabled = true` (per-channel setting)
+- Skip channels with < 10 messages in the period (insufficient data)
 - Log changes for audit trail
 - Notify admin of significant changes (>0.2 delta)
 
@@ -132,13 +167,18 @@ func CalculateAutoWeight(stats ChannelStats) float32 {
 
 ### Database Schema
 
+The `importance_weight` column is defined in the Proposed Solution section above. Additional columns for override control:
+
 ```sql
-ALTER TABLE channels ADD COLUMN importance_weight FLOAT DEFAULT 1.0;
+-- Per-channel control (added alongside importance_weight)
+ALTER TABLE channels ADD COLUMN auto_weight_enabled BOOLEAN DEFAULT TRUE;
 ALTER TABLE channels ADD COLUMN weight_override BOOLEAN DEFAULT FALSE;
 ALTER TABLE channels ADD COLUMN weight_override_reason TEXT;
 ALTER TABLE channels ADD COLUMN weight_updated_at TIMESTAMPTZ;
 ALTER TABLE channels ADD COLUMN weight_updated_by BIGINT;
 ```
+
+When `weight_override = true`, the `importance_weight` is manually set and auto-calculation is skipped for this channel regardless of `auto_weight_enabled`.
 
 ### Bot Commands
 
@@ -172,8 +212,13 @@ PUT /api/channels/{id}/weight
 
 ### Phase 1: Database & Model (Migration)
 
-1. Add `importance_weight` column to channels
-2. Add `weight_override`, `weight_override_reason` columns
+1. Add `importance_weight` column to channels (FLOAT DEFAULT 1.0)
+2. Add control columns:
+   - `auto_weight_enabled` (BOOLEAN DEFAULT TRUE)
+   - `weight_override` (BOOLEAN DEFAULT FALSE)
+   - `weight_override_reason` (TEXT)
+   - `weight_updated_at` (TIMESTAMPTZ)
+   - `weight_updated_by` (BIGINT)
 3. Create `channel_stats` table
 4. Update Go models
 
@@ -225,17 +270,30 @@ PUT /api/channels/{id}/weight
 
 ## Configuration
 
-### New Settings
+### Global Settings (Environment/Config)
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `auto_weight_enabled` | bool | true | Enable auto-calculation globally |
-| `weight_update_interval` | duration | 7d | How often to recalculate |
-| `weight_min` | float | 0.1 | Minimum allowed weight |
-| `weight_max` | float | 2.0 | Maximum allowed weight |
-| `weight_change_notify_threshold` | float | 0.2 | Notify admin if change exceeds this |
+| `AUTO_WEIGHT_ENABLED` | bool | true | Master switch for auto-calculation |
+| `WEIGHT_UPDATE_INTERVAL` | duration | 7d | How often to recalculate |
+| `WEIGHT_MIN` | float | 0.1 | Minimum allowed weight (manual) |
+| `WEIGHT_MAX` | float | 2.0 | Maximum allowed weight (manual) |
+| `WEIGHT_AUTO_MIN` | float | 0.5 | Minimum auto-calculated weight |
+| `WEIGHT_AUTO_MAX` | float | 1.5 | Maximum auto-calculated weight |
+| `WEIGHT_CHANGE_NOTIFY_THRESHOLD` | float | 0.2 | Notify admin if change exceeds this |
+| `MIN_MESSAGES_FOR_AUTO_WEIGHT` | int | 10 | Minimum messages before auto-weight applies |
+| `EXPECTED_MESSAGES_PER_DAY` | float | 5.0 | Expected frequency for consistency scoring |
 
-### Per-Channel Override
+### Per-Channel Settings (Database)
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `auto_weight_enabled` | bool | true | Enable auto-calculation for this channel |
+| `weight_override` | bool | false | Manual override active (skips auto-calc) |
+
+**Precedence**: Global `AUTO_WEIGHT_ENABLED=false` disables all auto-calculation. If global is enabled, per-channel `auto_weight_enabled` and `weight_override` control individual channels.
+
+### Per-Channel Override Examples
 
 ```sql
 -- Example: Boost @breaking_news to always be high priority
