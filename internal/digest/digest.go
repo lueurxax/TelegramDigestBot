@@ -84,12 +84,49 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 
+	// Auto-weight update ticker (check every hour, run weekly)
+	autoWeightTicker := time.NewTicker(time.Hour)
+	defer autoWeightTicker.Stop()
+	var lastAutoWeightRun time.Time
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
 			s.runOnceWithLock(ctx)
+		case <-autoWeightTicker.C:
+			s.maybeRunAutoWeightUpdate(ctx, &lastAutoWeightRun)
+		}
+	}
+}
+
+// maybeRunAutoWeightUpdate checks if it's time for weekly auto-weight update
+func (s *Scheduler) maybeRunAutoWeightUpdate(ctx context.Context, lastRun *time.Time) {
+	// Check if auto-weight is enabled
+	var autoWeightEnabled bool = true
+	if err := s.database.GetSetting(ctx, "auto_weight_enabled", &autoWeightEnabled); err != nil {
+		s.logger.Debug().Err(err).Msg("auto_weight_enabled not set, defaulting to true")
+	}
+	if !autoWeightEnabled {
+		return
+	}
+
+	now := time.Now()
+
+	// Run on Sundays at midnight (or if never run and it's past Sunday)
+	isSunday := now.Weekday() == time.Sunday
+	isMidnightHour := now.Hour() == 0
+	notRunThisWeek := lastRun.IsZero() || now.Sub(*lastRun) > 6*24*time.Hour
+
+	if isSunday && isMidnightHour && notRunThisWeek {
+		logger := s.logger.With().Str("task", "auto-weight").Logger()
+		logger.Info().Msg("Starting weekly auto-weight update")
+
+		if err := s.UpdateAutoWeights(ctx, &logger); err != nil {
+			logger.Error().Err(err).Msg("failed to update auto-weights")
+		} else {
+			*lastRun = now
 		}
 	}
 }
@@ -327,6 +364,13 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	if err := s.database.SaveDigestEntries(ctx, digestID, entries); err != nil {
 		return nil, fmt.Errorf("failed to save digest entries: %w", err)
 	}
+
+	// Collect and save channel stats for this window
+	if err := s.database.CollectAndSaveChannelStats(ctx, start, end); err != nil {
+		logger.Error().Err(err).Msg("failed to collect channel stats")
+		// Don't fail the digest for stats collection errors
+	}
+
 	return nil, nil
 }
 

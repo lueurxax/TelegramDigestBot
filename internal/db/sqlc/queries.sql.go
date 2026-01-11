@@ -332,28 +332,30 @@ func (q *Queries) FindSimilarItem(ctx context.Context, arg FindSimilarItemParams
 }
 
 const getActiveChannels = `-- name: GetActiveChannels :many
-SELECT id, tg_peer_id, username, title, is_active, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override FROM channels WHERE is_active = TRUE
+SELECT id, tg_peer_id, username, title, is_active, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override, auto_relevance_enabled, relevance_threshold_delta FROM channels WHERE is_active = TRUE
 `
 
 type GetActiveChannelsRow struct {
-	ID                  pgtype.UUID   `json:"id"`
-	TgPeerID            int64         `json:"tg_peer_id"`
-	Username            pgtype.Text   `json:"username"`
-	Title               pgtype.Text   `json:"title"`
-	IsActive            bool          `json:"is_active"`
-	AccessHash          pgtype.Int8   `json:"access_hash"`
-	InviteLink          pgtype.Text   `json:"invite_link"`
-	Context             pgtype.Text   `json:"context"`
-	Description         pgtype.Text   `json:"description"`
-	LastTgMessageID     int64         `json:"last_tg_message_id"`
-	Category            pgtype.Text   `json:"category"`
-	Tone                pgtype.Text   `json:"tone"`
-	UpdateFreq          pgtype.Text   `json:"update_freq"`
-	RelevanceThreshold  pgtype.Float4 `json:"relevance_threshold"`
-	ImportanceThreshold pgtype.Float4 `json:"importance_threshold"`
-	ImportanceWeight    pgtype.Float4 `json:"importance_weight"`
-	AutoWeightEnabled   pgtype.Bool   `json:"auto_weight_enabled"`
-	WeightOverride      pgtype.Bool   `json:"weight_override"`
+	ID                      pgtype.UUID   `json:"id"`
+	TgPeerID                int64         `json:"tg_peer_id"`
+	Username                pgtype.Text   `json:"username"`
+	Title                   pgtype.Text   `json:"title"`
+	IsActive                bool          `json:"is_active"`
+	AccessHash              pgtype.Int8   `json:"access_hash"`
+	InviteLink              pgtype.Text   `json:"invite_link"`
+	Context                 pgtype.Text   `json:"context"`
+	Description             pgtype.Text   `json:"description"`
+	LastTgMessageID         int64         `json:"last_tg_message_id"`
+	Category                pgtype.Text   `json:"category"`
+	Tone                    pgtype.Text   `json:"tone"`
+	UpdateFreq              pgtype.Text   `json:"update_freq"`
+	RelevanceThreshold      pgtype.Float4 `json:"relevance_threshold"`
+	ImportanceThreshold     pgtype.Float4 `json:"importance_threshold"`
+	ImportanceWeight        pgtype.Float4 `json:"importance_weight"`
+	AutoWeightEnabled       pgtype.Bool   `json:"auto_weight_enabled"`
+	WeightOverride          pgtype.Bool   `json:"weight_override"`
+	AutoRelevanceEnabled    pgtype.Bool   `json:"auto_relevance_enabled"`
+	RelevanceThresholdDelta pgtype.Float4 `json:"relevance_threshold_delta"`
 }
 
 func (q *Queries) GetActiveChannels(ctx context.Context) ([]GetActiveChannelsRow, error) {
@@ -384,6 +386,8 @@ func (q *Queries) GetActiveChannels(ctx context.Context) ([]GetActiveChannelsRow
 			&i.ImportanceWeight,
 			&i.AutoWeightEnabled,
 			&i.WeightOverride,
+			&i.AutoRelevanceEnabled,
+			&i.RelevanceThresholdDelta,
 		); err != nil {
 			return nil, err
 		}
@@ -472,7 +476,7 @@ func (q *Queries) GetBacklogCount(ctx context.Context) (int64, error) {
 }
 
 const getChannelByPeerID = `-- name: GetChannelByPeerID :one
-SELECT id, tg_peer_id, username, title, is_active, added_at, added_by_tg_user, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at, weight_updated_by FROM channels WHERE tg_peer_id = $1
+SELECT id, tg_peer_id, username, title, is_active, added_at, added_by_tg_user, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at, weight_updated_by, auto_relevance_enabled, relevance_threshold_delta FROM channels WHERE tg_peer_id = $1
 `
 
 func (q *Queries) GetChannelByPeerID(ctx context.Context, tgPeerID int64) (Channel, error) {
@@ -502,6 +506,8 @@ func (q *Queries) GetChannelByPeerID(ctx context.Context, tgPeerID int64) (Chann
 		&i.WeightOverrideReason,
 		&i.WeightUpdatedAt,
 		&i.WeightUpdatedBy,
+		&i.AutoRelevanceEnabled,
+		&i.RelevanceThresholdDelta,
 	)
 	return i, err
 }
@@ -555,6 +561,162 @@ func (q *Queries) GetChannelStats(ctx context.Context) ([]GetChannelStatsRow, er
 	return items, nil
 }
 
+const getChannelStatsForPeriod = `-- name: GetChannelStatsForPeriod :many
+SELECT cs.id, cs.channel_id, cs.period_start, cs.period_end, cs.messages_received, cs.items_created, cs.items_digested, cs.avg_importance, cs.avg_relevance, cs.created_at, cs.updated_at, c.username, c.title
+FROM channel_stats cs
+JOIN channels c ON cs.channel_id = c.id
+WHERE cs.period_start >= $1 AND cs.period_end <= $2
+`
+
+type GetChannelStatsForPeriodParams struct {
+	PeriodStart pgtype.Date `json:"period_start"`
+	PeriodEnd   pgtype.Date `json:"period_end"`
+}
+
+type GetChannelStatsForPeriodRow struct {
+	ID               int32              `json:"id"`
+	ChannelID        pgtype.UUID        `json:"channel_id"`
+	PeriodStart      pgtype.Date        `json:"period_start"`
+	PeriodEnd        pgtype.Date        `json:"period_end"`
+	MessagesReceived pgtype.Int4        `json:"messages_received"`
+	ItemsCreated     pgtype.Int4        `json:"items_created"`
+	ItemsDigested    pgtype.Int4        `json:"items_digested"`
+	AvgImportance    pgtype.Float8      `json:"avg_importance"`
+	AvgRelevance     pgtype.Float8      `json:"avg_relevance"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	Username         pgtype.Text        `json:"username"`
+	Title            pgtype.Text        `json:"title"`
+}
+
+func (q *Queries) GetChannelStatsForPeriod(ctx context.Context, arg GetChannelStatsForPeriodParams) ([]GetChannelStatsForPeriodRow, error) {
+	rows, err := q.db.Query(ctx, getChannelStatsForPeriod, arg.PeriodStart, arg.PeriodEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetChannelStatsForPeriodRow
+	for rows.Next() {
+		var i GetChannelStatsForPeriodRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChannelID,
+			&i.PeriodStart,
+			&i.PeriodEnd,
+			&i.MessagesReceived,
+			&i.ItemsCreated,
+			&i.ItemsDigested,
+			&i.AvgImportance,
+			&i.AvgRelevance,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Username,
+			&i.Title,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getChannelStatsForWindow = `-- name: GetChannelStatsForWindow :many
+SELECT
+    c.id as channel_id,
+    COUNT(DISTINCT rm.id) as messages_received,
+    COUNT(DISTINCT CASE WHEN i.status = 'ready' OR i.status = 'digested' THEN i.id END) as items_created,
+    COUNT(DISTINCT CASE WHEN i.status = 'digested' THEN i.id END) as items_digested,
+    COALESCE(AVG(CASE WHEN i.status IN ('ready', 'digested') THEN i.importance_score END), 0) as avg_importance,
+    COALESCE(AVG(CASE WHEN i.status IN ('ready', 'digested') THEN i.relevance_score END), 0) as avg_relevance
+FROM channels c
+LEFT JOIN raw_messages rm ON rm.channel_id = c.id AND rm.tg_date >= $1 AND rm.tg_date < $2
+LEFT JOIN items i ON i.raw_message_id = rm.id
+WHERE c.is_active = TRUE
+GROUP BY c.id
+HAVING COUNT(DISTINCT rm.id) > 0
+`
+
+type GetChannelStatsForWindowParams struct {
+	TgDate   pgtype.Timestamptz `json:"tg_date"`
+	TgDate_2 pgtype.Timestamptz `json:"tg_date_2"`
+}
+
+type GetChannelStatsForWindowRow struct {
+	ChannelID        pgtype.UUID `json:"channel_id"`
+	MessagesReceived int64       `json:"messages_received"`
+	ItemsCreated     int64       `json:"items_created"`
+	ItemsDigested    int64       `json:"items_digested"`
+	AvgImportance    interface{} `json:"avg_importance"`
+	AvgRelevance     interface{} `json:"avg_relevance"`
+}
+
+func (q *Queries) GetChannelStatsForWindow(ctx context.Context, arg GetChannelStatsForWindowParams) ([]GetChannelStatsForWindowRow, error) {
+	rows, err := q.db.Query(ctx, getChannelStatsForWindow, arg.TgDate, arg.TgDate_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetChannelStatsForWindowRow
+	for rows.Next() {
+		var i GetChannelStatsForWindowRow
+		if err := rows.Scan(
+			&i.ChannelID,
+			&i.MessagesReceived,
+			&i.ItemsCreated,
+			&i.ItemsDigested,
+			&i.AvgImportance,
+			&i.AvgRelevance,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getChannelStatsRolling = `-- name: GetChannelStatsRolling :one
+SELECT
+    COALESCE(SUM(messages_received), 0)::int as total_messages,
+    COALESCE(SUM(items_created), 0)::int as total_items_created,
+    COALESCE(SUM(items_digested), 0)::int as total_items_digested,
+    COALESCE(AVG(avg_importance), 0)::float as avg_importance,
+    COALESCE(AVG(avg_relevance), 0)::float as avg_relevance
+FROM channel_stats
+WHERE channel_id = $1 AND period_start >= $2
+`
+
+type GetChannelStatsRollingParams struct {
+	ChannelID   pgtype.UUID `json:"channel_id"`
+	PeriodStart pgtype.Date `json:"period_start"`
+}
+
+type GetChannelStatsRollingRow struct {
+	TotalMessages      int32   `json:"total_messages"`
+	TotalItemsCreated  int32   `json:"total_items_created"`
+	TotalItemsDigested int32   `json:"total_items_digested"`
+	AvgImportance      float64 `json:"avg_importance"`
+	AvgRelevance       float64 `json:"avg_relevance"`
+}
+
+func (q *Queries) GetChannelStatsRolling(ctx context.Context, arg GetChannelStatsRollingParams) (GetChannelStatsRollingRow, error) {
+	row := q.db.QueryRow(ctx, getChannelStatsRolling, arg.ChannelID, arg.PeriodStart)
+	var i GetChannelStatsRollingRow
+	err := row.Scan(
+		&i.TotalMessages,
+		&i.TotalItemsCreated,
+		&i.TotalItemsDigested,
+		&i.AvgImportance,
+		&i.AvgRelevance,
+	)
+	return i, err
+}
+
 const getChannelWeight = `-- name: GetChannelWeight :one
 SELECT username, title, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at
 FROM channels
@@ -584,6 +746,48 @@ func (q *Queries) GetChannelWeight(ctx context.Context, username pgtype.Text) (G
 		&i.WeightUpdatedAt,
 	)
 	return i, err
+}
+
+const getChannelsForAutoWeight = `-- name: GetChannelsForAutoWeight :many
+SELECT id, username, title, importance_weight, auto_weight_enabled, weight_override
+FROM channels
+WHERE is_active = TRUE AND auto_weight_enabled = TRUE AND weight_override = FALSE
+`
+
+type GetChannelsForAutoWeightRow struct {
+	ID                pgtype.UUID   `json:"id"`
+	Username          pgtype.Text   `json:"username"`
+	Title             pgtype.Text   `json:"title"`
+	ImportanceWeight  pgtype.Float4 `json:"importance_weight"`
+	AutoWeightEnabled pgtype.Bool   `json:"auto_weight_enabled"`
+	WeightOverride    pgtype.Bool   `json:"weight_override"`
+}
+
+func (q *Queries) GetChannelsForAutoWeight(ctx context.Context) ([]GetChannelsForAutoWeightRow, error) {
+	rows, err := q.db.Query(ctx, getChannelsForAutoWeight)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetChannelsForAutoWeightRow
+	for rows.Next() {
+		var i GetChannelsForAutoWeightRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.Title,
+			&i.ImportanceWeight,
+			&i.AutoWeightEnabled,
+			&i.WeightOverride,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getClustersForWindow = `-- name: GetClustersForWindow :many
@@ -826,6 +1030,40 @@ func (q *Queries) GetItemEmbedding(ctx context.Context, itemID pgtype.UUID) (str
 	var embedding string
 	err := row.Scan(&embedding)
 	return embedding, err
+}
+
+const getItemRatingsSince = `-- name: GetItemRatingsSince :many
+SELECT rm.channel_id, ir.rating, ir.created_at
+FROM item_ratings ir
+JOIN items i ON ir.item_id = i.id
+JOIN raw_messages rm ON i.raw_message_id = rm.id
+WHERE ir.created_at >= $1
+`
+
+type GetItemRatingsSinceRow struct {
+	ChannelID pgtype.UUID        `json:"channel_id"`
+	Rating    string             `json:"rating"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetItemRatingsSince(ctx context.Context, createdAt pgtype.Timestamptz) ([]GetItemRatingsSinceRow, error) {
+	rows, err := q.db.Query(ctx, getItemRatingsSince, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetItemRatingsSinceRow
+	for rows.Next() {
+		var i GetItemRatingsSinceRow
+		if err := rows.Scan(&i.ChannelID, &i.Rating, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getItemsForWindow = `-- name: GetItemsForWindow :many
@@ -1215,7 +1453,9 @@ SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.entities_
        c.title as channel_title, c.context as channel_context, c.description as channel_description,
        c.category as channel_category, c.tone as channel_tone, c.update_freq as channel_update_freq,
        c.relevance_threshold as channel_relevance_threshold, c.importance_threshold as channel_importance_threshold,
-       c.importance_weight as channel_importance_weight
+       c.importance_weight as channel_importance_weight,
+       c.auto_relevance_enabled as channel_auto_relevance_enabled,
+       c.relevance_threshold_delta as channel_relevance_threshold_delta
 FROM raw_messages rm
 JOIN channels c ON rm.channel_id = c.id
 LEFT JOIN items i ON rm.id = i.raw_message_id
@@ -1225,25 +1465,27 @@ LIMIT $1
 `
 
 type GetUnprocessedMessagesRow struct {
-	ID                         pgtype.UUID        `json:"id"`
-	ChannelID                  pgtype.UUID        `json:"channel_id"`
-	TgMessageID                int64              `json:"tg_message_id"`
-	TgDate                     pgtype.Timestamptz `json:"tg_date"`
-	Text                       pgtype.Text        `json:"text"`
-	EntitiesJson               []byte             `json:"entities_json"`
-	MediaJson                  []byte             `json:"media_json"`
-	MediaData                  []byte             `json:"media_data"`
-	CanonicalHash              string             `json:"canonical_hash"`
-	IsForward                  bool               `json:"is_forward"`
-	ChannelTitle               pgtype.Text        `json:"channel_title"`
-	ChannelContext             pgtype.Text        `json:"channel_context"`
-	ChannelDescription         pgtype.Text        `json:"channel_description"`
-	ChannelCategory            pgtype.Text        `json:"channel_category"`
-	ChannelTone                pgtype.Text        `json:"channel_tone"`
-	ChannelUpdateFreq          pgtype.Text        `json:"channel_update_freq"`
-	ChannelRelevanceThreshold  pgtype.Float4      `json:"channel_relevance_threshold"`
-	ChannelImportanceThreshold pgtype.Float4      `json:"channel_importance_threshold"`
-	ChannelImportanceWeight    pgtype.Float4      `json:"channel_importance_weight"`
+	ID                             pgtype.UUID        `json:"id"`
+	ChannelID                      pgtype.UUID        `json:"channel_id"`
+	TgMessageID                    int64              `json:"tg_message_id"`
+	TgDate                         pgtype.Timestamptz `json:"tg_date"`
+	Text                           pgtype.Text        `json:"text"`
+	EntitiesJson                   []byte             `json:"entities_json"`
+	MediaJson                      []byte             `json:"media_json"`
+	MediaData                      []byte             `json:"media_data"`
+	CanonicalHash                  string             `json:"canonical_hash"`
+	IsForward                      bool               `json:"is_forward"`
+	ChannelTitle                   pgtype.Text        `json:"channel_title"`
+	ChannelContext                 pgtype.Text        `json:"channel_context"`
+	ChannelDescription             pgtype.Text        `json:"channel_description"`
+	ChannelCategory                pgtype.Text        `json:"channel_category"`
+	ChannelTone                    pgtype.Text        `json:"channel_tone"`
+	ChannelUpdateFreq              pgtype.Text        `json:"channel_update_freq"`
+	ChannelRelevanceThreshold      pgtype.Float4      `json:"channel_relevance_threshold"`
+	ChannelImportanceThreshold     pgtype.Float4      `json:"channel_importance_threshold"`
+	ChannelImportanceWeight        pgtype.Float4      `json:"channel_importance_weight"`
+	ChannelAutoRelevanceEnabled    pgtype.Bool        `json:"channel_auto_relevance_enabled"`
+	ChannelRelevanceThresholdDelta pgtype.Float4      `json:"channel_relevance_threshold_delta"`
 }
 
 func (q *Queries) GetUnprocessedMessages(ctx context.Context, limit int32) ([]GetUnprocessedMessagesRow, error) {
@@ -1275,6 +1517,8 @@ func (q *Queries) GetUnprocessedMessages(ctx context.Context, limit int32) ([]Ge
 			&i.ChannelRelevanceThreshold,
 			&i.ChannelImportanceThreshold,
 			&i.ChannelImportanceWeight,
+			&i.ChannelAutoRelevanceEnabled,
+			&i.ChannelRelevanceThresholdDelta,
 		); err != nil {
 			return nil, err
 		}
@@ -1786,6 +2030,23 @@ func (q *Queries) UpdateChannel(ctx context.Context, arg UpdateChannelParams) er
 	return err
 }
 
+const updateChannelAutoWeight = `-- name: UpdateChannelAutoWeight :exec
+UPDATE channels
+SET importance_weight = $2,
+    weight_updated_at = NOW()
+WHERE id = $1 AND weight_override = FALSE
+`
+
+type UpdateChannelAutoWeightParams struct {
+	ID               pgtype.UUID   `json:"id"`
+	ImportanceWeight pgtype.Float4 `json:"importance_weight"`
+}
+
+func (q *Queries) UpdateChannelAutoWeight(ctx context.Context, arg UpdateChannelAutoWeightParams) error {
+	_, err := q.db.Exec(ctx, updateChannelAutoWeight, arg.ID, arg.ImportanceWeight)
+	return err
+}
+
 const updateChannelContext = `-- name: UpdateChannelContext :exec
 UPDATE channels SET context = $2 WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1
 `
@@ -1836,6 +2097,24 @@ func (q *Queries) UpdateChannelMetadata(ctx context.Context, arg UpdateChannelMe
 		arg.RelevanceThreshold,
 		arg.ImportanceThreshold,
 	)
+	return err
+}
+
+const updateChannelRelevanceDelta = `-- name: UpdateChannelRelevanceDelta :exec
+UPDATE channels
+SET relevance_threshold_delta = $2,
+    auto_relevance_enabled = $3
+WHERE id = $1
+`
+
+type UpdateChannelRelevanceDeltaParams struct {
+	ID                      pgtype.UUID   `json:"id"`
+	RelevanceThresholdDelta pgtype.Float4 `json:"relevance_threshold_delta"`
+	AutoRelevanceEnabled    pgtype.Bool   `json:"auto_relevance_enabled"`
+}
+
+func (q *Queries) UpdateChannelRelevanceDelta(ctx context.Context, arg UpdateChannelRelevanceDeltaParams) error {
+	_, err := q.db.Exec(ctx, updateChannelRelevanceDelta, arg.ID, arg.RelevanceThresholdDelta, arg.AutoRelevanceEnabled)
 	return err
 }
 
@@ -1960,6 +2239,45 @@ type UpdateDiscoveryStatusByUsernameParams struct {
 
 func (q *Queries) UpdateDiscoveryStatusByUsername(ctx context.Context, arg UpdateDiscoveryStatusByUsernameParams) error {
 	_, err := q.db.Exec(ctx, updateDiscoveryStatusByUsername, arg.Username, arg.Status, arg.StatusChangedBy)
+	return err
+}
+
+const upsertChannelStats = `-- name: UpsertChannelStats :exec
+
+INSERT INTO channel_stats (channel_id, period_start, period_end, messages_received, items_created, items_digested, avg_importance, avg_relevance)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (channel_id, period_start, period_end) DO UPDATE SET
+    messages_received = channel_stats.messages_received + EXCLUDED.messages_received,
+    items_created = channel_stats.items_created + EXCLUDED.items_created,
+    items_digested = channel_stats.items_digested + EXCLUDED.items_digested,
+    avg_importance = EXCLUDED.avg_importance,
+    avg_relevance = EXCLUDED.avg_relevance,
+    updated_at = NOW()
+`
+
+type UpsertChannelStatsParams struct {
+	ChannelID        pgtype.UUID   `json:"channel_id"`
+	PeriodStart      pgtype.Date   `json:"period_start"`
+	PeriodEnd        pgtype.Date   `json:"period_end"`
+	MessagesReceived pgtype.Int4   `json:"messages_received"`
+	ItemsCreated     pgtype.Int4   `json:"items_created"`
+	ItemsDigested    pgtype.Int4   `json:"items_digested"`
+	AvgImportance    pgtype.Float8 `json:"avg_importance"`
+	AvgRelevance     pgtype.Float8 `json:"avg_relevance"`
+}
+
+// Channel stats queries
+func (q *Queries) UpsertChannelStats(ctx context.Context, arg UpsertChannelStatsParams) error {
+	_, err := q.db.Exec(ctx, upsertChannelStats,
+		arg.ChannelID,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.MessagesReceived,
+		arg.ItemsCreated,
+		arg.ItemsDigested,
+		arg.AvgImportance,
+		arg.AvgRelevance,
+	)
 	return err
 }
 

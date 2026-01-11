@@ -26,6 +26,8 @@ type Channel struct {
 	ImportanceWeight    float32
 	AutoWeightEnabled   bool
 	WeightOverride      bool
+	AutoRelevanceEnabled   bool
+	RelevanceThresholdDelta float32
 }
 
 func (db *DB) GetActiveChannels(ctx context.Context) ([]Channel, error) {
@@ -60,6 +62,8 @@ func (db *DB) GetActiveChannels(ctx context.Context) ([]Channel, error) {
 			ImportanceWeight:    weight,
 			AutoWeightEnabled:   c.AutoWeightEnabled.Bool,
 			WeightOverride:      c.WeightOverride.Bool,
+			AutoRelevanceEnabled:   c.AutoRelevanceEnabled.Bool,
+			RelevanceThresholdDelta: c.RelevanceThresholdDelta.Float32,
 		}
 	}
 	return channels, nil
@@ -144,6 +148,8 @@ func (db *DB) GetChannelByPeerID(ctx context.Context, peerID int64) (*Channel, e
 		Category:        c.Category.String,
 		Tone:            c.Tone.String,
 		UpdateFreq:      c.UpdateFreq.String,
+		AutoRelevanceEnabled:   c.AutoRelevanceEnabled.Bool,
+		RelevanceThresholdDelta: c.RelevanceThresholdDelta.Float32,
 	}, nil
 }
 
@@ -208,4 +214,12 @@ func (db *DB) UpdateChannelWeight(ctx context.Context, identifier string, weight
 		Username: row.Username.String,
 		Title:    row.Title.String,
 	}, nil
+}
+
+func (db *DB) UpdateChannelRelevanceDelta(ctx context.Context, channelID string, delta float32, autoEnabled bool) error {
+	return db.Queries.UpdateChannelRelevanceDelta(ctx, sqlc.UpdateChannelRelevanceDeltaParams{
+		ID:                      toUUID(channelID),
+		RelevanceThresholdDelta: pgtype.Float4{Float32: delta, Valid: true},
+		AutoRelevanceEnabled:    pgtype.Bool{Bool: autoEnabled, Valid: true},
+	})
 }

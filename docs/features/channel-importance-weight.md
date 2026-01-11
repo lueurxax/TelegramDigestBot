@@ -49,7 +49,7 @@ Shows:
 
 - Resets weight to 1.0
 - Sets `auto_weight_enabled = true` and `weight_override = false`
-- Note: Auto-calculation is not yet implemented; weight stays at 1.0 until manually changed
+- Weight will be automatically adjusted by the weekly auto-weight job
 
 ### View All Weights
 
@@ -59,16 +59,81 @@ Shows:
 
 Shows all tracked channels with their current weights.
 
+## Auto-Weight Calculation
+
+Channels with `auto_weight_enabled = true` and `weight_override = false` have their weights automatically calculated weekly (Sunday at midnight).
+
+### Algorithm
+
+The auto-weight is calculated from rolling 30-day channel statistics:
+
+```
+rawScore = (inclusionScore * 0.4) +
+           (importanceScore * 0.3) +
+           (consistencyScore * 0.2) +
+           (signalScore * 0.1)
+
+weight = 0.5 + rawScore  // Maps 0-1 to 0.5-1.5
+```
+
+Where:
+- **inclusionScore** = items_digested / items_created (how often channel's items make the digest)
+- **importanceScore** = average importance of digested items
+- **consistencyScore** = messages_per_day / expected_frequency (posting regularity)
+- **signalScore** = items_created / messages_received (signal-to-noise ratio)
+
+### Auto-Weight Range
+
+Auto-calculated weights are constrained to **0.5–1.5** (more conservative than manual 0.1–2.0) to prevent extreme swings.
+
+### Configuration
+
+Auto-weight behavior can be configured via database settings:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `auto_weight_enabled` | true | Master switch for auto-calculation |
+| `auto_weight_min_messages` | 10 | Minimum messages before auto-weight applies |
+| `auto_weight_expected_freq` | 5.0 | Expected messages per day for consistency scoring |
+| `auto_weight_min` | 0.5 | Minimum auto-calculated weight |
+| `auto_weight_max` | 1.5 | Maximum auto-calculated weight |
+| `auto_weight_rolling_days` | 30 | Days to look back for stats |
+
+## Stats Collection
+
+Channel statistics are collected automatically after each digest is posted:
+
+- **messages_received** - Total messages from channel in window
+- **items_created** - Items that passed relevance filter
+- **items_digested** - Items included in digest
+- **avg_importance** - Average importance score
+- **avg_relevance** - Average relevance score
+
+Stats are stored in the `channel_stats` table and aggregated daily.
+
 ## Database Schema
 
 ```sql
 -- Added to channels table
 importance_weight        FLOAT4 DEFAULT 1.0    -- The multiplier
-auto_weight_enabled      BOOLEAN DEFAULT TRUE  -- Reserved for future auto-calc
+auto_weight_enabled      BOOLEAN DEFAULT TRUE  -- Enable auto-calculation
 weight_override          BOOLEAN DEFAULT FALSE -- Manual override active
 weight_override_reason   TEXT                  -- Why weight was set
 weight_updated_at        TIMESTAMPTZ           -- Last change timestamp
 weight_updated_by        BIGINT                -- Telegram user ID who changed it
+
+-- Stats table
+CREATE TABLE channel_stats (
+    channel_id       UUID REFERENCES channels(id),
+    period_start     DATE NOT NULL,
+    period_end       DATE NOT NULL,
+    messages_received    INT,
+    items_created        INT,
+    items_digested       INT,
+    avg_importance       FLOAT,
+    avg_relevance        FLOAT,
+    PRIMARY KEY (channel_id, period_start, period_end)
+);
 ```
 
 ## Pipeline Behavior
@@ -109,41 +174,38 @@ Reuters items get 1.8x importance multiplier. An item with LLM importance 0.5 be
 
 Items from this channel need higher LLM scores to make the digest.
 
-### Reset After Testing
+### Let Auto-Weight Handle It
 
 ```
-/channel weight @testchannel auto
+/channel weight @newchannel auto
 ```
 
-Returns to neutral weight (1.0).
+Returns to auto mode. After 30 days of data collection, weight will be automatically calculated based on channel performance.
 
 ## Limitations
-
-### Not Yet Implemented
-
-The following features from the original proposal are deferred:
-
-1. **Auto-calculation** - Automatic weight adjustment based on channel performance metrics
-2. **Stats collection** - `channel_stats` table tracking inclusion rates, average importance, etc.
-3. **Scheduled updates** - Weekly job to recalculate weights
-4. **Admin notifications** - Alerts when weights change significantly
-
-Currently, all weight management is manual via bot commands.
 
 ### Weight Does Not Affect Relevance
 
 The weight multiplier only affects `ImportanceScore`, not `RelevanceScore`. A channel with low weight can still have items included if they pass the relevance threshold.
 
+### New Channels
+
+Channels with fewer than 10 messages in the rolling window keep the default weight of 1.0 until sufficient data is collected.
+
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `migrations/20260111120000_add_importance_weight.sql` | Database migration |
+| `migrations/20260111120000_add_importance_weight.sql` | Weight columns migration |
+| `migrations/20260111130000_add_channel_stats.sql` | Stats table migration |
 | `internal/db/channels.go` | Channel model and weight queries |
-| `internal/db/queries.sql` | SQL for GetChannelWeight, UpdateChannelWeight |
+| `internal/db/channel_stats.go` | Stats collection and auto-weight queries |
+| `internal/db/queries.sql` | SQL queries |
 | `internal/pipeline/pipeline.go` | Weight application logic |
+| `internal/digest/autoweight.go` | Auto-weight calculation algorithm |
+| `internal/digest/digest.go` | Stats collection and weekly job |
 | `internal/telegrambot/handlers.go` | `/channel weight` command handler |
 
 ## See Also
 
-- [Content Quality Improvements](../proposals/content-quality-improvements.md) - Roadmap including future auto-weighting
+- [Content Quality Improvements](../proposals/content-quality-improvements.md) - Roadmap for future quality improvements

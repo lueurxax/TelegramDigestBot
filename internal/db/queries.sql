@@ -1,5 +1,5 @@
 -- name: GetActiveChannels :many
-SELECT id, tg_peer_id, username, title, is_active, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override FROM channels WHERE is_active = TRUE;
+SELECT id, tg_peer_id, username, title, is_active, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override, auto_relevance_enabled, relevance_threshold_delta FROM channels WHERE is_active = TRUE;
 
 -- name: SaveRawMessage :exec
 INSERT INTO raw_messages (channel_id, tg_message_id, tg_date, text, entities_json, media_json, media_data, canonical_hash, is_forward)
@@ -40,7 +40,9 @@ SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.entities_
        c.title as channel_title, c.context as channel_context, c.description as channel_description,
        c.category as channel_category, c.tone as channel_tone, c.update_freq as channel_update_freq,
        c.relevance_threshold as channel_relevance_threshold, c.importance_threshold as channel_importance_threshold,
-       c.importance_weight as channel_importance_weight
+       c.importance_weight as channel_importance_weight,
+       c.auto_relevance_enabled as channel_auto_relevance_enabled,
+       c.relevance_threshold_delta as channel_relevance_threshold_delta
 FROM raw_messages rm
 JOIN channels c ON rm.channel_id = c.id
 LEFT JOIN items i ON rm.id = i.raw_message_id
@@ -338,7 +340,7 @@ WHERE ml.raw_message_id = $1
 ORDER BY ml.position;
 
 -- name: GetChannelByPeerID :one
-SELECT * FROM channels WHERE tg_peer_id = $1;
+SELECT id, tg_peer_id, username, title, is_active, added_at, added_by_tg_user, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at, weight_updated_by, auto_relevance_enabled, relevance_threshold_delta FROM channels WHERE tg_peer_id = $1;
 
 -- Channel Discovery queries
 
@@ -498,7 +500,75 @@ SET importance_weight = $2,
 WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1
 RETURNING username, title;
 
+-- name: UpdateChannelRelevanceDelta :exec
+UPDATE channels
+SET relevance_threshold_delta = $2,
+    auto_relevance_enabled = $3
+WHERE id = $1;
+
 -- name: GetChannelWeight :one
 SELECT username, title, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at
 FROM channels
 WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1;
+
+-- name: GetItemRatingsSince :many
+SELECT rm.channel_id, ir.rating, ir.created_at
+FROM item_ratings ir
+JOIN items i ON ir.item_id = i.id
+JOIN raw_messages rm ON i.raw_message_id = rm.id
+WHERE ir.created_at >= $1;
+
+-- Channel stats queries
+
+-- name: UpsertChannelStats :exec
+INSERT INTO channel_stats (channel_id, period_start, period_end, messages_received, items_created, items_digested, avg_importance, avg_relevance)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (channel_id, period_start, period_end) DO UPDATE SET
+    messages_received = channel_stats.messages_received + EXCLUDED.messages_received,
+    items_created = channel_stats.items_created + EXCLUDED.items_created,
+    items_digested = channel_stats.items_digested + EXCLUDED.items_digested,
+    avg_importance = EXCLUDED.avg_importance,
+    avg_relevance = EXCLUDED.avg_relevance,
+    updated_at = NOW();
+
+-- name: GetChannelStatsForPeriod :many
+SELECT cs.*, c.username, c.title
+FROM channel_stats cs
+JOIN channels c ON cs.channel_id = c.id
+WHERE cs.period_start >= $1 AND cs.period_end <= $2;
+
+-- name: GetChannelStatsRolling :one
+SELECT
+    COALESCE(SUM(messages_received), 0)::int as total_messages,
+    COALESCE(SUM(items_created), 0)::int as total_items_created,
+    COALESCE(SUM(items_digested), 0)::int as total_items_digested,
+    COALESCE(AVG(avg_importance), 0)::float as avg_importance,
+    COALESCE(AVG(avg_relevance), 0)::float as avg_relevance
+FROM channel_stats
+WHERE channel_id = $1 AND period_start >= $2;
+
+-- name: GetChannelsForAutoWeight :many
+SELECT id, username, title, importance_weight, auto_weight_enabled, weight_override
+FROM channels
+WHERE is_active = TRUE AND auto_weight_enabled = TRUE AND weight_override = FALSE;
+
+-- name: UpdateChannelAutoWeight :exec
+UPDATE channels
+SET importance_weight = $2,
+    weight_updated_at = NOW()
+WHERE id = $1 AND weight_override = FALSE;
+
+-- name: GetChannelStatsForWindow :many
+SELECT
+    c.id as channel_id,
+    COUNT(DISTINCT rm.id) as messages_received,
+    COUNT(DISTINCT CASE WHEN i.status = 'ready' OR i.status = 'digested' THEN i.id END) as items_created,
+    COUNT(DISTINCT CASE WHEN i.status = 'digested' THEN i.id END) as items_digested,
+    COALESCE(AVG(CASE WHEN i.status IN ('ready', 'digested') THEN i.importance_score END), 0) as avg_importance,
+    COALESCE(AVG(CASE WHEN i.status IN ('ready', 'digested') THEN i.relevance_score END), 0) as avg_relevance
+FROM channels c
+LEFT JOIN raw_messages rm ON rm.channel_id = c.id AND rm.tg_date >= $1 AND rm.tg_date < $2
+LEFT JOIN items i ON i.raw_message_id = rm.id
+WHERE c.is_active = TRUE
+GROUP BY c.id
+HAVING COUNT(DISTINCT rm.id) > 0;

@@ -19,6 +19,8 @@ type RawMessage struct {
 	RelevanceThreshold  float32
 	ImportanceThreshold float32
 	ImportanceWeight    float32
+	AutoRelevanceEnabled   bool
+	RelevanceThresholdDelta float32
 	TGMessageID         int64
 	TGDate              time.Time
 	Text                string
@@ -68,6 +70,8 @@ func (db *DB) GetUnprocessedMessages(ctx context.Context, limit int) ([]RawMessa
 			RelevanceThreshold:  m.ChannelRelevanceThreshold.Float32,
 			ImportanceThreshold: m.ChannelImportanceThreshold.Float32,
 			ImportanceWeight:    weight,
+			AutoRelevanceEnabled:   m.ChannelAutoRelevanceEnabled.Bool,
+			RelevanceThresholdDelta: m.ChannelRelevanceThresholdDelta.Float32,
 			TGMessageID:         m.TgMessageID,
 			TGDate:              m.TgDate.Time,
 			Text:                m.Text.String,

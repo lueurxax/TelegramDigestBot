@@ -39,7 +39,11 @@ type Querier interface {
 	GetBacklogCount(ctx context.Context) (int64, error)
 	GetChannelByPeerID(ctx context.Context, tgPeerID int64) (Channel, error)
 	GetChannelStats(ctx context.Context) ([]GetChannelStatsRow, error)
+	GetChannelStatsForPeriod(ctx context.Context, arg GetChannelStatsForPeriodParams) ([]GetChannelStatsForPeriodRow, error)
+	GetChannelStatsForWindow(ctx context.Context, arg GetChannelStatsForWindowParams) ([]GetChannelStatsForWindowRow, error)
+	GetChannelStatsRolling(ctx context.Context, arg GetChannelStatsRollingParams) (GetChannelStatsRollingRow, error)
 	GetChannelWeight(ctx context.Context, username pgtype.Text) (GetChannelWeightRow, error)
+	GetChannelsForAutoWeight(ctx context.Context) ([]GetChannelsForAutoWeightRow, error)
 	GetClustersForWindow(ctx context.Context, arg GetClustersForWindowParams) ([]GetClustersForWindowRow, error)
 	GetDigestCoverImage(ctx context.Context, arg GetDigestCoverImageParams) ([]byte, error)
 	GetDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetDiscoveriesNeedingResolutionRow, error)
@@ -47,6 +51,7 @@ type Querier interface {
 	GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetInviteLinkDiscoveriesNeedingResolutionRow, error)
 	GetItemByID(ctx context.Context, id pgtype.UUID) (GetItemByIDRow, error)
 	GetItemEmbedding(ctx context.Context, itemID pgtype.UUID) (string, error)
+	GetItemRatingsSince(ctx context.Context, createdAt pgtype.Timestamptz) ([]GetItemRatingsSinceRow, error)
 	GetItemsForWindow(ctx context.Context, arg GetItemsForWindowParams) ([]GetItemsForWindowRow, error)
 	GetLastPostedDigest(ctx context.Context) (GetLastPostedDigestRow, error)
 	GetLinkCache(ctx context.Context, url string) (LinkCache, error)
@@ -80,15 +85,19 @@ type Querier interface {
 	SaveSetting(ctx context.Context, arg SaveSettingParams) error
 	TryAcquireAdvisoryLock(ctx context.Context, pgTryAdvisoryLock int64) (bool, error)
 	UpdateChannel(ctx context.Context, arg UpdateChannelParams) error
+	UpdateChannelAutoWeight(ctx context.Context, arg UpdateChannelAutoWeightParams) error
 	UpdateChannelContext(ctx context.Context, arg UpdateChannelContextParams) error
 	UpdateChannelLastMessageID(ctx context.Context, arg UpdateChannelLastMessageIDParams) error
 	UpdateChannelMetadata(ctx context.Context, arg UpdateChannelMetadataParams) error
+	UpdateChannelRelevanceDelta(ctx context.Context, arg UpdateChannelRelevanceDeltaParams) error
 	// Channel importance weight queries
 	UpdateChannelWeight(ctx context.Context, arg UpdateChannelWeightParams) (UpdateChannelWeightRow, error)
 	UpdateDiscoveryChannelInfo(ctx context.Context, arg UpdateDiscoveryChannelInfoParams) error
 	UpdateDiscoveryFromInvite(ctx context.Context, arg UpdateDiscoveryFromInviteParams) error
 	UpdateDiscoveryStatus(ctx context.Context, arg UpdateDiscoveryStatusParams) error
 	UpdateDiscoveryStatusByUsername(ctx context.Context, arg UpdateDiscoveryStatusByUsernameParams) error
+	// Channel stats queries
+	UpsertChannelStats(ctx context.Context, arg UpsertChannelStatsParams) error
 	UpsertDiscoveredChannelByInvite(ctx context.Context, arg UpsertDiscoveredChannelByInviteParams) error
 	UpsertDiscoveredChannelByPeerID(ctx context.Context, arg UpsertDiscoveredChannelByPeerIDParams) error
 	// Channel Discovery queries

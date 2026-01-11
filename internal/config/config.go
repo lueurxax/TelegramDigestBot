@@ -34,6 +34,13 @@ type Config struct {
 	WorkerPollInterval      string  `env:"WORKER_POLL_INTERVAL" envDefault:"10s"`
 	SchedulerTickInterval   string  `env:"SCHEDULER_TICK_INTERVAL" envDefault:"10m"`
 	SchedulerCatchupWindow  string  `env:"SCHEDULER_CATCHUP_WINDOW" envDefault:"24h"`
+	RelevanceGateEnabled    bool    `env:"RELEVANCE_GATE_ENABLED" envDefault:"false"`
+	TopicDiversityCap       float32 `env:"TOPIC_DIVERSITY_CAP" envDefault:"0.30"`
+	FreshnessDecayHours     int     `env:"FRESHNESS_DECAY_HOURS" envDefault:"36"`
+	FreshnessFloor          float32 `env:"FRESHNESS_FLOOR" envDefault:"0.4"`
+	MinTopicCount           int     `env:"MIN_TOPIC_COUNT" envDefault:"3"`
+	RatingMinSampleChannel  int     `env:"RATING_MIN_SAMPLE_CHANNEL" envDefault:"15"`
+	RatingMinSampleGlobal   int     `env:"RATING_MIN_SAMPLE_GLOBAL" envDefault:"100"`
 
 	// Link enrichment
 	LinkEnrichmentEnabled bool          `env:"LINK_ENRICHMENT_ENABLED" envDefault:"false"`

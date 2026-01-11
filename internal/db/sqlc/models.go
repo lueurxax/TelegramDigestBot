@@ -10,29 +10,45 @@ import (
 )
 
 type Channel struct {
-	ID                   pgtype.UUID        `json:"id"`
-	TgPeerID             int64              `json:"tg_peer_id"`
-	Username             pgtype.Text        `json:"username"`
-	Title                pgtype.Text        `json:"title"`
-	IsActive             bool               `json:"is_active"`
-	AddedAt              pgtype.Timestamptz `json:"added_at"`
-	AddedByTgUser        pgtype.Int8        `json:"added_by_tg_user"`
-	AccessHash           pgtype.Int8        `json:"access_hash"`
-	InviteLink           pgtype.Text        `json:"invite_link"`
-	Context              pgtype.Text        `json:"context"`
-	Description          pgtype.Text        `json:"description"`
-	LastTgMessageID      int64              `json:"last_tg_message_id"`
-	Category             pgtype.Text        `json:"category"`
-	Tone                 pgtype.Text        `json:"tone"`
-	UpdateFreq           pgtype.Text        `json:"update_freq"`
-	RelevanceThreshold   pgtype.Float4      `json:"relevance_threshold"`
-	ImportanceThreshold  pgtype.Float4      `json:"importance_threshold"`
-	ImportanceWeight     pgtype.Float4      `json:"importance_weight"`
-	AutoWeightEnabled    pgtype.Bool        `json:"auto_weight_enabled"`
-	WeightOverride       pgtype.Bool        `json:"weight_override"`
-	WeightOverrideReason pgtype.Text        `json:"weight_override_reason"`
-	WeightUpdatedAt      pgtype.Timestamptz `json:"weight_updated_at"`
-	WeightUpdatedBy      pgtype.Int8        `json:"weight_updated_by"`
+	ID                      pgtype.UUID        `json:"id"`
+	TgPeerID                int64              `json:"tg_peer_id"`
+	Username                pgtype.Text        `json:"username"`
+	Title                   pgtype.Text        `json:"title"`
+	IsActive                bool               `json:"is_active"`
+	AddedAt                 pgtype.Timestamptz `json:"added_at"`
+	AddedByTgUser           pgtype.Int8        `json:"added_by_tg_user"`
+	AccessHash              pgtype.Int8        `json:"access_hash"`
+	InviteLink              pgtype.Text        `json:"invite_link"`
+	Context                 pgtype.Text        `json:"context"`
+	Description             pgtype.Text        `json:"description"`
+	LastTgMessageID         int64              `json:"last_tg_message_id"`
+	Category                pgtype.Text        `json:"category"`
+	Tone                    pgtype.Text        `json:"tone"`
+	UpdateFreq              pgtype.Text        `json:"update_freq"`
+	RelevanceThreshold      pgtype.Float4      `json:"relevance_threshold"`
+	ImportanceThreshold     pgtype.Float4      `json:"importance_threshold"`
+	ImportanceWeight        pgtype.Float4      `json:"importance_weight"`
+	AutoWeightEnabled       pgtype.Bool        `json:"auto_weight_enabled"`
+	WeightOverride          pgtype.Bool        `json:"weight_override"`
+	WeightOverrideReason    pgtype.Text        `json:"weight_override_reason"`
+	WeightUpdatedAt         pgtype.Timestamptz `json:"weight_updated_at"`
+	WeightUpdatedBy         pgtype.Int8        `json:"weight_updated_by"`
+	AutoRelevanceEnabled    pgtype.Bool        `json:"auto_relevance_enabled"`
+	RelevanceThresholdDelta pgtype.Float4      `json:"relevance_threshold_delta"`
+}
+
+type ChannelStat struct {
+	ID               int32              `json:"id"`
+	ChannelID        pgtype.UUID        `json:"channel_id"`
+	PeriodStart      pgtype.Date        `json:"period_start"`
+	PeriodEnd        pgtype.Date        `json:"period_end"`
+	MessagesReceived pgtype.Int4        `json:"messages_received"`
+	ItemsCreated     pgtype.Int4        `json:"items_created"`
+	ItemsDigested    pgtype.Int4        `json:"items_digested"`
+	AvgImportance    pgtype.Float8      `json:"avg_importance"`
+	AvgRelevance     pgtype.Float8      `json:"avg_relevance"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Cluster struct {
@@ -187,6 +203,17 @@ type RawMessage struct {
 	ProcessedAt          pgtype.Timestamptz `json:"processed_at"`
 	MediaData            []byte             `json:"media_data"`
 	DiscoveriesExtracted pgtype.Bool        `json:"discoveries_extracted"`
+}
+
+type RelevanceGateLog struct {
+	ID           int32              `json:"id"`
+	RawMessageID pgtype.UUID        `json:"raw_message_id"`
+	Decision     string             `json:"decision"`
+	Confidence   pgtype.Float4      `json:"confidence"`
+	Reason       pgtype.Text        `json:"reason"`
+	Model        pgtype.Text        `json:"model"`
+	GateVersion  pgtype.Text        `json:"gate_version"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type Setting struct {

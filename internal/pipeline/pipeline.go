@@ -463,6 +463,14 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		if candidates[i].RelevanceThreshold > 0 {
 			itemRelThreshold = candidates[i].RelevanceThreshold
 		}
+		if candidates[i].AutoRelevanceEnabled {
+			itemRelThreshold += candidates[i].RelevanceThresholdDelta
+		}
+		if itemRelThreshold < 0 {
+			itemRelThreshold = 0
+		} else if itemRelThreshold > 1 {
+			itemRelThreshold = 1
+		}
 
 		if res.RelevanceScore < itemRelThreshold {
 			item.Status = "rejected"
