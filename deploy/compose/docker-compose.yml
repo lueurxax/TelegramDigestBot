@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: ankane/pgvector:v0.5.1
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: digest
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  bot:
+    build: ../..
+    command: ["--mode=bot"]
+    env_file: ../../.env
+    depends_on:
+      - postgres
+
+  reader:
+    build: ../..
+    command: ["--mode=reader"]
+    env_file: ../../.env
+    stdin_open: true
+    tty: true
+    volumes:
+      - tgdata:/app/data
+    depends_on:
+      - postgres
+
+  worker:
+    build: ../..
+    command: ["--mode=worker"]
+    env_file: ../../.env
+    depends_on:
+      - postgres
+
+  digest:
+    build: ../..
+    command: ["--mode=digest"]
+    env_file: ../../.env
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:
+  tgdata:

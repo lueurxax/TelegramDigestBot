@@ -1,0 +1,231 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: digest-bot
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: digest-bot-leader-election
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "create", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: digest-bot-leader-election
+subjects:
+- kind: ServiceAccount
+  name: digest-bot
+roleRef:
+  kind: Role
+  name: digest-bot-leader-election
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tg-session-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: digest-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: digest-bot
+  template:
+    metadata:
+      labels:
+        app: digest-bot
+    spec:
+      serviceAccountName: digest-bot
+      containers:
+      - name: bot
+        image: ghcr.io/lueurxax/telegram-digest-bot:main
+        command: ["./telegram-digest-bot"]
+        args: ["--mode=bot"]
+        envFrom:
+        - configMapRef:
+            name: digest-config
+        - secretRef:
+            name: digest-secrets
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: digest-reader
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: digest-reader
+  template:
+    metadata:
+      labels:
+        app: digest-reader
+    spec:
+      serviceAccountName: digest-bot
+      containers:
+      - name: reader
+        image: ghcr.io/lueurxax/telegram-digest-bot:main
+        command: ["./telegram-digest-bot"]
+        args: ["--mode=reader"]
+        envFrom:
+        - configMapRef:
+            name: digest-config
+        - secretRef:
+            name: digest-secrets
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - name: tg-session
+          mountPath: /app/data
+      volumes:
+      - name: tg-session
+        persistentVolumeClaim:
+          claimName: tg-session-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: digest-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: digest-worker
+  template:
+    metadata:
+      labels:
+        app: digest-worker
+    spec:
+      serviceAccountName: digest-bot
+      containers:
+      - name: worker
+        image: ghcr.io/lueurxax/telegram-digest-bot:main
+        command: ["./telegram-digest-bot"]
+        args: ["--mode=worker"]
+        envFrom:
+        - configMapRef:
+            name: digest-config
+        - secretRef:
+            name: digest-secrets
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: digest-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: digest-scheduler
+  template:
+    metadata:
+      labels:
+        app: digest-scheduler
+    spec:
+      serviceAccountName: digest-bot
+      containers:
+      - name: scheduler
+        image: ghcr.io/lueurxax/telegram-digest-bot:main
+        command: ["./telegram-digest-bot"]
+        args: ["--mode=digest"]
+        envFrom:
+        - configMapRef:
+            name: digest-config
+        - secretRef:
+            name: digest-secrets
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10

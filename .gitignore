@@ -1,0 +1,29 @@
+# Binaries
+telegram-digest-bot
+digest-bot
+
+# Environment Variables
+.env
+
+# Session data
+tg.session
+data/tg.session
+
+# Docker data
+pgdata/
+tgdata/
+
+# Go artifacts
+vendor/
+*.test
+*.out
+
+# Kubernetes secrets
+deploy/k8s/secrets.yaml
+
+# IDE
+.idea/
+
+# Claude Code
+.claude/
+.output.txt

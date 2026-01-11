@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: digest-config
+data:
+  APP_ENV: "prod"
+  # Digest settings
+  DIGEST_WINDOW: "60m"
+  DIGEST_TOP_N: "20"
+  RELEVANCE_THRESHOLD: "0.5"
+  IMPORTANCE_THRESHOLD: "0.3"
+  SIMILARITY_THRESHOLD: "0.75"
+  # Health & monitoring
+  HEALTH_PORT: "8080"
+  # Leader election
+  LEADER_ELECTION_ENABLED: "true"
+  LEADER_ELECTION_LEASE_NAME: "digest-scheduler-lease"
+  # Telegram session
+  TG_SESSION_PATH: "/app/data/tg.session"
+  # LLM settings
+  LLM_MODEL: "gpt-4o-mini"
+  # Worker settings
+  WORKER_BATCH_SIZE: "10"
+  WORKER_POLL_INTERVAL: "10s"
+  # Reader settings
+  READER_FETCH_LIMIT: "20"
+  RATE_LIMIT_RPS: "1"
+  # Scheduler settings
+  SCHEDULER_TICK_INTERVAL: "10m"
+  SCHEDULER_CATCHUP_WINDOW: "24h"
