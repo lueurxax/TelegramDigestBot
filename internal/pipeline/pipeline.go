@@ -30,6 +30,7 @@ type Repository interface {
 	GetChannelStats(ctx context.Context) (map[string]db.ChannelStats, error)
 	SaveItem(ctx context.Context, item *db.Item) error
 	SaveItemError(ctx context.Context, rawMsgID string, errJSON []byte) error
+	SaveRelevanceGateLog(ctx context.Context, rawMsgID string, decision string, confidence *float32, reason, model, gateVersion string) error
 	SaveEmbedding(ctx context.Context, itemID string, embedding []float32) error
 	CheckStrictDuplicate(ctx context.Context, hash string, id string) (bool, error)
 	FindSimilarItem(ctx context.Context, embedding []float32, threshold float32) (string, error)
@@ -176,6 +177,11 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		logger.Debug().Err(err).Msg("could not get normalize_scores from DB")
 	}
 
+	relevanceGateEnabled := p.cfg.RelevanceGateEnabled
+	if err := p.database.GetSetting(ctx, "relevance_gate_enabled", &relevanceGateEnabled); err != nil {
+		logger.Debug().Err(err).Msg("could not get relevance_gate_enabled from DB")
+	}
+
 	var channelStats map[string]db.ChannelStats
 	if normalizeScores {
 		var err error
@@ -244,6 +250,21 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 				logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
 			}
 			continue
+		}
+
+		if relevanceGateEnabled {
+			decision := evaluateRelevanceGate(m.Text)
+			confidence := decision.confidence
+			if err := p.database.SaveRelevanceGateLog(ctx, m.ID, decision.decision, &confidence, decision.reason, gateModel, gateVersion); err != nil {
+				logger.Warn().Str("msg_id", m.ID).Err(err).Msg("failed to save relevance gate log")
+			}
+			if decision.decision == "irrelevant" {
+				logger.Info().Str("msg_id", m.ID).Str("reason", decision.reason).Msg("skipping message by relevance gate")
+				if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
+					logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
+				}
+				continue
+			}
 		}
 
 		// 2. Deduplication

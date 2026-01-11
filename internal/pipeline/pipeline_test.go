@@ -69,6 +69,10 @@ func (m *mockRepo) SaveItemError(ctx context.Context, rawMsgID string, errJSON [
 	return nil
 }
 
+func (m *mockRepo) SaveRelevanceGateLog(ctx context.Context, rawMsgID string, decision string, confidence *float32, reason, model, gateVersion string) error {
+	return nil
+}
+
 func (m *mockRepo) SaveEmbedding(ctx context.Context, itemID string, embedding []float32) error {
 	return nil
 }
