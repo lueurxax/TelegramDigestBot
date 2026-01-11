@@ -80,6 +80,15 @@ func (b *Bot) handleChannelNamespace(msg *tgbotapi.Message) {
 	if len(args) > 1 {
 		newMsg.Text += " " + strings.Join(args[1:], " ")
 	}
+	// Update entities to match new text - the command entity length must match the new command
+	newEntities := make([]tgbotapi.MessageEntity, len(msg.Entities))
+	copy(newEntities, msg.Entities)
+	for i := range newEntities {
+		if newEntities[i].Type == "bot_command" && newEntities[i].Offset == 0 {
+			newEntities[i].Length = len(subcommand) + 1 // +1 for the leading /
+		}
+	}
+	newMsg.Entities = newEntities
 
 	switch subcommand {
 	case "add":
@@ -112,6 +121,15 @@ func (b *Bot) handleFilterNamespace(msg *tgbotapi.Message) {
 	if len(args) > 1 {
 		newMsg.Text += " " + strings.Join(args[1:], " ")
 	}
+	// Update entities to match new text - the command entity length must match the new command
+	newEntities := make([]tgbotapi.MessageEntity, len(msg.Entities))
+	copy(newEntities, msg.Entities)
+	for i := range newEntities {
+		if newEntities[i].Type == "bot_command" && newEntities[i].Offset == 0 {
+			newEntities[i].Length = len(subcommand) + 1 // +1 for the leading /
+		}
+	}
+	newMsg.Entities = newEntities
 
 	switch subcommand {
 	case "add", "remove", "ads", "mode":
@@ -140,6 +158,15 @@ func (b *Bot) handleConfigNamespace(msg *tgbotapi.Message) {
 	if len(args) > 1 {
 		newMsg.Text += " " + strings.Join(args[1:], " ")
 	}
+	// Update entities to match new text - the command entity length must match the new command
+	newEntities := make([]tgbotapi.MessageEntity, len(msg.Entities))
+	copy(newEntities, msg.Entities)
+	for i := range newEntities {
+		if newEntities[i].Type == "bot_command" && newEntities[i].Offset == 0 {
+			newEntities[i].Length = len(subcommand) + 1 // +1 for the leading /
+		}
+	}
+	newMsg.Entities = newEntities
 
 	switch subcommand {
 	case "links":
@@ -180,6 +207,15 @@ func (b *Bot) handleAINamespace(msg *tgbotapi.Message) {
 	if len(args) > 1 {
 		newMsg.Text += " " + strings.Join(args[1:], " ")
 	}
+	// Update entities to match new text - the command entity length must match the new command
+	newEntities := make([]tgbotapi.MessageEntity, len(msg.Entities))
+	copy(newEntities, msg.Entities)
+	for i := range newEntities {
+		if newEntities[i].Type == "bot_command" && newEntities[i].Offset == 0 {
+			newEntities[i].Length = len(subcommand) + 1 // +1 for the leading /
+		}
+	}
+	newMsg.Entities = newEntities
 
 	switch subcommand {
 	case "model":
@@ -222,6 +258,15 @@ func (b *Bot) handleSystemNamespace(msg *tgbotapi.Message) {
 	if len(args) > 1 {
 		newMsg.Text += " " + strings.Join(args[1:], " ")
 	}
+	// Update entities to match new text - the command entity length must match the new command
+	newEntities := make([]tgbotapi.MessageEntity, len(msg.Entities))
+	copy(newEntities, msg.Entities)
+	for i := range newEntities {
+		if newEntities[i].Type == "bot_command" && newEntities[i].Offset == 0 {
+			newEntities[i].Length = len(subcommand) + 1 // +1 for the leading /
+		}
+	}
+	newMsg.Entities = newEntities
 
 	switch subcommand {
 	case "status":
