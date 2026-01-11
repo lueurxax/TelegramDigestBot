@@ -88,6 +88,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	autoWeightTicker := time.NewTicker(time.Hour)
 	defer autoWeightTicker.Stop()
 	var lastAutoWeightRun time.Time
+	var lastAutoRelevanceRun time.Time
 
 	for {
 		select {
@@ -97,6 +98,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			s.runOnceWithLock(ctx)
 		case <-autoWeightTicker.C:
 			s.maybeRunAutoWeightUpdate(ctx, &lastAutoWeightRun)
+			s.maybeRunAutoRelevanceUpdate(ctx, &lastAutoRelevanceRun)
 		}
 	}
 }
@@ -125,6 +127,32 @@ func (s *Scheduler) maybeRunAutoWeightUpdate(ctx context.Context, lastRun *time.
 
 		if err := s.UpdateAutoWeights(ctx, &logger); err != nil {
 			logger.Error().Err(err).Msg("failed to update auto-weights")
+		} else {
+			*lastRun = now
+		}
+	}
+}
+
+func (s *Scheduler) maybeRunAutoRelevanceUpdate(ctx context.Context, lastRun *time.Time) {
+	autoRelevanceEnabled := true
+	if err := s.database.GetSetting(ctx, "auto_relevance_enabled", &autoRelevanceEnabled); err != nil {
+		s.logger.Debug().Err(err).Msg("auto_relevance_enabled not set, defaulting to true")
+	}
+	if !autoRelevanceEnabled {
+		return
+	}
+
+	now := time.Now()
+	isSunday := now.Weekday() == time.Sunday
+	isMidnightHour := now.Hour() == 0
+	notRunThisWeek := lastRun.IsZero() || now.Sub(*lastRun) > 6*24*time.Hour
+
+	if isSunday && isMidnightHour && notRunThisWeek {
+		logger := s.logger.With().Str("task", "auto-relevance").Logger()
+		logger.Info().Msg("Starting weekly auto-relevance update")
+
+		if err := s.UpdateAutoRelevance(ctx, &logger); err != nil {
+			logger.Error().Err(err).Msg("failed to update auto-relevance deltas")
 		} else {
 			*lastRun = now
 		}

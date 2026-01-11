@@ -29,6 +29,12 @@ type Item struct {
 	Embedding          []float32
 }
 
+type ItemRating struct {
+	ChannelID string
+	Rating    string
+	CreatedAt time.Time
+}
+
 func (db *DB) SaveItem(ctx context.Context, item *Item) error {
 	id, err := db.Queries.SaveItem(ctx, sqlc.SaveItemParams{
 		RawMessageID:    toUUID(item.RawMessageID),
@@ -136,6 +142,25 @@ func (db *DB) SaveItemRating(ctx context.Context, itemID string, userID int64, r
 		Rating:   rating,
 		Feedback: toText(feedback),
 	})
+}
+
+func (db *DB) GetItemRatingsSince(ctx context.Context, since time.Time) ([]ItemRating, error) {
+	rows, err := db.Queries.GetItemRatingsSince(ctx, toTimestamptz(since))
+	if err != nil {
+		return nil, err
+	}
+	ratings := make([]ItemRating, 0, len(rows))
+	for _, row := range rows {
+		if !row.CreatedAt.Valid {
+			continue
+		}
+		ratings = append(ratings, ItemRating{
+			ChannelID: fromUUID(row.ChannelID),
+			Rating:    row.Rating,
+			CreatedAt: row.CreatedAt.Time,
+		})
+	}
+	return ratings, nil
 }
 
 func (db *DB) GetItemEmbedding(ctx context.Context, itemID string) ([]float32, error) {
