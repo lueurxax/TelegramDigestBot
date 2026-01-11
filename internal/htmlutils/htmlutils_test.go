@@ -130,6 +130,11 @@ func TestSanitizeHTML(t *testing.T) {
 			expected: `<a href="https://example.com?q=a&amp;b=c">Link</a>`,
 		},
 		{
+			name:     "upper-case tags are normalized",
+			input:    `<B>Bold</B>`,
+			expected: `<b>Bold</b>`,
+		},
+		{
 			name:     "strips style attribute from b tag",
 			input:    `<b style="color:red">Bold</b>`,
 			expected: `<b>Bold</b>`,
@@ -143,6 +148,26 @@ func TestSanitizeHTML(t *testing.T) {
 			name:     "strips all attributes from blockquote",
 			input:    `<blockquote expandable>Quote</blockquote>`,
 			expected: `<blockquote>Quote</blockquote>`,
+		},
+		{
+			name:     "strips extra anchor attributes",
+			input:    `<a href="https://example.com" target="_blank" onclick="alert(1)">Link</a>`,
+			expected: `<a href="https://example.com">Link</a>`,
+		},
+		{
+			name:     "anchor without href",
+			input:    `<a onclick="alert(1)">Link</a>`,
+			expected: "<a>Link</a>",
+		},
+		{
+			name:     "single quoted href",
+			input:    "<a href='https://example.com/path?x=1&y=2'>Link</a>",
+			expected: `<a href="https://example.com/path?x=1&amp;y=2">Link</a>`,
+		},
+		{
+			name:     "strips javascript href with whitespace",
+			input:    `<a href=" JavaScript:alert(1)">Click</a>`,
+			expected: "<a>Click</a>",
 		},
 	}
 
@@ -253,6 +278,14 @@ func TestSplitHTML(t *testing.T) {
 			checkNotSplit: "With more paragraph", // Should not split at \n\n within item
 		},
 		{
+			name:        "does not duplicate item boundary newline",
+			text:        ItemStart + "Item one content that is long enough to be split" + ItemEnd + "\n" + ItemStart + "Item two content continues here" + ItemEnd,
+			limit:       65,
+			wantParts:   2,
+			checkFirst:  "Item one content",
+			checkSecond: "Item two content",
+		},
+		{
 			name:        "blockquote not reopened after split",
 			text:        "<blockquote>Long blockquote content that spans multiple parts and needs to be split</blockquote>\nMore content after the blockquote here",
 			limit:       50,
@@ -308,5 +341,41 @@ func TestSplitHTML(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSplitHTMLReopensAnchor(t *testing.T) {
+	text := `<a href="https://example.com">` + strings.Repeat("word ", 30) + `</a>`
+	parts := SplitHTML(text, 20)
+
+	if len(parts) < 2 {
+		t.Fatalf("SplitHTML() got %d parts, want at least 2. Parts: %v", len(parts), parts)
+	}
+
+	for i, part := range parts {
+		if !strings.Contains(part, `<a href="https://example.com">`) {
+			t.Errorf("Part %d missing reopened anchor tag: %q", i, part)
+		}
+	}
+}
+
+func TestSplitHTMLItemBoundaryFlush(t *testing.T) {
+	itemOne := ItemStart + strings.Repeat("A", 40) + ItemEnd
+	itemTwo := ItemStart + strings.Repeat("B", 40) + ItemEnd
+	text := itemOne + "\n" + itemTwo
+
+	parts := SplitHTML(text, 70)
+	if len(parts) != 2 {
+		t.Fatalf("SplitHTML() got %d parts, want 2. Parts: %v", len(parts), parts)
+	}
+
+	if strings.Contains(parts[0], "BBBB") {
+		t.Errorf("First part should not include second item: %q", parts[0])
+	}
+	if !strings.Contains(parts[1], "BBBB") {
+		t.Errorf("Second part missing second item: %q", parts[1])
+	}
+	if strings.HasPrefix(parts[1], "\n") {
+		t.Errorf("Second part should not start with a newline: %q", parts[1])
 	}
 }
