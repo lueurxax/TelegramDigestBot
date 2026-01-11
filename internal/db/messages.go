@@ -18,6 +18,7 @@ type RawMessage struct {
 	ChannelUpdateFreq   string
 	RelevanceThreshold  float32
 	ImportanceThreshold float32
+	ImportanceWeight    float32
 	TGMessageID         int64
 	TGDate              time.Time
 	Text                string
@@ -50,6 +51,11 @@ func (db *DB) GetUnprocessedMessages(ctx context.Context, limit int) ([]RawMessa
 
 	messages := make([]RawMessage, len(sqlcMessages))
 	for i, m := range sqlcMessages {
+		// Default importance weight to 1.0 if not set
+		weight := m.ChannelImportanceWeight.Float32
+		if !m.ChannelImportanceWeight.Valid || weight == 0 {
+			weight = 1.0
+		}
 		messages[i] = RawMessage{
 			ID:                  fromUUID(m.ID),
 			ChannelID:           fromUUID(m.ChannelID),
@@ -61,6 +67,7 @@ func (db *DB) GetUnprocessedMessages(ctx context.Context, limit int) ([]RawMessa
 			ChannelUpdateFreq:   m.ChannelUpdateFreq.String,
 			RelevanceThreshold:  m.ChannelRelevanceThreshold.Float32,
 			ImportanceThreshold: m.ChannelImportanceThreshold.Float32,
+			ImportanceWeight:    weight,
 			TGMessageID:         m.TgMessageID,
 			TGDate:              m.TgDate.Time,
 			Text:                m.Text.String,

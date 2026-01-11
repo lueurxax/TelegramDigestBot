@@ -68,7 +68,7 @@ func (b *Bot) handleStatus(msg *tgbotapi.Message) {
 func (b *Bot) handleChannelNamespace(msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 	if len(args) == 0 {
-		b.reply(msg, "Usage: <code>/channel &lt;add|remove|list|context|metadata&gt;</code>")
+		b.reply(msg, "Usage: <code>/channel &lt;add|remove|list|context|metadata|weight&gt;</code>")
 		return
 	}
 
@@ -103,6 +103,8 @@ func (b *Bot) handleChannelNamespace(msg *tgbotapi.Message) {
 		b.handleChannelMetadata(&newMsg)
 	case "stats":
 		b.handleChannelStats(&newMsg)
+	case "weight":
+		b.handleChannelWeight(&newMsg)
 	default:
 		b.reply(msg, fmt.Sprintf("❓ Unknown channel subcommand: <code>%s</code>", html.EscapeString(subcommand)))
 	}
@@ -567,6 +569,12 @@ func (b *Bot) handleListChannels(msg *tgbotapi.Message) {
 			title = "Pending..."
 		}
 		sb.WriteString(fmt.Sprintf("• %s (%s)\n", html.EscapeString(title), identifier))
+		// Show weight
+		weightStr := fmt.Sprintf("%.1fx", ch.ImportanceWeight)
+		if ch.WeightOverride {
+			weightStr += " (manual)"
+		}
+		sb.WriteString(fmt.Sprintf("  Weight: <code>%s</code>\n", weightStr))
 		if ch.Context != "" {
 			sb.WriteString(fmt.Sprintf("  <i>Context: %s</i>\n", html.EscapeString(ch.Context)))
 		}
@@ -587,7 +595,7 @@ func (b *Bot) handleListChannels(msg *tgbotapi.Message) {
 			sb.WriteString(fmt.Sprintf("  <i>Metadata: %s</i>\n", html.EscapeString(strings.TrimSpace(meta))))
 		}
 	}
-	sb.WriteString("\n💡 <i>Use <code>/channelcontext &lt;id&gt; &lt;text&gt;</code> to provide extra context for the AI analysis.</i>")
+	sb.WriteString("\n💡 <i>Use <code>/channel weight</code> to view/set importance weight.</i>")
 	b.reply(msg, sb.String())
 }
 
@@ -635,6 +643,90 @@ func (b *Bot) handleChannelStats(msg *tgbotapi.Message) {
 	}
 
 	b.reply(msg, sb.String())
+}
+
+func (b *Bot) handleChannelWeight(msg *tgbotapi.Message) {
+	args := strings.Fields(msg.CommandArguments())
+	ctx := context.Background()
+
+	// No args - show usage
+	if len(args) == 0 {
+		b.reply(msg, "Usage:\n"+
+			"<code>/channel weight @username</code> - Show current weight\n"+
+			"<code>/channel weight @username 1.5</code> - Set weight (0.1-2.0)\n"+
+			"<code>/channel weight @username auto</code> - Enable auto-calculation\n"+
+			"<code>/channel weight @username 1.5 reason text</code> - Set weight with reason")
+		return
+	}
+
+	identifier := strings.TrimPrefix(args[0], "@")
+
+	// Just identifier - show current weight
+	if len(args) == 1 {
+		weight, err := b.database.GetChannelWeight(ctx, identifier)
+		if err != nil {
+			b.reply(msg, fmt.Sprintf("Error: %s", html.EscapeString(err.Error())))
+			return
+		}
+
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("<b>Channel Weight: @%s</b>\n\n", html.EscapeString(weight.Username)))
+		if weight.Title != "" {
+			sb.WriteString(fmt.Sprintf("Title: %s\n", html.EscapeString(weight.Title)))
+		}
+		sb.WriteString(fmt.Sprintf("Weight: <code>%.2f</code>", weight.ImportanceWeight))
+		if weight.WeightOverride {
+			sb.WriteString(" (manual override)")
+		} else if weight.AutoWeightEnabled {
+			sb.WriteString(" (auto)")
+		}
+		sb.WriteString("\n")
+		if weight.WeightOverrideReason != "" {
+			sb.WriteString(fmt.Sprintf("Reason: <i>%s</i>\n", html.EscapeString(weight.WeightOverrideReason)))
+		}
+		if weight.WeightUpdatedAt != nil {
+			sb.WriteString(fmt.Sprintf("Updated: %s\n", *weight.WeightUpdatedAt))
+		}
+		b.reply(msg, sb.String())
+		return
+	}
+
+	// Set weight or enable auto
+	weightArg := args[1]
+	if weightArg == "auto" {
+		// Enable auto-weight: autoEnabled=true, override=false
+		err := b.database.UpdateChannelWeight(ctx, identifier, 1.0, true, false, "", msg.From.ID)
+		if err != nil {
+			b.reply(msg, fmt.Sprintf("Error: %s", html.EscapeString(err.Error())))
+			return
+		}
+		b.reply(msg, fmt.Sprintf("Auto-weight enabled for <code>@%s</code>. Weight reset to 1.0 (will be calculated automatically when auto-weighting is implemented).", html.EscapeString(identifier)))
+		return
+	}
+
+	weight, err := strconv.ParseFloat(weightArg, 32)
+	if err != nil || weight < 0.1 || weight > 2.0 {
+		b.reply(msg, "Invalid weight. Use a number between 0.1 and 2.0, or 'auto' to reset to default.")
+		return
+	}
+
+	reason := ""
+	if len(args) > 2 {
+		reason = strings.Join(args[2:], " ")
+	}
+
+	// Manual weight: autoEnabled=false, override=true
+	err = b.database.UpdateChannelWeight(ctx, identifier, float32(weight), false, true, reason, msg.From.ID)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("Error: %s", html.EscapeString(err.Error())))
+		return
+	}
+
+	reply := fmt.Sprintf("Weight for <code>@%s</code> set to <code>%.2f</code>", html.EscapeString(identifier), weight)
+	if reason != "" {
+		reply += fmt.Sprintf("\nReason: <i>%s</i>", html.EscapeString(reason))
+	}
+	b.reply(msg, reply)
 }
 
 func (b *Bot) handleChannelContext(msg *tgbotapi.Message) {

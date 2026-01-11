@@ -332,7 +332,7 @@ func (q *Queries) FindSimilarItem(ctx context.Context, arg FindSimilarItemParams
 }
 
 const getActiveChannels = `-- name: GetActiveChannels :many
-SELECT id, tg_peer_id, username, title, is_active, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold FROM channels WHERE is_active = TRUE
+SELECT id, tg_peer_id, username, title, is_active, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override FROM channels WHERE is_active = TRUE
 `
 
 type GetActiveChannelsRow struct {
@@ -351,6 +351,9 @@ type GetActiveChannelsRow struct {
 	UpdateFreq          pgtype.Text   `json:"update_freq"`
 	RelevanceThreshold  pgtype.Float4 `json:"relevance_threshold"`
 	ImportanceThreshold pgtype.Float4 `json:"importance_threshold"`
+	ImportanceWeight    pgtype.Float4 `json:"importance_weight"`
+	AutoWeightEnabled   pgtype.Bool   `json:"auto_weight_enabled"`
+	WeightOverride      pgtype.Bool   `json:"weight_override"`
 }
 
 func (q *Queries) GetActiveChannels(ctx context.Context) ([]GetActiveChannelsRow, error) {
@@ -378,6 +381,9 @@ func (q *Queries) GetActiveChannels(ctx context.Context) ([]GetActiveChannelsRow
 			&i.UpdateFreq,
 			&i.RelevanceThreshold,
 			&i.ImportanceThreshold,
+			&i.ImportanceWeight,
+			&i.AutoWeightEnabled,
+			&i.WeightOverride,
 		); err != nil {
 			return nil, err
 		}
@@ -466,7 +472,7 @@ func (q *Queries) GetBacklogCount(ctx context.Context) (int64, error) {
 }
 
 const getChannelByPeerID = `-- name: GetChannelByPeerID :one
-SELECT id, tg_peer_id, username, title, is_active, added_at, added_by_tg_user, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold FROM channels WHERE tg_peer_id = $1
+SELECT id, tg_peer_id, username, title, is_active, added_at, added_by_tg_user, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at, weight_updated_by FROM channels WHERE tg_peer_id = $1
 `
 
 func (q *Queries) GetChannelByPeerID(ctx context.Context, tgPeerID int64) (Channel, error) {
@@ -490,6 +496,12 @@ func (q *Queries) GetChannelByPeerID(ctx context.Context, tgPeerID int64) (Chann
 		&i.UpdateFreq,
 		&i.RelevanceThreshold,
 		&i.ImportanceThreshold,
+		&i.ImportanceWeight,
+		&i.AutoWeightEnabled,
+		&i.WeightOverride,
+		&i.WeightOverrideReason,
+		&i.WeightUpdatedAt,
+		&i.WeightUpdatedBy,
 	)
 	return i, err
 }
@@ -541,6 +553,37 @@ func (q *Queries) GetChannelStats(ctx context.Context) ([]GetChannelStatsRow, er
 		return nil, err
 	}
 	return items, nil
+}
+
+const getChannelWeight = `-- name: GetChannelWeight :one
+SELECT username, title, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at
+FROM channels
+WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1
+`
+
+type GetChannelWeightRow struct {
+	Username             pgtype.Text        `json:"username"`
+	Title                pgtype.Text        `json:"title"`
+	ImportanceWeight     pgtype.Float4      `json:"importance_weight"`
+	AutoWeightEnabled    pgtype.Bool        `json:"auto_weight_enabled"`
+	WeightOverride       pgtype.Bool        `json:"weight_override"`
+	WeightOverrideReason pgtype.Text        `json:"weight_override_reason"`
+	WeightUpdatedAt      pgtype.Timestamptz `json:"weight_updated_at"`
+}
+
+func (q *Queries) GetChannelWeight(ctx context.Context, username pgtype.Text) (GetChannelWeightRow, error) {
+	row := q.db.QueryRow(ctx, getChannelWeight, username)
+	var i GetChannelWeightRow
+	err := row.Scan(
+		&i.Username,
+		&i.Title,
+		&i.ImportanceWeight,
+		&i.AutoWeightEnabled,
+		&i.WeightOverride,
+		&i.WeightOverrideReason,
+		&i.WeightUpdatedAt,
+	)
+	return i, err
 }
 
 const getClustersForWindow = `-- name: GetClustersForWindow :many
@@ -1171,7 +1214,8 @@ const getUnprocessedMessages = `-- name: GetUnprocessedMessages :many
 SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.entities_json, rm.media_json, rm.media_data, rm.canonical_hash, rm.is_forward,
        c.title as channel_title, c.context as channel_context, c.description as channel_description,
        c.category as channel_category, c.tone as channel_tone, c.update_freq as channel_update_freq,
-       c.relevance_threshold as channel_relevance_threshold, c.importance_threshold as channel_importance_threshold
+       c.relevance_threshold as channel_relevance_threshold, c.importance_threshold as channel_importance_threshold,
+       c.importance_weight as channel_importance_weight
 FROM raw_messages rm
 JOIN channels c ON rm.channel_id = c.id
 LEFT JOIN items i ON rm.id = i.raw_message_id
@@ -1199,6 +1243,7 @@ type GetUnprocessedMessagesRow struct {
 	ChannelUpdateFreq          pgtype.Text        `json:"channel_update_freq"`
 	ChannelRelevanceThreshold  pgtype.Float4      `json:"channel_relevance_threshold"`
 	ChannelImportanceThreshold pgtype.Float4      `json:"channel_importance_threshold"`
+	ChannelImportanceWeight    pgtype.Float4      `json:"channel_importance_weight"`
 }
 
 func (q *Queries) GetUnprocessedMessages(ctx context.Context, limit int32) ([]GetUnprocessedMessagesRow, error) {
@@ -1229,6 +1274,7 @@ func (q *Queries) GetUnprocessedMessages(ctx context.Context, limit int32) ([]Ge
 			&i.ChannelUpdateFreq,
 			&i.ChannelRelevanceThreshold,
 			&i.ChannelImportanceThreshold,
+			&i.ChannelImportanceWeight,
 		); err != nil {
 			return nil, err
 		}
@@ -1789,6 +1835,40 @@ func (q *Queries) UpdateChannelMetadata(ctx context.Context, arg UpdateChannelMe
 		arg.UpdateFreq,
 		arg.RelevanceThreshold,
 		arg.ImportanceThreshold,
+	)
+	return err
+}
+
+const updateChannelWeight = `-- name: UpdateChannelWeight :exec
+
+UPDATE channels
+SET importance_weight = $2,
+    auto_weight_enabled = $3,
+    weight_override = $4,
+    weight_override_reason = $5,
+    weight_updated_at = NOW(),
+    weight_updated_by = $6
+WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1
+`
+
+type UpdateChannelWeightParams struct {
+	Username             pgtype.Text   `json:"username"`
+	ImportanceWeight     pgtype.Float4 `json:"importance_weight"`
+	AutoWeightEnabled    pgtype.Bool   `json:"auto_weight_enabled"`
+	WeightOverride       pgtype.Bool   `json:"weight_override"`
+	WeightOverrideReason pgtype.Text   `json:"weight_override_reason"`
+	WeightUpdatedBy      pgtype.Int8   `json:"weight_updated_by"`
+}
+
+// Channel importance weight queries
+func (q *Queries) UpdateChannelWeight(ctx context.Context, arg UpdateChannelWeightParams) error {
+	_, err := q.db.Exec(ctx, updateChannelWeight,
+		arg.Username,
+		arg.ImportanceWeight,
+		arg.AutoWeightEnabled,
+		arg.WeightOverride,
+		arg.WeightOverrideReason,
+		arg.WeightUpdatedBy,
 	)
 	return err
 }

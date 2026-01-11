@@ -1,5 +1,5 @@
 -- name: GetActiveChannels :many
-SELECT id, tg_peer_id, username, title, is_active, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold FROM channels WHERE is_active = TRUE;
+SELECT id, tg_peer_id, username, title, is_active, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override FROM channels WHERE is_active = TRUE;
 
 -- name: SaveRawMessage :exec
 INSERT INTO raw_messages (channel_id, tg_message_id, tg_date, text, entities_json, media_json, media_data, canonical_hash, is_forward)
@@ -39,7 +39,8 @@ UPDATE channels SET is_active = FALSE WHERE username = $1 OR '@' || username = $
 SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.entities_json, rm.media_json, rm.media_data, rm.canonical_hash, rm.is_forward,
        c.title as channel_title, c.context as channel_context, c.description as channel_description,
        c.category as channel_category, c.tone as channel_tone, c.update_freq as channel_update_freq,
-       c.relevance_threshold as channel_relevance_threshold, c.importance_threshold as channel_importance_threshold
+       c.relevance_threshold as channel_relevance_threshold, c.importance_threshold as channel_importance_threshold,
+       c.importance_weight as channel_importance_weight
 FROM raw_messages rm
 JOIN channels c ON rm.channel_id = c.id
 LEFT JOIN items i ON rm.id = i.raw_message_id
@@ -483,3 +484,20 @@ SET title = COALESCE(NULLIF(@title, ''), title),
     access_hash = COALESCE(NULLIF(@access_hash::bigint, 0::bigint), access_hash),
     resolution_attempts = 0
 WHERE id = @id;
+
+-- Channel importance weight queries
+
+-- name: UpdateChannelWeight :exec
+UPDATE channels
+SET importance_weight = $2,
+    auto_weight_enabled = $3,
+    weight_override = $4,
+    weight_override_reason = $5,
+    weight_updated_at = NOW(),
+    weight_updated_by = $6
+WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1;
+
+-- name: GetChannelWeight :one
+SELECT username, title, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at
+FROM channels
+WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1;

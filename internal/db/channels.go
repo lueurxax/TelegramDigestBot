@@ -23,6 +23,9 @@ type Channel struct {
 	UpdateFreq          string
 	RelevanceThreshold  float32
 	ImportanceThreshold float32
+	ImportanceWeight    float32
+	AutoWeightEnabled   bool
+	WeightOverride      bool
 }
 
 func (db *DB) GetActiveChannels(ctx context.Context) ([]Channel, error) {
@@ -33,6 +36,11 @@ func (db *DB) GetActiveChannels(ctx context.Context) ([]Channel, error) {
 
 	channels := make([]Channel, len(sqlcChannels))
 	for i, c := range sqlcChannels {
+		// Default weight to 1.0 if not set
+		weight := c.ImportanceWeight.Float32
+		if !c.ImportanceWeight.Valid || weight == 0 {
+			weight = 1.0
+		}
 		channels[i] = Channel{
 			ID:                  fromUUID(c.ID),
 			TGPeerID:            c.TgPeerID,
@@ -49,6 +57,9 @@ func (db *DB) GetActiveChannels(ctx context.Context) ([]Channel, error) {
 			UpdateFreq:          c.UpdateFreq.String,
 			RelevanceThreshold:  c.RelevanceThreshold.Float32,
 			ImportanceThreshold: c.ImportanceThreshold.Float32,
+			ImportanceWeight:    weight,
+			AutoWeightEnabled:   c.AutoWeightEnabled.Bool,
+			WeightOverride:      c.WeightOverride.Bool,
 		}
 	}
 	return channels, nil
@@ -134,4 +145,54 @@ func (db *DB) GetChannelByPeerID(ctx context.Context, peerID int64) (*Channel, e
 		Tone:            c.Tone.String,
 		UpdateFreq:      c.UpdateFreq.String,
 	}, nil
+}
+
+// ChannelWeight holds weight configuration for a channel
+type ChannelWeight struct {
+	Username            string
+	Title               string
+	ImportanceWeight    float32
+	AutoWeightEnabled   bool
+	WeightOverride      bool
+	WeightOverrideReason string
+	WeightUpdatedAt     *string
+}
+
+func (db *DB) GetChannelWeight(ctx context.Context, identifier string) (*ChannelWeight, error) {
+	c, err := db.Queries.GetChannelWeight(ctx, toText(identifier))
+	if err != nil {
+		return nil, err
+	}
+
+	weight := c.ImportanceWeight.Float32
+	if !c.ImportanceWeight.Valid || weight == 0 {
+		weight = 1.0
+	}
+
+	var updatedAt *string
+	if c.WeightUpdatedAt.Valid {
+		s := c.WeightUpdatedAt.Time.Format("2006-01-02 15:04")
+		updatedAt = &s
+	}
+
+	return &ChannelWeight{
+		Username:            c.Username.String,
+		Title:               c.Title.String,
+		ImportanceWeight:    weight,
+		AutoWeightEnabled:   c.AutoWeightEnabled.Bool,
+		WeightOverride:      c.WeightOverride.Bool,
+		WeightOverrideReason: c.WeightOverrideReason.String,
+		WeightUpdatedAt:     updatedAt,
+	}, nil
+}
+
+func (db *DB) UpdateChannelWeight(ctx context.Context, identifier string, weight float32, autoEnabled bool, override bool, reason string, updatedBy int64) error {
+	return db.Queries.UpdateChannelWeight(ctx, sqlc.UpdateChannelWeightParams{
+		Username:             toText(identifier),
+		ImportanceWeight:     pgtype.Float4{Float32: weight, Valid: true},
+		AutoWeightEnabled:    pgtype.Bool{Bool: autoEnabled, Valid: true},
+		WeightOverride:       pgtype.Bool{Bool: override, Valid: true},
+		WeightOverrideReason: toText(reason),
+		WeightUpdatedBy:      toInt8(updatedBy),
+	})
 }

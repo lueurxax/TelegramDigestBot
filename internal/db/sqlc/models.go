@@ -10,23 +10,29 @@ import (
 )
 
 type Channel struct {
-	ID                  pgtype.UUID        `json:"id"`
-	TgPeerID            int64              `json:"tg_peer_id"`
-	Username            pgtype.Text        `json:"username"`
-	Title               pgtype.Text        `json:"title"`
-	IsActive            bool               `json:"is_active"`
-	AddedAt             pgtype.Timestamptz `json:"added_at"`
-	AddedByTgUser       pgtype.Int8        `json:"added_by_tg_user"`
-	AccessHash          pgtype.Int8        `json:"access_hash"`
-	InviteLink          pgtype.Text        `json:"invite_link"`
-	Context             pgtype.Text        `json:"context"`
-	Description         pgtype.Text        `json:"description"`
-	LastTgMessageID     int64              `json:"last_tg_message_id"`
-	Category            pgtype.Text        `json:"category"`
-	Tone                pgtype.Text        `json:"tone"`
-	UpdateFreq          pgtype.Text        `json:"update_freq"`
-	RelevanceThreshold  pgtype.Float4      `json:"relevance_threshold"`
-	ImportanceThreshold pgtype.Float4      `json:"importance_threshold"`
+	ID                   pgtype.UUID        `json:"id"`
+	TgPeerID             int64              `json:"tg_peer_id"`
+	Username             pgtype.Text        `json:"username"`
+	Title                pgtype.Text        `json:"title"`
+	IsActive             bool               `json:"is_active"`
+	AddedAt              pgtype.Timestamptz `json:"added_at"`
+	AddedByTgUser        pgtype.Int8        `json:"added_by_tg_user"`
+	AccessHash           pgtype.Int8        `json:"access_hash"`
+	InviteLink           pgtype.Text        `json:"invite_link"`
+	Context              pgtype.Text        `json:"context"`
+	Description          pgtype.Text        `json:"description"`
+	LastTgMessageID      int64              `json:"last_tg_message_id"`
+	Category             pgtype.Text        `json:"category"`
+	Tone                 pgtype.Text        `json:"tone"`
+	UpdateFreq           pgtype.Text        `json:"update_freq"`
+	RelevanceThreshold   pgtype.Float4      `json:"relevance_threshold"`
+	ImportanceThreshold  pgtype.Float4      `json:"importance_threshold"`
+	ImportanceWeight     pgtype.Float4      `json:"importance_weight"`
+	AutoWeightEnabled    pgtype.Bool        `json:"auto_weight_enabled"`
+	WeightOverride       pgtype.Bool        `json:"weight_override"`
+	WeightOverrideReason pgtype.Text        `json:"weight_override_reason"`
+	WeightUpdatedAt      pgtype.Timestamptz `json:"weight_updated_at"`
+	WeightUpdatedBy      pgtype.Int8        `json:"weight_updated_by"`
 }
 
 type Cluster struct {

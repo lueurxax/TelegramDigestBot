@@ -308,6 +308,7 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 			ChannelUpdateFreq:   m.ChannelUpdateFreq,
 			RelevanceThreshold:  m.RelevanceThreshold,
 			ImportanceThreshold: m.ImportanceThreshold,
+			ImportanceWeight:    m.ImportanceWeight,
 			Context:             channelCtx,
 			ResolvedLinks:       resolvedLinks,
 		})
@@ -427,7 +428,20 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 			continue
 		}
 
-		importance := res.ImportanceScore
+		// Apply channel importance weight multiplier
+		channelWeight := candidates[i].ImportanceWeight
+		// Clamp weight to valid range [0.1, 2.0], default to 1.0 if invalid
+		if channelWeight < 0.1 {
+			channelWeight = 1.0
+		} else if channelWeight > 2.0 {
+			channelWeight = 2.0
+		}
+		importance := res.ImportanceScore * channelWeight
+		// Cap at 1.0 to maintain valid range
+		if importance > 1.0 {
+			importance = 1.0
+		}
+
 		if !p.hasUniqueInfo(res.Summary) {
 			importance = importance - 0.2
 			if importance < 0 {

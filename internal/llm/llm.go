@@ -32,6 +32,7 @@ type MessageInput struct {
 	ChannelUpdateFreq   string
 	RelevanceThreshold  float32
 	ImportanceThreshold float32
+	ImportanceWeight    float32
 	Context             []string
 	ResolvedLinks       []db.ResolvedLink
 }

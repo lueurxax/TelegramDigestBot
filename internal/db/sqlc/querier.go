@@ -39,6 +39,7 @@ type Querier interface {
 	GetBacklogCount(ctx context.Context) (int64, error)
 	GetChannelByPeerID(ctx context.Context, tgPeerID int64) (Channel, error)
 	GetChannelStats(ctx context.Context) ([]GetChannelStatsRow, error)
+	GetChannelWeight(ctx context.Context, username pgtype.Text) (GetChannelWeightRow, error)
 	GetClustersForWindow(ctx context.Context, arg GetClustersForWindowParams) ([]GetClustersForWindowRow, error)
 	GetDigestCoverImage(ctx context.Context, arg GetDigestCoverImageParams) ([]byte, error)
 	GetDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetDiscoveriesNeedingResolutionRow, error)
@@ -82,6 +83,8 @@ type Querier interface {
 	UpdateChannelContext(ctx context.Context, arg UpdateChannelContextParams) error
 	UpdateChannelLastMessageID(ctx context.Context, arg UpdateChannelLastMessageIDParams) error
 	UpdateChannelMetadata(ctx context.Context, arg UpdateChannelMetadataParams) error
+	// Channel importance weight queries
+	UpdateChannelWeight(ctx context.Context, arg UpdateChannelWeightParams) error
 	UpdateDiscoveryChannelInfo(ctx context.Context, arg UpdateDiscoveryChannelInfoParams) error
 	UpdateDiscoveryFromInvite(ctx context.Context, arg UpdateDiscoveryFromInviteParams) error
 	UpdateDiscoveryStatus(ctx context.Context, arg UpdateDiscoveryStatusParams) error
