@@ -183,13 +183,13 @@ func TestSanitizeHTML(t *testing.T) {
 
 func TestSplitHTML(t *testing.T) {
 	tests := []struct {
-		name           string
-		text           string
-		limit          int
-		wantParts      int
-		checkFirst     string // substring that should be in first part
-		checkSecond    string // substring that should be in second part
-		checkNotSplit  string // substring that should NOT be split across parts
+		name          string
+		text          string
+		limit         int
+		wantParts     int
+		checkFirst    string // substring that should be in first part
+		checkSecond   string // substring that should be in second part
+		checkNotSplit string // substring that should NOT be split across parts
 	}{
 		{
 			name:       "no split needed",
@@ -216,11 +216,11 @@ func TestSplitHTML(t *testing.T) {
 			checkSecond: "Second paragraph",
 		},
 		{
-			name:        "split at word boundary",
-			text:        "This is a long sentence that needs to be split somewhere reasonable.",
-			limit:       30,
-			wantParts:   3,
-			checkFirst:  "This is a long",
+			name:       "split at word boundary",
+			text:       "This is a long sentence that needs to be split somewhere reasonable.",
+			limit:      30,
+			wantParts:  3,
+			checkFirst: "This is a long",
 		},
 		{
 			name:        "split at newline",

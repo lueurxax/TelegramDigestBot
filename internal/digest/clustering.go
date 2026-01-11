@@ -9,6 +9,8 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/db"
 	"github.com/lueurxax/telegram-digest-bot/internal/dedup"
 	"github.com/rs/zerolog"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, end time.Time, logger *zerolog.Logger) error {
@@ -30,7 +32,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	// 1. Group items by topic for hierarchical clustering (with normalization)
 	topicGroups := make(map[string][]db.Item)
 	for _, item := range items {
-		topic := strings.TrimSpace(strings.Title(strings.ToLower(item.Topic)))
+		topic := strings.TrimSpace(cases.Title(language.English).String(strings.ToLower(item.Topic)))
 		if topic == "" {
 			topic = "General"
 		}

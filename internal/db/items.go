@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -66,7 +67,7 @@ func (db *DB) FindSimilarItem(ctx context.Context, embedding []float32, threshol
 		MinCreatedAt: toTimestamptz(time.Now().Add(-7 * 24 * time.Hour)),
 	})
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil
 		}
 		return "", err

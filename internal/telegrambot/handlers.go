@@ -12,6 +12,8 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/lueurxax/telegram-digest-bot/internal/db"
 	"github.com/lueurxax/telegram-digest-bot/internal/digest"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 func (b *Bot) handleThreshold(msg *tgbotapi.Message, key string) {
@@ -36,7 +38,7 @@ func (b *Bot) handleThreshold(msg *tgbotapi.Message, key string) {
 		b.reply(msg, fmt.Sprintf("❌ Error saving %s: %s", html.EscapeString(key), html.EscapeString(err.Error())))
 		return
 	}
-	label := strings.Title(strings.ReplaceAll(key, "_", " "))
+	label := cases.Title(language.English).String(strings.ReplaceAll(key, "_", " "))
 	b.reply(msg, fmt.Sprintf("✅ <b>%s</b> updated.\nOld value: <code>%v</code>\nNew value: <code>%v</code>", html.EscapeString(label), current, val))
 }
 
@@ -645,6 +647,73 @@ func (b *Bot) handleChannelStats(msg *tgbotapi.Message) {
 	b.reply(msg, sb.String())
 }
 
+func (b *Bot) handleRatings(msg *tgbotapi.Message) {
+	args := strings.Fields(msg.CommandArguments())
+	days := 30
+	limit := 10
+	if len(args) > 0 {
+		if v, err := strconv.Atoi(args[0]); err == nil && v > 0 {
+			days = v
+		}
+	}
+	if len(args) > 1 {
+		if v, err := strconv.Atoi(args[1]); err == nil && v > 0 {
+			limit = v
+		}
+	}
+
+	ctx := context.Background()
+	since := time.Now().AddDate(0, 0, -days)
+	summaries, err := b.database.GetItemRatingSummary(ctx, since)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error fetching ratings: %s", html.EscapeString(err.Error())))
+		return
+	}
+
+	if len(summaries) == 0 {
+		b.reply(msg, fmt.Sprintf("No item ratings in the last %d days.", days))
+		return
+	}
+
+	totalGood := 0
+	totalBad := 0
+	totalIrrelevant := 0
+	totalAll := 0
+	for _, s := range summaries {
+		totalGood += s.GoodCount
+		totalBad += s.BadCount
+		totalIrrelevant += s.IrrelevantCount
+		totalAll += s.TotalCount
+	}
+
+	if limit > len(summaries) {
+		limit = len(summaries)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("⭐ <b>Item Ratings (last %d days)</b>\n\n", days))
+	sb.WriteString(fmt.Sprintf("Total: <code>%d</code> (good %d | bad %d | irrelevant %d)\n\n", totalAll, totalGood, totalBad, totalIrrelevant))
+
+	for i := 0; i < limit; i++ {
+		s := summaries[i]
+		name := s.ChannelID
+		if s.Username != "" {
+			name = "@" + s.Username
+		} else if s.Title != "" {
+			name = s.Title
+		}
+
+		reliability := 0.0
+		if s.TotalCount > 0 {
+			reliability = float64(s.GoodCount) / float64(s.TotalCount)
+		}
+		sb.WriteString(fmt.Sprintf("• <b>%s</b>: <code>%d</code> (g %d | b %d | i %d) rel <code>%.2f</code>\n",
+			html.EscapeString(name), s.TotalCount, s.GoodCount, s.BadCount, s.IrrelevantCount, reliability))
+	}
+
+	b.reply(msg, sb.String())
+}
+
 func (b *Bot) handleChannelWeight(msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 	ctx := context.Background()
@@ -1031,7 +1100,7 @@ func (b *Bot) handleToggleSetting(msg *tgbotapi.Message, key string) {
 		b.reply(msg, fmt.Sprintf("❌ Error saving %s: %s", html.EscapeString(key), html.EscapeString(err.Error())))
 		return
 	}
-	label := strings.Title(strings.ReplaceAll(key, "_", " "))
+	label := cases.Title(language.English).String(strings.ReplaceAll(key, "_", " "))
 	status := "ENABLED"
 	if !enabled {
 		status = "DISABLED"
@@ -1277,6 +1346,8 @@ func (b *Bot) handleHelp(msg *tgbotapi.Message) {
 		"• <code>/ai consolidated &lt;on|off&gt;</code> - Merge similar stories\n"+
 		"• <code>/preview</code> - See what the next digest will look like\n\n"+
 		"🛠 <b>System</b> (<code>/system</code>)\n"+
+		"• <code>/channel stats</code> - Channel quality metrics (last 7 days)\n"+
+		"• <code>/ratings [days] [limit]</code> - Item rating summary\n"+
 		"• <code>/system status</code> - Detailed system health\n"+
 		"• <code>/system settings</code> - View all configuration overrides\n"+
 		"• <code>/system errors</code> - Review processing failures\n"+
@@ -1543,7 +1614,7 @@ func (b *Bot) handleDiscoverCallback(query *tgbotapi.CallbackQuery) {
 		return
 	}
 
-	action := parts[1]  // "approve" or "reject"
+	action := parts[1] // "approve" or "reject"
 	username := parts[2]
 	ctx := context.Background()
 

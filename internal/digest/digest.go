@@ -105,7 +105,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 // maybeRunAutoWeightUpdate checks if it's time for weekly auto-weight update
 func (s *Scheduler) maybeRunAutoWeightUpdate(ctx context.Context, lastRun *time.Time) {
 	// Check if auto-weight is enabled
-	var autoWeightEnabled bool = true
+	var autoWeightEnabled = true
 	if err := s.database.GetSetting(ctx, "auto_weight_enabled", &autoWeightEnabled); err != nil {
 		s.logger.Debug().Err(err).Msg("auto_weight_enabled not set, defaulting to true")
 	}
@@ -253,7 +253,7 @@ func (s *Scheduler) processDigest(ctx context.Context, logger *zerolog.Logger) e
 	}
 
 	// Check if anomaly notifications are enabled
-	var anomalyNotificationsEnabled bool = true
+	var anomalyNotificationsEnabled = true
 	if err := s.database.GetSetting(ctx, "anomaly_notifications", &anomalyNotificationsEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get anomaly_notifications from DB, defaulting to enabled")
 	}
@@ -312,7 +312,7 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	digestID := uuid.New().String()
 
 	// Check if cover images are enabled
-	var coverImageEnabled bool = true
+	var coverImageEnabled = true
 	if err := s.database.GetSetting(ctx, "digest_cover_image", &coverImageEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get digest_cover_image from DB, defaulting to enabled")
 	}
@@ -447,7 +447,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 		return "", nil, nil, nil, nil
 	}
 
-	var topicsEnabled bool = true
+	var topicsEnabled = true
 	if err := s.database.GetSetting(ctx, "topics_enabled", &topicsEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get topics_enabled from DB")
 	}
@@ -562,7 +562,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 		logger.Debug().Err(err).Msg("could not get consolidated_clusters_enabled from DB")
 	}
 
-	var editorDetailedItems bool = true
+	var editorDetailedItems = true
 	if err := s.database.GetSetting(ctx, "editor_detailed_items", &editorDetailedItems); err != nil {
 		logger.Debug().Err(err).Msg("could not get editor_detailed_items from DB")
 	}

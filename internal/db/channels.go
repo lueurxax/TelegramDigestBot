@@ -8,25 +8,25 @@ import (
 )
 
 type Channel struct {
-	ID                  string
-	TGPeerID            int64
-	Username            string
-	Title               string
-	IsActive            bool
-	AccessHash          int64
-	InviteLink          string
-	Context             string
-	Description         string
-	LastTGMessageID     int64
-	Category            string
-	Tone                string
-	UpdateFreq          string
-	RelevanceThreshold  float32
-	ImportanceThreshold float32
-	ImportanceWeight    float32
-	AutoWeightEnabled   bool
-	WeightOverride      bool
-	AutoRelevanceEnabled   bool
+	ID                      string
+	TGPeerID                int64
+	Username                string
+	Title                   string
+	IsActive                bool
+	AccessHash              int64
+	InviteLink              string
+	Context                 string
+	Description             string
+	LastTGMessageID         int64
+	Category                string
+	Tone                    string
+	UpdateFreq              string
+	RelevanceThreshold      float32
+	ImportanceThreshold     float32
+	ImportanceWeight        float32
+	AutoWeightEnabled       bool
+	WeightOverride          bool
+	AutoRelevanceEnabled    bool
 	RelevanceThresholdDelta float32
 }
 
@@ -44,25 +44,25 @@ func (db *DB) GetActiveChannels(ctx context.Context) ([]Channel, error) {
 			weight = 1.0
 		}
 		channels[i] = Channel{
-			ID:                  fromUUID(c.ID),
-			TGPeerID:            c.TgPeerID,
-			Username:            c.Username.String,
-			Title:               c.Title.String,
-			IsActive:            c.IsActive,
-			AccessHash:          c.AccessHash.Int64,
-			InviteLink:          c.InviteLink.String,
-			Context:             c.Context.String,
-			Description:         c.Description.String,
-			LastTGMessageID:     c.LastTgMessageID,
-			Category:            c.Category.String,
-			Tone:                c.Tone.String,
-			UpdateFreq:          c.UpdateFreq.String,
-			RelevanceThreshold:  c.RelevanceThreshold.Float32,
-			ImportanceThreshold: c.ImportanceThreshold.Float32,
-			ImportanceWeight:    weight,
-			AutoWeightEnabled:   c.AutoWeightEnabled.Bool,
-			WeightOverride:      c.WeightOverride.Bool,
-			AutoRelevanceEnabled:   c.AutoRelevanceEnabled.Bool,
+			ID:                      fromUUID(c.ID),
+			TGPeerID:                c.TgPeerID,
+			Username:                c.Username.String,
+			Title:                   c.Title.String,
+			IsActive:                c.IsActive,
+			AccessHash:              c.AccessHash.Int64,
+			InviteLink:              c.InviteLink.String,
+			Context:                 c.Context.String,
+			Description:             c.Description.String,
+			LastTGMessageID:         c.LastTgMessageID,
+			Category:                c.Category.String,
+			Tone:                    c.Tone.String,
+			UpdateFreq:              c.UpdateFreq.String,
+			RelevanceThreshold:      c.RelevanceThreshold.Float32,
+			ImportanceThreshold:     c.ImportanceThreshold.Float32,
+			ImportanceWeight:        weight,
+			AutoWeightEnabled:       c.AutoWeightEnabled.Bool,
+			WeightOverride:          c.WeightOverride.Bool,
+			AutoRelevanceEnabled:    c.AutoRelevanceEnabled.Bool,
 			RelevanceThresholdDelta: c.RelevanceThresholdDelta.Float32,
 		}
 	}
@@ -135,33 +135,33 @@ func (db *DB) GetChannelByPeerID(ctx context.Context, peerID int64) (*Channel, e
 		return nil, err
 	}
 	return &Channel{
-		ID:              fromUUID(c.ID),
-		TGPeerID:        c.TgPeerID,
-		Username:        c.Username.String,
-		Title:           c.Title.String,
-		IsActive:        c.IsActive,
-		AccessHash:      c.AccessHash.Int64,
-		InviteLink:      c.InviteLink.String,
-		Context:         c.Context.String,
-		Description:     c.Description.String,
-		LastTGMessageID: c.LastTgMessageID,
-		Category:        c.Category.String,
-		Tone:            c.Tone.String,
-		UpdateFreq:      c.UpdateFreq.String,
-		AutoRelevanceEnabled:   c.AutoRelevanceEnabled.Bool,
+		ID:                      fromUUID(c.ID),
+		TGPeerID:                c.TgPeerID,
+		Username:                c.Username.String,
+		Title:                   c.Title.String,
+		IsActive:                c.IsActive,
+		AccessHash:              c.AccessHash.Int64,
+		InviteLink:              c.InviteLink.String,
+		Context:                 c.Context.String,
+		Description:             c.Description.String,
+		LastTGMessageID:         c.LastTgMessageID,
+		Category:                c.Category.String,
+		Tone:                    c.Tone.String,
+		UpdateFreq:              c.UpdateFreq.String,
+		AutoRelevanceEnabled:    c.AutoRelevanceEnabled.Bool,
 		RelevanceThresholdDelta: c.RelevanceThresholdDelta.Float32,
 	}, nil
 }
 
 // ChannelWeight holds weight configuration for a channel
 type ChannelWeight struct {
-	Username            string
-	Title               string
-	ImportanceWeight    float32
-	AutoWeightEnabled   bool
-	WeightOverride      bool
+	Username             string
+	Title                string
+	ImportanceWeight     float32
+	AutoWeightEnabled    bool
+	WeightOverride       bool
 	WeightOverrideReason string
-	WeightUpdatedAt     *string
+	WeightUpdatedAt      *string
 }
 
 func (db *DB) GetChannelWeight(ctx context.Context, identifier string) (*ChannelWeight, error) {
@@ -182,13 +182,13 @@ func (db *DB) GetChannelWeight(ctx context.Context, identifier string) (*Channel
 	}
 
 	return &ChannelWeight{
-		Username:            c.Username.String,
-		Title:               c.Title.String,
-		ImportanceWeight:    weight,
-		AutoWeightEnabled:   c.AutoWeightEnabled.Bool,
-		WeightOverride:      c.WeightOverride.Bool,
+		Username:             c.Username.String,
+		Title:                c.Title.String,
+		ImportanceWeight:     weight,
+		AutoWeightEnabled:    c.AutoWeightEnabled.Bool,
+		WeightOverride:       c.WeightOverride.Bool,
 		WeightOverrideReason: c.WeightOverrideReason.String,
-		WeightUpdatedAt:     updatedAt,
+		WeightUpdatedAt:      updatedAt,
 	}, nil
 }
 

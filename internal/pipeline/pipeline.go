@@ -111,7 +111,7 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		logger.Debug().Err(err).Msg("could not get filters_ads from DB")
 	}
 
-	var minLength int = 20
+	var minLength = 20
 	if err := p.database.GetSetting(ctx, "filters_min_length", &minLength); err != nil {
 		logger.Debug().Err(err).Msg("could not get filters_min_length from DB")
 	}
@@ -126,17 +126,17 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		logger.Debug().Err(err).Msg("could not get filters_skip_forwards from DB")
 	}
 
-	var filtersMode string = "mixed"
+	var filtersMode = "mixed"
 	if err := p.database.GetSetting(ctx, "filters_mode", &filtersMode); err != nil {
 		logger.Debug().Err(err).Msg("could not get filters_mode from DB")
 	}
 
-	var dedupMode string = "semantic"
+	var dedupMode = "semantic"
 	if err := p.database.GetSetting(ctx, "dedup_mode", &dedupMode); err != nil {
 		logger.Debug().Err(err).Msg("could not get dedup_mode from DB")
 	}
 
-	var topicsEnabled bool = true
+	var topicsEnabled = true
 	if err := p.database.GetSetting(ctx, "topics_enabled", &topicsEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get topics_enabled from DB")
 	}
@@ -198,18 +198,18 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		linkEnrichmentEnabled = p.cfg.LinkEnrichmentEnabled
 	}
 
-	var maxLinks int = p.cfg.MaxLinksPerMessage
+	var maxLinks = p.cfg.MaxLinksPerMessage
 	if err := p.database.GetSetting(ctx, "max_links_per_message", &maxLinks); err != nil {
 		logger.Debug().Err(err).Msg("could not get max_links_per_message from DB")
 	}
 
-	var linkCacheTTLStr string = p.cfg.LinkCacheTTL.String()
+	var linkCacheTTLStr = p.cfg.LinkCacheTTL.String()
 	if err := p.database.GetSetting(ctx, "link_cache_ttl", &linkCacheTTLStr); err != nil {
 		logger.Debug().Err(err).Msg("could not get link_cache_ttl from DB")
 	}
 	linkCacheTTL, _ := time.ParseDuration(linkCacheTTLStr)
 
-	var tgLinkCacheTTLStr string = p.cfg.TelegramLinkCacheTTL.String()
+	var tgLinkCacheTTLStr = p.cfg.TelegramLinkCacheTTL.String()
 	if err := p.database.GetSetting(ctx, "tg_link_cache_ttl", &tgLinkCacheTTLStr); err != nil {
 		logger.Debug().Err(err).Msg("could not get tg_link_cache_ttl from DB")
 	}

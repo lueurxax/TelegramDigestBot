@@ -128,6 +128,8 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		b.handleRemoveChannel(msg)
 	case "feedback":
 		b.handleFeedback(msg)
+	case "ratings":
+		b.handleRatings(msg)
 	case "channelcontext":
 		b.handleChannelContext(msg)
 	case "filters":
@@ -191,9 +193,10 @@ func (b *Bot) handleCallback(query *tgbotapi.CallbackQuery) {
 			digestID := parts[1]
 			ratingVal := parts[2]
 			var rating int16
-			if ratingVal == "up" {
+			switch ratingVal {
+			case "up":
 				rating = 1
-			} else if ratingVal == "down" {
+			case "down":
 				rating = -1
 			}
 

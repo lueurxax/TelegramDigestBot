@@ -22,11 +22,11 @@ type ChannelStatsEntry struct {
 
 // RollingStats represents aggregated stats over a rolling window
 type RollingStats struct {
-	TotalMessages     int
-	TotalItemsCreated int
+	TotalMessages      int
+	TotalItemsCreated  int
 	TotalItemsDigested int
-	AvgImportance     float64
-	AvgRelevance      float64
+	AvgImportance      float64
+	AvgRelevance       float64
 }
 
 // ChannelForAutoWeight represents a channel eligible for auto-weight calculation

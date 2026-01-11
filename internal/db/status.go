@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,7 +17,7 @@ type LastDigestInfo struct {
 func (db *DB) GetLastPostedDigest(ctx context.Context) (*LastDigestInfo, error) {
 	row, err := db.Queries.GetLastPostedDigest(ctx)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err

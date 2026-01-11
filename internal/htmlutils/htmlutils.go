@@ -132,20 +132,20 @@ func StripItemMarkers(text string) string {
 
 // splitAfter defines markers where we split AFTER the marker (marker stays in current part)
 var splitAfter = []string{
-	ItemEnd + "\n",              // Highest priority: between complete items
-	"</blockquote>\n",           // After blockquote end - prefer split here
-	"━━━━━━━━━━━━━━━━━━━━━━\n",  // Section separator
+	ItemEnd + "\n",    // Highest priority: between complete items
+	"</blockquote>\n", // After blockquote end - prefer split here
+	"━━━━━━━━━━━━━━━━━━━━━━\n", // Section separator
 	"─────────────────────\n",  // Sub-section separator
-	"\n\n",                     // Paragraph break
-	"\n    ↳ ",                  // Source attribution line (complete before splitting)
+	"\n\n",     // Paragraph break
+	"\n    ↳ ", // Source attribution line (complete before splitting)
 }
 
 // splitBefore defines markers where we split BEFORE the content (only newline stays in current part)
 // These are section headers that should start the next message, not end the current one
 var splitBefore = []string{
-	"\n🔴 ",                    // Breaking section - split before emoji
-	"\n📌 ",                    // Notable section - split before emoji
-	"\n📝 ",                    // Also section - split before emoji
+	"\n🔴 ", // Breaking section - split before emoji
+	"\n📌 ", // Notable section - split before emoji
+	"\n📝 ", // Also section - split before emoji
 	"\n┌─────────────────────", // Topic header - split before box
 }
 

@@ -8,27 +8,27 @@ import (
 )
 
 type RawMessage struct {
-	ID                  string
-	ChannelID           string
-	ChannelTitle        string
-	ChannelContext      string
-	ChannelDescription  string
-	ChannelCategory     string
-	ChannelTone         string
-	ChannelUpdateFreq   string
-	RelevanceThreshold  float32
-	ImportanceThreshold float32
-	ImportanceWeight    float32
-	AutoRelevanceEnabled   bool
+	ID                      string
+	ChannelID               string
+	ChannelTitle            string
+	ChannelContext          string
+	ChannelDescription      string
+	ChannelCategory         string
+	ChannelTone             string
+	ChannelUpdateFreq       string
+	RelevanceThreshold      float32
+	ImportanceThreshold     float32
+	ImportanceWeight        float32
+	AutoRelevanceEnabled    bool
 	RelevanceThresholdDelta float32
-	TGMessageID         int64
-	TGDate              time.Time
-	Text                string
-	EntitiesJSON        []byte
-	MediaJSON           []byte
-	MediaData           []byte
-	CanonicalHash       string
-	IsForward           bool
+	TGMessageID             int64
+	TGDate                  time.Time
+	Text                    string
+	EntitiesJSON            []byte
+	MediaJSON               []byte
+	MediaData               []byte
+	CanonicalHash           string
+	IsForward               bool
 }
 
 func (db *DB) SaveRawMessage(ctx context.Context, msg *RawMessage) error {
@@ -59,27 +59,27 @@ func (db *DB) GetUnprocessedMessages(ctx context.Context, limit int) ([]RawMessa
 			weight = 1.0
 		}
 		messages[i] = RawMessage{
-			ID:                  fromUUID(m.ID),
-			ChannelID:           fromUUID(m.ChannelID),
-			ChannelTitle:        m.ChannelTitle.String,
-			ChannelContext:      m.ChannelContext.String,
-			ChannelDescription:  m.ChannelDescription.String,
-			ChannelCategory:     m.ChannelCategory.String,
-			ChannelTone:         m.ChannelTone.String,
-			ChannelUpdateFreq:   m.ChannelUpdateFreq.String,
-			RelevanceThreshold:  m.ChannelRelevanceThreshold.Float32,
-			ImportanceThreshold: m.ChannelImportanceThreshold.Float32,
-			ImportanceWeight:    weight,
-			AutoRelevanceEnabled:   m.ChannelAutoRelevanceEnabled.Bool,
+			ID:                      fromUUID(m.ID),
+			ChannelID:               fromUUID(m.ChannelID),
+			ChannelTitle:            m.ChannelTitle.String,
+			ChannelContext:          m.ChannelContext.String,
+			ChannelDescription:      m.ChannelDescription.String,
+			ChannelCategory:         m.ChannelCategory.String,
+			ChannelTone:             m.ChannelTone.String,
+			ChannelUpdateFreq:       m.ChannelUpdateFreq.String,
+			RelevanceThreshold:      m.ChannelRelevanceThreshold.Float32,
+			ImportanceThreshold:     m.ChannelImportanceThreshold.Float32,
+			ImportanceWeight:        weight,
+			AutoRelevanceEnabled:    m.ChannelAutoRelevanceEnabled.Bool,
 			RelevanceThresholdDelta: m.ChannelRelevanceThresholdDelta.Float32,
-			TGMessageID:         m.TgMessageID,
-			TGDate:              m.TgDate.Time,
-			Text:                m.Text.String,
-			EntitiesJSON:        m.EntitiesJson,
-			MediaJSON:           m.MediaJson,
-			MediaData:           m.MediaData,
-			CanonicalHash:       m.CanonicalHash,
-			IsForward:           m.IsForward,
+			TGMessageID:             m.TgMessageID,
+			TGDate:                  m.TgDate.Time,
+			Text:                    m.Text.String,
+			EntitiesJSON:            m.EntitiesJson,
+			MediaJSON:               m.MediaJson,
+			MediaData:               m.MediaData,
+			CanonicalHash:           m.CanonicalHash,
+			IsForward:               m.IsForward,
 		}
 	}
 	return messages, nil

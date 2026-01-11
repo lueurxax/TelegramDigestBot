@@ -47,7 +47,7 @@ func New(cfg *config.Config, database *db.DB, logger *zerolog.Logger) *Reader {
 		cfg:         cfg,
 		database:    database,
 		logger:      logger,
-		downloadSem: make(chan struct{}, 5),          // limit to 5 concurrent downloads
+		downloadSem: make(chan struct{}, 5),           // limit to 5 concurrent downloads
 		workerSem:   make(chan struct{}, workerCount), // limit concurrent channel fetches
 	}
 }

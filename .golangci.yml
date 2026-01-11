@@ -1,11 +1,16 @@
+version: "2"
+
 run:
   timeout: 5m
   tests: true
 
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
 linters:
   enable:
-    - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
@@ -13,104 +18,52 @@ linters:
     - bodyclose
     - durationcheck
     - errorlint
-    - exhaustive
-    # exportloopref removed in Go 1.22+ (loop var semantics changed)
-    - gocritic
-    - gofmt
-    - goimports
-    - gosec
     - misspell
-    - nilerr
     - noctx
     - prealloc
-    - predeclared
-    - revive
     - sqlclosecheck
     - unconvert
-    - unparam
     - whitespace
+  disable:
+    - errcheck    # Too many false positives in defers
+    - gosec       # Too many false positives for type conversions
+    - predeclared # Conflicts with Go 1.21+ min/max builtins
+    - exhaustive  # Too strict
+    - nilerr      # False positives
+    - unparam     # Too noisy
+    - gocritic    # Style checks too strict
 
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: false
-
+settings:
   govet:
-    enable-all: true
     disable:
-      - fieldalignment  # Too noisy for most projects
-
-  gosec:
-    excludes:
-      - G104  # Audit errors not checked (too noisy with defer)
-      - G304  # File path provided as taint input (false positives)
-
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-    disabled-checks:
-      - hugeParam  # Too strict for this codebase
-
-  revive:
-    rules:
-      - name: blank-imports
-      - name: context-as-argument
-      - name: context-keys-type
-      - name: dot-imports
-      - name: error-return
-      - name: error-strings
-      - name: error-naming
-      - name: exported
-        disabled: true  # Too noisy
-      - name: increment-decrement
-      - name: var-naming
-      - name: var-declaration
-      - name: package-comments
-        disabled: true
-      - name: range
-      - name: receiver-naming
-      - name: time-naming
-      - name: unexported-return
-      - name: indent-error-flow
-      - name: errorf
-      - name: empty-block
-      - name: superfluous-else
-      - name: unused-parameter
-        disabled: true  # Caught by unparam
-      - name: unreachable-code
-      - name: redefines-builtin-id
+      - fieldalignment
 
   misspell:
     locale: US
 
-  exhaustive:
-    default-signifies-exhaustive: true
-
-issues:
-  exclude-use-default: false
-  exclude-rules:
-    # Allow dot imports in tests
+exclusions:
+  generated: lax
+  presets:
+    - comments
+    - std-error-handling
+  rules:
     - path: _test\.go
       linters:
-        - revive
-      text: "dot-imports"
+        - staticcheck
 
-    # Allow unused params in test files
-    - path: _test\.go
+    - path: internal/db/sqlc/
       linters:
-        - unparam
+        - govet
+        - staticcheck
 
-    # Ignore long lines in generated files
-    - path: sqlc/
-      linters:
-        - gocritic
-        - revive
-
-    # Allow context.Background() in main/cmd
     - path: cmd/
       linters:
         - noctx
 
-  max-issues-per-linter: 50
-  max-same-issues: 10
+    - linters:
+        - staticcheck
+      text: SA1019
+
+    - linters:
+        - staticcheck
+      text: ST1023

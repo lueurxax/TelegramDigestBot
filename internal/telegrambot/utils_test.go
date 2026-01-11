@@ -139,9 +139,7 @@ func TestSplitHTML(t *testing.T) {
 				t.Errorf("SplitHTML() got %d parts, want %d. Parts: %v", len(parts), tt.wantLen, parts)
 			}
 			for i, p := range parts {
-				if len(p) > tt.limit && !strings.Contains(p, "<blockquote>") { // blockquote might add few chars but we should be careful
-					// Actually our limit check is strictly before adding line, so it should be fine.
-				}
+				// Note: blockquote tags might add a few chars over limit, which is acceptable
 				if strings.Contains(p, "<blockquote>") && !strings.Contains(p, "</blockquote>") {
 					t.Errorf("Part %d has open blockquote: %s", i, p)
 				}
