@@ -27,8 +27,23 @@ jobs:
       with:
         go-version: '1.25'
 
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: latest
+        args: --timeout=5m
+
     - name: Run tests
-      run: go test ./...
+      run: go test -race ./...
+
+    - name: Run evaluation harness
+      run: |
+        go run ./cmd/eval \
+          -input docs/eval/sample.jsonl \
+          -relevance-threshold 0.5 \
+          -importance-threshold 0.3 \
+          -min-precision 0.8 \
+          -max-noise-rate 0.15
 
     - name: Log in to Container Registry
       if: github.event_name != 'pull_request'
