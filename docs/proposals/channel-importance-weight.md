@@ -96,16 +96,17 @@ CREATE TABLE channel_stats (
 Calculate weekly, based on rolling 30-day stats:
 
 ```go
-const (
-    // Minimum messages required before auto-weighting applies
-    MinMessagesForAutoWeight = 10
-    // Expected messages per day for consistency scoring (configurable)
-    DefaultExpectedFrequency = 5.0
-)
+// Config values (from environment/settings)
+type AutoWeightConfig struct {
+    MinMessages       int     // MIN_MESSAGES_FOR_AUTO_WEIGHT (default: 10)
+    ExpectedFrequency float32 // EXPECTED_MESSAGES_PER_DAY (default: 5.0)
+    AutoMin           float32 // WEIGHT_AUTO_MIN (default: 0.5)
+    AutoMax           float32 // WEIGHT_AUTO_MAX (default: 1.5)
+}
 
-func CalculateAutoWeight(stats ChannelStats, expectedFrequency float32) float32 {
+func CalculateAutoWeight(stats ChannelStats, cfg AutoWeightConfig) float32 {
     // Guard: insufficient data - return neutral weight
-    if stats.MessagesReceived < MinMessagesForAutoWeight {
+    if stats.MessagesReceived < cfg.MinMessages {
         return 1.0
     }
 
@@ -116,10 +117,10 @@ func CalculateAutoWeight(stats ChannelStats, expectedFrequency float32) float32 
     }
 
     // Use avg_importance directly (already 0-1 scale)
-    // Default to 0.5 (neutral) if no data
+    // Only fall back to neutral if no digested items exist
     importanceScore := stats.AvgImportance
-    if importanceScore == 0 || stats.ItemsDigested == 0 {
-        importanceScore = 0.5
+    if stats.ItemsDigested == 0 {
+        importanceScore = 0.5 // No data to judge quality
     }
 
     // Calculate messages per day from period
@@ -128,7 +129,7 @@ func CalculateAutoWeight(stats ChannelStats, expectedFrequency float32) float32 
         days = 1
     }
     messagesPerDay := float32(stats.MessagesReceived) / float32(days)
-    consistencyScore := min(1.0, messagesPerDay/expectedFrequency)
+    consistencyScore := min(1.0, messagesPerDay/cfg.ExpectedFrequency)
 
     // Signal-to-noise with divide-by-zero guard
     var signalScore float32 = 0.0
@@ -136,18 +137,16 @@ func CalculateAutoWeight(stats ChannelStats, expectedFrequency float32) float32 
         signalScore = float32(stats.ItemsCreated) / float32(stats.MessagesReceived)
     }
 
-    // Weighted sum
+    // Weighted sum (each component is 0-1)
     rawScore := (inclusionScore * 0.4) +
                 (importanceScore * 0.3) +
                 (consistencyScore * 0.2) +
                 (signalScore * 0.1)
 
-    // Map to AUTO weight range [0.5, 1.5]
-    // Note: Manual weights can go wider (0.1-2.0)
-    // Score 0.0 -> weight 0.5 (de-prioritize poor channels)
-    // Score 0.5 -> weight 1.0 (neutral)
-    // Score 1.0 -> weight 1.5 (boost excellent channels)
+    // Map to weight range and clamp to configured bounds
+    // rawScore 0.0 -> weight 0.5; rawScore 1.0 -> weight 1.5
     weight := 0.5 + rawScore
+    weight = max(cfg.AutoMin, min(cfg.AutoMax, weight))
 
     return weight
 }
@@ -344,7 +343,7 @@ WHERE username = 'memes_daily';
 | Weight too aggressive, excludes good content | Cap at 0.1 minimum, admin notifications |
 | Auto-calculation gaming | Track anomalies, require manual review for extremes |
 | Complexity in debugging | Detailed logging of weight application |
-| Breaking existing behavior | Default weight 1.0, opt-in for auto |
+| Breaking existing behavior | Default weight 1.0; auto-calc enabled by default but conservative (0.5-1.5 range) |
 
 ---
 
