@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"html"
-	"math"
 	"sort"
 	"strings"
 	"time"
@@ -448,6 +447,31 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 		return "", nil, nil, nil, nil
 	}
 
+	var topicsEnabled bool = true
+	if err := s.database.GetSetting(ctx, "topics_enabled", &topicsEnabled); err != nil {
+		logger.Debug().Err(err).Msg("could not get topics_enabled from DB")
+	}
+
+	freshnessDecayHours := s.cfg.FreshnessDecayHours
+	if err := s.database.GetSetting(ctx, "freshness_decay_hours", &freshnessDecayHours); err != nil {
+		logger.Debug().Err(err).Msg("could not get freshness_decay_hours from DB")
+	}
+
+	freshnessFloor := s.cfg.FreshnessFloor
+	if err := s.database.GetSetting(ctx, "freshness_floor", &freshnessFloor); err != nil {
+		logger.Debug().Err(err).Msg("could not get freshness_floor from DB")
+	}
+
+	topicDiversityCap := s.cfg.TopicDiversityCap
+	if err := s.database.GetSetting(ctx, "topic_diversity_cap", &topicDiversityCap); err != nil {
+		logger.Debug().Err(err).Msg("could not get topic_diversity_cap from DB")
+	}
+
+	minTopicCount := s.cfg.MinTopicCount
+	if err := s.database.GetSetting(ctx, "min_topic_count", &minTopicCount); err != nil {
+		logger.Debug().Err(err).Msg("could not get min_topic_count from DB")
+	}
+
 	// Apply smart selection adjustments
 	channelCounts := make(map[string]int)
 	for _, item := range items {
@@ -456,10 +480,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 
 	for i := range items {
 		// 1. Time-decay: reduce importance of older items
-		hoursOld := time.Since(items[i].TGDate).Hours()
-		// Decay up to 30% over 24 hours, floor at 0.5
-		decayFactor := math.Max(0.5, 1.0-(hoursOld/24.0*0.3))
-		items[i].ImportanceScore = items[i].ImportanceScore * float32(decayFactor)
+		items[i].ImportanceScore = applyFreshnessDecay(items[i].ImportanceScore, items[i].TGDate, freshnessDecayHours, freshnessFloor)
 
 		// 2. Source Diversity Bonus: boost items from channels that only have 1 item in the pool
 		if channelCounts[items[i].SourceChannel] == 1 {
@@ -507,19 +528,24 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 	}
 	items = dedupedItems
 
-	// Truncate to desired TopN
-	if len(items) > s.cfg.DigestTopN {
+	if topicsEnabled && topicDiversityCap > 0 && topicDiversityCap < 1 && len(items) > 0 {
+		result := applyTopicBalance(items, s.cfg.DigestTopN, topicDiversityCap, minTopicCount)
+		items = result.Items
+		if result.Relaxed {
+			logger.Warn().
+				Int("topics_available", result.TopicsAvailable).
+				Int("topics_selected", result.TopicsSelected).
+				Int("max_per_topic", result.MaxPerTopic).
+				Float32("cap", topicDiversityCap).
+				Msg("Topic diversity cap relaxed due to limited candidates")
+		}
+	} else if len(items) > s.cfg.DigestTopN {
 		items = items[:s.cfg.DigestTopN]
 	}
 
 	logger.Info().Time("start", start).Time("end", end).
 		Int("count", len(items)).
 		Msg("Processing items for digest")
-
-	var topicsEnabled bool = true
-	if err := s.database.GetSetting(ctx, "topics_enabled", &topicsEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get topics_enabled from DB")
-	}
 
 	var editorEnabled bool
 	if err := s.database.GetSetting(ctx, "editor_enabled", &editorEnabled); err != nil {
@@ -592,7 +618,14 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 	for _, item := range items {
 		uniqueChannels[item.SourceChannel] = true
 	}
-	sb.WriteString(fmt.Sprintf("📊 <i>%d items from %d channels | %d topics</i>\n\n", len(items), len(uniqueChannels), len(clusters)))
+	topicCount := 0
+	if topicsEnabled {
+		topicCount = len(clusters)
+		if topicCount == 0 {
+			topicCount = countDistinctTopics(items)
+		}
+	}
+	sb.WriteString(fmt.Sprintf("📊 <i>%d items from %d channels | %d topics</i>\n\n", len(items), len(uniqueChannels), topicCount))
 
 	seenSummaries := make(map[string]bool)
 	var narrativeGenerated bool
