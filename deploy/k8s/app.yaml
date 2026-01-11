@@ -2,11 +2,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: digest-bot
+  namespace: digest
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: digest-bot-leader-election
+  namespace: digest
 rules:
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
@@ -16,9 +18,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: digest-bot-leader-election
+  namespace: digest
 subjects:
 - kind: ServiceAccount
   name: digest-bot
+  namespace: digest
 roleRef:
   kind: Role
   name: digest-bot-leader-election
@@ -28,6 +32,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: tg-session-pvc
+  namespace: digest
 spec:
   accessModes:
     - ReadWriteOnce
@@ -39,6 +44,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: digest-bot
+  namespace: digest
 spec:
   replicas: 1
   selector:
@@ -52,7 +58,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: bot
-        image: ghcr.io/lueurxax/telegram-digest-bot:main
+        image: ghcr.io/lueurxax/telegramdigestbot:main
         command: ["./telegram-digest-bot"]
         args: ["--mode=bot"]
         envFrom:
@@ -86,6 +92,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: digest-reader
+  namespace: digest
 spec:
   replicas: 1
   selector:
@@ -99,7 +106,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: reader
-        image: ghcr.io/lueurxax/telegram-digest-bot:main
+        image: ghcr.io/lueurxax/telegramdigestbot:main
         command: ["./telegram-digest-bot"]
         args: ["--mode=reader"]
         envFrom:
@@ -140,6 +147,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: digest-worker
+  namespace: digest
 spec:
   replicas: 1
   selector:
@@ -153,7 +161,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: worker
-        image: ghcr.io/lueurxax/telegram-digest-bot:main
+        image: ghcr.io/lueurxax/telegramdigestbot:main
         command: ["./telegram-digest-bot"]
         args: ["--mode=worker"]
         envFrom:
@@ -187,6 +195,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: digest-scheduler
+  namespace: digest
 spec:
   replicas: 1
   selector:
@@ -200,7 +209,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: scheduler
-        image: ghcr.io/lueurxax/telegram-digest-bot:main
+        image: ghcr.io/lueurxax/telegramdigestbot:main
         command: ["./telegram-digest-bot"]
         args: ["--mode=digest"]
         envFrom:

@@ -628,6 +628,8 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 								}
 								seenSummaries[summary] = true
 								hasContent = true
+								// Item boundary marker for intelligent splitting
+								groupSb.WriteString(htmlutils.ItemStart)
 								if c.Topic != "" {
 									emoji := topicEmojis[c.Topic]
 									if emoji == "" {
@@ -655,6 +657,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 								if len(links) > 0 {
 									groupSb.WriteString(fmt.Sprintf(" <i>via %s</i>", strings.Join(links, " • ")))
 								}
+								groupSb.WriteString(htmlutils.ItemEnd)
 								groupSb.WriteString("\n")
 								continue
 							} else if err != nil {
@@ -665,14 +668,48 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 						if emoji == "" {
 							emoji = "📂"
 						}
-						topicHeader := fmt.Sprintf("%s <b>%s</b> (%d related items)\n", emoji, html.EscapeString(c.Topic), len(c.Items))
-						formatted := s.formatItems(c.Items, false, seenSummaries)
-						if formatted != "" {
-							hasContent = true
-							groupSb.WriteString(topicHeader)
-							groupSb.WriteString(formatted)
-							groupSb.WriteString("\n")
+						// Show only the representative (first item, sorted by importance)
+						// but aggregate sources from all cluster items
+						representative := c.Items[0]
+						if seenSummaries[representative.Summary] {
+							continue
 						}
+						seenSummaries[representative.Summary] = true
+						hasContent = true
+
+						// Item boundary marker for intelligent splitting
+						groupSb.WriteString(htmlutils.ItemStart)
+						groupSb.WriteString("┌─────────────────────\n")
+						groupSb.WriteString(fmt.Sprintf("│ %s <b>%s</b>\n", emoji, strings.ToUpper(html.EscapeString(c.Topic))))
+						groupSb.WriteString("└─────────────────────\n")
+
+						sanitizedSummary := htmlutils.SanitizeHTML(representative.Summary)
+						prefix := getImportancePrefix(representative.ImportanceScore)
+						groupSb.WriteString(fmt.Sprintf("%s %s", prefix, sanitizedSummary))
+
+						// Collect sources from ALL items in cluster
+						var links []string
+						for _, item := range c.Items {
+							label := item.SourceChannel
+							if label != "" {
+								label = "@" + label
+							}
+							if label == "" {
+								label = item.SourceChannelTitle
+							}
+							if label == "" {
+								label = "Source"
+							}
+							links = append(links, s.formatLink(item, label))
+						}
+						if len(links) > 0 {
+							groupSb.WriteString(fmt.Sprintf("\n    ↳ <i>via %s</i>", strings.Join(links, " • ")))
+						}
+						if len(c.Items) > 1 {
+							groupSb.WriteString(fmt.Sprintf(" <i>(+%d related)</i>", len(c.Items)-1))
+						}
+						groupSb.WriteString(htmlutils.ItemEnd)
+						groupSb.WriteString("\n\n")
 					} else {
 						formatted := s.formatItems(c.Items, true, seenSummaries)
 						if formatted != "" {
@@ -794,6 +831,9 @@ func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummarie
 		sanitizedSummary := htmlutils.SanitizeHTML(g.summary)
 		prefix := getImportancePrefix(g.importanceScore)
 
+		// Item boundary marker for intelligent splitting
+		sb.WriteString(htmlutils.ItemStart)
+
 		if includeTopic && g.items[0].Topic != "" {
 			emoji := topicEmojis[g.items[0].Topic]
 			if emoji == "" {
@@ -823,6 +863,7 @@ func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummarie
 		if len(links) > 0 {
 			sb.WriteString(fmt.Sprintf("\n    ↳ <i>via %s</i>", strings.Join(links, " • ")))
 		}
+		sb.WriteString(htmlutils.ItemEnd)
 		sb.WriteString("\n")
 	}
 	return sb.String()

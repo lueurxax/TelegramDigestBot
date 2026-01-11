@@ -85,8 +85,23 @@ func sanitizeAnchorTag(tag string) string {
 	return `<a href="` + html.EscapeString(href) + `">`
 }
 
+// Item boundary markers for intelligent splitting
+// These are stripped before sending to Telegram
+const (
+	ItemStart = "<!-- ITEM -->"
+	ItemEnd   = "<!-- /ITEM -->"
+)
+
+// StripItemMarkers removes item boundary markers from text before sending to Telegram
+func StripItemMarkers(text string) string {
+	text = strings.ReplaceAll(text, ItemStart, "")
+	text = strings.ReplaceAll(text, ItemEnd, "")
+	return text
+}
+
 // splitPriority defines preferred split points in order of preference
 var splitPriorities = []string{
+	ItemEnd + "\n",              // Highest priority: between complete items
 	"</blockquote>\n",           // After blockquote end - prefer split here
 	"━━━━━━━━━━━━━━━━━━━━━━\n",  // Section separator
 	"─────────────────────\n",  // Sub-section separator
@@ -108,22 +123,59 @@ func SplitHTML(text string, limit int) []string {
 	currentRuneLen := 0
 
 	type token struct {
-		val   string
-		isTag bool
+		val      string
+		isTag    bool
+		isMarker bool // Special marker tokens (not counted, used for split priority)
 	}
 	var tokens []token
 
-	indices := tagRegex.FindAllStringIndex(text, -1)
-	lastPos := 0
-	for _, idx := range indices {
-		if idx[0] > lastPos {
-			tokens = append(tokens, token{val: text[lastPos:idx[0]], isTag: false})
+	// Tokenize: find all HTML tags and item markers
+	// Item markers are treated like tags (not counted toward limit)
+	remaining := text
+	for len(remaining) > 0 {
+		// Check for item markers first
+		if strings.HasPrefix(remaining, ItemStart) {
+			tokens = append(tokens, token{val: ItemStart, isTag: true, isMarker: true})
+			remaining = remaining[len(ItemStart):]
+			continue
 		}
-		tokens = append(tokens, token{val: text[idx[0]:idx[1]], isTag: true})
-		lastPos = idx[1]
-	}
-	if lastPos < len(text) {
-		tokens = append(tokens, token{val: text[lastPos:], isTag: false})
+		if strings.HasPrefix(remaining, ItemEnd) {
+			tokens = append(tokens, token{val: ItemEnd, isTag: true, isMarker: true})
+			remaining = remaining[len(ItemEnd):]
+			continue
+		}
+
+		// Check for HTML tags
+		tagMatch := tagRegex.FindStringIndex(remaining)
+		if tagMatch != nil && tagMatch[0] == 0 {
+			tokens = append(tokens, token{val: remaining[:tagMatch[1]], isTag: true})
+			remaining = remaining[tagMatch[1]:]
+			continue
+		}
+
+		// Find next tag or marker
+		nextTag := len(remaining)
+		if tagMatch != nil {
+			nextTag = tagMatch[0]
+		}
+		nextStart := strings.Index(remaining, ItemStart)
+		if nextStart >= 0 && nextStart < nextTag {
+			nextTag = nextStart
+		}
+		nextEnd := strings.Index(remaining, ItemEnd)
+		if nextEnd >= 0 && nextEnd < nextTag {
+			nextTag = nextEnd
+		}
+
+		// Add text content up to next tag/marker
+		if nextTag > 0 {
+			tokens = append(tokens, token{val: remaining[:nextTag], isTag: false})
+			remaining = remaining[nextTag:]
+		} else {
+			// Shouldn't happen, but handle gracefully
+			tokens = append(tokens, token{val: remaining, isTag: false})
+			break
+		}
 	}
 
 	// Count total runes (not bytes) in text content
@@ -223,10 +275,28 @@ func SplitHTML(text string, limit int) []string {
 		return maxRunes
 	}
 
-	for _, t := range tokens {
+	for i, t := range tokens {
 		if t.isTag {
 			current.WriteString(t.val)
-			openTags = updateOpenTags(t.val, openTags)
+			if !t.isMarker {
+				openTags = updateOpenTags(t.val, openTags)
+			}
+			// Prefer splitting at ItemEnd boundaries when approaching limit
+			if t.val == ItemEnd {
+				// Check if next token is a newline, and if we're past 50% of limit
+				// If so, flush now to split at item boundary
+				if currentRuneLen > limit/2 && i+1 < len(tokens) {
+					nextToken := tokens[i+1]
+					if !nextToken.isTag && strings.HasPrefix(nextToken.val, "\n") {
+						// Write the newline to current, then flush
+						current.WriteString("\n")
+						flush()
+						// Skip the newline from next token
+						tokens[i+1] = token{val: strings.TrimPrefix(nextToken.val, "\n"), isTag: false}
+						continue
+					}
+				}
+			}
 		} else {
 			remaining := t.val
 			for len(remaining) > 0 {

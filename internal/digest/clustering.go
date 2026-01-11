@@ -2,11 +2,13 @@ package digest
 
 import (
 	"context"
+	"sort"
+	"strings"
+	"time"
+
 	"github.com/lueurxax/telegram-digest-bot/internal/db"
 	"github.com/lueurxax/telegram-digest-bot/internal/dedup"
 	"github.com/rs/zerolog"
-	"strings"
-	"time"
 )
 
 func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, end time.Time, logger *zerolog.Logger) error {
@@ -101,6 +103,22 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 				// they will be rendered as regular items
 				continue
 			}
+
+			// Sort cluster items by importance score (descending)
+			// The first item becomes the "representative" of the cluster
+			sort.Slice(clusterItemsList, func(i, j int) bool {
+				if clusterItemsList[i].ImportanceScore != clusterItemsList[j].ImportanceScore {
+					return clusterItemsList[i].ImportanceScore > clusterItemsList[j].ImportanceScore
+				}
+				// Tie-breaker: prefer longer summaries (more detailed)
+				return len(clusterItemsList[i].Summary) > len(clusterItemsList[j].Summary)
+			})
+
+			logger.Debug().
+				Int("cluster_size", len(clusterItemsList)).
+				Str("representative", clusterItemsList[0].ID).
+				Float32("rep_importance", clusterItemsList[0].ImportanceScore).
+				Msg("Cluster representative selected")
 
 			// Smart Cluster Naming
 			clusterTopic := topic

@@ -5,6 +5,49 @@ import (
 	"testing"
 )
 
+func TestStripItemMarkers(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no markers",
+			input:    "Hello World",
+			expected: "Hello World",
+		},
+		{
+			name:     "strip start marker",
+			input:    ItemStart + "Content",
+			expected: "Content",
+		},
+		{
+			name:     "strip end marker",
+			input:    "Content" + ItemEnd,
+			expected: "Content",
+		},
+		{
+			name:     "strip both markers",
+			input:    ItemStart + "Content" + ItemEnd,
+			expected: "Content",
+		},
+		{
+			name:     "multiple items",
+			input:    ItemStart + "Item 1" + ItemEnd + "\n" + ItemStart + "Item 2" + ItemEnd,
+			expected: "Item 1\nItem 2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StripItemMarkers(tt.input)
+			if got != tt.expected {
+				t.Errorf("StripItemMarkers() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestSanitizeHTML(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -176,6 +219,23 @@ func TestSplitHTML(t *testing.T) {
 			limit:         25,
 			wantParts:     2,
 			checkNotSplit: "🔴🔵🟢🟡",
+		},
+		{
+			name:        "split at item boundary marker",
+			text:        ItemStart + "First item with some content here" + ItemEnd + "\n" + ItemStart + "Second item with more content" + ItemEnd + "\n",
+			limit:       60,
+			wantParts:   2,
+			checkFirst:  "First item",
+			checkSecond: "Second item",
+		},
+		{
+			name:          "item boundary takes priority over other splits",
+			text:          ItemStart + "Item one has some longer content here\n\nWith more paragraph text" + ItemEnd + "\n" + ItemStart + "Item two with additional content" + ItemEnd + "\n",
+			limit:         70,
+			wantParts:     2,
+			checkFirst:    "Item one",
+			checkSecond:   "Item two",
+			checkNotSplit: "With more paragraph", // Should not split at \n\n within item
 		},
 	}
 
