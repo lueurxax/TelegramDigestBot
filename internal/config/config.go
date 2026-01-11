@@ -24,7 +24,7 @@ type Config struct {
 	DigestTopN              int     `env:"DIGEST_TOP_N" envDefault:"20"`
 	RelevanceThreshold      float32 `env:"RELEVANCE_THRESHOLD" envDefault:"0.5"`
 	ImportanceThreshold     float32 `env:"IMPORTANCE_THRESHOLD" envDefault:"0.3"`
-	SimilarityThreshold     float32 `env:"SIMILARITY_THRESHOLD" envDefault:"0.75"`
+	SimilarityThreshold     float32 `env:"SIMILARITY_THRESHOLD" envDefault:"0.65"`
 	RateLimitRPS            int     `env:"RATE_LIMIT_RPS" envDefault:"1"`
 	HealthPort              int     `env:"HEALTH_PORT" envDefault:"8080"`
 	LeaderElectionEnabled   bool    `env:"LEADER_ELECTION_ENABLED" envDefault:"true"`
