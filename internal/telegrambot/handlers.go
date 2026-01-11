@@ -661,17 +661,28 @@ func (b *Bot) handleChannelWeight(msg *tgbotapi.Message) {
 
 	identifier := strings.TrimPrefix(args[0], "@")
 
+	// Check if user forgot to specify channel (e.g., "/channel weight auto" instead of "/channel weight @chan auto")
+	if len(args) == 1 && (identifier == "auto" || isNumericWeight(identifier)) {
+		b.reply(msg, "Missing channel identifier.\nUsage: <code>/channel weight @username</code> or <code>/channel weight @username 1.5</code>")
+		return
+	}
+
 	// Just identifier - show current weight
 	if len(args) == 1 {
 		weight, err := b.database.GetChannelWeight(ctx, identifier)
 		if err != nil {
-			b.reply(msg, fmt.Sprintf("Error: %s", html.EscapeString(err.Error())))
+			if strings.Contains(err.Error(), "no rows") {
+				b.reply(msg, fmt.Sprintf("Channel <code>@%s</code> not found.", html.EscapeString(identifier)))
+			} else {
+				b.reply(msg, fmt.Sprintf("Error: %s", html.EscapeString(err.Error())))
+			}
 			return
 		}
 
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("<b>Channel Weight: @%s</b>\n\n", html.EscapeString(weight.Username)))
-		if weight.Title != "" {
+		chanDisplay := formatChannelDisplay(weight.Username, weight.Title, identifier)
+		sb.WriteString(fmt.Sprintf("<b>Channel Weight: %s</b>\n\n", chanDisplay))
+		if weight.Title != "" && weight.Username != "" {
 			sb.WriteString(fmt.Sprintf("Title: %s\n", html.EscapeString(weight.Title)))
 		}
 		sb.WriteString(fmt.Sprintf("Weight: <code>%.2f</code>", weight.ImportanceWeight))
@@ -695,12 +706,17 @@ func (b *Bot) handleChannelWeight(msg *tgbotapi.Message) {
 	weightArg := args[1]
 	if weightArg == "auto" {
 		// Enable auto-weight: autoEnabled=true, override=false
-		err := b.database.UpdateChannelWeight(ctx, identifier, 1.0, true, false, "", msg.From.ID)
+		result, err := b.database.UpdateChannelWeight(ctx, identifier, 1.0, true, false, "", msg.From.ID)
 		if err != nil {
-			b.reply(msg, fmt.Sprintf("Error: %s", html.EscapeString(err.Error())))
+			if strings.Contains(err.Error(), "no rows") {
+				b.reply(msg, fmt.Sprintf("Channel <code>%s</code> not found.", html.EscapeString(identifier)))
+			} else {
+				b.reply(msg, fmt.Sprintf("Error: %s", html.EscapeString(err.Error())))
+			}
 			return
 		}
-		b.reply(msg, fmt.Sprintf("Auto-weight enabled for <code>@%s</code>. Weight reset to 1.0 (will be calculated automatically when auto-weighting is implemented).", html.EscapeString(identifier)))
+		chanDisplay := formatChannelDisplay(result.Username, result.Title, identifier)
+		b.reply(msg, fmt.Sprintf("Auto-weight enabled for %s. Weight reset to 1.0.", chanDisplay))
 		return
 	}
 
@@ -716,17 +732,39 @@ func (b *Bot) handleChannelWeight(msg *tgbotapi.Message) {
 	}
 
 	// Manual weight: autoEnabled=false, override=true
-	err = b.database.UpdateChannelWeight(ctx, identifier, float32(weight), false, true, reason, msg.From.ID)
+	result, err := b.database.UpdateChannelWeight(ctx, identifier, float32(weight), false, true, reason, msg.From.ID)
 	if err != nil {
-		b.reply(msg, fmt.Sprintf("Error: %s", html.EscapeString(err.Error())))
+		if strings.Contains(err.Error(), "no rows") {
+			b.reply(msg, fmt.Sprintf("Channel <code>%s</code> not found.", html.EscapeString(identifier)))
+		} else {
+			b.reply(msg, fmt.Sprintf("Error: %s", html.EscapeString(err.Error())))
+		}
 		return
 	}
 
-	reply := fmt.Sprintf("Weight for <code>@%s</code> set to <code>%.2f</code>", html.EscapeString(identifier), weight)
+	chanDisplay := formatChannelDisplay(result.Username, result.Title, identifier)
+	reply := fmt.Sprintf("Weight for %s set to <code>%.2f</code>", chanDisplay, weight)
 	if reason != "" {
 		reply += fmt.Sprintf("\nReason: <i>%s</i>", html.EscapeString(reason))
 	}
 	b.reply(msg, reply)
+}
+
+// isNumericWeight checks if a string looks like a weight value (number between 0.1 and 2.0)
+func isNumericWeight(s string) bool {
+	f, err := strconv.ParseFloat(s, 32)
+	return err == nil && f >= 0.1 && f <= 2.0
+}
+
+// formatChannelDisplay returns a display string for a channel, preferring username then title then identifier
+func formatChannelDisplay(username, title, identifier string) string {
+	if username != "" {
+		return fmt.Sprintf("<code>@%s</code>", html.EscapeString(username))
+	}
+	if title != "" {
+		return fmt.Sprintf("<b>%s</b>", html.EscapeString(title))
+	}
+	return fmt.Sprintf("<code>%s</code>", html.EscapeString(identifier))
 }
 
 func (b *Bot) handleChannelContext(msg *tgbotapi.Message) {
@@ -1210,7 +1248,8 @@ func (b *Bot) handleHelp(msg *tgbotapi.Message) {
 		"• <code>/channel add &lt;id|@user|link&gt;</code> - Track a new channel\n"+
 		"• <code>/channel remove &lt;id|@user&gt;</code> - Stop tracking\n"+
 		"• <code>/channel list</code> - List all tracked channels\n"+
-		"• <code>/channel context &lt;id&gt; &lt;text&gt;</code> - Set channel context\n\n"+
+		"• <code>/channel context &lt;id&gt; &lt;text&gt;</code> - Set channel context\n"+
+		"• <code>/channel weight &lt;@user&gt; [0.1-2.0|auto]</code> - Get/set importance weight\n\n"+
 		"🔍 <b>Channel Discovery</b> (<code>/discover</code>)\n"+
 		"• <code>/discover</code> - View pending discovered channels\n"+
 		"• <code>/discover approve @channel</code> - Add channel to tracking\n"+

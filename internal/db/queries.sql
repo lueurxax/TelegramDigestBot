@@ -487,7 +487,7 @@ WHERE id = @id;
 
 -- Channel importance weight queries
 
--- name: UpdateChannelWeight :exec
+-- name: UpdateChannelWeight :one
 UPDATE channels
 SET importance_weight = $2,
     auto_weight_enabled = $3,
@@ -495,7 +495,8 @@ SET importance_weight = $2,
     weight_override_reason = $5,
     weight_updated_at = NOW(),
     weight_updated_by = $6
-WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1;
+WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1
+RETURNING username, title;
 
 -- name: GetChannelWeight :one
 SELECT username, title, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at

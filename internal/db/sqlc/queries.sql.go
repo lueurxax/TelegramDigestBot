@@ -1839,7 +1839,7 @@ func (q *Queries) UpdateChannelMetadata(ctx context.Context, arg UpdateChannelMe
 	return err
 }
 
-const updateChannelWeight = `-- name: UpdateChannelWeight :exec
+const updateChannelWeight = `-- name: UpdateChannelWeight :one
 
 UPDATE channels
 SET importance_weight = $2,
@@ -1849,6 +1849,7 @@ SET importance_weight = $2,
     weight_updated_at = NOW(),
     weight_updated_by = $6
 WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1
+RETURNING username, title
 `
 
 type UpdateChannelWeightParams struct {
@@ -1860,9 +1861,14 @@ type UpdateChannelWeightParams struct {
 	WeightUpdatedBy      pgtype.Int8   `json:"weight_updated_by"`
 }
 
+type UpdateChannelWeightRow struct {
+	Username pgtype.Text `json:"username"`
+	Title    pgtype.Text `json:"title"`
+}
+
 // Channel importance weight queries
-func (q *Queries) UpdateChannelWeight(ctx context.Context, arg UpdateChannelWeightParams) error {
-	_, err := q.db.Exec(ctx, updateChannelWeight,
+func (q *Queries) UpdateChannelWeight(ctx context.Context, arg UpdateChannelWeightParams) (UpdateChannelWeightRow, error) {
+	row := q.db.QueryRow(ctx, updateChannelWeight,
 		arg.Username,
 		arg.ImportanceWeight,
 		arg.AutoWeightEnabled,
@@ -1870,7 +1876,9 @@ func (q *Queries) UpdateChannelWeight(ctx context.Context, arg UpdateChannelWeig
 		arg.WeightOverrideReason,
 		arg.WeightUpdatedBy,
 	)
-	return err
+	var i UpdateChannelWeightRow
+	err := row.Scan(&i.Username, &i.Title)
+	return i, err
 }
 
 const updateDiscoveryChannelInfo = `-- name: UpdateDiscoveryChannelInfo :exec

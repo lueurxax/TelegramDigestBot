@@ -84,7 +84,7 @@ type Querier interface {
 	UpdateChannelLastMessageID(ctx context.Context, arg UpdateChannelLastMessageIDParams) error
 	UpdateChannelMetadata(ctx context.Context, arg UpdateChannelMetadataParams) error
 	// Channel importance weight queries
-	UpdateChannelWeight(ctx context.Context, arg UpdateChannelWeightParams) error
+	UpdateChannelWeight(ctx context.Context, arg UpdateChannelWeightParams) (UpdateChannelWeightRow, error)
 	UpdateDiscoveryChannelInfo(ctx context.Context, arg UpdateDiscoveryChannelInfoParams) error
 	UpdateDiscoveryFromInvite(ctx context.Context, arg UpdateDiscoveryFromInviteParams) error
 	UpdateDiscoveryStatus(ctx context.Context, arg UpdateDiscoveryStatusParams) error

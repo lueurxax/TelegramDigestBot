@@ -186,8 +186,14 @@ func (db *DB) GetChannelWeight(ctx context.Context, identifier string) (*Channel
 	}, nil
 }
 
-func (db *DB) UpdateChannelWeight(ctx context.Context, identifier string, weight float32, autoEnabled bool, override bool, reason string, updatedBy int64) error {
-	return db.Queries.UpdateChannelWeight(ctx, sqlc.UpdateChannelWeightParams{
+// UpdateChannelWeightResult contains info about the updated channel
+type UpdateChannelWeightResult struct {
+	Username string
+	Title    string
+}
+
+func (db *DB) UpdateChannelWeight(ctx context.Context, identifier string, weight float32, autoEnabled bool, override bool, reason string, updatedBy int64) (*UpdateChannelWeightResult, error) {
+	row, err := db.Queries.UpdateChannelWeight(ctx, sqlc.UpdateChannelWeightParams{
 		Username:             toText(identifier),
 		ImportanceWeight:     pgtype.Float4{Float32: weight, Valid: true},
 		AutoWeightEnabled:    pgtype.Bool{Bool: autoEnabled, Valid: true},
@@ -195,4 +201,11 @@ func (db *DB) UpdateChannelWeight(ctx context.Context, identifier string, weight
 		WeightOverrideReason: toText(reason),
 		WeightUpdatedBy:      toInt8(updatedBy),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return &UpdateChannelWeightResult{
+		Username: row.Username.String,
+		Title:    row.Title.String,
+	}, nil
 }
