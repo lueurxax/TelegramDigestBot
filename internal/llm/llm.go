@@ -45,15 +45,19 @@ type Client interface {
 	GenerateClusterTopic(ctx context.Context, items []db.Item, targetLanguage string, model string) (string, error)
 }
 
+type PromptStore interface {
+	GetSetting(ctx context.Context, key string, target interface{}) error
+}
+
 type mockClient struct {
 	cfg *config.Config
 }
 
-func New(cfg *config.Config, logger *zerolog.Logger) Client {
+func New(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
 	if cfg.LLMAPIKey == "" || cfg.LLMAPIKey == "mock" {
 		return &mockClient{cfg: cfg}
 	}
-	return NewOpenAI(cfg, logger)
+	return NewOpenAI(cfg, store, logger)
 }
 
 func (c *mockClient) GetEmbedding(ctx context.Context, text string) ([]float32, error) {

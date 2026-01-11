@@ -78,7 +78,7 @@ func main() {
 
 func runBot(ctx context.Context, cfg *config.Config, database *db.DB, logger zerolog.Logger) {
 	logger.Info().Msg("Starting bot mode")
-	llmClient := llm.New(cfg, &logger)
+	llmClient := llm.New(cfg, database, &logger)
 	bot, err := telegrambot.New(cfg, database, llmClient, &logger)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("bot initialization failed")
@@ -99,7 +99,7 @@ func runReader(ctx context.Context, cfg *config.Config, database *db.DB, logger 
 func runWorker(ctx context.Context, cfg *config.Config, database *db.DB, logger zerolog.Logger) {
 	logger.Info().Msg("Starting worker mode")
 
-	llmClient := llm.New(cfg, &logger)
+	llmClient := llm.New(cfg, database, &logger)
 	resolver := linkresolver.New(cfg, database, nil, &logger)
 	p := pipeline.New(cfg, database, llmClient, resolver, &logger)
 	if err := p.Run(ctx); err != nil {
@@ -109,7 +109,7 @@ func runWorker(ctx context.Context, cfg *config.Config, database *db.DB, logger 
 
 func runDigest(ctx context.Context, cfg *config.Config, database *db.DB, logger zerolog.Logger, once bool) {
 	logger.Info().Bool("once", once).Msg("Starting digest mode")
-	llmClient := llm.New(cfg, &logger)
+	llmClient := llm.New(cfg, database, &logger)
 	bot, err := telegrambot.New(cfg, database, llmClient, &logger)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("bot initialization failed")
