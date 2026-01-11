@@ -4,8 +4,33 @@ import (
 	"html"
 	"regexp"
 	"strings"
-	"unicode/utf8"
+	"unicode/utf16"
 )
+
+// utf16Len returns the number of UTF-16 code units needed to encode the string.
+// Telegram counts message length in UTF-16 code units, not Unicode code points.
+// Characters outside the BMP (emoji, etc.) require surrogate pairs (2 code units).
+func utf16Len(s string) int {
+	return len(utf16.Encode([]rune(s)))
+}
+
+// utf16Slice safely slices a string by UTF-16 code unit count.
+// It returns the portion of the string that fits within the specified UTF-16 length.
+func utf16Slice(s string, maxUnits int) string {
+	runes := []rune(s)
+	units := 0
+	for i, r := range runes {
+		runeUnits := 1
+		if r > 0xFFFF {
+			runeUnits = 2 // Surrogate pair needed
+		}
+		if units+runeUnits > maxUnits {
+			return string(runes[:i])
+		}
+		units += runeUnits
+	}
+	return s
+}
 
 var tagRegex = regexp.MustCompile(`<(/?)([a-zA-Z0-9-]+)([^>]*)>`)
 var hrefRegex = regexp.MustCompile(`(?i)\s*href\s*=\s*["']([^"']*)["']`)
@@ -30,7 +55,7 @@ var dangerousProtocols = []string{
 }
 
 // SanitizeHTML ensures only Telegram-supported HTML tags are kept and text is properly escaped.
-// For <a> tags, only safe href attributes are preserved.
+// For <a> tags, only safe href attributes are preserved. All other tags have attributes stripped.
 func SanitizeHTML(text string) string {
 	var sb strings.Builder
 	indices := tagRegex.FindAllStringIndex(text, -1)
@@ -43,14 +68,20 @@ func SanitizeHTML(text string) string {
 		tag := text[idx[0]:idx[1]]
 		matches := tagRegex.FindStringSubmatch(tag)
 		if len(matches) >= 3 {
+			isClosing := matches[1] == "/"
 			tagName := strings.ToLower(matches[2])
 			if allowedTags[tagName] {
-				if tagName == "a" && matches[1] != "/" {
+				if tagName == "a" && !isClosing {
 					// Sanitize <a> tag - only allow safe href
 					sanitizedTag := sanitizeAnchorTag(tag)
 					sb.WriteString(sanitizedTag)
 				} else {
-					sb.WriteString(tag)
+					// Strip all attributes from non-<a> tags (Telegram doesn't support them)
+					if isClosing {
+						sb.WriteString("</" + tagName + ">")
+					} else {
+						sb.WriteString("<" + tagName + ">")
+					}
 				}
 			}
 			// Strip unsupported tags but keep content
@@ -99,28 +130,33 @@ func StripItemMarkers(text string) string {
 	return text
 }
 
-// splitPriority defines preferred split points in order of preference
-var splitPriorities = []string{
+// splitAfter defines markers where we split AFTER the marker (marker stays in current part)
+var splitAfter = []string{
 	ItemEnd + "\n",              // Highest priority: between complete items
 	"</blockquote>\n",           // After blockquote end - prefer split here
 	"━━━━━━━━━━━━━━━━━━━━━━\n",  // Section separator
 	"─────────────────────\n",  // Sub-section separator
 	"\n\n",                     // Paragraph break
-	"\n🔴 ",                    // Breaking section
-	"\n📌 ",                    // Notable section
-	"\n📝 ",                    // Also section
-	"\n┌─────────────────────\n", // Topic header
 	"\n    ↳ ",                  // Source attribution line (complete before splitting)
+}
+
+// splitBefore defines markers where we split BEFORE the content (only newline stays in current part)
+// These are section headers that should start the next message, not end the current one
+var splitBefore = []string{
+	"\n🔴 ",                    // Breaking section - split before emoji
+	"\n📌 ",                    // Notable section - split before emoji
+	"\n📝 ",                    // Also section - split before emoji
+	"\n┌─────────────────────", // Topic header - split before box
 }
 
 // SplitHTML splits an HTML string into multiple parts, each within the specified limit.
 // It tries to split at semantic boundaries (sections, paragraphs) before falling back to lines.
-// The limit is in runes (Unicode code points), not bytes, to properly handle non-ASCII text.
+// The limit is in UTF-16 code units, matching Telegram's message length counting.
 func SplitHTML(text string, limit int) []string {
 	var parts []string
 	var current strings.Builder
 	var openTags []string
-	currentRuneLen := 0
+	currentLen := 0 // UTF-16 code units
 
 	type token struct {
 		val      string
@@ -178,14 +214,14 @@ func SplitHTML(text string, limit int) []string {
 		}
 	}
 
-	// Count total runes (not bytes) in text content
-	totalRuneLen := 0
+	// Count total UTF-16 code units in text content
+	totalLen := 0
 	for _, t := range tokens {
 		if !t.isTag {
-			totalRuneLen += utf8.RuneCountInString(t.val)
+			totalLen += utf16Len(t.val)
 		}
 	}
-	if totalRuneLen <= limit {
+	if totalLen <= limit {
 		return []string{text}
 	}
 
@@ -211,81 +247,97 @@ func SplitHTML(text string, limit int) []string {
 		parts = append(parts, content)
 
 		current.Reset()
-		currentRuneLen = 0
-		// Reopen tags that should be reopened
+		currentLen = 0
+
+		// Filter openTags: remove noReopenTags (they were closed and won't be reopened)
+		// This prevents closing them again in subsequent parts
+		var newOpenTags []string
 		for _, tag := range openTags {
 			tagName := strings.ToLower(GetTagName(tag))
 			if !noReopenTags[tagName] {
+				newOpenTags = append(newOpenTags, tag)
 				current.WriteString(tag)
 			}
 		}
+		openTags = newOpenTags
 	}
 
-	// runeSlice safely slices a string by rune count, never splitting a rune
-	runeSlice := func(s string, start, end int) string {
-		runes := []rune(s)
-		if start > len(runes) {
-			start = len(runes)
-		}
-		if end > len(runes) {
-			end = len(runes)
-		}
-		if start > end {
-			start = end
-		}
-		return string(runes[start:end])
-	}
-
-	// findBestSplit finds the best position to split within the given text chunk
-	// Returns the rune position to split at
-	findBestSplit := func(text string, maxRunes int) int {
-		runeCount := utf8.RuneCountInString(text)
-		if runeCount <= maxRunes {
-			return runeCount
+	// findBestSplit finds the best position to split within the given text chunk.
+	// maxUnits is in UTF-16 code units. Returns the string to write and the remainder.
+	findBestSplit := func(text string, maxUnits int) (toWrite, remainder string) {
+		textLen := utf16Len(text)
+		if textLen <= maxUnits {
+			return text, ""
 		}
 
-		// Get the searchable portion as runes
-		searchText := runeSlice(text, 0, maxRunes)
+		// Get the searchable portion by UTF-16 length
+		searchText := utf16Slice(text, maxUnits)
 
-		// Try each priority split point
-		for _, sep := range splitPriorities {
+		// Try "split after" markers first (marker stays in current part)
+		for _, sep := range splitAfter {
 			pos := strings.LastIndex(searchText, sep)
 			if pos > 0 {
-				// Convert byte position to rune position
-				runePos := utf8.RuneCountInString(searchText[:pos])
-				return runePos + utf8.RuneCountInString(sep)
+				splitAt := pos + len(sep)
+				return searchText[:splitAt], text[splitAt:]
+			}
+		}
+
+		// Try "split before" markers (only newline stays, rest goes to next part)
+		for _, sep := range splitBefore {
+			pos := strings.LastIndex(searchText, sep)
+			if pos > 0 {
+				// Split after the newline only, marker content goes to next part
+				splitAt := pos + 1 // Just the \n
+				return searchText[:splitAt], text[splitAt:]
 			}
 		}
 
 		// Try to split at a newline
 		pos := strings.LastIndex(searchText, "\n")
 		if pos > 0 {
-			runePos := utf8.RuneCountInString(searchText[:pos])
-			return runePos + 1
+			return searchText[:pos+1], text[pos+1:]
 		}
 
 		// Try to split at a space (word boundary) - always use if found
 		pos = strings.LastIndex(searchText, " ")
 		if pos > 0 {
-			runePos := utf8.RuneCountInString(searchText[:pos])
-			return runePos + 1
+			return searchText[:pos+1], text[pos+1:]
 		}
 
-		// Last resort: split at maxRunes (safe, won't split mid-rune)
-		return maxRunes
+		// Last resort: split at maxUnits (utf16Slice ensures we don't split mid-character)
+		return searchText, text[len(searchText):]
 	}
 
 	for i, t := range tokens {
 		if t.isTag {
-			current.WriteString(t.val)
 			if !t.isMarker {
+				// Check if this is a closing tag for a noReopenTag that was already closed
+				matches := tagRegex.FindStringSubmatch(t.val)
+				if len(matches) >= 3 && matches[1] == "/" {
+					tagName := strings.ToLower(matches[2])
+					if noReopenTags[tagName] {
+						// Check if this tag is currently open
+						found := false
+						for _, ot := range openTags {
+							if strings.ToLower(GetTagName(ot)) == tagName {
+								found = true
+								break
+							}
+						}
+						if !found {
+							// This closing tag was already emitted in a previous flush, skip it
+							continue
+						}
+					}
+				}
 				openTags = updateOpenTags(t.val, openTags)
 			}
+			current.WriteString(t.val)
 			// Prefer splitting at ItemEnd boundaries when approaching limit
 			if t.val == ItemEnd {
 				// Check if next token is a newline, and if we're past 50% of limit
 				// If so, flush now to split at item boundary
-				if currentRuneLen > limit/2 && i+1 < len(tokens) {
+				if currentLen > limit/2 && i+1 < len(tokens) {
 					nextToken := tokens[i+1]
 					if !nextToken.isTag && strings.HasPrefix(nextToken.val, "\n") {
 						// Write the newline to current, then flush
@@ -300,28 +352,25 @@ func SplitHTML(text string, limit int) []string {
 		} else {
 			remaining := t.val
 			for len(remaining) > 0 {
-				canTake := limit - currentRuneLen
+				canTake := limit - currentLen
 				if canTake <= 0 {
 					flush()
 					canTake = limit
 				}
 
-				remainingRunes := utf8.RuneCountInString(remaining)
-				if remainingRunes <= canTake {
+				remainingLen := utf16Len(remaining)
+				if remainingLen <= canTake {
 					current.WriteString(remaining)
-					currentRuneLen += remainingRunes
+					currentLen += remainingLen
 					remaining = ""
 				} else {
-					// Find the best split point (in runes)
-					splitPos := findBestSplit(remaining, canTake)
+					// Find the best split point
+					toWrite, newRemaining := findBestSplit(remaining, canTake)
 
-					if splitPos > 0 {
-						toWrite := runeSlice(remaining, 0, splitPos)
+					if len(toWrite) > 0 {
 						current.WriteString(toWrite)
-						currentRuneLen += splitPos
-						remaining = runeSlice(remaining, splitPos, remainingRunes)
-						// Trim leading whitespace from next part
-						remaining = strings.TrimLeft(remaining, " \t\n\r")
+						currentLen += utf16Len(toWrite)
+						remaining = strings.TrimLeft(newRemaining, " \t\n\r")
 					}
 
 					if len(remaining) > 0 {

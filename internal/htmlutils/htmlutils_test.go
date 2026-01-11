@@ -129,6 +129,21 @@ func TestSanitizeHTML(t *testing.T) {
 			input:    `<a href="https://example.com?q=a&b=c">Link</a>`,
 			expected: `<a href="https://example.com?q=a&amp;b=c">Link</a>`,
 		},
+		{
+			name:     "strips style attribute from b tag",
+			input:    `<b style="color:red">Bold</b>`,
+			expected: `<b>Bold</b>`,
+		},
+		{
+			name:     "strips class attribute from i tag",
+			input:    `<i class="highlight">Italic</i>`,
+			expected: `<i>Italic</i>`,
+		},
+		{
+			name:     "strips all attributes from blockquote",
+			input:    `<blockquote expandable>Quote</blockquote>`,
+			expected: `<blockquote>Quote</blockquote>`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -214,11 +229,11 @@ func TestSplitHTML(t *testing.T) {
 			checkSecond: "сообщение",
 		},
 		{
-			name:          "UTF-8 emoji not split",
+			name:          "UTF-8 emoji not split mid-character",
 			text:          "Hello 🔴🔵🟢🟡 world test message with emojis 🎉🎊🎁",
-			limit:         25,
+			limit:         30, // UTF-16 units: emojis are 2 units each
 			wantParts:     2,
-			checkNotSplit: "🔴🔵🟢🟡",
+			checkNotSplit: "🔴🔵🟢🟡", // These 4 emojis should stay together (8 UTF-16 units)
 		},
 		{
 			name:        "split at item boundary marker",
@@ -236,6 +251,14 @@ func TestSplitHTML(t *testing.T) {
 			checkFirst:    "Item one",
 			checkSecond:   "Item two",
 			checkNotSplit: "With more paragraph", // Should not split at \n\n within item
+		},
+		{
+			name:        "blockquote not reopened after split",
+			text:        "<blockquote>Long blockquote content that spans multiple parts and needs to be split</blockquote>\nMore content after the blockquote here",
+			limit:       50,
+			wantParts:   3, // Split happens naturally due to length
+			checkFirst:  "blockquote",
+			checkSecond: "and needs", // Second part should NOT have unbalanced </blockquote>
 		},
 	}
 
