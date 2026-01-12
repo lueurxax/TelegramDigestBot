@@ -19,9 +19,9 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	}
 
 	// Safety cap to avoid O(n²) explosion if TopN is misconfigured
-	if len(items) > 500 {
-		logger.Warn().Int("count", len(items)).Msg("Too many items to cluster, limiting to first 500")
-		items = items[:500]
+	if len(items) > ClusterMaxItemsLimit {
+		logger.Warn().Int(LogFieldCount, len(items)).Msg("Too many items to cluster, limiting to first 500")
+		items = items[:ClusterMaxItemsLimit]
 	}
 
 	// Clean up old clusters for this window to prevent duplicates on retries
@@ -58,7 +58,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	}
 
 	if coherenceThreshold <= 0 {
-		coherenceThreshold = 0.7
+		coherenceThreshold = ClusterDefaultCoherenceThreshold
 	}
 
 	clusterWindowHours := s.cfg.ClusterTimeWindowHours
@@ -96,14 +96,14 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 
 	var digestLanguage string
 
-	if err := s.database.GetSetting(ctx, "digest_language", &digestLanguage); err != nil {
-		logger.Debug().Err(err).Msg("could not get digest_language from DB")
+	if err := s.database.GetSetting(ctx, SettingDigestLanguage, &digestLanguage); err != nil {
+		logger.Debug().Err(err).Msg(MsgCouldNotGetDigestLanguage)
 	}
 
 	var smartLLMModel string
 
-	if err := s.database.GetSetting(ctx, "smart_llm_model", &smartLLMModel); err != nil {
-		logger.Debug().Err(err).Msg("could not get smart_llm_model from DB")
+	if err := s.database.GetSetting(ctx, SettingSmartLLMModel, &smartLLMModel); err != nil {
+		logger.Debug().Err(err).Msg(MsgCouldNotGetSmartLLMModel)
 	}
 
 	assigned := make(map[string]bool)

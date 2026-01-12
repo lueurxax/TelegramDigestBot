@@ -62,8 +62,8 @@ func New(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
 }
 
 func (c *mockClient) GetEmbedding(ctx context.Context, text string) ([]float32, error) {
-	// Mock embedding (1536 dimensions as in schema)
-	emb := make([]float32, 1536)
+	// Mock embedding (dimensions as in schema)
+	emb := make([]float32, mockEmbeddingDimensions)
 	// Fill with some deterministic values based on text for mock consistency
 	for i := 0; i < len(emb); i++ {
 		emb[i] = 0.1
@@ -88,8 +88,8 @@ func (c *mockClient) ProcessBatch(ctx context.Context, messages []MessageInput, 
 	for i := range messages {
 		results[i] = BatchResult{
 			Index:           i,
-			RelevanceScore:  0.8,
-			ImportanceScore: 0.5,
+			RelevanceScore:  mockRelevanceScore,
+			ImportanceScore: mockImportanceScore,
 			Topic:           DefaultTopic,
 			Summary:         "This is a summary of the message.",
 			Language:        "en",

@@ -60,8 +60,8 @@ func (s *Scheduler) UpdateGlobalThresholds(ctx context.Context, logger *zerolog.
 
 	if totalCount < s.cfg.RatingMinSampleGlobal || weightedTotal == 0 {
 		logger.Info().
-			Int("global_count", totalCount).
-			Int("min_global", s.cfg.RatingMinSampleGlobal).
+			Int(LogFieldGlobalCount, totalCount).
+			Int(LogFieldMinGlobal, s.cfg.RatingMinSampleGlobal).
 			Msg("Skipping threshold tuning due to insufficient ratings")
 
 		return nil
@@ -97,18 +97,18 @@ func (s *Scheduler) UpdateGlobalThresholds(ctx context.Context, logger *zerolog.
 	}
 
 	if delta == 0 {
-		logger.Info().Float64("net_score", net).Msg("Threshold tuning skipped (within neutral band)")
+		logger.Info().Float64(LogFieldNetScore, net).Msg("Threshold tuning skipped (within neutral band)")
 
 		return nil
 	}
 
 	relevance := s.cfg.RelevanceThreshold
-	if err := s.database.GetSetting(ctx, "relevance_threshold", &relevance); err != nil {
+	if err := s.database.GetSetting(ctx, SettingRelevanceThreshold, &relevance); err != nil {
 		logger.Debug().Err(err).Msg("could not get relevance_threshold from DB")
 	}
 
 	importance := s.cfg.ImportanceThreshold
-	if err := s.database.GetSetting(ctx, "importance_threshold", &importance); err != nil {
+	if err := s.database.GetSetting(ctx, SettingImportanceThreshold, &importance); err != nil {
 		logger.Debug().Err(err).Msg("could not get importance_threshold from DB")
 	}
 
@@ -128,7 +128,7 @@ func (s *Scheduler) UpdateGlobalThresholds(ctx context.Context, logger *zerolog.
 	}
 
 	logger.Info().
-		Float64("net_score", net).
+		Float64(LogFieldNetScore, net).
 		Float32("delta", delta).
 		Float32("relevance", relevance).
 		Float32("relevance_new", newRelevance).

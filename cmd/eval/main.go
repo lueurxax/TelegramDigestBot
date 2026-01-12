@@ -9,6 +9,17 @@ import (
 	"strings"
 )
 
+const (
+	labelGood       = "good"
+	labelBad        = "bad"
+	labelIrrelevant = "irrelevant"
+
+	defaultRelevanceThreshold  = 0.5
+	defaultImportanceThreshold = 0.3
+	maxScannerBufferSize       = 1024
+	scannerBufferMultiplier    = 64
+)
+
 type evalRecord struct {
 	ID              string  `json:"id"`
 	Label           string  `json:"label"`
@@ -31,8 +42,8 @@ type evalStats struct {
 
 func main() {
 	inputPath := flag.String("input", "docs/eval/sample.jsonl", "Path to JSONL dataset")
-	relevanceThreshold := flag.Float64("relevance-threshold", 0.5, "Relevance score threshold")
-	importanceThreshold := flag.Float64("importance-threshold", 0.3, "Importance score threshold")
+	relevanceThreshold := flag.Float64("relevance-threshold", defaultRelevanceThreshold, "Relevance score threshold")
+	importanceThreshold := flag.Float64("importance-threshold", defaultImportanceThreshold, "Importance score threshold")
 	ignoreImportance := flag.Bool("ignore-importance", false, "Ignore importance score threshold")
 	minPrecision := flag.Float64("min-precision", -1, "Fail if precision is below this value (disabled if <0)")
 	maxNoiseRate := flag.Float64("max-noise-rate", -1, "Fail if noise rate is above this value (disabled if <0)")
@@ -48,7 +59,7 @@ func main() {
 
 	stats := evalStats{}
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, scannerBufferMultiplier*maxScannerBufferSize), maxScannerBufferSize*maxScannerBufferSize)
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -71,11 +82,11 @@ func main() {
 		stats.total++
 
 		switch label {
-		case "good":
+		case labelGood:
 			stats.goodCount++
-		case "bad":
+		case labelBad:
 			stats.badCount++
-		case "irrelevant":
+		case labelIrrelevant:
 			stats.irrelevantCount++
 		}
 
@@ -84,7 +95,7 @@ func main() {
 			predicted = predicted && rec.ImportanceScore >= float32(*importanceThreshold)
 		}
 
-		actualPositive := label == "good"
+		actualPositive := label == labelGood
 		switch {
 		case predicted && actualPositive:
 			stats.tp++
@@ -125,7 +136,7 @@ func normalizeLabel(label string, rating string) string {
 	}
 
 	switch val {
-	case "good", "bad", "irrelevant":
+	case labelGood, labelBad, labelIrrelevant:
 		return val
 	default:
 		return ""

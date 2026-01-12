@@ -14,6 +14,13 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/linkextract"
 )
 
+const (
+	errFmtString         = "%w: %s"
+	errFmtInt            = "%w: %d"
+	rateLimiterBurst     = 3
+	rateLimiterRateLimit = 0.5
+)
+
 type TelegramResolver struct {
 	client      *telegram.Client
 	database    *db.DB
@@ -60,7 +67,7 @@ func NewTelegramResolver(client *telegram.Client, database *db.DB) *TelegramReso
 	return &TelegramResolver{
 		client:      client,
 		database:    database,
-		rateLimiter: rate.NewLimiter(rate.Limit(0.5), 3), // 30 req/min for Telegram
+		rateLimiter: rate.NewLimiter(rate.Limit(rateLimiterRateLimit), rateLimiterBurst), // 30 req/min for Telegram
 	}
 }
 
@@ -70,7 +77,7 @@ func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) 
 	}
 
 	if link.TelegramType != "post" {
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedTelegramLinkType, link.TelegramType)
+		return nil, fmt.Errorf(errFmtString, ErrUnsupportedTelegramLinkType, link.TelegramType)
 	}
 
 	if err := r.rateLimiter.Wait(ctx); err != nil {
@@ -162,12 +169,12 @@ func (r *TelegramResolver) resolveByUsername(ctx context.Context, api *tg.Client
 	}
 
 	if len(resolved.Chats) == 0 {
-		return nil, fmt.Errorf("%w: %s", ErrChannelNotFound, username)
+		return nil, fmt.Errorf(errFmtString, ErrChannelNotFound, username)
 	}
 
 	channel, ok := resolved.Chats[0].(*tg.Channel)
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", ErrNotAChannel, username)
+		return nil, fmt.Errorf(errFmtString, ErrNotAChannel, username)
 	}
 
 	return &tg.InputChannel{
@@ -180,7 +187,7 @@ func (r *TelegramResolver) resolveByID(ctx context.Context, channelID int64) (*t
 	// Check if we're tracking this channel
 	ch, err := r.database.GetChannelByPeerID(ctx, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %d", ErrPrivateChannelNotTracked, channelID)
+		return nil, fmt.Errorf(errFmtInt, ErrPrivateChannelNotTracked, channelID)
 	}
 
 	return &tg.InputChannel{

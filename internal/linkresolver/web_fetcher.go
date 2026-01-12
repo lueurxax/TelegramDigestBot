@@ -20,6 +20,15 @@ var ErrTooManyRedirects = errors.New("too many redirects")
 // ErrHTTPStatusNotOK indicates an HTTP response with a non-200 status code.
 var ErrHTTPStatusNotOK = errors.New("HTTP status not OK")
 
+const (
+	defaultFetchTimeoutSeconds = 30
+	globalLimiterBurst         = 5
+	maxBodySizeMB              = 5
+	maxBodySizeBytes           = maxBodySizeMB * 1024 * 1024
+	domainLimiterRate          = 1
+	domainLimiterBurst         = 2
+)
+
 type WebFetcher struct {
 	client         *http.Client
 	globalLimiter  *rate.Limiter
@@ -30,21 +39,21 @@ type WebFetcher struct {
 
 func NewWebFetcher(rps float64, timeout time.Duration) *WebFetcher {
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = defaultFetchTimeoutSeconds * time.Second
 	}
 
 	return &WebFetcher{
 		client: &http.Client{
 			Timeout: timeout,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				if len(via) >= 5 {
+				if len(via) >= globalLimiterBurst {
 					return ErrTooManyRedirects
 				}
 
 				return nil
 			},
 		},
-		globalLimiter:  rate.NewLimiter(rate.Limit(rps), 5),
+		globalLimiter:  rate.NewLimiter(rate.Limit(rps), globalLimiterBurst),
 		domainLimiters: make(map[string]*rate.Limiter),
 		userAgent:      "DigestBot/1.0 (News Aggregator)",
 	}
@@ -84,7 +93,7 @@ func (f *WebFetcher) Fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	}
 
 	// Limit to 5MB
-	return io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+	return io.ReadAll(io.LimitReader(resp.Body, maxBodySizeBytes))
 }
 
 func (f *WebFetcher) getDomainLimiter(domain string) *rate.Limiter {
@@ -104,7 +113,7 @@ func (f *WebFetcher) getDomainLimiter(domain string) *rate.Limiter {
 		return limiter
 	}
 
-	limiter = rate.NewLimiter(1, 2) // 1 req/sec per domain
+	limiter = rate.NewLimiter(domainLimiterRate, domainLimiterBurst) // 1 req/sec per domain
 	f.domainLimiters[domain] = limiter
 
 	return limiter

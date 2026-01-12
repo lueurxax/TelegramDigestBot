@@ -25,7 +25,7 @@ type ratingStats struct {
 }
 
 func decayWeight(now time.Time, createdAt time.Time) float64 {
-	ageDays := now.Sub(createdAt).Hours() / 24
+	ageDays := now.Sub(createdAt).Hours() / HoursPerDay
 	if ageDays < 0 {
 		ageDays = 0
 	}
@@ -93,8 +93,8 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 
 	if globalCount < s.cfg.RatingMinSampleGlobal {
 		logger.Info().
-			Int("global_count", globalCount).
-			Int("min_global", s.cfg.RatingMinSampleGlobal).
+			Int(LogFieldGlobalCount, globalCount).
+			Int(LogFieldMinGlobal, s.cfg.RatingMinSampleGlobal).
 			Msg("Skipping auto-relevance update due to insufficient global ratings")
 
 		return nil
@@ -118,7 +118,7 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 		if st == nil || st.count < s.cfg.RatingMinSampleChannel || st.weightedTotal <= 0 {
 			if ch.RelevanceThresholdDelta != 0 {
 				if err := s.database.UpdateChannelRelevanceDelta(ctx, ch.ID, 0, ch.AutoRelevanceEnabled); err != nil {
-					logger.Warn().Err(err).Str("channel_id", ch.ID).Msg("failed to reset relevance delta")
+					logger.Warn().Err(err).Str(LogFieldChannelID, ch.ID).Msg("failed to reset relevance delta")
 					continue
 				}
 
@@ -145,7 +145,7 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 		}
 
 		if err := s.database.UpdateChannelRelevanceDelta(ctx, ch.ID, delta, ch.AutoRelevanceEnabled); err != nil {
-			logger.Warn().Err(err).Str("channel_id", ch.ID).Msg("failed to update relevance delta")
+			logger.Warn().Err(err).Str(LogFieldChannelID, ch.ID).Msg("failed to update relevance delta")
 			continue
 		}
 
@@ -159,7 +159,7 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 		}
 
 		logger.Info().
-			Str("channel", name).
+			Str(LogFieldChannel, name).
 			Float32("old_delta", ch.RelevanceThresholdDelta).
 			Float32("new_delta", delta).
 			Int("rating_count", st.count).
@@ -170,10 +170,10 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 	}
 
 	logger.Info().
-		Int("updated", updated).
-		Int("skipped", skipped).
-		Int("total", len(channels)).
-		Int("global_count", globalCount).
+		Int(LogFieldUpdated, updated).
+		Int(LogFieldSkipped, skipped).
+		Int(LogFieldTotal, len(channels)).
+		Int(LogFieldGlobalCount, globalCount).
 		Float64("global_weighted", globalWeighted).
 		Msg("Auto-relevance update completed")
 

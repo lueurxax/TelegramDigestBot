@@ -79,7 +79,7 @@ func (db *DB) GetChannelsForAutoWeight(ctx context.Context) ([]ChannelForAutoWei
 	for i, r := range rows {
 		weight := r.ImportanceWeight.Float32
 		if !r.ImportanceWeight.Valid || weight == 0 {
-			weight = 1.0
+			weight = DefaultImportanceWeight
 		}
 
 		result[i] = ChannelForAutoWeight{
@@ -146,11 +146,11 @@ func (db *DB) CollectAndSaveChannelStats(ctx context.Context, start, end time.Ti
 		return err
 	}
 
-	periodStart := start.Truncate(24 * time.Hour)
-	periodEnd := end.Truncate(24 * time.Hour)
+	periodStart := start.Truncate(HoursPerDay)
+	periodEnd := end.Truncate(HoursPerDay)
 
 	if periodEnd.Equal(periodStart) {
-		periodEnd = periodStart.Add(24 * time.Hour)
+		periodEnd = periodStart.Add(HoursPerDay)
 	}
 
 	for _, s := range stats {

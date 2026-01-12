@@ -8,6 +8,10 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/db"
 )
 
+const (
+	filterModeAllowlist = "allowlist"
+)
+
 type Filterer struct {
 	adsEnabled  bool
 	minLength   int
@@ -67,7 +71,7 @@ func (f *Filterer) IsFiltered(text string) bool {
 			if strings.Contains(lowerText, lowerPattern) {
 				return true
 			}
-		} else if filter.Type == "allow" && (f.mode == "allowlist" || f.mode == "mixed") {
+		} else if filter.Type == "allow" && (f.mode == filterModeAllowlist || f.mode == "mixed") {
 			hasAllowFilters = true
 
 			if strings.Contains(lowerText, lowerPattern) {
@@ -76,7 +80,7 @@ func (f *Filterer) IsFiltered(text string) bool {
 		}
 	}
 
-	if hasAllowFilters && !matchedAllow && (f.mode == "allowlist" || f.mode == "mixed") {
+	if hasAllowFilters && !matchedAllow && (f.mode == filterModeAllowlist || f.mode == "mixed") {
 		return true
 	}
 

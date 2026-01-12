@@ -49,7 +49,7 @@ func NewOpenAI(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Cl
 		cfg:         cfg,
 		client:      openai.NewClient(cfg.LLMAPIKey),
 		logger:      logger,
-		rateLimiter: rate.NewLimiter(rate.Limit(float64(cfg.RateLimitRPS)), 5), // User-defined RPS, burst 5
+		rateLimiter: rate.NewLimiter(rate.Limit(float64(cfg.RateLimitRPS)), rateLimiterBurst), // User-defined RPS, burst 5
 		promptStore: store,
 	}
 }
@@ -118,7 +118,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	}
 
 	if tone != "" {
-		langInstruction += fmt.Sprintf(" Tone: %s.", getToneInstruction(tone))
+		langInstruction += fmt.Sprintf(toneFormatString, getToneInstruction(tone))
 	}
 
 	if model == "" {
@@ -166,7 +166,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 		}
 
 		if len(m.Context) > 0 {
-			textPart += fmt.Sprintf("[BACKGROUND CONTEXT - DO NOT SUMMARIZE: %s] ", truncate(strings.Join(m.Context, " | "), 500))
+			textPart += fmt.Sprintf("[BACKGROUND CONTEXT - DO NOT SUMMARIZE: %s] ", truncate(strings.Join(m.Context, " | "), truncateLengthShort))
 		}
 
 		if len(m.ResolvedLinks) > 0 {
@@ -174,12 +174,12 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 
 			for _, link := range m.ResolvedLinks {
 				if link.LinkType == LinkTypeTelegram {
-					textPart += fmt.Sprintf("[Telegram] From %s: \"%s\" ", link.ChannelTitle, truncate(link.Content, 500))
+					textPart += fmt.Sprintf("[Telegram] From %s: \"%s\" ", link.ChannelTitle, truncate(link.Content, truncateLengthShort))
 					if link.Views > 0 {
 						textPart += fmt.Sprintf("[%d views] ", link.Views)
 					}
 				} else {
-					textPart += fmt.Sprintf("[Web] %s Title: %s Content: %s ", link.Domain, link.Title, truncate(link.Content, 1000))
+					textPart += fmt.Sprintf("[Web] %s Title: %s Content: %s ", link.Domain, link.Title, truncate(link.Content, truncateLengthLong))
 				}
 			}
 
@@ -282,7 +282,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 				finalResults[res.Index] = res
 				foundIndices[res.Index] = true
 			} else if res.Index != 0 || !allZeroIndex {
-				c.logger.Warn().Int("index", res.Index).Msg("LLM returned duplicate index, ignoring")
+				c.logger.Warn().Int(logKeyIndex, res.Index).Msg("LLM returned duplicate index, ignoring")
 			}
 		}
 	}
@@ -350,13 +350,13 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 				}
 			}
 
-			c.logger.Info().Int("matched_by_channel", matchedByChannel).Int("total", len(messages)).Msg("Aligned results by source_channel")
+			c.logger.Info().Int("matched_by_channel", matchedByChannel).Int(logKeyTotal, len(messages)).Msg("Aligned results by source_channel")
 
 			return aligned, nil
 		}
 
 		// Source channel matching didn't work well, fall back to order
-		c.logger.Warn().Int("matched", matchedByChannel).Int("total", len(messages)).Msg("Source channel matching insufficient, assuming results are in order (potential misalignment)")
+		c.logger.Warn().Int("matched", matchedByChannel).Int(logKeyTotal, len(messages)).Msg("Source channel matching insufficient, assuming results are in order (potential misalignment)")
 
 		return results, nil
 	}
@@ -364,7 +364,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	// For missing indices, log warnings
 	for i := 0; i < len(messages); i++ {
 		if !foundIndices[i] {
-			c.logger.Warn().Int("index", i).Msg("LLM result missing for message index")
+			c.logger.Warn().Int(logKeyIndex, i).Msg("LLM result missing for message index")
 		}
 	}
 
@@ -387,7 +387,7 @@ func (c *openaiClient) GenerateNarrative(ctx context.Context, items []db.Item, t
 	}
 
 	if tone != "" {
-		langInstruction += fmt.Sprintf(" Tone: %s.", getToneInstruction(tone))
+		langInstruction += fmt.Sprintf(toneFormatString, getToneInstruction(tone))
 	}
 
 	var sb strings.Builder
@@ -443,7 +443,7 @@ func (c *openaiClient) SummarizeCluster(ctx context.Context, items []db.Item, ta
 	}
 
 	if tone != "" {
-		langInstruction += fmt.Sprintf(" Tone: %s.", getToneInstruction(tone))
+		langInstruction += fmt.Sprintf(toneFormatString, getToneInstruction(tone))
 	}
 
 	var sb strings.Builder
@@ -452,7 +452,7 @@ func (c *openaiClient) SummarizeCluster(ctx context.Context, items []db.Item, ta
 	sb.WriteString(applyPromptTokens(promptTemplate, langInstruction, len(items)))
 
 	for i, item := range items {
-		sb.WriteString(fmt.Sprintf("[%d] %s\n", i+1, item.Summary))
+		sb.WriteString(fmt.Sprintf(indexedItemFormat, i+1, item.Summary))
 	}
 
 	if err := c.checkCircuit(); err != nil {
@@ -504,7 +504,7 @@ func (c *openaiClient) GenerateClusterTopic(ctx context.Context, items []db.Item
 	sb.WriteString(applyPromptTokens(promptTemplate, langInstruction, len(items)))
 
 	for i, item := range items {
-		sb.WriteString(fmt.Sprintf("[%d] %s\n", i+1, item.Summary))
+		sb.WriteString(fmt.Sprintf(indexedItemFormat, i+1, item.Summary))
 	}
 
 	if err := c.checkCircuit(); err != nil {

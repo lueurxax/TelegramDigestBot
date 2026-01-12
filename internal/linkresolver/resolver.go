@@ -13,6 +13,12 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/linkextract"
 )
 
+const (
+	logKeyURL                = "url"
+	defaultTimeoutSeconds    = 30
+	defaultWebCacheTTLHours  = 24
+)
+
 type Resolver struct {
 	webFetcher *WebFetcher
 	tgResolver *TelegramResolver
@@ -36,14 +42,14 @@ func New(cfg *config.Config, database *db.DB, tgClient *telegram.Client, logger 
 	timeout := cfg.WebFetchTimeout
 
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = defaultTimeoutSeconds * time.Second
 	}
 
 	// Set default cache TTL if not provided
 	webTTL := cfg.LinkCacheTTL
 
 	if webTTL <= 0 {
-		webTTL = 24 * time.Hour
+		webTTL = defaultWebCacheTTLHours * time.Hour
 	}
 
 	tgTTL := cfg.TelegramLinkCacheTTL
@@ -126,11 +132,11 @@ func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, 
 
 		if err != nil {
 			if errors.Is(err, ErrClientNotInitialized) {
-				r.logger.Debug().Str("url", link.URL).Msg("skipping telegram link resolution: client not initialized")
+				r.logger.Debug().Str(logKeyURL, link.URL).Msg("skipping telegram link resolution: client not initialized")
 				continue
 			}
 
-			r.logger.Warn().Err(err).Str("url", link.URL).Msg("failed to resolve link")
+			r.logger.Warn().Err(err).Str(logKeyURL, link.URL).Msg("failed to resolve link")
 			// Save error to cache to avoid retrying immediately
 			r.database.SaveLinkCache(ctx, &db.ResolvedLink{
 				URL:          link.URL,
@@ -148,7 +154,7 @@ func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, 
 			// Save to cache
 			id, err := r.database.SaveLinkCache(ctx, resolved)
 			if err != nil {
-				r.logger.Error().Err(err).Str("url", link.URL).Msg("failed to save link to cache")
+				r.logger.Error().Err(err).Str(logKeyURL, link.URL).Msg("failed to save link to cache")
 			} else {
 				resolved.ID = id
 			}

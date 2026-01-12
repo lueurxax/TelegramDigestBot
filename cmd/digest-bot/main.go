@@ -22,9 +22,14 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/telegramreader"
 )
 
+const (
+	flagOnce             = "once"
+	msgBotInitFailed     = "bot initialization failed"
+)
+
 func main() {
 	mode := flag.String("mode", "", "Service mode (bot, reader, worker, digest)")
-	once := flag.Bool("once", false, "Run once and exit (for digest mode)")
+	once := flag.Bool(flagOnce, false, "Run once and exit (for digest mode)")
 
 	flag.Parse()
 
@@ -80,7 +85,7 @@ func runBot(ctx context.Context, cfg *config.Config, database *db.DB, logger zer
 
 	bot, err := telegrambot.New(cfg, database, llmClient, &logger)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("bot initialization failed")
+		logger.Fatal().Err(err).Msg(msgBotInitFailed)
 	}
 
 	if err := bot.Run(ctx); err != nil {
@@ -115,7 +120,7 @@ func runDigest(ctx context.Context, cfg *config.Config, database *db.DB, logger 
 
 	bot, err := telegrambot.New(cfg, database, llmClient, &logger)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("bot initialization failed")
+		logger.Fatal().Err(err).Msg(msgBotInitFailed)
 	}
 
 	s := digest.New(cfg, database, bot, llmClient, &logger)

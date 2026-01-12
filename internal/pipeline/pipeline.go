@@ -86,15 +86,15 @@ func (p *Pipeline) Run(ctx context.Context) error {
 	if err != nil {
 		p.logger.Error().Err(err).Str("interval", p.cfg.WorkerPollInterval).Msg("invalid worker poll interval, using 10s")
 
-		pollInterval = 10 * time.Second
+		pollInterval = DefaultPollInterval
 	}
 
 	for {
 		correlationID := uuid.New().String()
-		p.logger.Info().Str("correlation_id", correlationID).Msg("Starting pipeline batch")
+		p.logger.Info().Str(LogFieldCorrelationID, correlationID).Msg("Starting pipeline batch")
 
 		if err := p.processNextBatch(ctx, correlationID); err != nil {
-			p.logger.Error().Err(err).Str("correlation_id", correlationID).Msg("failed to process batch")
+			p.logger.Error().Err(err).Str(LogFieldCorrelationID, correlationID).Msg("failed to process batch")
 		}
 
 		select {
@@ -106,7 +106,7 @@ func (p *Pipeline) Run(ctx context.Context) error {
 }
 
 func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) error {
-	logger := p.logger.With().Str("correlation_id", correlationID).Logger()
+	logger := p.logger.With().Str(LogFieldCorrelationID, correlationID).Logger()
 
 	s, err := p.loadPipelineSettings(ctx, logger)
 	if err != nil {
@@ -174,7 +174,7 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 		filtersMode:           FilterModeMixed,
 		dedupMode:             DedupModeSemantic,
 		topicsEnabled:         true,
-		minLength:             20,
+		minLength:             DefaultMinLength,
 	}
 
 	p.getSetting(ctx, "worker_batch_size", &s.batchSize, logger)
@@ -236,14 +236,14 @@ func (p *Pipeline) getSetting(ctx context.Context, key string, target interface{
 
 func (p *Pipeline) markProcessed(ctx context.Context, logger zerolog.Logger, msgID string) {
 	if err := p.database.MarkAsProcessed(ctx, msgID); err != nil {
-		logger.Error().Str("msg_id", msgID).Err(err).Msg("failed to mark message as processed")
+		logger.Error().Str(LogFieldMsgID, msgID).Err(err).Msg(LogMsgFailedToMarkProcessed)
 	}
 }
 
 func (p *Pipeline) recordRelevanceGateDecision(ctx context.Context, logger zerolog.Logger, msgID string, decision gateDecision) {
 	confidence := decision.confidence
 	if err := p.database.SaveRelevanceGateLog(ctx, msgID, decision.decision, &confidence, decision.reason, gateModel, gateVersion); err != nil {
-		logger.Warn().Str("msg_id", msgID).Err(err).Msg("failed to save relevance gate log")
+		logger.Warn().Str(LogFieldMsgID, msgID).Err(err).Msg("failed to save relevance gate log")
 	}
 }
 
@@ -283,14 +283,14 @@ func (p *Pipeline) prepareCandidates(ctx context.Context, logger zerolog.Logger,
 
 func (p *Pipeline) skipMessage(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, seenHashes map[string]string, f *filters.Filterer) bool {
 	if dupID, seen := seenHashes[m.CanonicalHash]; seen {
-		logger.Info().Str("msg_id", m.ID).Str("duplicate_id", dupID).Msg("skipping strict duplicate in batch")
+		logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, dupID).Msg("skipping strict duplicate in batch")
 		p.markProcessed(ctx, logger, m.ID)
 
 		return true
 	}
 
 	if s.skipForwards && m.IsForward {
-		logger.Info().Str("msg_id", m.ID).Msg("skipping forwarded message")
+		logger.Info().Str(LogFieldMsgID, m.ID).Msg("skipping forwarded message")
 		p.markProcessed(ctx, logger, m.ID)
 
 		return true
@@ -307,7 +307,7 @@ func (p *Pipeline) skipMessage(ctx context.Context, logger zerolog.Logger, m *db
 		p.recordRelevanceGateDecision(ctx, logger, m.ID, decision)
 
 		if decision.decision == DecisionIrrelevant {
-			logger.Info().Str("msg_id", m.ID).Str("reason", decision.reason).Msg("skipping message by relevance gate")
+			logger.Info().Str(LogFieldMsgID, m.ID).Str("reason", decision.reason).Msg("skipping message by relevance gate")
 			p.markProcessed(ctx, logger, m.ID)
 
 			return true
@@ -325,7 +325,7 @@ func (p *Pipeline) handleDeduplication(ctx context.Context, logger zerolog.Logge
 
 		emb, err = p.llmClient.GetEmbedding(ctx, m.Text)
 		if err != nil {
-			logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to get embedding")
+			logger.Error().Str(LogFieldMsgID, m.ID).Err(err).Msg("failed to get embedding")
 
 			return nil, true
 		}
@@ -336,7 +336,7 @@ func (p *Pipeline) handleDeduplication(ctx context.Context, logger zerolog.Logge
 	if s.dedupMode == DedupModeSemantic {
 		for _, cand := range candidates {
 			if dedup.CosineSimilarity(embeddings[cand.ID], emb) > p.cfg.SimilarityThreshold {
-				logger.Info().Str("msg_id", m.ID).Str("duplicate_id", cand.ID).Msg("skipping semantic duplicate in batch")
+				logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, cand.ID).Msg("skipping semantic duplicate in batch")
 				p.markProcessed(ctx, logger, m.ID)
 
 				return nil, true
@@ -346,26 +346,26 @@ func (p *Pipeline) handleDeduplication(ctx context.Context, logger zerolog.Logge
 
 	isDup, dupID, dErr := deduplicator.IsDuplicate(ctx, *m, emb)
 	if dErr == nil && isDup {
-		logger.Info().Str("msg_id", m.ID).Str("duplicate_id", dupID).Msg("skipping duplicate message")
+		logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, dupID).Msg("skipping duplicate message")
 		p.markProcessed(ctx, logger, m.ID)
 
 		return nil, true
 	} else if dErr != nil {
-		logger.Error().Str("msg_id", m.ID).Err(dErr).Msg("failed to check for duplicates")
+		logger.Error().Str(LogFieldMsgID, m.ID).Err(dErr).Msg("failed to check for duplicates")
 	}
 
 	return emb, false
 }
 
 func (p *Pipeline) enrichMessage(ctx context.Context, logger zerolog.Logger, m db.RawMessage, s *pipelineSettings) llm.MessageInput {
-	channelCtx, cErr := p.database.GetRecentMessagesForChannel(ctx, m.ChannelID, m.TGDate, 5)
+	channelCtx, cErr := p.database.GetRecentMessagesForChannel(ctx, m.ChannelID, m.TGDate, DefaultChannelContextLimit)
 	if cErr != nil {
-		logger.Warn().Err(cErr).Str("msg_id", m.ID).Msg("failed to fetch channel context")
+		logger.Warn().Err(cErr).Str(LogFieldMsgID, m.ID).Msg("failed to fetch channel context")
 	}
 
 	resolvedLinks, eErr := p.enrichWithLinks(ctx, &m, s.linkEnrichmentEnabled, s.maxLinks, s.linkCacheTTL, s.tgLinkCacheTTL)
 	if eErr != nil {
-		logger.Warn().Err(eErr).Str("msg_id", m.ID).Msg("link enrichment failed")
+		logger.Warn().Err(eErr).Str(LogFieldMsgID, m.ID).Msg("link enrichment failed")
 	}
 
 	return llm.MessageInput{
@@ -402,7 +402,7 @@ func (p *Pipeline) runLLMProcessing(ctx context.Context, logger zerolog.Logger, 
 	// 2.1 Tiered Importance Analysis
 	p.performTieredImportanceAnalysis(ctx, logger, candidates, results, modelUsed, s)
 
-	logger.Info().Int("count", len(candidates)).Dur("duration", time.Since(start)).Msg("LLM processing finished")
+	logger.Info().Int(LogFieldCount, len(candidates)).Dur("duration", time.Since(start)).Msg("LLM processing finished")
 
 	return results, nil
 }
@@ -433,7 +433,7 @@ func (p *Pipeline) processModelBatch(ctx context.Context, logger zerolog.Logger,
 
 	groupResults, err := p.llmClient.ProcessBatch(ctx, groupCandidates, s.digestLanguage, model, s.digestTone)
 	if err != nil {
-		logger.Error().Err(err).Str("model", model).Msg("LLM batch processing failed")
+		logger.Error().Err(err).Str(LogFieldModel, model).Msg("LLM batch processing failed")
 		observability.PipelineProcessed.WithLabelValues(StatusError).Add(float64(len(indices)))
 
 		for _, idx := range indices {
@@ -448,7 +448,7 @@ func (p *Pipeline) processModelBatch(ctx context.Context, logger zerolog.Logger,
 	observability.LLMRequestDuration.WithLabelValues(model).Observe(time.Since(llmStart).Seconds())
 
 	if len(groupResults) != len(indices) {
-		logger.Warn().Int("expected", len(indices)).Int("actual", len(groupResults)).Str("model", model).Msg("LLM batch size mismatch, results might be misaligned")
+		logger.Warn().Int("expected", len(indices)).Int("actual", len(groupResults)).Str(LogFieldModel, model).Msg("LLM batch size mismatch, results might be misaligned")
 	}
 
 	for j, idx := range indices {
@@ -472,14 +472,14 @@ func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger z
 	)
 
 	for i, res := range results {
-		if res.ImportanceScore > 0.8 && modelUsed[i] != s.smartLLMModel {
+		if res.ImportanceScore > TieredImportanceThreshold && modelUsed[i] != s.smartLLMModel {
 			tieredIndices = append(tieredIndices, i)
 			tieredCandidates = append(tieredCandidates, candidates[i])
 		}
 	}
 
 	if len(tieredCandidates) > 0 {
-		logger.Info().Int("count", len(tieredCandidates)).Msg("Performing tiered importance analysis with smart model")
+		logger.Info().Int(LogFieldCount, len(tieredCandidates)).Msg("Performing tiered importance analysis with smart model")
 
 		llmStart := time.Now()
 
@@ -537,11 +537,11 @@ func (p *Pipeline) normalizeResults(candidates []llm.MessageInput, results []llm
 
 		stats, ok := s.channelStats[candidates[i].ChannelID]
 		if ok {
-			if stats.StddevRelevance > 0.01 {
+			if stats.StddevRelevance > NormalizationStddevMinimum {
 				results[i].RelevanceScore = (results[i].RelevanceScore - stats.AvgRelevance) / stats.StddevRelevance
 			}
 
-			if stats.StddevImportance > 0.01 {
+			if stats.StddevImportance > NormalizationStddevMinimum {
 				results[i].ImportanceScore = (results[i].ImportanceScore - stats.AvgImportance) / stats.StddevImportance
 			}
 		}
@@ -549,7 +549,7 @@ func (p *Pipeline) normalizeResults(candidates []llm.MessageInput, results []llm
 }
 
 func (p *Pipeline) handleEmptySummary(ctx context.Context, logger zerolog.Logger, msgID string, index int) {
-	logger.Warn().Str("msg_id", msgID).Int("index", index).Msg("LLM summary empty for item, marking as error")
+	logger.Warn().Str(LogFieldMsgID, msgID).Int("index", index).Msg("LLM summary empty for item, marking as error")
 	observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
 
 	errJSON, _ := json.Marshal(map[string]string{"error": "empty summary from LLM"})
@@ -574,24 +574,24 @@ func (p *Pipeline) createItem(logger zerolog.Logger, c llm.MessageInput, res llm
 
 func (p *Pipeline) calculateImportance(logger zerolog.Logger, c llm.MessageInput, res llm.BatchResult) float32 {
 	channelWeight := c.ImportanceWeight
-	if channelWeight < 0.1 {
-		channelWeight = 1.0
-	} else if channelWeight > 2.0 {
-		channelWeight = 2.0
+	if channelWeight < MinChannelWeight {
+		channelWeight = MaxImportanceScore
+	} else if channelWeight > MaxChannelWeight {
+		channelWeight = MaxChannelWeight
 	}
 
 	importance := res.ImportanceScore * channelWeight
-	if importance > 1.0 {
-		importance = 1.0
+	if importance > MaxImportanceScore {
+		importance = MaxImportanceScore
 	}
 
 	if !p.hasUniqueInfo(res.Summary) {
-		importance -= 0.2
+		importance -= UniqueInfoPenalty
 		if importance < 0 {
 			importance = 0
 		}
 
-		logger.Debug().Str("msg_id", c.ID).Msg("Applied penalty for lack of unique info")
+		logger.Debug().Str(LogFieldMsgID, c.ID).Msg("Applied penalty for lack of unique info")
 	}
 
 	return importance
@@ -622,7 +622,7 @@ func (p *Pipeline) determineStatus(c llm.MessageInput, relevanceScore float32, s
 
 func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, item *db.Item, embeddings map[string][]float32) bool {
 	if err := p.database.SaveItem(ctx, item); err != nil {
-		logger.Error().Str("msg_id", c.ID).Err(err).Msg("failed to save item")
+		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg("failed to save item")
 		observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
 
 		errJSON, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("failed to save item: %v", err)})
@@ -643,7 +643,7 @@ func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logg
 	}
 
 	if err := p.database.MarkAsProcessed(ctx, c.ID); err != nil {
-		logger.Error().Str("msg_id", c.ID).Err(err).Msg("failed to mark message as processed")
+		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg(LogMsgFailedToMarkProcessed)
 	}
 
 	return true

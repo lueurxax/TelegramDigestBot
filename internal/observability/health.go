@@ -12,6 +12,10 @@ import (
 	"github.com/rs/zerolog"
 )
 
+const (
+	shutdownTimeout = 5 * time.Second
+)
+
 type Server struct {
 	db     *db.DB
 	port   int
@@ -55,7 +59,7 @@ func (s *Server) Start(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 
 		defer cancel()
 

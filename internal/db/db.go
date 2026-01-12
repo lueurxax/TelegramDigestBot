@@ -38,7 +38,7 @@ func New(ctx context.Context, dsn string) (*DB, error) {
 			pool.Close()
 		}
 
-		time.Sleep(2 * time.Second)
+		time.Sleep(ConnectionRetrySleep)
 	}
 
 	return nil, fmt.Errorf("failed to connect to database after retries: %w", err)

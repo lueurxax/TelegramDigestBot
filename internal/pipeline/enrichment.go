@@ -21,7 +21,7 @@ func (p *Pipeline) enrichWithLinks(ctx context.Context, msg *db.RawMessage, enab
 	for i, link := range resolvedLinks {
 		if link.ID != "" {
 			if err := p.database.LinkMessageToLink(ctx, msg.ID, link.ID, i); err != nil {
-				p.logger.Error().Err(err).Str("msg_id", msg.ID).Str("link_id", link.ID).Msg("failed to link message to link")
+				p.logger.Error().Err(err).Str(LogFieldMsgID, msg.ID).Str("link_id", link.ID).Msg("failed to link message to link")
 			}
 		}
 	}

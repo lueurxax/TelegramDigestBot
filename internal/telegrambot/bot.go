@@ -14,6 +14,89 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/llm"
 )
 
+// Message size and delay constants.
+const (
+	// MaxMessageSize is the maximum size for a single Telegram message part.
+	MaxMessageSize = 4000
+	// SleepBetweenParts is the delay between sending message parts to avoid rate limits.
+	SleepBetweenParts = 500 * time.Millisecond
+	// SleepAfterImage is the delay after sending an image before sending text.
+	SleepAfterImage = 300 * time.Millisecond
+)
+
+// Callback data prefixes.
+const (
+	CallbackPrefixRate     = "rate:"
+	CallbackPrefixDiscover = "discover:"
+	CallbackSuffixUp       = ":up"
+	CallbackSuffixDown     = ":down"
+)
+
+// Command names.
+const (
+	CmdStatus       = "status"
+	CmdSettings     = "settings"
+	CmdHistory      = "history"
+	CmdAdd          = "add"
+	CmdList         = "list"
+	CmdRemove       = "remove"
+	CmdPrompt       = "prompt"
+	CmdMinLength    = "min_length"
+	CmdMinLengthAlt = "minlength"
+	CmdSkipForwards = "skip_forwards"
+	CmdSkipFwdAlt   = "skipforwards"
+	CmdTarget       = "target"
+	CmdWindow       = "window"
+	CmdTopics       = "topics"
+	CmdDedup        = "dedup"
+	CmdRelevance    = "relevance"
+	CmdImportance   = "importance"
+	CmdLanguage     = "language"
+	CmdTone         = "tone"
+	CmdModel        = "model"
+	CmdSmartModel   = "smart_model"
+	CmdSmartModelAlt = "smartmodel"
+	CmdEditor       = "editor"
+	CmdTiered       = "tiered"
+	CmdVision       = "vision"
+	CmdVisionAlt    = "visionrouting"
+	CmdConsolidated = "consolidated"
+	CmdEditorDetail = "editordetails"
+	CmdErrors       = "errors"
+	CmdRetry        = "retry"
+	CmdChannel      = "channel"
+)
+
+// Setting keys.
+const (
+	SettingFiltersSkipForwards       = "filters_skip_forwards"
+	SettingRelevanceThreshold        = "relevance_threshold"
+	SettingImportanceThreshold       = "importance_threshold"
+	SettingEditorEnabled             = "editor_enabled"
+	SettingTieredImportanceEnabled   = "tiered_importance_enabled"
+	SettingVisionRoutingEnabled      = "vision_routing_enabled"
+	SettingConsolidatedClustersEnabled = "consolidated_clusters_enabled"
+	SettingEditorDetailedItems       = "editor_detailed_items"
+)
+
+// Log field names.
+const (
+	LogFieldUserID   = "user_id"
+	LogFieldUsername = "username"
+)
+
+// Button labels.
+const (
+	ButtonUseful    = "👍 Useful"
+	ButtonNotUseful = "👎 Not useful"
+)
+
+// Error message formats.
+const (
+	ErrSendDigestPart      = "failed to send digest part %d to chat %d: %w"
+	ErrSendCallbackResp    = "failed to send callback response"
+)
+
 type Bot struct {
 	cfg       *config.Config
 	database  *db.DB
@@ -58,7 +141,7 @@ func (b *Bot) Run(ctx context.Context) error {
 			}
 
 			if !b.isAdmin(update.Message.From.ID) {
-				b.logger.Warn().Int64("user_id", update.Message.From.ID).Str("username", update.Message.From.UserName).Msg("Unauthorized access attempt")
+				b.logger.Warn().Int64(LogFieldUserID, update.Message.From.ID).Str(LogFieldUsername, update.Message.From.UserName).Msg("Unauthorized access attempt")
 				continue
 			}
 
@@ -100,18 +183,18 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		return
 	}
 
-	b.logger.Info().Str("command", msg.Command()).Int64("user_id", msg.From.ID).Msg("Handling command")
+	b.logger.Info().Str("command", msg.Command()).Int64(LogFieldUserID, msg.From.ID).Msg("Handling command")
 
 	switch msg.Command() {
 	case "start", "help":
 		b.handleHelp(msg)
 	case "setup":
 		b.handleSetup(msg)
-	case "status":
+	case CmdStatus:
 		b.handleStatus(msg)
 	case "preview":
 		b.handlePreview(msg)
-	case "channel":
+	case CmdChannel:
 		b.handleChannelNamespace(msg)
 	case "filter":
 		b.handleFilterNamespace(msg)
@@ -121,65 +204,65 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		b.handleAINamespace(msg)
 	case "system":
 		b.handleSystemNamespace(msg)
-	case "settings":
+	case CmdSettings:
 		b.handleSettings(msg)
-	case "history":
+	case CmdHistory:
 		b.handleHistory(msg)
-	case "add":
+	case CmdAdd:
 		b.handleAddChannel(msg)
-	case "list":
+	case CmdList:
 		b.handleListChannels(msg)
-	case "remove":
+	case CmdRemove:
 		b.handleRemoveChannel(msg)
 	case "feedback":
 		b.handleFeedback(msg)
 	case "ratings":
 		b.handleRatings(msg)
-	case "prompt":
+	case CmdPrompt:
 		b.handlePrompt(msg)
 	case "channelcontext":
 		b.handleChannelContext(msg)
 	case "filters":
 		b.handleFilters(msg)
-	case "min_length", "minlength":
+	case CmdMinLength, CmdMinLengthAlt:
 		b.handleMinLength(msg)
 	case "ads_keywords", "adskeywords":
 		b.handleAdsKeywords(msg)
-	case "skip_forwards", "skipforwards":
-		b.handleToggleSetting(msg, "filters_skip_forwards")
-	case "target":
+	case CmdSkipForwards, CmdSkipFwdAlt:
+		b.handleToggleSetting(msg, SettingFiltersSkipForwards)
+	case CmdTarget:
 		b.handleTarget(msg)
-	case "window":
+	case CmdWindow:
 		b.handleWindow(msg)
-	case "topics":
+	case CmdTopics:
 		b.handleTopics(msg)
-	case "dedup":
+	case CmdDedup:
 		b.handleDedup(msg)
-	case "relevance":
-		b.handleThreshold(msg, "relevance_threshold")
-	case "importance":
-		b.handleThreshold(msg, "importance_threshold")
-	case "language":
+	case CmdRelevance:
+		b.handleThreshold(msg, SettingRelevanceThreshold)
+	case CmdImportance:
+		b.handleThreshold(msg, SettingImportanceThreshold)
+	case CmdLanguage:
 		b.handleLanguage(msg)
-	case "tone":
+	case CmdTone:
 		b.handleTone(msg)
-	case "model":
+	case CmdModel:
 		b.handleModel(msg)
-	case "smart_model", "smartmodel":
+	case CmdSmartModel, CmdSmartModelAlt:
 		b.handleSmartModel(msg)
-	case "editor":
-		b.handleToggleSetting(msg, "editor_enabled")
-	case "tiered":
-		b.handleToggleSetting(msg, "tiered_importance_enabled")
-	case "vision", "vision_routing", "visionrouting":
-		b.handleToggleSetting(msg, "vision_routing_enabled")
-	case "consolidated":
-		b.handleToggleSetting(msg, "consolidated_clusters_enabled")
-	case "editor_details", "editordetails":
-		b.handleToggleSetting(msg, "editor_detailed_items")
-	case "errors":
+	case CmdEditor:
+		b.handleToggleSetting(msg, SettingEditorEnabled)
+	case CmdTiered:
+		b.handleToggleSetting(msg, SettingTieredImportanceEnabled)
+	case CmdVision, "vision_routing", CmdVisionAlt:
+		b.handleToggleSetting(msg, SettingVisionRoutingEnabled)
+	case CmdConsolidated:
+		b.handleToggleSetting(msg, SettingConsolidatedClustersEnabled)
+	case "editor_details", CmdEditorDetail:
+		b.handleToggleSetting(msg, SettingEditorDetailedItems)
+	case CmdErrors:
 		b.handleErrors(msg)
-	case "retry":
+	case CmdRetry:
 		b.handleRetry(msg)
 	case "discover":
 		b.handleDiscoverNamespace(msg)
@@ -195,7 +278,7 @@ func (b *Bot) handleCallback(query *tgbotapi.CallbackQuery) {
 
 	data := query.Data
 
-	if strings.HasPrefix(data, "rate:") {
+	if strings.HasPrefix(data, CallbackPrefixRate) {
 		parts := strings.Split(data, ":")
 		if len(parts) == 3 {
 			digestID := parts[1]
@@ -218,11 +301,11 @@ func (b *Bot) handleCallback(query *tgbotapi.CallbackQuery) {
 
 				callback := tgbotapi.NewCallback(query.ID, "Feedback recorded. Thanks!")
 				if _, err := b.api.Request(callback); err != nil {
-					b.logger.Error().Err(err).Msg("failed to send callback response")
+					b.logger.Error().Err(err).Msg(ErrSendCallbackResp)
 				}
 			}
 		}
-	} else if strings.HasPrefix(data, "discover:") {
+	} else if strings.HasPrefix(data, CallbackPrefixDiscover) {
 		b.handleDiscoverCallback(query)
 	}
 }
@@ -243,7 +326,7 @@ func (b *Bot) SendNotification(ctx context.Context, text string) error {
 }
 
 func (b *Bot) SendDigest(ctx context.Context, chatID int64, text string, digestID string) (int64, error) {
-	parts := SplitHTML(text, 4000)
+	parts := SplitHTML(text, MaxMessageSize)
 
 	var firstMsgID int64
 
@@ -256,15 +339,15 @@ func (b *Bot) SendDigest(ctx context.Context, chatID int64, text string, digestI
 		if i == len(parts)-1 && digestID != "" {
 			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("👍 Useful", "rate:"+digestID+":up"),
-					tgbotapi.NewInlineKeyboardButtonData("👎 Not useful", "rate:"+digestID+":down"),
+					tgbotapi.NewInlineKeyboardButtonData(ButtonUseful, CallbackPrefixRate+digestID+CallbackSuffixUp),
+					tgbotapi.NewInlineKeyboardButtonData(ButtonNotUseful, CallbackPrefixRate+digestID+CallbackSuffixDown),
 				),
 			)
 		}
 
 		sent, err := b.api.Send(msg)
 		if err != nil {
-			return 0, fmt.Errorf("failed to send digest part %d to chat %d: %w", i+1, chatID, err)
+			return 0, fmt.Errorf(ErrSendDigestPart, i+1, chatID, err)
 		}
 
 		if i == 0 {
@@ -273,7 +356,7 @@ func (b *Bot) SendDigest(ctx context.Context, chatID int64, text string, digestI
 
 		// Small delay between parts to avoid rate limits if many parts
 		if len(parts) > 1 && i < len(parts)-1 {
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(SleepBetweenParts)
 		}
 	}
 
@@ -296,12 +379,12 @@ func (b *Bot) SendDigestWithImage(ctx context.Context, chatID int64, text string
 		} else {
 			firstMsgID = int64(sent.MessageID)
 
-			time.Sleep(300 * time.Millisecond)
+			time.Sleep(SleepAfterImage)
 		}
 	}
 
 	// Send text parts
-	parts := SplitHTML(text, 4000)
+	parts := SplitHTML(text, MaxMessageSize)
 
 	for i, part := range parts {
 		msg := tgbotapi.NewMessage(chatID, part)
@@ -312,15 +395,15 @@ func (b *Bot) SendDigestWithImage(ctx context.Context, chatID int64, text string
 		if i == len(parts)-1 && digestID != "" {
 			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("👍 Useful", "rate:"+digestID+":up"),
-					tgbotapi.NewInlineKeyboardButtonData("👎 Not useful", "rate:"+digestID+":down"),
+					tgbotapi.NewInlineKeyboardButtonData(ButtonUseful, CallbackPrefixRate+digestID+CallbackSuffixUp),
+					tgbotapi.NewInlineKeyboardButtonData(ButtonNotUseful, CallbackPrefixRate+digestID+CallbackSuffixDown),
 				),
 			)
 		}
 
 		sent, err := b.api.Send(msg)
 		if err != nil {
-			return 0, fmt.Errorf("failed to send digest part %d to chat %d: %w", i+1, chatID, err)
+			return 0, fmt.Errorf(ErrSendDigestPart, i+1, chatID, err)
 		}
 
 		if firstMsgID == 0 {
@@ -328,7 +411,7 @@ func (b *Bot) SendDigestWithImage(ctx context.Context, chatID int64, text string
 		}
 
 		if len(parts) > 1 && i < len(parts)-1 {
-			time.Sleep(500 * time.Millisecond)
+			time.Sleep(SleepBetweenParts)
 		}
 	}
 
@@ -336,7 +419,7 @@ func (b *Bot) SendDigestWithImage(ctx context.Context, chatID int64, text string
 }
 
 func (b *Bot) reply(msg *tgbotapi.Message, text string) {
-	parts := SplitHTML(text, 4000)
+	parts := SplitHTML(text, MaxMessageSize)
 
 	for _, part := range parts {
 		reply := tgbotapi.NewMessage(msg.Chat.ID, part)

@@ -36,6 +36,8 @@ func utf16Slice(s string, maxUnits int) string {
 	return s
 }
 
+const emptyAnchorTag = "<a>"
+
 var tagRegex = regexp.MustCompile(`<(/?)([a-zA-Z0-9-]+)([^>]*)>`)
 var hrefRegex = regexp.MustCompile(`(?i)\s*href\s*=\s*["']([^"']*)["']`)
 
@@ -109,7 +111,7 @@ func SanitizeHTML(text string) string {
 func sanitizeAnchorTag(tag string) string {
 	hrefMatch := hrefRegex.FindStringSubmatch(tag)
 	if hrefMatch == nil {
-		return "<a>" // No href found
+		return emptyAnchorTag // No href found
 	}
 
 	href := hrefMatch[1]
@@ -118,7 +120,7 @@ func sanitizeAnchorTag(tag string) string {
 	// Check for dangerous protocols
 	for _, proto := range dangerousProtocols {
 		if strings.HasPrefix(hrefLower, proto) {
-			return "<a>" // Strip dangerous href
+			return emptyAnchorTag // Strip dangerous href
 		}
 	}
 

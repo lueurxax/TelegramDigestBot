@@ -22,11 +22,11 @@ type AutoWeightConfig struct {
 // DefaultAutoWeightConfig returns sensible defaults
 func DefaultAutoWeightConfig() AutoWeightConfig {
 	return AutoWeightConfig{
-		MinMessages:       10,
-		ExpectedFrequency: 5.0,
-		AutoMin:           0.5,
-		AutoMax:           1.5,
-		RollingDays:       30,
+		MinMessages:       AutoWeightDefaultMinMessages,
+		ExpectedFrequency: AutoWeightDefaultExpectedFrequency,
+		AutoMin:           AutoWeightDefaultMinWeight,
+		AutoMax:           AutoWeightDefaultMaxWeight,
+		RollingDays:       AutoWeightDefaultRollingDays,
 	}
 }
 
@@ -64,14 +64,14 @@ func CalculateAutoWeight(stats *db.RollingStats, cfg AutoWeightConfig, days int)
 	}
 
 	// Weighted sum (each component is 0-1)
-	rawScore := (inclusionScore * 0.4) +
-		(importanceScore * 0.3) +
-		(consistencyScore * 0.2) +
-		(signalScore * 0.1)
+	rawScore := (inclusionScore * AutoWeightInclusionFactor) +
+		(importanceScore * AutoWeightImportanceFactor) +
+		(consistencyScore * AutoWeightConsistencyFactor) +
+		(signalScore * AutoWeightSignalFactor)
 
 	// Map to weight range and clamp to configured bounds
 	// rawScore 0.0 -> weight 0.5; rawScore 1.0 -> weight 1.5
-	weight := 0.5 + rawScore
+	weight := AutoWeightBaseOffset + rawScore
 	weight = float32(math.Max(float64(cfg.AutoMin), math.Min(float64(cfg.AutoMax), float64(weight))))
 
 	return weight
@@ -115,7 +115,7 @@ func (s *Scheduler) UpdateAutoWeights(ctx context.Context, logger *zerolog.Logge
 	for _, ch := range channels {
 		stats, err := s.database.GetChannelStatsRolling(ctx, ch.ID, since)
 		if err != nil {
-			logger.Warn().Err(err).Str("channel_id", ch.ID).Msg("failed to get rolling stats")
+			logger.Warn().Err(err).Str(LogFieldChannelID, ch.ID).Msg("failed to get rolling stats")
 			continue
 		}
 
@@ -128,12 +128,12 @@ func (s *Scheduler) UpdateAutoWeights(ctx context.Context, logger *zerolog.Logge
 		}
 
 		if err := s.database.UpdateChannelAutoWeight(ctx, ch.ID, newWeight); err != nil {
-			logger.Warn().Err(err).Str("channel_id", ch.ID).Msg("failed to update auto-weight")
+			logger.Warn().Err(err).Str(LogFieldChannelID, ch.ID).Msg("failed to update auto-weight")
 			continue
 		}
 
 		logger.Info().
-			Str("channel", ch.Username).
+			Str(LogFieldChannel, ch.Username).
 			Float32("old_weight", ch.ImportanceWeight).
 			Float32("new_weight", newWeight).
 			Msg("Updated channel auto-weight")
@@ -142,9 +142,9 @@ func (s *Scheduler) UpdateAutoWeights(ctx context.Context, logger *zerolog.Logge
 	}
 
 	logger.Info().
-		Int("updated", updated).
-		Int("skipped", skipped).
-		Int("total", len(channels)).
+		Int(LogFieldUpdated, updated).
+		Int(LogFieldSkipped, skipped).
+		Int(LogFieldTotal, len(channels)).
 		Msg("Auto-weight update completed")
 
 	return nil

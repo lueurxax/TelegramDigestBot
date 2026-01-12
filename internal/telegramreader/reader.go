@@ -23,6 +23,61 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/observability"
 )
 
+// Constants for magic numbers and repeated strings.
+const (
+	// Concurrency limits
+	concurrentDownloadsLimit = 5
+	maxWorkerCount           = 10
+
+	// Wait times in seconds
+	errorWaitSeconds       = 10
+	noChannelsWaitSeconds  = 30
+	defaultCycleDelay      = 30
+	activeCycleDelay       = 15
+	resolutionSleepShortMs = 200
+	resolutionSleepLongMs  = 500
+
+	// Rate limiting
+	millisecondsPerSecond = 1000
+	jitterModulo          = 1000
+
+	// Batch sizes
+	unknownDiscoveryBatchSize    = 10
+	inviteLinkDiscoveryBatchSize = 5
+
+	// Slice capacities
+	discoverySliceCapacity = 8
+	webpageSliceCapacity   = 4
+
+	// Log field names (goconst)
+	logFieldChannels     = "channels"
+	logFieldChannel      = "channel"
+	logFieldCount        = "count"
+	logFieldPeerID       = "peer_id"
+	logFieldTitle        = "title"
+	logFieldUsername     = "username"
+	logFieldInviteLink   = "invite_link"
+	logFieldMsgID        = "msg_id"
+
+	// Error messages
+	errMsgIncrementResolutionAttempts = "failed to increment resolution attempts"
+
+	// Telegram link types (used in case statements for link.TelegramType)
+	telegramLinkTypeChannel = "channel"
+	telegramLinkTypePost    = "post"
+	telegramLinkTypeInvite  = "invite"
+
+	// Discovery source types
+	sourceTypeKeyboardURL = "keyboard_url"
+	sourceTypeGame        = "game"
+	sourceTypeInvoice     = "invoice"
+	sourceTypeWebpageSite = "webpage_site"
+	sourceTypeTopicTitle  = "topic_title"
+
+	// Error format strings
+	errFmtWrapString = "%w: %s"
+)
+
 // ErrChannelNotFound indicates the channel was not found.
 var ErrChannelNotFound = errors.New("channel not found")
 
@@ -59,15 +114,15 @@ func New(cfg *config.Config, database *db.DB, logger *zerolog.Logger) *Reader {
 		workerCount = 1
 	}
 
-	if workerCount > 10 {
-		workerCount = 10 // Cap at 10 to avoid overwhelming Telegram API
+	if workerCount > maxWorkerCount {
+		workerCount = maxWorkerCount // Cap at maxWorkerCount to avoid overwhelming Telegram API
 	}
 
 	return &Reader{
 		cfg:         cfg,
 		database:    database,
 		logger:      logger,
-		downloadSem: make(chan struct{}, 5),           // limit to 5 concurrent downloads
+		downloadSem: make(chan struct{}, concurrentDownloadsLimit), // limit concurrent downloads
 		workerSem:   make(chan struct{}, workerCount), // limit concurrent channel fetches
 	}
 }
@@ -116,7 +171,7 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		if err != nil {
 			r.logger.Error().Err(err).Msg("failed to get active channels")
 
-			if err := r.wait(ctx, 10*time.Second); err != nil {
+			if err := r.wait(ctx, errorWaitSeconds*time.Second); err != nil {
 				return err
 			}
 
@@ -126,19 +181,19 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		if len(channels) == 0 {
 			r.logger.Info().Msg("No active channels to track. Waiting...")
 
-			if err := r.wait(ctx, 30*time.Second); err != nil {
+			if err := r.wait(ctx, noChannelsWaitSeconds*time.Second); err != nil {
 				return err
 			}
 
 			continue
 		}
 
-		r.logger.Info().Int("channels", len(channels)).Msg("Starting ingestion cycle")
+		r.logger.Info().Int(logFieldChannels, len(channels)).Msg("Starting ingestion cycle")
 
 		start := time.Now()
 		cycleMsgs := r.runIngestionCycle(ctx, api, channels)
 
-		r.logger.Info().Int("channels", len(channels)).Int("msgs", cycleMsgs).Dur("duration", time.Since(start)).Msg("Finished ingestion cycle")
+		r.logger.Info().Int(logFieldChannels, len(channels)).Int("msgs", cycleMsgs).Dur("duration", time.Since(start)).Msg("Finished ingestion cycle")
 
 		// Resolve unknown discoveries (channels with peer ID but no title)
 		go r.resolveUnknownDiscoveries(ctx, api)
@@ -147,9 +202,9 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		go r.resolveInviteLinkDiscoveries(ctx, api)
 
 		// Adaptive delay: shorter if we found messages, longer if quiet
-		cycleDelay := 30 * time.Second
+		cycleDelay := defaultCycleDelay * time.Second
 		if cycleMsgs > 0 {
-			cycleDelay = 15 * time.Second // Poll more frequently if active
+			cycleDelay = activeCycleDelay * time.Second // Poll more frequently if active
 		}
 
 		if err := r.wait(ctx, cycleDelay); err != nil {
@@ -169,9 +224,9 @@ func (r *Reader) wait(ctx context.Context, delay time.Duration) error {
 
 func (r *Reader) runIngestionCycle(ctx context.Context, api *tg.Client, channels []db.Channel) int {
 	// Calculate minimum delay between API calls based on RateLimitRPS
-	minDelay := 1000 * time.Millisecond
+	minDelay := millisecondsPerSecond * time.Millisecond
 	if r.cfg.RateLimitRPS > 0 {
-		minDelay = time.Duration(1000/r.cfg.RateLimitRPS) * time.Millisecond
+		minDelay = time.Duration(millisecondsPerSecond/r.cfg.RateLimitRPS) * time.Millisecond
 	}
 
 	results := make(chan fetchResult, len(channels))
@@ -190,7 +245,7 @@ func (r *Reader) runIngestionCycle(ctx context.Context, api *tg.Client, channels
 			defer func() { <-r.workerSem }() // Release worker slot
 
 			// Rate limiting delay with jitter
-			jitter := minDelay + time.Duration(float64(minDelay)*0.5*(float64(time.Now().UnixNano()%1000)/1000.0))
+			jitter := minDelay + time.Duration(float64(minDelay)*0.5*(float64(time.Now().UnixNano()%jitterModulo)/float64(jitterModulo)))
 
 			select {
 			case <-ctx.Done():
@@ -213,7 +268,7 @@ func (r *Reader) runIngestionCycle(ctx context.Context, api *tg.Client, channels
 			return cycleMsgs
 		case result := <-results:
 			if result.err != nil {
-				r.logger.Error().Str("channel", result.channel).Err(result.err).Msg("failed to fetch messages for channel")
+				r.logger.Error().Str(logFieldChannel, result.channel).Err(result.err).Msg("failed to fetch messages for channel")
 			}
 
 			cycleMsgs += result.count
@@ -225,7 +280,7 @@ func (r *Reader) runIngestionCycle(ctx context.Context, api *tg.Client, channels
 
 // resolveUnknownDiscoveries attempts to fetch channel info for discoveries with peer IDs but no titles
 func (r *Reader) resolveUnknownDiscoveries(ctx context.Context, api *tg.Client) {
-	discoveries, err := r.database.GetDiscoveriesNeedingResolution(ctx, 10)
+	discoveries, err := r.database.GetDiscoveriesNeedingResolution(ctx, unknownDiscoveryBatchSize)
 	if err != nil {
 		r.logger.Warn().Err(err).Msg("failed to get discoveries needing resolution")
 		return
@@ -235,7 +290,7 @@ func (r *Reader) resolveUnknownDiscoveries(ctx context.Context, api *tg.Client) 
 		return
 	}
 
-	r.logger.Debug().Int("count", len(discoveries)).Msg("Resolving unknown discoveries")
+	r.logger.Debug().Int(logFieldCount, len(discoveries)).Msg("Resolving unknown discoveries")
 
 	for _, d := range discoveries {
 		// Try to get channel info using InputChannel with peer ID and access hash
@@ -246,14 +301,14 @@ func (r *Reader) resolveUnknownDiscoveries(ctx context.Context, api *tg.Client) 
 			},
 		})
 		if err != nil {
-			r.logger.Debug().Err(err).Int64("peer_id", d.TGPeerID).Int64("access_hash", d.AccessHash).Msg("failed to resolve channel (may be private)")
+			r.logger.Debug().Err(err).Int64(logFieldPeerID, d.TGPeerID).Int64("access_hash", d.AccessHash).Msg("failed to resolve channel (may be private)")
 
 			// Increment attempt counter so we don't keep trying forever
 			if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
-				r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
+				r.logger.Warn().Err(err).Msg(errMsgIncrementResolutionAttempts)
 			}
 
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(resolutionSleepShortMs * time.Millisecond)
 
 			continue
 		}
@@ -265,9 +320,9 @@ func (r *Reader) resolveUnknownDiscoveries(ctx context.Context, api *tg.Client) 
 			for _, chat := range channelsResult.Chats {
 				if channel, ok := chat.(*tg.Channel); ok && channel.ID == d.TGPeerID {
 					r.logger.Info().
-						Int64("peer_id", d.TGPeerID).
-						Str("title", channel.Title).
-						Str("username", channel.Username).
+						Int64(logFieldPeerID, d.TGPeerID).
+						Str(logFieldTitle, channel.Title).
+						Str(logFieldUsername, channel.Username).
 						Msg("Resolved unknown discovery")
 
 					if err := r.database.UpdateDiscoveryChannelInfo(ctx, d.ID, channel.Title, channel.Username); err != nil {
@@ -284,18 +339,18 @@ func (r *Reader) resolveUnknownDiscoveries(ctx context.Context, api *tg.Client) 
 		if !resolved {
 			// API call succeeded but didn't return our channel - mark as attempted
 			if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
-				r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
+				r.logger.Warn().Err(err).Msg(errMsgIncrementResolutionAttempts)
 			}
 		}
 
 		// Rate limit to avoid hitting Telegram API limits
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(resolutionSleepLongMs * time.Millisecond)
 	}
 }
 
 // resolveInviteLinkDiscoveries attempts to fetch channel info for discoveries with invite links
 func (r *Reader) resolveInviteLinkDiscoveries(ctx context.Context, api *tg.Client) {
-	discoveries, err := r.database.GetInviteLinkDiscoveriesNeedingResolution(ctx, 5)
+	discoveries, err := r.database.GetInviteLinkDiscoveriesNeedingResolution(ctx, inviteLinkDiscoveryBatchSize)
 	if err != nil {
 		r.logger.Warn().Err(err).Msg("failed to get invite link discoveries needing resolution")
 
@@ -306,7 +361,7 @@ func (r *Reader) resolveInviteLinkDiscoveries(ctx context.Context, api *tg.Clien
 		return
 	}
 
-	r.logger.Debug().Int("count", len(discoveries)).Msg("Resolving invite link discoveries")
+	r.logger.Debug().Int(logFieldCount, len(discoveries)).Msg("Resolving invite link discoveries")
 
 	for _, d := range discoveries {
 		select {
@@ -332,10 +387,10 @@ func (r *Reader) resolveSingleInviteLinkDiscovery(ctx context.Context, api *tg.C
 	hash = strings.TrimPrefix(hash, "https://t.me/joinchat/")
 
 	if hash == d.InviteLink || hash == "" {
-		r.logger.Debug().Str("invite_link", d.InviteLink).Msg("invalid invite link format")
+		r.logger.Debug().Str(logFieldInviteLink, d.InviteLink).Msg("invalid invite link format")
 
 		if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
-			r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
+			r.logger.Warn().Err(err).Msg(errMsgIncrementResolutionAttempts)
 		}
 
 		return
@@ -344,10 +399,10 @@ func (r *Reader) resolveSingleInviteLinkDiscovery(ctx context.Context, api *tg.C
 	// Try to check the invite without joining
 	invite, err := api.MessagesCheckChatInvite(ctx, hash)
 	if err != nil {
-		r.logger.Debug().Err(err).Str("invite_link", d.InviteLink).Msg("failed to check invite link")
+		r.logger.Debug().Err(err).Str(logFieldInviteLink, d.InviteLink).Msg("failed to check invite link")
 
 		if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
-			r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
+			r.logger.Warn().Err(err).Msg(errMsgIncrementResolutionAttempts)
 		}
 
 		return
@@ -385,9 +440,9 @@ func (r *Reader) resolveSingleInviteLinkDiscovery(ctx context.Context, api *tg.C
 	if title != "" {
 		r.logger.Info().
 			Str("invite_link", d.InviteLink).
-			Str("title", title).
-			Str("username", username).
-			Int64("peer_id", peerID).
+			Str(logFieldTitle, title).
+			Str(logFieldUsername, username).
+			Int64(logFieldPeerID, peerID).
 			Msg("Resolved invite link discovery")
 
 		if err := r.database.UpdateDiscoveryFromInvite(ctx, d.ID, title, username, peerID, accessHash); err != nil {
@@ -396,7 +451,7 @@ func (r *Reader) resolveSingleInviteLinkDiscovery(ctx context.Context, api *tg.C
 	} else {
 		// Couldn't extract info
 		if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
-			r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
+			r.logger.Warn().Err(err).Msg(errMsgIncrementResolutionAttempts)
 		}
 	}
 }
@@ -455,7 +510,7 @@ func (r *Reader) extractDiscoveriesFromChannelFull(ctx context.Context, api *tg.
 			}
 
 			switch link.TelegramType {
-			case "channel", "post":
+			case telegramLinkTypeChannel, telegramLinkTypePost:
 				if link.Username != "" {
 					discoveries = append(discoveries, db.Discovery{
 						Username:      link.Username,
@@ -469,7 +524,7 @@ func (r *Reader) extractDiscoveriesFromChannelFull(ctx context.Context, api *tg.
 						FromChannelID: channelID,
 					})
 				}
-			case "invite":
+			case telegramLinkTypeInvite:
 				discoveries = append(discoveries, db.Discovery{
 					InviteLink:    link.URL,
 					SourceType:    "description_link",
@@ -499,7 +554,7 @@ func (r *Reader) extractDiscoveriesFromChannelFull(ctx context.Context, api *tg.
 }
 
 func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db.Channel) (int, error) {
-	r.logger.Debug().Str("username", ch.Username).Str("title", ch.Title).Msg("Fetching messages for channel")
+	r.logger.Debug().Str(logFieldUsername, ch.Username).Str(logFieldTitle, ch.Title).Msg("Fetching messages for channel")
 
 	if err := r.ensureJoined(ctx, api, &ch); err != nil {
 		return 0, err
@@ -538,7 +593,7 @@ func (r *Reader) ensureJoined(ctx context.Context, api *tg.Client, ch *db.Channe
 		}
 	}
 
-	r.logger.Info().Str("invite_link", ch.InviteLink).Msg("Attempting to join channel by invite link")
+	r.logger.Info().Str(logFieldInviteLink, ch.InviteLink).Msg("Attempting to join channel by invite link")
 
 	updates, err := api.MessagesImportChatInvite(ctx, hash)
 	if err != nil {
@@ -611,10 +666,10 @@ func (r *Reader) resolvePeer(ctx context.Context, api *tg.Client, ch *db.Channel
 			AccessHash: ch.AccessHash,
 		}
 
-		r.logger.Debug().Str("username", ch.Username).Int64("peer_id", ch.TGPeerID).Msg("Using cached peer info")
+		r.logger.Debug().Str(logFieldUsername, ch.Username).Int64(logFieldPeerID, ch.TGPeerID).Msg("Using cached peer info")
 	} else if ch.Username != "" {
 		// Need to resolve username to get peer info
-		r.logger.Debug().Str("username", ch.Username).Msg("Resolving username (no cached peer info)")
+		r.logger.Debug().Str(logFieldUsername, ch.Username).Msg("Resolving username (no cached peer info)")
 
 		resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: ch.Username})
 		if err != nil {
@@ -622,16 +677,16 @@ func (r *Reader) resolvePeer(ctx context.Context, api *tg.Client, ch *db.Channel
 		}
 
 		if len(resolved.Chats) == 0 {
-			return nil, fmt.Errorf("%w: %s", ErrChannelNotFound, ch.Username)
+			return nil, fmt.Errorf(errFmtWrapString, ErrChannelNotFound, ch.Username)
 		}
 
 		channel, ok := resolved.Chats[0].(*tg.Channel)
 		if !ok {
-			return nil, fmt.Errorf("%w: %s", ErrNotAChannel, ch.Username)
+			return nil, fmt.Errorf(errFmtWrapString, ErrNotAChannel, ch.Username)
 		}
 
 		// Update channel info
-		r.logger.Info().Str("username", ch.Username).Int64("peer_id", channel.ID).Str("title", channel.Title).Msg("Caching channel info")
+		r.logger.Info().Str(logFieldUsername, ch.Username).Int64(logFieldPeerID, channel.ID).Str(logFieldTitle, channel.Title).Msg("Caching channel info")
 
 		ch.TGPeerID = channel.ID
 		ch.AccessHash = channel.AccessHash
@@ -644,7 +699,7 @@ func (r *Reader) resolvePeer(ctx context.Context, api *tg.Client, ch *db.Channel
 	} else if ch.TGPeerID != 0 {
 		return nil, fmt.Errorf("%w: %d", ErrMissingAccessHash, ch.TGPeerID)
 	} else {
-		return nil, fmt.Errorf("%w: %s", ErrNoChannelIdentifier, ch.ID)
+		return nil, fmt.Errorf(errFmtWrapString, ErrNoChannelIdentifier, ch.ID)
 	}
 
 	// Update channel info in DB if it was just resolved OR if description is missing
@@ -652,13 +707,13 @@ func (r *Reader) resolvePeer(ctx context.Context, api *tg.Client, ch *db.Channel
 		description := ch.Description
 
 		if description == "" {
-			r.logger.Info().Int64("peer_id", ch.TGPeerID).Msg("Fetching missing channel description")
+			r.logger.Info().Int64(logFieldPeerID, ch.TGPeerID).Msg("Fetching missing channel description")
 
 			var err error
 
 			description, err = r.fetchChannelDescription(ctx, api, ch.TGPeerID, ch.AccessHash)
 			if err != nil {
-				r.logger.Warn().Err(err).Int64("peer_id", ch.TGPeerID).Msg("failed to fetch channel description")
+				r.logger.Warn().Err(err).Int64(logFieldPeerID, ch.TGPeerID).Msg("failed to fetch channel description")
 			}
 		}
 
@@ -679,7 +734,7 @@ func (r *Reader) resolvePeer(ctx context.Context, api *tg.Client, ch *db.Channel
 }
 
 func (r *Reader) fetchHistory(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, ch db.Channel) (tg.MessagesMessagesClass, error) {
-	r.logger.Debug().Str("username", ch.Username).Int64("peer_id", ch.TGPeerID).Int64("last_id", ch.LastTGMessageID).Msg("Getting history")
+	r.logger.Debug().Str(logFieldUsername, ch.Username).Int64(logFieldPeerID, ch.TGPeerID).Int64("last_id", ch.LastTGMessageID).Msg("Getting history")
 
 	req := &tg.MessagesGetHistoryRequest{
 		Peer:  peer,
@@ -696,7 +751,7 @@ func (r *Reader) fetchHistory(ctx context.Context, api *tg.Client, peer tg.Input
 	if err != nil {
 		floodErr, ok := tgerr.As(err)
 		if ok && floodErr.Type == "FLOOD_WAIT" {
-			r.logger.Warn().Int("seconds", floodErr.Argument).Str("channel", ch.Username).Msg("flood wait")
+			r.logger.Warn().Int("seconds", floodErr.Argument).Str(logFieldChannel, ch.Username).Msg("flood wait")
 
 			select {
 			case <-ctx.Done():
@@ -771,7 +826,7 @@ func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessin
 	}
 
 	if err := r.database.SaveRawMessage(ctx, rawMsg); err != nil {
-		r.logger.Error().Err(err).Str("channel", hpc.ch.Username).Int("msg_id", msg.ID).Msg("failed to save raw message")
+		r.logger.Error().Err(err).Str(logFieldChannel, hpc.ch.Username).Int(logFieldMsgID, msg.ID).Msg("failed to save raw message")
 
 		return false
 	}
@@ -799,7 +854,7 @@ func (r *Reader) startAsyncMediaDownload(ctx context.Context, hpc *historyProces
 
 		data, err := r.downloadMedia(ctx, api, m)
 		if err != nil {
-			r.logger.Warn().Err(err).Int("msg_id", int(rm.TGMessageID)).Msg("async download failed")
+			r.logger.Warn().Err(err).Int(logFieldMsgID, int(rm.TGMessageID)).Msg("async download failed")
 
 			return
 		}
@@ -811,7 +866,7 @@ func (r *Reader) startAsyncMediaDownload(ctx context.Context, hpc *historyProces
 		rm.MediaData = data
 
 		if err := r.database.SaveRawMessage(ctx, &rm); err != nil {
-			r.logger.Error().Err(err).Int("msg_id", int(rm.TGMessageID)).Msg("failed to update raw message with media data")
+			r.logger.Error().Err(err).Int(logFieldMsgID, int(rm.TGMessageID)).Msg("failed to update raw message with media data")
 		}
 	}(ctx, hpc.api, msg.Media, *rawMsg)
 }
@@ -843,7 +898,7 @@ func (r *Reader) startAsyncDiscoveryExtraction(ctx context.Context, hpc *history
 		discoveries := r.extractDiscoveries(m, channelID, channelPeerID, titles, accessHashes)
 		for _, d := range discoveries {
 			if err := r.database.RecordDiscovery(ctx, d); err != nil {
-				r.logger.Warn().Err(err).Str("discovery", d.Username).Int64("peer_id", d.TGPeerID).Msg("failed to record discovery")
+				r.logger.Warn().Err(err).Str("discovery", d.Username).Int64(logFieldPeerID, d.TGPeerID).Msg("failed to record discovery")
 			}
 		}
 	}(ctx, msg, hpc.ch.ID, hpc.ch.TGPeerID, int64(msg.ID), hpc.channelTitles, hpc.channelAccessHashes)
@@ -852,7 +907,7 @@ func (r *Reader) startAsyncDiscoveryExtraction(ctx context.Context, hpc *history
 func (r *Reader) processHistoryMessages(ctx context.Context, api *tg.Client, history tg.MessagesMessagesClass, ch db.Channel) (int, error) {
 	messages, chats, ok := r.extractHistoryData(history)
 	if !ok {
-		r.logger.Debug().Str("channel", ch.Username).Msg("History not modified")
+		r.logger.Debug().Str(logFieldChannel, ch.Username).Msg("History not modified")
 
 		return 0, nil
 	}
@@ -863,7 +918,7 @@ func (r *Reader) processHistoryMessages(ctx context.Context, api *tg.Client, his
 	}
 	hpc.channelTitles, hpc.channelAccessHashes = r.buildChannelLookups(chats)
 
-	r.logger.Debug().Str("channel", ch.Username).Int("count", len(messages)).Int("chats_in_response", len(chats)).Msg("Processing messages")
+	r.logger.Debug().Str(logFieldChannel, ch.Username).Int(logFieldCount, len(messages)).Int("chats_in_response", len(chats)).Msg("Processing messages")
 
 	count := 0
 	maxID := ch.LastTGMessageID
@@ -899,7 +954,7 @@ func (r *Reader) processServiceMessage(ctx context.Context, svcMsg *tg.MessageSe
 		discoveries := r.extractDiscoveriesFromService(sm, chID)
 		for _, d := range discoveries {
 			if err := r.database.RecordDiscovery(ctx, d); err != nil {
-				r.logger.Warn().Err(err).Int64("peer_id", d.TGPeerID).Msg("failed to record service message discovery")
+				r.logger.Warn().Err(err).Int64(logFieldPeerID, d.TGPeerID).Msg("failed to record service message discovery")
 			}
 		}
 	}(ctx, svcMsg, channelID)
@@ -907,14 +962,14 @@ func (r *Reader) processServiceMessage(ctx context.Context, svcMsg *tg.MessageSe
 
 func (r *Reader) logProcessingResult(ctx context.Context, ch db.Channel, count int, maxID int64) {
 	if count > 0 {
-		r.logger.Info().Str("channel", ch.Username).Int("count", count).Msg("Saved messages for channel")
+		r.logger.Info().Str(logFieldChannel, ch.Username).Int(logFieldCount, count).Msg("Saved messages for channel")
 	} else {
-		r.logger.Debug().Str("channel", ch.Username).Msg("No new messages for channel")
+		r.logger.Debug().Str(logFieldChannel, ch.Username).Msg("No new messages for channel")
 	}
 
 	if maxID > ch.LastTGMessageID {
 		if err := r.database.UpdateChannelLastMessageID(ctx, ch.ID, maxID); err != nil {
-			r.logger.Error().Err(err).Str("channel", ch.Username).Int64("max_id", maxID).Msg("failed to update last message id")
+			r.logger.Error().Err(err).Str(logFieldChannel, ch.Username).Int64("max_id", maxID).Msg("failed to update last message id")
 		}
 	}
 }
@@ -1055,7 +1110,7 @@ func (dc *discoveryContext) extractTelegramLinkDiscoveries(url, sourceType strin
 		}
 
 		switch link.TelegramType {
-		case "channel", "post":
+		case telegramLinkTypeChannel, telegramLinkTypePost:
 			if link.Username != "" {
 				discoveries = append(discoveries, db.Discovery{
 					Username:      link.Username,
@@ -1073,7 +1128,7 @@ func (dc *discoveryContext) extractTelegramLinkDiscoveries(url, sourceType strin
 					Forwards:      dc.forwards,
 				})
 			}
-		case "invite":
+		case telegramLinkTypeInvite:
 			discoveries = append(discoveries, db.Discovery{
 				InviteLink:    link.URL,
 				SourceType:    sourceType,
@@ -1133,7 +1188,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 	}
 
 	// Preallocate with reasonable initial capacity for typical message
-	discoveries := make([]db.Discovery, 0, 8)
+	discoveries := make([]db.Discovery, 0, discoverySliceCapacity)
 
 	// 1-2. Extract from forwards and replies
 	discoveries = append(discoveries, r.extractFromForwards(msg, fromChannelID, channelTitles, channelAccessHashes, dc.views, dc.forwards)...)
@@ -1202,9 +1257,9 @@ func (r *Reader) extractFromKeyboard(markup tg.ReplyMarkupClass, dc *discoveryCo
 		for _, btn := range row.Buttons {
 			switch b := btn.(type) {
 			case *tg.KeyboardButtonURL:
-				discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(b.URL, "keyboard_url")...)
+				discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(b.URL, sourceTypeKeyboardURL)...)
 			case *tg.KeyboardButtonWebView:
-				discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(b.URL, "keyboard_url")...)
+				discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(b.URL, sourceTypeKeyboardURL)...)
 			case *tg.KeyboardButtonUserProfile:
 				discoveries = append(discoveries, db.Discovery{
 					TGPeerID:      b.UserID,
@@ -1267,12 +1322,12 @@ func (r *Reader) extractFromMedia(msg *tg.Message, dc *discoveryContext) []db.Di
 			})
 		}
 	case *tg.MessageMediaGame:
-		discoveries = append(discoveries, dc.extractMentionDiscoveries(m.Game.ShortName, "game")...)
-		discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(m.Game.Description, "game")...)
-		discoveries = append(discoveries, dc.extractMentionDiscoveries(m.Game.Description, "game")...)
+		discoveries = append(discoveries, dc.extractMentionDiscoveries(m.Game.ShortName, sourceTypeGame)...)
+		discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(m.Game.Description, sourceTypeGame)...)
+		discoveries = append(discoveries, dc.extractMentionDiscoveries(m.Game.Description, sourceTypeGame)...)
 	case *tg.MessageMediaInvoice:
-		discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(m.Description, "invoice")...)
-		discoveries = append(discoveries, dc.extractMentionDiscoveries(m.Description, "invoice")...)
+		discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(m.Description, sourceTypeInvoice)...)
+		discoveries = append(discoveries, dc.extractMentionDiscoveries(m.Description, sourceTypeInvoice)...)
 	}
 
 	// Extract from reactions
@@ -1299,13 +1354,13 @@ func (r *Reader) extractFromWebPage(media *tg.MessageMediaWebPage, dc *discovery
 	}
 
 	// Preallocate with reasonable initial capacity for typical webpage
-	discoveries := make([]db.Discovery, 0, 4)
+	discoveries := make([]db.Discovery, 0, webpageSliceCapacity)
 
 	discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(webpage.URL, "webpage_url")...)
 	discoveries = append(discoveries, dc.extractMentionDiscoveries(webpage.Author, "webpage_author")...)
 	discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(webpage.EmbedURL, "embed_url")...)
-	discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(webpage.SiteName, "webpage_site")...)
-	discoveries = append(discoveries, dc.extractMentionDiscoveries(webpage.SiteName, "webpage_site")...)
+	discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(webpage.SiteName, sourceTypeWebpageSite)...)
+	discoveries = append(discoveries, dc.extractMentionDiscoveries(webpage.SiteName, sourceTypeWebpageSite)...)
 
 	return discoveries
 }
@@ -1476,9 +1531,9 @@ func (r *Reader) extractDiscoveriesFromService(msg *tg.MessageService, fromChann
 	case *tg.MessageActionRequestedPeer:
 		discoveries = append(discoveries, r.extractFromRequestedPeers(action.Peers, fromChannelID)...)
 	case *tg.MessageActionTopicCreate:
-		discoveries = append(discoveries, extractServiceMentions(action.Title, "topic_title", fromChannelID)...)
+		discoveries = append(discoveries, extractServiceMentions(action.Title, sourceTypeTopicTitle, fromChannelID)...)
 	case *tg.MessageActionTopicEdit:
-		discoveries = append(discoveries, extractServiceMentions(action.Title, "topic_title", fromChannelID)...)
+		discoveries = append(discoveries, extractServiceMentions(action.Title, sourceTypeTopicTitle, fromChannelID)...)
 	case *tg.MessageActionInviteToGroupCall:
 		discoveries = append(discoveries, extractServiceUserIDs(action.Users, "group_call_invite", fromChannelID)...)
 	case *tg.MessageActionChatJoinedByLink:
