@@ -878,17 +878,19 @@ func (b *Bot) handlePrompt(msg *tgbotapi.Message) {
 			"<code>/prompt show &lt;summarize|narrative|cluster_summary|cluster_topic&gt; [version]</code>\n"+
 			"<code>/prompt set &lt;base&gt; &lt;version&gt; &lt;text...&gt;</code>\n"+
 			"<code>/prompt activate &lt;base&gt; &lt;version&gt;</code>")
+
 		return
 	}
 
 	baseList := []string{"summarize", "narrative", "cluster_summary", "cluster_topic"}
-	base := ""
+
 	isValidBase := func(v string) bool {
 		for _, baseName := range baseList {
 			if baseName == v {
 				return true
 			}
 		}
+
 		return false
 	}
 
@@ -899,80 +901,111 @@ func (b *Bot) handlePrompt(msg *tgbotapi.Message) {
 	case "list":
 		var sb strings.Builder
 		sb.WriteString("🧩 <b>Prompt Templates</b>\n\n")
+
 		for _, baseName := range baseList {
 			activeKey := fmt.Sprintf("prompt:%s:active", baseName)
 			active := "v1"
 			_ = b.database.GetSetting(ctx, activeKey, &active)
 			sb.WriteString(fmt.Sprintf("• <b>%s</b> active: <code>%s</code>\n", html.EscapeString(baseName), html.EscapeString(active)))
 		}
+
 		b.reply(msg, sb.String())
+
 		return
 	case "show":
 		if len(args) < 2 {
 			b.reply(msg, "Usage: <code>/prompt show &lt;base&gt; [version]</code>")
+
 			return
 		}
-		base = strings.ToLower(args[1])
-		if !isValidBase(base) {
+
+		baseName := strings.ToLower(args[1])
+		if !isValidBase(baseName) {
 			b.reply(msg, fmt.Sprintf("Unknown base. Use: <code>%s</code>", html.EscapeString(strings.Join(baseList, ", "))))
+
 			return
 		}
+
 		version := "v1"
 		if len(args) > 2 {
 			version = args[2]
 		} else {
-			activeKey := fmt.Sprintf("prompt:%s:active", base)
+			activeKey := fmt.Sprintf("prompt:%s:active", baseName)
 			_ = b.database.GetSetting(ctx, activeKey, &version)
+
 			if version == "" {
 				version = "v1"
 			}
 		}
-		promptKey := fmt.Sprintf("prompt:%s:%s", base, version)
+
+		promptKey := fmt.Sprintf("prompt:%s:%s", baseName, version)
+
 		var prompt string
+
 		_ = b.database.GetSetting(ctx, promptKey, &prompt)
 		if prompt == "" {
-			b.reply(msg, fmt.Sprintf("No override found for <code>%s</code> (version <code>%s</code>). Using built-in default.", html.EscapeString(base), html.EscapeString(version)))
+			b.reply(msg, fmt.Sprintf("No override found for <code>%s</code> (version <code>%s</code>). Using built-in default.", html.EscapeString(baseName), html.EscapeString(version)))
+
 			return
 		}
+
 		escaped := html.EscapeString(prompt)
-		b.reply(msg, fmt.Sprintf("Prompt <b>%s</b> (<code>%s</code>):\n<pre>%s</pre>", html.EscapeString(base), html.EscapeString(version), escaped))
+
+		b.reply(msg, fmt.Sprintf("Prompt <b>%s</b> (<code>%s</code>):\n<pre>%s</pre>", html.EscapeString(baseName), html.EscapeString(version), escaped))
+
 		return
 	case "set":
 		if len(args) < 4 {
 			b.reply(msg, "Usage: <code>/prompt set &lt;base&gt; &lt;version&gt; &lt;text...&gt;</code>")
+
 			return
 		}
-		base = strings.ToLower(args[1])
-		if !isValidBase(base) {
+
+		baseName := strings.ToLower(args[1])
+		if !isValidBase(baseName) {
 			b.reply(msg, fmt.Sprintf("Unknown base. Use: <code>%s</code>", html.EscapeString(strings.Join(baseList, ", "))))
+
 			return
 		}
+
 		version := args[2]
 		text := strings.Join(args[3:], " ")
-		key := fmt.Sprintf("prompt:%s:%s", base, version)
+
+		key := fmt.Sprintf("prompt:%s:%s", baseName, version)
 		if err := b.database.SaveSettingWithHistory(ctx, key, text, msg.From.ID); err != nil {
 			b.reply(msg, fmt.Sprintf("❌ Error saving prompt: %s", html.EscapeString(err.Error())))
+
 			return
 		}
-		b.reply(msg, fmt.Sprintf("✅ Prompt <b>%s</b> saved as <code>%s</code>.", html.EscapeString(base), html.EscapeString(version)))
+
+		b.reply(msg, fmt.Sprintf("✅ Prompt <b>%s</b> saved as <code>%s</code>.", html.EscapeString(baseName), html.EscapeString(version)))
+
 		return
 	case "activate", "active":
 		if len(args) < 3 {
 			b.reply(msg, "Usage: <code>/prompt activate &lt;base&gt; &lt;version&gt;</code>")
+
 			return
 		}
-		base = strings.ToLower(args[1])
-		if !isValidBase(base) {
+
+		baseName := strings.ToLower(args[1])
+		if !isValidBase(baseName) {
 			b.reply(msg, fmt.Sprintf("Unknown base. Use: <code>%s</code>", html.EscapeString(strings.Join(baseList, ", "))))
+
 			return
 		}
+
 		version := args[2]
-		key := fmt.Sprintf("prompt:%s:active", base)
+
+		key := fmt.Sprintf("prompt:%s:active", baseName)
 		if err := b.database.SaveSettingWithHistory(ctx, key, version, msg.From.ID); err != nil {
 			b.reply(msg, fmt.Sprintf("❌ Error saving active version: %s", html.EscapeString(err.Error())))
+
 			return
 		}
-		b.reply(msg, fmt.Sprintf("✅ Active prompt for <b>%s</b> set to <code>%s</code>.", html.EscapeString(base), html.EscapeString(version)))
+
+		b.reply(msg, fmt.Sprintf("✅ Active prompt for <b>%s</b> set to <code>%s</code>.", html.EscapeString(baseName), html.EscapeString(version)))
+
 		return
 	default:
 		b.reply(msg, "Usage:\n"+
