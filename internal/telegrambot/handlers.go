@@ -12,6 +12,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/lueurxax/telegram-digest-bot/internal/db"
 	"github.com/lueurxax/telegram-digest-bot/internal/digest"
+	"github.com/lueurxax/telegram-digest-bot/internal/htmlutils"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -22,6 +23,10 @@ const (
 	DefaultRatingsDays = 30
 	// DefaultRatingsLimit is the default limit for ratings results.
 	DefaultRatingsLimit = 10
+	// DefaultScoresHours is the default number of hours to look back for item scores.
+	DefaultScoresHours = 24
+	// DefaultScoresLimit is the default limit for item scores results.
+	DefaultScoresLimit = 10
 	// RecentErrorsLimit is the limit for fetching recent errors.
 	RecentErrorsLimit = 10
 	// SettingHistoryLimit is the limit for fetching setting history.
@@ -84,13 +89,14 @@ const (
 
 // Error message formats and strings.
 const (
-	ErrSavingFmt           = "❌ Error saving %s: %s"
-	ErrFetchingChannelsFmt = "❌ Error fetching channels: %s"
-	ErrFetchingAdsKeywords = "❌ Error fetching ads keywords."
-	ErrUnknownBaseFmt      = "Unknown base. Use: <code>%s</code>"
-	ErrChannelNotFoundFmt  = "Channel <code>%s</code> not found."
-	ErrGenericFmt          = "Error: %s"
-	ErrNoRows              = "no rows"
+	ErrSavingFmt                      = "❌ Error saving %s: %s"
+	ErrFetchingChannelsFmt            = "❌ Error fetching channels: %s"
+	ErrFetchingAdsKeywords            = "❌ Error fetching ads keywords."
+	ErrUnknownBaseFmt                 = "Unknown base. Use: <code>%s</code>"
+	ErrChannelNotFoundFmt             = "Channel <code>%s</code> not found."
+	ErrGenericFmt                     = "Error: %s"
+	ErrNoRows                         = "no rows"
+	MsgCouldNotGetImportanceThreshold = "could not get importance threshold from DB"
 )
 
 // Status strings.
@@ -379,7 +385,7 @@ func (b *Bot) handleSystemNamespace(msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 
 	if len(args) == 0 {
-		b.reply(msg, "Usage: <code>/system &lt;status|settings|history|errors|retry&gt;</code>")
+		b.reply(msg, "Usage: <code>/system &lt;status|settings|history|errors|retry|scores&gt;</code>")
 
 		return
 	}
@@ -415,6 +421,8 @@ func (b *Bot) handleSystemNamespace(msg *tgbotapi.Message) {
 		b.handleErrors(&newMsg)
 	case "retry":
 		b.handleRetry(&newMsg)
+	case "scores":
+		b.handleScores(&newMsg)
 	default:
 		b.reply(msg, fmt.Sprintf("❓ Unknown system subcommand: <code>%s</code>", html.EscapeString(subcommand)))
 	}
@@ -967,6 +975,110 @@ func (b *Bot) handleRatings(msg *tgbotapi.Message) {
 
 		sb.WriteString(fmt.Sprintf("• <b>%s</b>: <code>%d</code> (g %d | b %d | i %d) rel <code>%.2f</code>\n",
 			html.EscapeString(name), s.TotalCount, s.GoodCount, s.BadCount, s.IrrelevantCount, reliability))
+	}
+
+	b.reply(msg, sb.String())
+}
+
+func (b *Bot) handleScores(msg *tgbotapi.Message) {
+	args := strings.Fields(msg.CommandArguments())
+	hours := DefaultScoresHours
+	limit := DefaultScoresLimit
+
+	if len(args) > 0 {
+		if v, err := strconv.Atoi(args[0]); err == nil && v > 0 {
+			hours = v
+		}
+	}
+
+	if len(args) > 1 {
+		if v, err := strconv.Atoi(args[1]); err == nil && v > 0 {
+			limit = v
+		}
+	}
+
+	if hours <= 0 || limit <= 0 {
+		b.reply(msg, "Usage: <code>/scores [hours] [limit]</code>")
+
+		return
+	}
+
+	ctx := context.Background()
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+
+	importanceThreshold := b.cfg.ImportanceThreshold
+	if err := b.database.GetSetting(ctx, SettingImportanceThreshold, &importanceThreshold); err != nil {
+		b.logger.Debug().Err(err).Msg(MsgCouldNotGetImportanceThreshold)
+	}
+
+	stats, err := b.database.GetImportanceStats(ctx, since, importanceThreshold)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error fetching scores: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	if stats.Total == 0 {
+		b.reply(msg, fmt.Sprintf("No ready items in the last %d hours.", hours))
+
+		return
+	}
+
+	items, err := b.database.GetTopItemScores(ctx, since, limit)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error fetching items: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	var sb strings.Builder
+
+	belowCount := stats.Total - stats.AboveThreshold
+
+	sb.WriteString(fmt.Sprintf("📊 <b>Item Importance Scores</b> (last %d hours)\n\n", hours))
+	sb.WriteString(fmt.Sprintf("Threshold: <code>%.2f</code>\n", importanceThreshold))
+	sb.WriteString(fmt.Sprintf("Ready items: <code>%d</code> | >= threshold: <code>%d</code> | below: <code>%d</code>\n", stats.Total, stats.AboveThreshold, belowCount))
+	sb.WriteString(fmt.Sprintf("Percentiles: p50 <code>%.2f</code> | p75 <code>%.2f</code> | p90 <code>%.2f</code> | p95 <code>%.2f</code>\n", stats.P50, stats.P75, stats.P90, stats.P95))
+	sb.WriteString(fmt.Sprintf("Range: <code>%.2f</code> - <code>%.2f</code>\n\n", stats.Min, stats.Max))
+
+	if len(items) == 0 {
+		sb.WriteString("No ready items to display.\n")
+		b.reply(msg, sb.String())
+
+		return
+	}
+
+	sb.WriteString(fmt.Sprintf("Top %d items:\n", len(items)))
+
+	for _, item := range items {
+		name := item.Username
+		if name != "" {
+			name = "@" + name
+		} else if item.Title != "" {
+			name = item.Title
+		} else {
+			name = "unknown"
+		}
+
+		summary := item.Summary
+		if summary == "" {
+			summary = "(no summary)"
+		} else {
+			summary = htmlutils.SanitizeHTML(summary)
+		}
+
+		marker := ""
+		if item.Importance < float64(importanceThreshold) {
+			marker = "⬇ "
+		}
+
+		sb.WriteString(fmt.Sprintf("• %s<code>%.2f</code> (rel %.2f) %s - %s\n",
+			marker,
+			item.Importance,
+			item.Relevance,
+			html.EscapeString(name),
+			summary,
+		))
 	}
 
 	b.reply(msg, sb.String())
@@ -1807,7 +1919,7 @@ func (b *Bot) handlePreview(msg *tgbotapi.Message) {
 	importanceThreshold := b.cfg.ImportanceThreshold
 
 	if err := b.database.GetSetting(ctx, SettingImportanceThreshold, &importanceThreshold); err != nil {
-		b.logger.Debug().Err(err).Msg("could not get importance threshold from DB")
+		b.logger.Debug().Err(err).Msg(MsgCouldNotGetImportanceThreshold)
 	}
 
 	now := time.Now()
@@ -2027,6 +2139,7 @@ func (b *Bot) handleHelp(msg *tgbotapi.Message) {
 		"🛠 <b>System</b> (<code>/system</code>)\n"+
 		"• <code>/channel stats</code> - Channel quality metrics (last 7 days)\n"+
 		"• <code>/ratings [days] [limit]</code> - Item rating summary\n"+
+		"• <code>/scores [hours] [limit]</code> - Importance score snapshot\n"+
 		"• <code>/system status</code> - Detailed system health\n"+
 		"• <code>/system settings</code> - View all configuration overrides\n"+
 		"• <code>/system errors</code> - Review processing failures\n"+

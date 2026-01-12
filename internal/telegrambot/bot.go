@@ -34,49 +34,51 @@ const (
 
 // Command names.
 const (
-	CmdStatus       = "status"
-	CmdSettings     = "settings"
-	CmdHistory      = "history"
-	CmdAdd          = "add"
-	CmdList         = "list"
-	CmdRemove       = "remove"
-	CmdPrompt       = "prompt"
-	CmdMinLength    = "min_length"
-	CmdMinLengthAlt = "minlength"
-	CmdSkipForwards = "skip_forwards"
-	CmdSkipFwdAlt   = "skipforwards"
-	CmdTarget       = "target"
-	CmdWindow       = "window"
-	CmdTopics       = "topics"
-	CmdDedup        = "dedup"
-	CmdRelevance    = "relevance"
-	CmdImportance   = "importance"
-	CmdLanguage     = "language"
-	CmdTone         = "tone"
-	CmdModel        = "model"
-	CmdSmartModel   = "smart_model"
+	CmdStatus        = "status"
+	CmdSettings      = "settings"
+	CmdHistory       = "history"
+	CmdAdd           = "add"
+	CmdList          = "list"
+	CmdRemove        = "remove"
+	CmdPrompt        = "prompt"
+	CmdMinLength     = "min_length"
+	CmdMinLengthAlt  = "minlength"
+	CmdSkipForwards  = "skip_forwards"
+	CmdSkipFwdAlt    = "skipforwards"
+	CmdTarget        = "target"
+	CmdWindow        = "window"
+	CmdTopics        = "topics"
+	CmdDedup         = "dedup"
+	CmdRelevance     = "relevance"
+	CmdImportance    = "importance"
+	CmdLanguage      = "language"
+	CmdTone          = "tone"
+	CmdModel         = "model"
+	CmdSmartModel    = "smart_model"
 	CmdSmartModelAlt = "smartmodel"
-	CmdEditor       = "editor"
-	CmdTiered       = "tiered"
-	CmdVision       = "vision"
-	CmdVisionAlt    = "visionrouting"
-	CmdConsolidated = "consolidated"
-	CmdEditorDetail = "editordetails"
-	CmdErrors       = "errors"
-	CmdRetry        = "retry"
-	CmdChannel      = "channel"
+	CmdEditor        = "editor"
+	CmdTiered        = "tiered"
+	CmdVision        = "vision"
+	CmdVisionAlt     = "visionrouting"
+	CmdConsolidated  = "consolidated"
+	CmdEditorDetail  = "editordetails"
+	CmdErrors        = "errors"
+	CmdRetry         = "retry"
+	CmdChannel       = "channel"
+	CmdScores        = "scores"
+	CmdRatings       = "ratings"
 )
 
 // Setting keys.
 const (
-	SettingFiltersSkipForwards       = "filters_skip_forwards"
-	SettingRelevanceThreshold        = "relevance_threshold"
-	SettingImportanceThreshold       = "importance_threshold"
-	SettingEditorEnabled             = "editor_enabled"
-	SettingTieredImportanceEnabled   = "tiered_importance_enabled"
-	SettingVisionRoutingEnabled      = "vision_routing_enabled"
+	SettingFiltersSkipForwards         = "filters_skip_forwards"
+	SettingRelevanceThreshold          = "relevance_threshold"
+	SettingImportanceThreshold         = "importance_threshold"
+	SettingEditorEnabled               = "editor_enabled"
+	SettingTieredImportanceEnabled     = "tiered_importance_enabled"
+	SettingVisionRoutingEnabled        = "vision_routing_enabled"
 	SettingConsolidatedClustersEnabled = "consolidated_clusters_enabled"
-	SettingEditorDetailedItems       = "editor_detailed_items"
+	SettingEditorDetailedItems         = "editor_detailed_items"
 )
 
 // Log field names.
@@ -93,8 +95,8 @@ const (
 
 // Error message formats.
 const (
-	ErrSendDigestPart      = "failed to send digest part %d to chat %d: %w"
-	ErrSendCallbackResp    = "failed to send callback response"
+	ErrSendDigestPart   = "failed to send digest part %d to chat %d: %w"
+	ErrSendCallbackResp = "failed to send callback response"
 )
 
 type Bot struct {
@@ -216,8 +218,10 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		b.handleRemoveChannel(msg)
 	case "feedback":
 		b.handleFeedback(msg)
-	case "ratings":
+	case CmdRatings:
 		b.handleRatings(msg)
+	case CmdScores:
+		b.handleScores(msg)
 	case CmdPrompt:
 		b.handlePrompt(msg)
 	case "channelcontext":
