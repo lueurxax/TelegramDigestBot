@@ -801,6 +801,18 @@ func (b *Bot) handleListChannels(msg *tgbotapi.Message) {
 
 		sb.WriteString(fmt.Sprintf("  Weight: <code>%s</code>\n", weightStr))
 
+		relevanceStr := WeightOverrideManual
+
+		if ch.AutoRelevanceEnabled {
+			if ch.RelevanceThresholdDelta != 0 {
+				relevanceStr = fmt.Sprintf("%s (%+.2f)", SubCmdAuto, ch.RelevanceThresholdDelta)
+			} else {
+				relevanceStr = SubCmdAuto
+			}
+		}
+
+		sb.WriteString(fmt.Sprintf("  Relevance: <code>%s</code>\n", relevanceStr))
+
 		if ch.Context != "" {
 			sb.WriteString(fmt.Sprintf("  <i>Context: %s</i>\n", html.EscapeString(ch.Context)))
 		}
