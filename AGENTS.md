@@ -30,6 +30,7 @@
 ## Commit & Pull Request Guidelines
 - History suggests short, imperative, sentence-case messages (e.g., "Fix deduplication...").
 - Keep commits focused on one logical change; avoid mixing refactors with behavior changes.
+- Run `make lint` before every commit to keep linting consistent.
 - PRs should include a concise summary, key config changes, and how to verify (`go test ./...` or specific modes).
 
 ## Security & Configuration Tips
