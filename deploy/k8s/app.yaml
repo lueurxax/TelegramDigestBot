@@ -58,7 +58,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: bot
-        image: ghcr.io/lueurxax/telegramdigestbot:2524705
+        image: ghcr.io/lueurxax/telegramdigestbot:b318d76
         command: ["./telegram-digest-bot"]
         args: ["--mode=bot"]
         envFrom:
@@ -106,7 +106,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: reader
-        image: ghcr.io/lueurxax/telegramdigestbot:2524705
+        image: ghcr.io/lueurxax/telegramdigestbot:b318d76
         command: ["./telegram-digest-bot"]
         args: ["--mode=reader"]
         envFrom:
@@ -161,7 +161,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: worker
-        image: ghcr.io/lueurxax/telegramdigestbot:2524705
+        image: ghcr.io/lueurxax/telegramdigestbot:b318d76
         command: ["./telegram-digest-bot"]
         args: ["--mode=worker"]
         envFrom:
@@ -209,7 +209,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: scheduler
-        image: ghcr.io/lueurxax/telegramdigestbot:2524705
+        image: ghcr.io/lueurxax/telegramdigestbot:b318d76
         command: ["./telegram-digest-bot"]
         args: ["--mode=digest"]
         envFrom:
