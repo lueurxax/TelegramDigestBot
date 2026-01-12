@@ -59,6 +59,7 @@ func (p *Pipeline) Run(ctx context.Context) error {
 	pollInterval, err := time.ParseDuration(p.cfg.WorkerPollInterval)
 	if err != nil {
 		p.logger.Error().Err(err).Str("interval", p.cfg.WorkerPollInterval).Msg("invalid worker poll interval, using 10s")
+
 		pollInterval = 10 * time.Second
 	}
 
@@ -108,77 +109,97 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 	}
 
 	var adsFilterEnabled bool
+
 	if err := p.database.GetSetting(ctx, "filters_ads", &adsFilterEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get filters_ads from DB")
 	}
 
-	var minLength = 20
+	minLength := 20
+
 	if err := p.database.GetSetting(ctx, "filters_min_length", &minLength); err != nil {
 		logger.Debug().Err(err).Msg("could not get filters_min_length from DB")
 	}
 
 	var adsKeywords []string
+
 	if err := p.database.GetSetting(ctx, "filters_ads_keywords", &adsKeywords); err != nil {
 		logger.Debug().Err(err).Msg("could not get filters_ads_keywords from DB")
 	}
 
 	var skipForwards bool
+
 	if err := p.database.GetSetting(ctx, "filters_skip_forwards", &skipForwards); err != nil {
 		logger.Debug().Err(err).Msg("could not get filters_skip_forwards from DB")
 	}
 
-	var filtersMode = FilterModeMixed
+	filtersMode := FilterModeMixed
+
 	if err := p.database.GetSetting(ctx, "filters_mode", &filtersMode); err != nil {
 		logger.Debug().Err(err).Msg("could not get filters_mode from DB")
 	}
 
-	var dedupMode = DedupModeSemantic
+	dedupMode := DedupModeSemantic
+
 	if err := p.database.GetSetting(ctx, "dedup_mode", &dedupMode); err != nil {
 		logger.Debug().Err(err).Msg("could not get dedup_mode from DB")
 	}
 
-	var topicsEnabled = true
+	topicsEnabled := true
+
 	if err := p.database.GetSetting(ctx, "topics_enabled", &topicsEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get topics_enabled from DB")
 	}
 
 	relevanceThreshold := p.cfg.RelevanceThreshold
+
 	if err := p.database.GetSetting(ctx, "relevance_threshold", &relevanceThreshold); err != nil {
 		logger.Debug().Err(err).Msg("could not get relevance_threshold from DB")
 	}
 
 	var digestLanguage string
+
 	if err := p.database.GetSetting(ctx, "digest_language", &digestLanguage); err != nil {
 		logger.Debug().Err(err).Msg("could not get digest_language from DB")
 	}
+
 	var llmModel string
+
 	if err := p.database.GetSetting(ctx, "llm_model", &llmModel); err != nil {
 		logger.Debug().Err(err).Msg("could not get llm_model from DB")
 	}
+
 	var smartLLMModel string
+
 	if err := p.database.GetSetting(ctx, "smart_llm_model", &smartLLMModel); err != nil {
 		logger.Debug().Err(err).Msg("could not get smart_llm_model from DB")
 	}
+
 	var visionRoutingEnabled bool
+
 	if err := p.database.GetSetting(ctx, "vision_routing_enabled", &visionRoutingEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get vision_routing_enabled from DB")
 	}
+
 	var tieredImportanceEnabled bool
+
 	if err := p.database.GetSetting(ctx, "tiered_importance_enabled", &tieredImportanceEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get tiered_importance_enabled from DB")
 	}
 
 	var digestTone string
+
 	if err := p.database.GetSetting(ctx, "digest_tone", &digestTone); err != nil {
 		logger.Debug().Err(err).Msg("could not get digest_tone from DB")
 	}
 
 	var normalizeScores bool
+
 	if err := p.database.GetSetting(ctx, "normalize_scores", &normalizeScores); err != nil {
 		logger.Debug().Err(err).Msg("could not get normalize_scores from DB")
 	}
 
 	relevanceGateEnabled := p.cfg.RelevanceGateEnabled
+
 	if err := p.database.GetSetting(ctx, "relevance_gate_enabled", &relevanceGateEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get relevance_gate_enabled from DB")
 	}
@@ -187,40 +208,50 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 
 	if normalizeScores {
 		var err error
+
 		channelStats, err = p.database.GetChannelStats(ctx)
 		if err != nil {
 			logger.Warn().Err(err).Msg("failed to fetch channel stats for normalization")
+
 			normalizeScores = false
 		}
 	}
 
 	var linkEnrichmentEnabled bool
+
 	if err := p.database.GetSetting(ctx, "link_enrichment_enabled", &linkEnrichmentEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get link_enrichment_enabled from DB")
+
 		linkEnrichmentEnabled = p.cfg.LinkEnrichmentEnabled
 	}
 
-	var maxLinks = p.cfg.MaxLinksPerMessage
+	maxLinks := p.cfg.MaxLinksPerMessage
+
 	if err := p.database.GetSetting(ctx, "max_links_per_message", &maxLinks); err != nil {
 		logger.Debug().Err(err).Msg("could not get max_links_per_message from DB")
 	}
 
-	var linkCacheTTLStr = p.cfg.LinkCacheTTL.String()
+	linkCacheTTLStr := p.cfg.LinkCacheTTL.String()
+
 	if err := p.database.GetSetting(ctx, "link_cache_ttl", &linkCacheTTLStr); err != nil {
 		logger.Debug().Err(err).Msg("could not get link_cache_ttl from DB")
 	}
+
 	linkCacheTTL, _ := time.ParseDuration(linkCacheTTLStr)
 
-	var tgLinkCacheTTLStr = p.cfg.TelegramLinkCacheTTL.String()
+	tgLinkCacheTTLStr := p.cfg.TelegramLinkCacheTTL.String()
+
 	if err := p.database.GetSetting(ctx, "tg_link_cache_ttl", &tgLinkCacheTTLStr); err != nil {
 		logger.Debug().Err(err).Msg("could not get tg_link_cache_ttl from DB")
 	}
+
 	tgLinkCacheTTL, _ := time.ParseDuration(tgLinkCacheTTLStr)
 
 	// 1. Filtering (MVP)
 	f := filters.New(filterList, adsFilterEnabled, minLength, adsKeywords, filtersMode)
 
 	var deduplicator dedup.Deduplicator
+
 	if dedupMode == DedupModeSemantic {
 		deduplicator = dedup.NewSemantic(p.database, p.cfg.SimilarityThreshold)
 	} else {
@@ -285,11 +316,13 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 
 		if dedupMode == DedupModeSemantic || topicsEnabled {
 			var err error
+
 			emb, err = p.llmClient.GetEmbedding(ctx, m.Text)
 			if err != nil {
 				logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to get embedding")
 				continue
 			}
+
 			embeddings[m.ID] = emb
 		}
 
@@ -368,11 +401,14 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 
 	// Group indices by model for Vision Routing
 	modelGroups := make(map[string][]int)
+
 	for i, c := range candidates {
 		model := llmModel
+
 		if visionRoutingEnabled && len(c.MediaData) > 0 && smartLLMModel != "" {
 			model = smartLLMModel
 		}
+
 		modelGroups[model] = append(modelGroups[model], i)
 	}
 
@@ -383,17 +419,21 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		}
 
 		llmStart := time.Now()
+
 		groupResults, err := p.llmClient.ProcessBatch(ctx, groupCandidates, digestLanguage, model, digestTone)
 		if err != nil {
 			logger.Error().Err(err).Str("model", model).Msg("LLM batch processing failed")
 			observability.PipelineProcessed.WithLabelValues(StatusError).Add(float64(len(indices)))
+
 			for _, idx := range indices {
 				errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
 				_ = p.database.SaveItemError(ctx, candidates[idx].ID, errJSON)
 				_ = p.database.MarkAsProcessed(ctx, candidates[idx].ID)
 			}
+
 			return err
 		}
+
 		observability.LLMRequestDuration.WithLabelValues(model).Observe(time.Since(llmStart).Seconds())
 
 		if len(groupResults) != len(indices) {
@@ -412,20 +452,26 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 
 	// 2.1 Tiered Importance Analysis
 	if tieredImportanceEnabled && smartLLMModel != "" {
-		var tieredIndices []int
-		var tieredCandidates []llm.MessageInput
-		for i, res := range results {
-			if res.ImportanceScore > 0.8 && modelUsed[i] != smartLLMModel {
+		var (
+			tieredIndices    []int
+			tieredCandidates []llm.MessageInput
+		)
+
+		for i, res := range results { 			if res.ImportanceScore > 0.8 && modelUsed[i] != smartLLMModel {
 				tieredIndices = append(tieredIndices, i)
 				tieredCandidates = append(tieredCandidates, candidates[i])
 			}
 		}
+
 		if len(tieredCandidates) > 0 {
 			logger.Info().Int("count", len(tieredCandidates)).Msg("Performing tiered importance analysis with smart model")
+
 			llmStart := time.Now()
+
 			tieredResults, err := p.llmClient.ProcessBatch(ctx, tieredCandidates, digestLanguage, smartLLMModel, digestTone)
 			if err == nil && len(tieredResults) == len(tieredCandidates) {
 				observability.LLMRequestDuration.WithLabelValues(smartLLMModel).Observe(time.Since(llmStart).Seconds())
+
 				for j, idx := range tieredIndices {
 					results[idx] = tieredResults[j]
 				}
@@ -444,11 +490,13 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 			if results[i].Summary == "" {
 				continue
 			}
+
 			stats, ok := channelStats[candidates[i].ChannelID]
 			if ok {
 				if stats.StddevRelevance > 0.01 {
 					results[i].RelevanceScore = (results[i].RelevanceScore - stats.AvgRelevance) / stats.StddevRelevance
 				}
+
 				if stats.StddevImportance > 0.01 {
 					results[i].ImportanceScore = (results[i].ImportanceScore - stats.AvgImportance) / stats.StddevImportance
 				}
@@ -459,14 +507,17 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 	// 4. Store results
 	readyCount := 0
 	rejectedCount := 0
+
 	for i, res := range results {
 		// If summary is empty, it means LLM failed to process this specific item
 		if res.Summary == "" {
 			logger.Warn().Str("msg_id", candidates[i].ID).Int("index", i).Msg("LLM summary empty for item, marking as error")
 			observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
+
 			errJSON, _ := json.Marshal(map[string]string{"error": "empty summary from LLM"})
 			_ = p.database.SaveItemError(ctx, candidates[i].ID, errJSON)
 			_ = p.database.MarkAsProcessed(ctx, candidates[i].ID)
+
 			continue
 		}
 
@@ -478,6 +529,7 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		} else if channelWeight > 2.0 {
 			channelWeight = 2.0
 		}
+
 		importance := res.ImportanceScore * channelWeight
 		// Cap at 1.0 to maintain valid range
 		if importance > 1.0 {
@@ -485,10 +537,11 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		}
 
 		if !p.hasUniqueInfo(res.Summary) {
-			importance = importance - 0.2
+			importance -= 0.2
 			if importance < 0 {
 				importance = 0
 			}
+
 			logger.Debug().Str("msg_id", candidates[i].ID).Msg("Applied penalty for lack of unique info")
 		}
 
@@ -502,12 +555,15 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 			Status:          StatusReady,
 		}
 		itemRelThreshold := relevanceThreshold
+
 		if candidates[i].RelevanceThreshold > 0 {
 			itemRelThreshold = candidates[i].RelevanceThreshold
 		}
+
 		if candidates[i].AutoRelevanceEnabled {
 			itemRelThreshold += candidates[i].RelevanceThresholdDelta
 		}
+
 		if itemRelThreshold < 0 {
 			itemRelThreshold = 0
 		} else if itemRelThreshold > 1 {
@@ -517,23 +573,28 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		if res.RelevanceScore < itemRelThreshold {
 			item.Status = StatusRejected
 			rejectedCount++
+
 			observability.PipelineProcessed.WithLabelValues(StatusRejected).Inc()
 		} else {
 			readyCount++
+
 			observability.PipelineProcessed.WithLabelValues(StatusReady).Inc()
 		}
 
 		if err := p.database.SaveItem(ctx, item); err != nil {
 			logger.Error().Str("msg_id", candidates[i].ID).Err(err).Msg("failed to save item")
 			observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
+
 			errJSON, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("failed to save item: %v", err)})
 			_ = p.database.SaveItemError(ctx, candidates[i].ID, errJSON)
 			_ = p.database.MarkAsProcessed(ctx, candidates[i].ID)
+
 			continue
 		}
 
 		// Save embedding
 		emb := embeddings[candidates[i].ID]
+
 		if len(emb) > 0 {
 			if err := p.database.SaveEmbedding(ctx, item.ID, emb); err != nil {
 				logger.Error().Str("item_id", item.ID).Err(err).Msg("failed to save embedding")

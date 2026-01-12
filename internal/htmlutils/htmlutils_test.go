@@ -301,6 +301,7 @@ func TestSplitHTML(t *testing.T) {
 
 			if len(parts) != tt.wantParts {
 				t.Errorf("SplitHTML() got %d parts, want %d. Parts:\n", len(parts), tt.wantParts)
+
 				for i, p := range parts {
 					t.Errorf("  Part %d (%d chars): %q\n", i, len(p), p)
 				}
@@ -333,6 +334,7 @@ func TestSplitHTML(t *testing.T) {
 				// Count opening and closing tags
 				openCount := strings.Count(p, "<b>") + strings.Count(p, "<i>") +
 					strings.Count(p, "<blockquote>") + strings.Count(p, "<a ")
+
 				closeCount := strings.Count(p, "</b>") + strings.Count(p, "</i>") +
 					strings.Count(p, "</blockquote>") + strings.Count(p, "</a>")
 				if openCount != closeCount {
@@ -372,9 +374,11 @@ func TestSplitHTMLItemBoundaryFlush(t *testing.T) {
 	if strings.Contains(parts[0], "BBBB") {
 		t.Errorf("First part should not include second item: %q", parts[0])
 	}
+
 	if !strings.Contains(parts[1], "BBBB") {
 		t.Errorf("Second part missing second item: %q", parts[1])
 	}
+
 	if strings.HasPrefix(parts[1], "\n") {
 		t.Errorf("Second part should not start with a newline: %q", parts[1])
 	}

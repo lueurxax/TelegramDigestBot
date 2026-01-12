@@ -59,6 +59,7 @@ func (db *DB) GetUnprocessedMessages(ctx context.Context, limit int) ([]RawMessa
 		if !m.ChannelImportanceWeight.Valid || weight == 0 {
 			weight = 1.0
 		}
+
 		messages[i] = RawMessage{
 			ID:                      fromUUID(m.ID),
 			ChannelID:               fromUUID(m.ChannelID),
@@ -83,6 +84,7 @@ func (db *DB) GetUnprocessedMessages(ctx context.Context, limit int) ([]RawMessa
 			IsForward:               m.IsForward,
 		}
 	}
+
 	return messages, nil
 }
 
@@ -95,10 +97,12 @@ func (db *DB) GetRecentMessagesForChannel(ctx context.Context, channelID string,
 	if err != nil {
 		return nil, err
 	}
+
 	res := make([]string, len(rows))
 	for i, r := range rows {
 		res[i] = r.Text.String
 	}
+
 	return res, nil
 }
 
@@ -130,7 +134,9 @@ func (db *DB) CheckAndMarkDiscoveriesExtracted(ctx context.Context, channelID st
 		if err.Error() == "no rows in result set" {
 			return false, nil
 		}
+
 		return false, err
 	}
+
 	return true, nil
 }

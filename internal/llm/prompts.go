@@ -121,6 +121,7 @@ func (c *openaiClient) loadPrompt(ctx context.Context, baseKey string, fallback 
 			}
 		}
 	}
+
 	return fallback, version
 }
 
@@ -137,8 +138,10 @@ func applyPromptTokens(prompt string, langInstruction string, count int) string 
 	if strings.Contains(withCount, promptLangPlaceholder) {
 		return strings.ReplaceAll(withCount, promptLangPlaceholder, langInstruction)
 	}
+
 	if langInstruction != "" {
 		return strings.TrimSpace(withCount + " " + strings.TrimSpace(langInstruction))
 	}
+
 	return withCount
 }

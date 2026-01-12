@@ -19,6 +19,7 @@ func (db *DB) SaveSetting(ctx context.Context, key string, value interface{}) er
 func (db *DB) SaveSettingWithHistory(ctx context.Context, key string, value interface{}, changedBy int64) error {
 	// Get old value
 	var oldVal []byte
+
 	rawOld, err := db.Queries.GetSetting(ctx, key)
 	if err == nil {
 		oldVal = rawOld
@@ -28,6 +29,7 @@ func (db *DB) SaveSettingWithHistory(ctx context.Context, key string, value inte
 	if err != nil {
 		return fmt.Errorf("failed to marshal setting value: %w", err)
 	}
+
 	if err := db.Queries.SaveSetting(ctx, sqlc.SaveSettingParams{
 		Key:   key,
 		Value: val,
@@ -54,11 +56,14 @@ func (db *DB) GetSetting(ctx context.Context, key string, target interface{}) er
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
+
 		return fmt.Errorf("failed to get setting from DB: %w", err)
 	}
+
 	if err := json.Unmarshal(val, target); err != nil {
 		return fmt.Errorf("failed to unmarshal setting value: %w", err)
 	}
+
 	return nil
 }
 
@@ -69,6 +74,7 @@ func (db *DB) DeleteSetting(ctx context.Context, key string) error {
 func (db *DB) DeleteSettingWithHistory(ctx context.Context, key string, changedBy int64) error {
 	// Get old value
 	var oldVal []byte
+
 	rawOld, err := db.Queries.GetSetting(ctx, key)
 	if err == nil {
 		oldVal = rawOld
@@ -104,7 +110,9 @@ func (db *DB) GetRecentSettingHistory(ctx context.Context, limit int) ([]Setting
 	if err != nil {
 		return nil, fmt.Errorf("failed to get setting history: %w", err)
 	}
+
 	res := make([]SettingHistory, len(rows))
+
 	for i, row := range rows {
 		res[i] = SettingHistory{
 			Key:       row.Key,
@@ -114,6 +122,7 @@ func (db *DB) GetRecentSettingHistory(ctx context.Context, limit int) ([]Setting
 			ChangedAt: row.ChangedAt.Time,
 		}
 	}
+
 	return res, nil
 }
 
@@ -122,13 +131,18 @@ func (db *DB) GetAllSettings(ctx context.Context) (map[string]interface{}, error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all settings from DB: %w", err)
 	}
+
 	res := make(map[string]interface{})
+
 	for _, row := range rows {
 		var val interface{}
+
 		if err := json.Unmarshal(row.Value, &val); err != nil {
 			continue
 		}
+
 		res[row.Key] = val
 	}
+
 	return res, nil
 }

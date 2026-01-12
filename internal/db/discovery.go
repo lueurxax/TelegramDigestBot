@@ -140,6 +140,7 @@ func (db *DB) GetPendingDiscoveries(ctx context.Context, limit int) ([]Discovere
 			EngagementScore: float64(r.EngagementScore.Float32),
 		}
 	}
+
 	return result, nil
 }
 
@@ -176,6 +177,7 @@ func (db *DB) GetDiscoveryStats(ctx context.Context) (*DiscoveryStats, error) {
 
 	// TotalDiscoveries is interface{} from COALESCE(SUM(...), 0)
 	var totalDiscoveries int64
+
 	switch v := row.TotalDiscoveries.(type) {
 	case int64:
 		totalDiscoveries = v
@@ -216,6 +218,7 @@ func (db *DB) GetDiscoveriesNeedingResolution(ctx context.Context, limit int) ([
 			AccessHash: r.AccessHash,
 		}
 	}
+
 	return result, nil
 }
 
@@ -253,6 +256,7 @@ func (db *DB) GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, lim
 			InviteLink: r.InviteLink.String,
 		}
 	}
+
 	return result, nil
 }
 

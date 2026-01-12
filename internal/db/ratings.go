@@ -74,5 +74,6 @@ func (db *DB) GetItemRatingSummary(ctx context.Context, since time.Time) ([]Rati
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+
 	return res, nil
 }

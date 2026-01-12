@@ -57,6 +57,7 @@ func New(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
 	if cfg.LLMAPIKey == "" || cfg.LLMAPIKey == "mock" {
 		return &mockClient{cfg: cfg}
 	}
+
 	return NewOpenAI(cfg, store, logger)
 }
 
@@ -67,6 +68,7 @@ func (c *mockClient) GetEmbedding(ctx context.Context, text string) ([]float32, 
 	for i := 0; i < len(emb); i++ {
 		emb[i] = 0.1
 	}
+
 	return emb, nil
 }
 
@@ -76,6 +78,7 @@ func (c *mockClient) ProcessBatch(ctx context.Context, messages []MessageInput, 
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("Summarize and score these Telegram messages in JSON format (target language: %s, model: %s, tone: %s):\n", targetLanguage, model, tone))
+
 	for i, m := range messages {
 		sb.WriteString(fmt.Sprintf("%d. [Context: %v] %s\n", i, m.Context, m.Text))
 	}
@@ -109,5 +112,6 @@ func (c *mockClient) GenerateClusterTopic(ctx context.Context, items []db.Item, 
 	if len(items) > 0 {
 		return items[0].Topic, nil
 	}
+
 	return DefaultTopic, nil
 }

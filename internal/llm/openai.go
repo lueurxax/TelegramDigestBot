@@ -68,12 +68,14 @@ func (c *openaiClient) checkCircuit() error {
 func (c *openaiClient) recordSuccess() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.consecutiveFailures = 0
 }
 
 func (c *openaiClient) recordFailure() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	c.consecutiveFailures++
 	if c.consecutiveFailures >= circuitBreakerThreshold {
 		c.circuitOpenUntil = time.Now().Add(circuitBreakerTimeout)
@@ -88,26 +90,33 @@ func (c *openaiClient) GetEmbedding(ctx context.Context, text string) ([]float32
 	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
+
 	if err := c.rateLimiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf(errRateLimiter, err)
 	}
+
 	resp, err := c.client.CreateEmbeddings(ctx, openai.EmbeddingRequest{
 		Input: []string{text},
 		Model: openai.SmallEmbedding3,
 	})
 	if err != nil {
 		c.recordFailure()
+
 		return nil, fmt.Errorf("failed to create embeddings: %w", err)
 	}
+
 	c.recordSuccess()
+
 	return resp.Data[0].Embedding, nil
 }
 
 func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage string, model string, tone string) ([]BatchResult, error) {
 	langInstruction := ""
+
 	if targetLanguage != "" {
 		langInstruction = fmt.Sprintf(" IMPORTANT: Return all topics and summaries in %s language.", targetLanguage)
 	}
+
 	if tone != "" {
 		langInstruction += fmt.Sprintf(" Tone: %s.", getToneInstruction(tone))
 	}
@@ -115,6 +124,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	if model == "" {
 		model = c.cfg.LLMModel
 	}
+
 	if model == "" {
 		model = openai.GPT4oMini
 	}
@@ -134,24 +144,31 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 		if m.ChannelTitle != "" {
 			textPart += fmt.Sprintf("(Source Channel: %s) ", m.ChannelTitle)
 		}
+
 		if m.ChannelContext != "" {
 			textPart += fmt.Sprintf("(Channel Context: %s) ", m.ChannelContext)
 		}
+
 		if m.ChannelDescription != "" {
 			textPart += fmt.Sprintf("(Channel Description: %s) ", m.ChannelDescription)
 		}
+
 		if m.ChannelCategory != "" {
 			textPart += fmt.Sprintf("(Channel Category: %s) ", m.ChannelCategory)
 		}
+
 		if m.ChannelTone != "" {
 			textPart += fmt.Sprintf("(Channel Tone: %s) ", m.ChannelTone)
 		}
+
 		if m.ChannelUpdateFreq != "" {
 			textPart += fmt.Sprintf("(Channel Frequency: %s) ", m.ChannelUpdateFreq)
 		}
+
 		if len(m.Context) > 0 {
 			textPart += fmt.Sprintf("[BACKGROUND CONTEXT - DO NOT SUMMARIZE: %s] ", truncate(strings.Join(m.Context, " | "), 500))
 		}
+
 		if len(m.ResolvedLinks) > 0 {
 			textPart += "[Referenced Content: "
 
@@ -165,8 +182,10 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 					textPart += fmt.Sprintf("[Web] %s Title: %s Content: %s ", link.Domain, link.Title, truncate(link.Content, 1000))
 				}
 			}
+
 			textPart += "] "
 		}
+
 		textPart += ">>> MESSAGE TO SUMMARIZE <<< " + m.Text + "\n"
 
 		parts = append(parts, openai.ChatMessagePart{
@@ -190,9 +209,11 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	if err := c.checkCircuit(); err != nil {
 		return nil, err
 	}
+
 	if err := c.rateLimiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf(errRateLimiter, err)
 	}
+
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: model,
 		Messages: []openai.ChatCompletionMessage{
@@ -215,10 +236,12 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	content := resp.Choices[0].Message.Content
 	c.logger.Debug().Str("content", content).Msg("LLM response")
 
-	var results []BatchResult
-	var wrapper struct {
-		Results []BatchResult `json:"results"`
-	}
+	var (
+		results []BatchResult
+		wrapper struct {
+			Results []BatchResult `json:"results"`
+		}
+	)
 
 	if err := json.Unmarshal([]byte(content), &wrapper); err == nil && len(wrapper.Results) > 0 {
 		results = wrapper.Results
@@ -253,6 +276,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 		if res.Index != 0 {
 			allZeroIndex = false
 		}
+
 		if res.Index >= 0 && res.Index < len(messages) {
 			if !foundIndices[res.Index] {
 				finalResults[res.Index] = res
@@ -269,6 +293,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 
 		// Build a map of channel title to message indices (there may be multiple messages from same channel)
 		channelToIndices := make(map[string][]int)
+
 		for i, m := range messages {
 			if m.ChannelTitle != "" {
 				channelToIndices[m.ChannelTitle] = append(channelToIndices[m.ChannelTitle], i)
@@ -286,11 +311,13 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 				if usedResults[j] {
 					continue
 				}
+
 				if res.SourceChannel != "" && res.SourceChannel == m.ChannelTitle {
 					aligned[i] = res
 					aligned[i].Index = i
 					usedResults[j] = true
 					matchedByChannel++
+
 					break
 				}
 			}
@@ -300,6 +327,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 		if matchedByChannel > len(messages)/2 {
 			// Fill any remaining unmatched slots with unmatched results in order
 			unmatchedResultIdx := 0
+
 			for i := range aligned {
 				if aligned[i].Summary == "" {
 					for unmatchedResultIdx < len(results) {
@@ -329,6 +357,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 
 		// Source channel matching didn't work well, fall back to order
 		c.logger.Warn().Int("matched", matchedByChannel).Int("total", len(messages)).Msg("Source channel matching insufficient, assuming results are in order (potential misalignment)")
+
 		return results, nil
 	}
 
@@ -352,16 +381,20 @@ func (c *openaiClient) GenerateNarrative(ctx context.Context, items []db.Item, t
 	}
 
 	langInstruction := ""
+
 	if targetLanguage != "" {
 		langInstruction = fmt.Sprintf(" IMPORTANT: Write the narrative in %s language.", targetLanguage)
 	}
+
 	if tone != "" {
 		langInstruction += fmt.Sprintf(" Tone: %s.", getToneInstruction(tone))
 	}
 
 	var sb strings.Builder
+
 	promptTemplate, _ := c.loadPrompt(ctx, promptKeyNarrative, defaultNarrativePrompt)
 	sb.WriteString(applyPromptTokens(promptTemplate, langInstruction, len(items)))
+
 	for i, item := range items {
 		sb.WriteString(fmt.Sprintf("[%d] Topic: %s - %s\n", i+1, item.Topic, item.Summary))
 	}
@@ -369,9 +402,11 @@ func (c *openaiClient) GenerateNarrative(ctx context.Context, items []db.Item, t
 	if err := c.checkCircuit(); err != nil {
 		return "", err
 	}
+
 	if err := c.rateLimiter.Wait(ctx); err != nil {
 		return "", fmt.Errorf(errRateLimiter, err)
 	}
+
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: model,
 		Messages: []openai.ChatCompletionMessage{
@@ -383,8 +418,10 @@ func (c *openaiClient) GenerateNarrative(ctx context.Context, items []db.Item, t
 	})
 	if err != nil {
 		c.recordFailure()
+
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
+
 	c.recordSuccess()
 
 	return resp.Choices[0].Message.Content, nil
@@ -400,16 +437,20 @@ func (c *openaiClient) SummarizeCluster(ctx context.Context, items []db.Item, ta
 	}
 
 	langInstruction := ""
+
 	if targetLanguage != "" {
 		langInstruction = fmt.Sprintf(" IMPORTANT: Write the summary in %s language.", targetLanguage)
 	}
+
 	if tone != "" {
 		langInstruction += fmt.Sprintf(" Tone: %s.", getToneInstruction(tone))
 	}
 
 	var sb strings.Builder
+
 	promptTemplate, _ := c.loadPrompt(ctx, promptKeyClusterSummary, defaultClusterSummaryPrompt)
 	sb.WriteString(applyPromptTokens(promptTemplate, langInstruction, len(items)))
+
 	for i, item := range items {
 		sb.WriteString(fmt.Sprintf("[%d] %s\n", i+1, item.Summary))
 	}
@@ -417,9 +458,11 @@ func (c *openaiClient) SummarizeCluster(ctx context.Context, items []db.Item, ta
 	if err := c.checkCircuit(); err != nil {
 		return "", err
 	}
+
 	if err := c.rateLimiter.Wait(ctx); err != nil {
 		return "", fmt.Errorf(errRateLimiter, err)
 	}
+
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: model,
 		Messages: []openai.ChatCompletionMessage{
@@ -431,8 +474,10 @@ func (c *openaiClient) SummarizeCluster(ctx context.Context, items []db.Item, ta
 	})
 	if err != nil {
 		c.recordFailure()
+
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
+
 	c.recordSuccess()
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
@@ -448,13 +493,16 @@ func (c *openaiClient) GenerateClusterTopic(ctx context.Context, items []db.Item
 	}
 
 	langInstruction := ""
+
 	if targetLanguage != "" {
 		langInstruction = fmt.Sprintf(" IMPORTANT: Write the topic in %s language.", targetLanguage)
 	}
 
 	var sb strings.Builder
+
 	promptTemplate, _ := c.loadPrompt(ctx, promptKeyClusterTopic, defaultClusterTopicPrompt)
 	sb.WriteString(applyPromptTokens(promptTemplate, langInstruction, len(items)))
+
 	for i, item := range items {
 		sb.WriteString(fmt.Sprintf("[%d] %s\n", i+1, item.Summary))
 	}
@@ -462,9 +510,11 @@ func (c *openaiClient) GenerateClusterTopic(ctx context.Context, items []db.Item
 	if err := c.checkCircuit(); err != nil {
 		return "", err
 	}
+
 	if err := c.rateLimiter.Wait(ctx); err != nil {
 		return "", fmt.Errorf(errRateLimiter, err)
 	}
+
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: model,
 		Messages: []openai.ChatCompletionMessage{
@@ -476,8 +526,10 @@ func (c *openaiClient) GenerateClusterTopic(ctx context.Context, items []db.Item
 	})
 	if err != nil {
 		c.recordFailure()
+
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
+
 	c.recordSuccess()
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
@@ -500,6 +552,8 @@ func truncate(s string, max int) string {
 	if utf8.RuneCountInString(s) <= max {
 		return s
 	}
+
 	runes := []rune(s)
+
 	return string(runes[:max]) + "..."
 }

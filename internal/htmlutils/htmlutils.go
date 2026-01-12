@@ -137,6 +137,7 @@ const (
 func StripItemMarkers(text string) string {
 	text = strings.ReplaceAll(text, ItemStart, "")
 	text = strings.ReplaceAll(text, ItemEnd, "")
+
 	return text
 }
 
@@ -163,9 +164,12 @@ var splitBefore = []string{
 // It tries to split at semantic boundaries (sections, paragraphs) before falling back to lines.
 // The limit is in UTF-16 code units, matching Telegram's message length counting.
 func SplitHTML(text string, limit int) []string {
-	var parts []string
-	var current strings.Builder
-	var openTags []string
+	var (
+		parts    []string
+		current  strings.Builder
+		openTags []string
+	)
+
 	currentLen := 0 // UTF-16 code units
 
 	type token struct {
@@ -173,6 +177,7 @@ func SplitHTML(text string, limit int) []string {
 		isTag    bool
 		isMarker bool // Special marker tokens (not counted, used for split priority)
 	}
+
 	var tokens []token
 
 	// Tokenize: find all HTML tags and item markers
@@ -183,11 +188,14 @@ func SplitHTML(text string, limit int) []string {
 		if strings.HasPrefix(remaining, ItemStart) {
 			tokens = append(tokens, token{val: ItemStart, isTag: true, isMarker: true})
 			remaining = remaining[len(ItemStart):]
+
 			continue
 		}
+
 		if strings.HasPrefix(remaining, ItemEnd) {
 			tokens = append(tokens, token{val: ItemEnd, isTag: true, isMarker: true})
 			remaining = remaining[len(ItemEnd):]
+
 			continue
 		}
 
@@ -196,6 +204,7 @@ func SplitHTML(text string, limit int) []string {
 		if tagMatch != nil && tagMatch[0] == 0 {
 			tokens = append(tokens, token{val: remaining[:tagMatch[1]], isTag: true})
 			remaining = remaining[tagMatch[1]:]
+
 			continue
 		}
 
@@ -204,10 +213,12 @@ func SplitHTML(text string, limit int) []string {
 		if tagMatch != nil {
 			nextTag = tagMatch[0]
 		}
+
 		nextStart := strings.Index(remaining, ItemStart)
 		if nextStart >= 0 && nextStart < nextTag {
 			nextTag = nextStart
 		}
+
 		nextEnd := strings.Index(remaining, ItemEnd)
 		if nextEnd >= 0 && nextEnd < nextTag {
 			nextTag = nextEnd
@@ -226,11 +237,13 @@ func SplitHTML(text string, limit int) []string {
 
 	// Count total UTF-16 code units in text content
 	totalLen := 0
+
 	for _, t := range tokens {
 		if !t.isTag {
 			totalLen += utf16Len(t.val)
 		}
 	}
+
 	if totalLen <= limit {
 		return []string{text}
 	}
@@ -239,10 +252,13 @@ func SplitHTML(text string, limit int) []string {
 		if current.Len() == 0 {
 			return
 		}
+
 		tagsLen := 0
+
 		for _, tag := range openTags {
 			tagsLen += len(tag)
 		}
+
 		if current.Len() <= tagsLen {
 			return
 		}
@@ -250,18 +266,22 @@ func SplitHTML(text string, limit int) []string {
 		content := current.String()
 		// Trim trailing whitespace before closing tags
 		content = strings.TrimRight(content, " \t")
+
 		// Close all open tags in reverse order
 		for i := len(openTags) - 1; i >= 0; i-- {
 			content += "</" + GetTagName(openTags[i]) + ">"
 		}
+
 		parts = append(parts, content)
 
 		current.Reset()
+
 		currentLen = 0
 
 		// Filter openTags: remove noReopenTags (they were closed and won't be reopened)
 		// This prevents closing them again in subsequent parts
 		var newOpenTags []string
+
 		for _, tag := range openTags {
 			tagName := strings.ToLower(GetTagName(tag))
 			if !noReopenTags[tagName] {
@@ -269,6 +289,7 @@ func SplitHTML(text string, limit int) []string {
 				current.WriteString(tag)
 			}
 		}
+
 		openTags = newOpenTags
 	}
 
@@ -328,20 +349,24 @@ func SplitHTML(text string, limit int) []string {
 					if noReopenTags[tagName] {
 						// Check if this tag is currently open
 						found := false
+
 						for _, ot := range openTags {
 							if strings.ToLower(GetTagName(ot)) == tagName {
 								found = true
 								break
 							}
 						}
+
 						if !found {
 							// This closing tag was already emitted in a previous flush, skip it
 							continue
 						}
 					}
 				}
+
 				openTags = updateOpenTags(t.val, openTags)
 			}
+
 			current.WriteString(t.val)
 			// Prefer splitting at ItemEnd boundaries when approaching limit
 			if t.val == ItemEnd {
@@ -355,22 +380,26 @@ func SplitHTML(text string, limit int) []string {
 						flush()
 						// Skip the newline from next token
 						tokens[i+1] = token{val: strings.TrimPrefix(nextToken.val, "\n"), isTag: false}
+
 						continue
 					}
 				}
 			}
 		} else {
 			remaining := t.val
+
 			for len(remaining) > 0 {
 				canTake := limit - currentLen
 				if canTake <= 0 {
 					flush()
+
 					canTake = limit
 				}
 
 				remainingLen := utf16Len(remaining)
 				if remainingLen <= canTake {
 					current.WriteString(remaining)
+
 					currentLen += remainingLen
 					remaining = ""
 				} else {
@@ -390,16 +419,20 @@ func SplitHTML(text string, limit int) []string {
 			}
 		}
 	}
+
 	flush()
+
 	return parts
 }
 
 func GetTagName(fullTag string) string {
 	tag := strings.Trim(fullTag, "<>")
+
 	parts := strings.Fields(tag)
 	if len(parts) > 0 {
 		return strings.TrimPrefix(parts[0], "/")
 	}
+
 	return ""
 }
 
@@ -412,6 +445,7 @@ var noReopenTags = map[string]bool{
 
 func updateOpenTags(line string, openTags []string) []string {
 	matches := tagRegex.FindAllStringSubmatch(line, -1)
+
 	for _, match := range matches {
 		isClosing := match[1] == "/"
 		tagName := strings.ToLower(match[2])
@@ -430,5 +464,6 @@ func updateOpenTags(line string, openTags []string) []string {
 			openTags = append(openTags, match[0])
 		}
 	}
+
 	return openTags
 }

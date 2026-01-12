@@ -36,6 +36,7 @@ func main() {
 	ignoreImportance := flag.Bool("ignore-importance", false, "Ignore importance score threshold")
 	minPrecision := flag.Float64("min-precision", -1, "Fail if precision is below this value (disabled if <0)")
 	maxNoiseRate := flag.Float64("max-noise-rate", -1, "Fail if noise rate is above this value (disabled if <0)")
+
 	flag.Parse()
 
 	f, err := os.Open(*inputPath)
@@ -48,6 +49,7 @@ func main() {
 	stats := evalStats{}
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -67,6 +69,7 @@ func main() {
 		}
 
 		stats.total++
+
 		switch label {
 		case "good":
 			stats.goodCount++
@@ -103,10 +106,12 @@ func main() {
 
 	precision := ratio(stats.tp, stats.tp+stats.fp)
 	noiseRate := ratio(stats.fp, stats.tp+stats.fp)
+
 	if *minPrecision >= 0 && precision < *minPrecision {
 		fmt.Fprintf(os.Stderr, "precision %.3f is below threshold %.3f\n", precision, *minPrecision)
 		os.Exit(1)
 	}
+
 	if *maxNoiseRate >= 0 && noiseRate > *maxNoiseRate {
 		fmt.Fprintf(os.Stderr, "noise rate %.3f is above threshold %.3f\n", noiseRate, *maxNoiseRate)
 		os.Exit(1)
@@ -118,6 +123,7 @@ func normalizeLabel(label string, rating string) string {
 	if val == "" {
 		val = strings.ToLower(strings.TrimSpace(rating))
 	}
+
 	switch val {
 	case "good", "bad", "irrelevant":
 		return val
@@ -136,11 +142,13 @@ func printSummary(stats evalStats, relevanceThreshold, importanceThreshold float
 	fmt.Printf("Evaluation Summary\n")
 	fmt.Printf("  Records: %d (skipped: %d)\n", stats.total, stats.skipped)
 	fmt.Printf("  Labels: good=%d bad=%d irrelevant=%d\n", stats.goodCount, stats.badCount, stats.irrelevantCount)
+
 	if ignoreImportance {
 		fmt.Printf("  Thresholds: relevance>=%.2f (importance ignored)\n", relevanceThreshold)
 	} else {
 		fmt.Printf("  Thresholds: relevance>=%.2f importance>=%.2f\n", relevanceThreshold, importanceThreshold)
 	}
+
 	fmt.Printf("  Confusion: TP=%d FP=%d FN=%d TN=%d\n", stats.tp, stats.fp, stats.fn, stats.tn)
 	fmt.Printf("  Precision: %.3f\n", precision)
 	fmt.Printf("  Recall: %.3f\n", recall)
@@ -152,5 +160,6 @@ func ratio(numerator, denominator int) float64 {
 	if denominator == 0 {
 		return 0
 	}
+
 	return float64(numerator) / float64(denominator)
 }

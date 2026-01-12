@@ -36,35 +36,6 @@ type ResolvedLink struct {
 	ExpiresAt       time.Time
 }
 
-// linkCacheRow is an interface for sqlc-generated link cache result types
-type linkCacheRow interface {
-	getID() pgtype.UUID
-	getUrl() string
-	getDomain() string
-	getLinkType() string
-	getTitle() pgtype.Text
-	getContent() pgtype.Text
-	getAuthor() pgtype.Text
-	getPublishedAt() pgtype.Timestamptz
-	getDescription() pgtype.Text
-	getImageUrl() pgtype.Text
-	getWordCount() pgtype.Int4
-	getChannelUsername() pgtype.Text
-	getChannelTitle() pgtype.Text
-	getChannelID() pgtype.Int8
-	getMessageID() pgtype.Int8
-	getViews() pgtype.Int4
-	getForwards() pgtype.Int4
-	getHasMedia() pgtype.Bool
-	getMediaType() pgtype.Text
-	getStatus() string
-	getErrorMessage() pgtype.Text
-	getLanguage() pgtype.Text
-	getResolvedAt() pgtype.Timestamptz
-	getCreatedAt() pgtype.Timestamptz
-	getExpiresAt() pgtype.Timestamptz
-}
-
 func resolvedLinkFromRow(
 	id pgtype.UUID,
 	url, domain, linkType string,

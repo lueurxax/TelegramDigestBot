@@ -29,8 +29,9 @@ func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent
 	// Extract using readability (Firefox Reader Mode algorithm)
 	article, err := readability.FromReader(bytes.NewReader(htmlBytes), u)
 	if err != nil {
-		// Fall back to meta tags only
+		// Fall back to meta tags only - readability failure is not fatal
 		meta := extractMetaTags(htmlBytes)
+
 		return &WebContent{
 			Title:       meta.Title,
 			Description: meta.Description,
@@ -95,6 +96,7 @@ func extractMetaTags(htmlBytes []byte) MetaTags {
 				}
 			}
 		}
+
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			traverse(c)
 		}
@@ -126,6 +128,7 @@ func coalesce(strs ...string) string {
 			return s
 		}
 	}
+
 	return ""
 }
 

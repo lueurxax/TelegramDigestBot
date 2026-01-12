@@ -10,6 +10,7 @@ import (
 
 func TestApplyFreshnessDecayFloor(t *testing.T) {
 	now := time.Now()
+
 	score := applyFreshnessDecay(1.0, now.Add(-36*time.Hour), 36, 0.4)
 	if math.Abs(float64(score-0.4)) > 0.01 {
 		t.Fatalf("applyFreshnessDecay floor = %v, want ~0.4", score)
@@ -33,6 +34,7 @@ func TestApplyTopicBalanceCapAndMin(t *testing.T) {
 	}
 
 	counts := make(map[string]int)
+
 	for _, item := range result.Items {
 		key, _ := topicKey(item.Topic)
 		counts[key]++
@@ -41,6 +43,7 @@ func TestApplyTopicBalanceCapAndMin(t *testing.T) {
 	if counts["a"] > 2 || counts["b"] > 2 || counts["c"] > 2 {
 		t.Fatalf("topic cap violated: %v", counts)
 	}
+
 	if result.TopicsSelected != 3 {
 		t.Fatalf("expected 3 topics selected, got %d", result.TopicsSelected)
 	}
@@ -58,6 +61,7 @@ func TestApplyTopicBalanceRelaxesCap(t *testing.T) {
 	if len(result.Items) != 4 {
 		t.Fatalf("expected 4 items, got %d", len(result.Items))
 	}
+
 	if !result.Relaxed {
 		t.Fatalf("expected relaxed cap when topics are insufficient")
 	}

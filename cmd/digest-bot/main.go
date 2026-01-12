@@ -3,12 +3,10 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
-
 	"time"
 
 	"github.com/rs/zerolog"
@@ -27,6 +25,7 @@ import (
 func main() {
 	mode := flag.String("mode", "", "Service mode (bot, reader, worker, digest)")
 	once := flag.Bool("once", false, "Run once and exit (for digest mode)")
+
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -71,18 +70,19 @@ func main() {
 	case "digest":
 		runDigest(ctx, cfg, database, logger, *once)
 	default:
-		fmt.Printf("Usage: %s --mode=[bot|reader|worker|digest]\n", os.Args[0])
-		os.Exit(1)
+		logger.Fatal().Msgf("Usage: %s --mode=[bot|reader|worker|digest]", os.Args[0])
 	}
 }
 
 func runBot(ctx context.Context, cfg *config.Config, database *db.DB, logger zerolog.Logger) {
 	logger.Info().Msg("Starting bot mode")
 	llmClient := llm.New(cfg, database, &logger)
+
 	bot, err := telegrambot.New(cfg, database, llmClient, &logger)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("bot initialization failed")
 	}
+
 	if err := bot.Run(ctx); err != nil {
 		logger.Fatal().Err(err).Msg("bot failed")
 	}
@@ -90,6 +90,7 @@ func runBot(ctx context.Context, cfg *config.Config, database *db.DB, logger zer
 
 func runReader(ctx context.Context, cfg *config.Config, database *db.DB, logger zerolog.Logger) {
 	logger.Info().Msg("Starting reader mode")
+
 	reader := telegramreader.New(cfg, database, &logger)
 	if err := reader.Run(ctx); err != nil {
 		logger.Fatal().Err(err).Msg("reader failed")
@@ -101,6 +102,7 @@ func runWorker(ctx context.Context, cfg *config.Config, database *db.DB, logger 
 
 	llmClient := llm.New(cfg, database, &logger)
 	resolver := linkresolver.New(cfg, database, nil, &logger)
+
 	p := pipeline.New(cfg, database, llmClient, resolver, &logger)
 	if err := p.Run(ctx); err != nil {
 		logger.Fatal().Err(err).Msg("pipeline failed")
@@ -110,17 +112,21 @@ func runWorker(ctx context.Context, cfg *config.Config, database *db.DB, logger 
 func runDigest(ctx context.Context, cfg *config.Config, database *db.DB, logger zerolog.Logger, once bool) {
 	logger.Info().Bool("once", once).Msg("Starting digest mode")
 	llmClient := llm.New(cfg, database, &logger)
+
 	bot, err := telegrambot.New(cfg, database, llmClient, &logger)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("bot initialization failed")
 	}
+
 	s := digest.New(cfg, database, bot, llmClient, &logger)
 	if once {
 		if err := s.RunOnce(ctx); err != nil {
 			logger.Fatal().Err(err).Msg("digest run once failed")
 		}
+
 		return
 	}
+
 	if err := s.Run(ctx); err != nil {
 		logger.Fatal().Err(err).Msg("digest scheduler failed")
 	}

@@ -43,5 +43,6 @@ func hasAlphaNum(s string) bool {
 			return true
 		}
 	}
+
 	return false
 }

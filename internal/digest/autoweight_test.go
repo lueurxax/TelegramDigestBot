@@ -98,6 +98,7 @@ func TestCalculateAutoWeight_Bounds(t *testing.T) {
 		TotalItemsDigested: 150, // 100% inclusion
 		AvgImportance:      1.0,
 	}
+
 	weight := CalculateAutoWeight(perfectStats, cfg, 30)
 	if weight > cfg.AutoMax {
 		t.Errorf("Perfect channel weight %v exceeds AutoMax %v", weight, cfg.AutoMax)
@@ -110,6 +111,7 @@ func TestCalculateAutoWeight_Bounds(t *testing.T) {
 		TotalItemsDigested: 0,
 		AvgImportance:      0,
 	}
+
 	weight = CalculateAutoWeight(terribleStats, cfg, 30)
 	if weight < cfg.AutoMin {
 		t.Errorf("Terrible channel weight %v below AutoMin %v", weight, cfg.AutoMin)

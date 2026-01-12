@@ -29,6 +29,7 @@ func decayWeight(now time.Time, createdAt time.Time) float64 {
 	if ageDays < 0 {
 		ageDays = 0
 	}
+
 	return math.Exp(-ageDays * math.Ln2 / autoRelevanceHalfLifeDays)
 }
 
@@ -39,6 +40,7 @@ func computeRelevanceDelta(reliability float64) float32 {
 	} else if penalty > autoRelevancePenaltyFactor {
 		penalty = autoRelevancePenaltyFactor
 	}
+
 	return float32(penalty)
 }
 
@@ -59,6 +61,7 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 		if r.ChannelID == "" {
 			continue
 		}
+
 		weight := decayWeight(now, r.CreatedAt)
 		if weight <= 0 {
 			continue
@@ -72,6 +75,7 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 			st = &ratingStats{}
 			stats[r.ChannelID] = st
 		}
+
 		st.count++
 		st.weightedTotal += weight
 
@@ -92,6 +96,7 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 			Int("global_count", globalCount).
 			Int("min_global", s.cfg.RatingMinSampleGlobal).
 			Msg("Skipping auto-relevance update due to insufficient global ratings")
+
 		return nil
 	}
 
@@ -116,10 +121,12 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 					logger.Warn().Err(err).Str("channel_id", ch.ID).Msg("failed to reset relevance delta")
 					continue
 				}
+
 				updated++
 			} else {
 				skipped++
 			}
+
 			continue
 		}
 
@@ -158,6 +165,7 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 			Int("rating_count", st.count).
 			Float64("reliability", reliability).
 			Msg("Updated auto-relevance delta")
+
 		updated++
 	}
 

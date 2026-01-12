@@ -69,6 +69,7 @@ func (f *Filterer) IsFiltered(text string) bool {
 			}
 		} else if filter.Type == "allow" && (f.mode == "allowlist" || f.mode == "mixed") {
 			hasAllowFilters = true
+
 			if strings.Contains(lowerText, lowerPattern) {
 				matchedAllow = true
 			}

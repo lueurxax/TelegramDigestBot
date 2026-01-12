@@ -98,7 +98,7 @@ func (r *Reader) Run(ctx context.Context) error {
 func (r *Reader) ingestMessages(ctx context.Context) error {
 	api := tg.NewClient(r.client)
 
-	for { //nolint:wsl_v5
+	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -150,8 +150,8 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		results := make(chan fetchResult, len(channels))
 
 		// Process channels with worker pool
-		for _, ch := range channels { //nolint:wsl_v5
-			ch := ch // capture for goroutine
+		for _, ch := range channels {
+			// capture for goroutine
 
 			// Acquire worker slot (blocks if all workers busy)
 			select {
@@ -182,7 +182,7 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		// Collect results
 		cycleMsgs := 0
 
-		for i := 0; i < len(channels); i++ { //nolint:wsl_v5
+		for i := 0; i < len(channels); i++ {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -232,7 +232,7 @@ func (r *Reader) resolveUnknownDiscoveries(ctx context.Context, api *tg.Client) 
 
 	r.logger.Debug().Int("count", len(discoveries)).Msg("Resolving unknown discoveries")
 
-	for _, d := range discoveries { //nolint:wsl_v5
+	for _, d := range discoveries {
 		// Try to get channel info using InputChannel with peer ID and access hash
 		channels, err := api.ChannelsGetChannels(ctx, []tg.InputChannelClass{
 			&tg.InputChannel{
@@ -256,7 +256,7 @@ func (r *Reader) resolveUnknownDiscoveries(ctx context.Context, api *tg.Client) 
 		// Extract channel info from response
 		resolved := false
 
-		if channelsResult, ok := channels.(*tg.MessagesChats); ok { //nolint:wsl_v5
+		if channelsResult, ok := channels.(*tg.MessagesChats); ok {
 			for _, chat := range channelsResult.Chats {
 				if channel, ok := chat.(*tg.Channel); ok && channel.ID == d.TGPeerID {
 					r.logger.Info().
@@ -302,7 +302,7 @@ func (r *Reader) resolveInviteLinkDiscoveries(ctx context.Context, api *tg.Clien
 
 	r.logger.Debug().Int("count", len(discoveries)).Msg("Resolving invite link discoveries")
 
-	for _, d := range discoveries { //nolint:wsl_v5
+	for _, d := range discoveries {
 		// Extract hash from invite link (e.g., https://t.me/+abc123 -> abc123)
 		hash := strings.TrimPrefix(d.InviteLink, "https://t.me/+")
 		hash = strings.TrimPrefix(hash, "https://t.me/joinchat/")
@@ -332,11 +332,12 @@ func (r *Reader) resolveInviteLinkDiscoveries(ctx context.Context, api *tg.Clien
 		}
 
 		// Extract channel info from invite response
-		var title, username string
-		var peerID, accessHash int64
+		var (
+			title, username    string
+			peerID, accessHash int64
+		)
 
-		switch i := invite.(type) { //nolint:wsl_v5
-		case *tg.ChatInviteAlready:
+		switch i := invite.(type) { 		case *tg.ChatInviteAlready:
 			// We're already a member
 			if channel, ok := i.Chat.(*tg.Channel); ok {
 				title = channel.Title
@@ -417,7 +418,7 @@ func (r *Reader) extractDiscoveriesFromChannelFull(ctx context.Context, api *tg.
 	var discoveries []db.Discovery
 
 	// Extract linked discussion group
-	if full.LinkedChatID != 0 { //nolint:wsl_v5
+	if full.LinkedChatID != 0 {
 		discoveries = append(discoveries, db.Discovery{
 			TGPeerID:      full.LinkedChatID,
 			SourceType:    "linked_chat",
@@ -471,7 +472,7 @@ func (r *Reader) extractDiscoveriesFromChannelFull(ctx context.Context, api *tg.
 	}
 
 	// Record all discoveries
-	for _, d := range discoveries { //nolint:wsl_v5
+	for _, d := range discoveries {
 		if err := r.database.RecordDiscovery(ctx, d); err != nil {
 			r.logger.Warn().Err(err).Str("source_type", d.SourceType).Msg("failed to record channel full discovery")
 		}
@@ -492,6 +493,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 		}
 
 		r.logger.Info().Str("invite_link", ch.InviteLink).Msg("Attempting to join channel by invite link")
+
 		updates, err := api.MessagesImportChatInvite(ctx, hash)
 		if err != nil {
 			if !tgerr.Is(err, "USER_ALREADY_PARTICIPANT") {
@@ -510,6 +512,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 					ch.AccessHash = channel.AccessHash
 					ch.Title = channel.Title
 					ch.Username = channel.Username
+
 					description, _ := r.fetchChannelDescription(ctx, api, ch.TGPeerID, ch.AccessHash)
 					if err := r.database.UpdateChannel(ctx, ch.ID, ch.TGPeerID, ch.Title, ch.AccessHash, ch.Username, description); err != nil {
 						r.logger.Error().Err(err).Msg("failed to update channel info from invite")
@@ -530,6 +533,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 						ch.AccessHash = channel.AccessHash
 						ch.Title = channel.Title
 						ch.Username = channel.Username
+
 						description, _ := r.fetchChannelDescription(ctx, api, ch.TGPeerID, ch.AccessHash)
 						if err := r.database.UpdateChannel(ctx, ch.ID, ch.TGPeerID, ch.Title, ch.AccessHash, ch.Username, description); err != nil {
 							r.logger.Error().Err(err).Msg("failed to update channel info from join updates")
@@ -558,13 +562,16 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 	} else if ch.Username != "" {
 		// Need to resolve username to get peer info
 		r.logger.Debug().Str("username", ch.Username).Msg("Resolving username (no cached peer info)")
+
 		resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: ch.Username})
 		if err != nil {
 			return 0, fmt.Errorf("failed to resolve username: %w", err)
 		}
+
 		if len(resolved.Chats) == 0 {
 			return 0, fmt.Errorf("%w: %s", ErrChannelNotFound, ch.Username)
 		}
+
 		channel, ok := resolved.Chats[0].(*tg.Channel)
 		if !ok {
 			return 0, fmt.Errorf("%w: %s", ErrNotAChannel, ch.Username)
@@ -591,7 +598,9 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 
 		if description == "" {
 			r.logger.Info().Int64("peer_id", ch.TGPeerID).Msg("Fetching missing channel description")
+
 			var err error
+
 			description, err = r.fetchChannelDescription(ctx, api, ch.TGPeerID, ch.AccessHash)
 			if err != nil {
 				r.logger.Warn().Err(err).Int64("peer_id", ch.TGPeerID).Msg("failed to fetch channel description")
@@ -603,6 +612,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 			if err := r.database.UpdateChannel(ctx, ch.ID, ch.TGPeerID, ch.Title, ch.AccessHash, ch.Username, description); err != nil {
 				r.logger.Error().Err(err).Msg("failed to update channel info")
 			}
+
 			ch.Description = description
 
 			// Extract discoveries from channel description and linked chat (async)
@@ -617,7 +627,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 		Limit: r.cfg.ReaderFetchLimit,
 	}
 
-	if ch.LastTGMessageID > 0 { //nolint:wsl_v5
+	if ch.LastTGMessageID > 0 {
 		// Fetch messages newer than last seen
 		req.OffsetID = int(ch.LastTGMessageID)
 		req.AddOffset = -r.cfg.ReaderFetchLimit
@@ -641,11 +651,12 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 		return 0, fmt.Errorf("failed to get history: %w", err)
 	}
 
-	var messages []tg.MessageClass
-	var chats []tg.ChatClass
+	var (
+		messages []tg.MessageClass
+		chats    []tg.ChatClass
+	)
 
-	switch h := history.(type) { //nolint:wsl_v5
-	case *tg.MessagesMessages:
+	switch h := history.(type) { 	case *tg.MessagesMessages:
 		messages = h.Messages
 		chats = h.Chats
 	case *tg.MessagesMessagesSlice:
@@ -664,7 +675,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 	channelTitles := make(map[int64]string)
 	channelAccessHashes := make(map[int64]int64)
 
-	for _, chat := range chats { //nolint:wsl_v5
+	for _, chat := range chats {
 		if channel, ok := chat.(*tg.Channel); ok {
 			channelTitles[channel.ID] = channel.Title
 			channelAccessHashes[channel.ID] = channel.AccessHash
@@ -744,6 +755,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 						r.logger.Warn().Err(err).Int("msg_id", int(rm.TGMessageID)).Msg("async download failed")
 						return
 					}
+
 					if data == nil {
 						return
 					}
@@ -775,6 +787,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 					r.logger.Warn().Err(err).Msg("failed to check discoveries extracted flag")
 					return
 				}
+
 				if !isNew {
 					// Already extracted discoveries for this message
 					return
@@ -808,7 +821,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 func (r *Reader) downloadMedia(ctx context.Context, api *tg.Client, media tg.MessageMediaClass) ([]byte, error) {
 	var fileLocation tg.InputFileLocationClass
 
-	switch m := media.(type) { //nolint:wsl_v5
+	switch m := media.(type) {
 	case *tg.MessageMediaPhoto:
 		photo, ok := m.Photo.(*tg.Photo)
 		if !ok {
@@ -916,7 +929,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 	forwards := msg.Forwards
 
 	// 1. Extract from forwards
-	if fwd, ok := msg.GetFwdFrom(); ok { //nolint:wsl_v5
+	if fwd, ok := msg.GetFwdFrom(); ok {
 		if fwd.FromID != nil {
 			switch from := fwd.FromID.(type) {
 			case *tg.PeerChannel:
@@ -925,6 +938,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 				if title == "" {
 					title = channelTitles[from.ChannelID]
 				}
+
 				if title == "" {
 					r.logger.Debug().
 						Int64("forward_from_id", from.ChannelID).
@@ -932,6 +946,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 						Int("chats_available", len(channelTitles)).
 						Msg("Forward from channel without title in response")
 				}
+
 				discoveries = append(discoveries, db.Discovery{
 					TGPeerID:      from.ChannelID,
 					Title:         title,
@@ -1031,6 +1046,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 					if link.Type != linkextract.LinkTypeTelegram {
 						continue
 					}
+
 					switch link.TelegramType {
 					case "channel", "post":
 						if link.Username != "" {
@@ -1090,6 +1106,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 								if link.Type != linkextract.LinkTypeTelegram {
 									continue
 								}
+
 								switch link.TelegramType {
 								case "channel", "post":
 									if link.Username != "" {
@@ -1127,6 +1144,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 								if link.Type != linkextract.LinkTypeTelegram {
 									continue
 								}
+
 								switch link.TelegramType {
 								case "channel", "post":
 									if link.Username != "" {
@@ -1189,6 +1207,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 						if link.Type != linkextract.LinkTypeTelegram {
 							continue
 						}
+
 						switch link.TelegramType {
 						case "channel", "post":
 							if link.Username != "" {
@@ -1239,6 +1258,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 						if link.Type != linkextract.LinkTypeTelegram {
 							continue
 						}
+
 						switch link.TelegramType {
 						case "channel", "post":
 							if link.Username != "" {
@@ -1275,6 +1295,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 							})
 						}
 					}
+
 					siteMentions := linkextract.ExtractMentions(webpage.SiteName)
 					for _, mention := range siteMentions {
 						discoveries = append(discoveries, db.Discovery{
@@ -1449,6 +1470,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 						})
 					}
 				}
+
 				gameMentions := linkextract.ExtractMentions(game.Game.Description)
 				for _, mention := range gameMentions {
 					discoveries = append(discoveries, db.Discovery{
@@ -1480,6 +1502,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 						})
 					}
 				}
+
 				invoiceMentions := linkextract.ExtractMentions(invoice.Description)
 				for _, mention := range invoiceMentions {
 					discoveries = append(discoveries, db.Discovery{
@@ -1501,7 +1524,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 func (r *Reader) extractDiscoveriesFromService(msg *tg.MessageService, fromChannelID string) []db.Discovery {
 	var discoveries []db.Discovery
 
-	switch action := msg.Action.(type) { //nolint:wsl_v5
+	switch action := msg.Action.(type) {
 	case *tg.MessageActionChatMigrateTo:
 		discoveries = append(discoveries, db.Discovery{
 			TGPeerID:      action.ChannelID,

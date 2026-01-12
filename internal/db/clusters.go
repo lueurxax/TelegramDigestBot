@@ -22,6 +22,7 @@ func (db *DB) CreateCluster(ctx context.Context, start, end time.Time, topic str
 	if err != nil {
 		return "", err
 	}
+
 	return fromUUID(id), nil
 }
 
@@ -72,5 +73,6 @@ func (db *DB) GetClustersForWindow(ctx context.Context, start, end time.Time) ([
 	for _, id := range clusters {
 		result = append(result, *clusterMap[id])
 	}
+
 	return result, nil
 }

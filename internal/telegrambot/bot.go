@@ -69,24 +69,29 @@ func (b *Bot) Run(ctx context.Context) error {
 
 func (b *Bot) isAdmin(userID int64) bool {
 	admins := b.getAdmins()
+
 	for _, id := range admins {
 		if id == userID {
 			return true
 		}
 	}
+
 	return false
 }
 
 func (b *Bot) getAdmins() []int64 {
-	admins := make([]int64, len(b.cfg.AdminIDs))
-	copy(admins, b.cfg.AdminIDs)
+	admins := make([]int64, 0, len(b.cfg.AdminIDs))
+	admins = append(admins, b.cfg.AdminIDs...)
 
 	// Check database settings for additional admins
 	var extraAdmins []int64
+
 	ctx := context.Background()
+
 	if err := b.database.GetSetting(ctx, "admin_ids", &extraAdmins); err == nil {
 		admins = append(admins, extraAdmins...)
 	}
+
 	return admins
 }
 
@@ -187,12 +192,15 @@ func (b *Bot) handleCallback(query *tgbotapi.CallbackQuery) {
 	}
 
 	data := query.Data
+
 	if strings.HasPrefix(data, "rate:") {
 		parts := strings.Split(data, ":")
 		if len(parts) == 3 {
 			digestID := parts[1]
 			ratingVal := parts[2]
+
 			var rating int16
+
 			switch ratingVal {
 			case "up":
 				rating = 1
@@ -219,18 +227,22 @@ func (b *Bot) handleCallback(query *tgbotapi.CallbackQuery) {
 
 func (b *Bot) SendNotification(ctx context.Context, text string) error {
 	admins := b.getAdmins()
+
 	for _, adminID := range admins {
 		msg := tgbotapi.NewMessage(adminID, text)
+
 		msg.ParseMode = tgbotapi.ModeHTML
 		if _, err := b.api.Send(msg); err != nil {
 			b.logger.Error().Err(err).Int64("admin_id", adminID).Msg("failed to send notification to admin")
 		}
 	}
+
 	return nil
 }
 
 func (b *Bot) SendDigest(ctx context.Context, chatID int64, text string, digestID string) (int64, error) {
 	parts := SplitHTML(text, 4000)
+
 	var firstMsgID int64
 
 	for i, part := range parts {
@@ -252,6 +264,7 @@ func (b *Bot) SendDigest(ctx context.Context, chatID int64, text string, digestI
 		if err != nil {
 			return 0, fmt.Errorf("failed to send digest part %d to chat %d: %w", i+1, chatID, err)
 		}
+
 		if i == 0 {
 			firstMsgID = int64(sent.MessageID)
 		}
@@ -274,17 +287,20 @@ func (b *Bot) SendDigestWithImage(ctx context.Context, chatID int64, text string
 			Name:  "cover.jpg",
 			Bytes: imageData,
 		})
+
 		sent, err := b.api.Send(photoMsg)
 		if err != nil {
 			b.logger.Warn().Err(err).Msg("failed to send digest cover image, continuing with text only")
 		} else {
 			firstMsgID = int64(sent.MessageID)
+
 			time.Sleep(300 * time.Millisecond)
 		}
 	}
 
 	// Send text parts
 	parts := SplitHTML(text, 4000)
+
 	for i, part := range parts {
 		msg := tgbotapi.NewMessage(chatID, part)
 		msg.ParseMode = tgbotapi.ModeHTML
@@ -304,6 +320,7 @@ func (b *Bot) SendDigestWithImage(ctx context.Context, chatID int64, text string
 		if err != nil {
 			return 0, fmt.Errorf("failed to send digest part %d to chat %d: %w", i+1, chatID, err)
 		}
+
 		if firstMsgID == 0 {
 			firstMsgID = int64(sent.MessageID)
 		}
@@ -318,8 +335,10 @@ func (b *Bot) SendDigestWithImage(ctx context.Context, chatID int64, text string
 
 func (b *Bot) reply(msg *tgbotapi.Message, text string) {
 	parts := SplitHTML(text, 4000)
+
 	for _, part := range parts {
 		reply := tgbotapi.NewMessage(msg.Chat.ID, part)
+
 		reply.ParseMode = tgbotapi.ModeHTML
 		if _, err := b.api.Send(reply); err != nil {
 			b.logger.Error().Err(err).Msg("failed to send reply")

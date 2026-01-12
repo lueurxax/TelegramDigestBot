@@ -57,6 +57,7 @@ func (db *DB) GetItemsForWindow(ctx context.Context, start, end time.Time, impor
 			Embedding:          item.Embedding.Slice(),
 		}
 	}
+
 	return items, nil
 }
 
@@ -65,6 +66,7 @@ func (db *DB) CountItemsInWindow(ctx context.Context, start, end time.Time) (int
 		TgDate:   toTimestamptz(start),
 		TgDate_2: toTimestamptz(end),
 	})
+
 	return int(count), err
 }
 
@@ -73,6 +75,7 @@ func (db *DB) CountReadyItemsInWindow(ctx context.Context, start, end time.Time)
 		TgDate:   toTimestamptz(start),
 		TgDate_2: toTimestamptz(end),
 	})
+
 	return int(count), err
 }
 
@@ -87,28 +90,31 @@ func (db *DB) SaveDigest(ctx context.Context, id string, start, end time.Time, c
 	if err != nil {
 		return "", err
 	}
+
 	return fromUUID(newID), nil
 }
 
 func (db *DB) SaveDigestEntries(ctx context.Context, digestID string, entries []DigestEntry) error {
 	for _, e := range entries {
 		sourcesJSON, _ := json.Marshal(e.Sources)
+
 		err := db.Queries.SaveDigestEntry(ctx, sqlc.SaveDigestEntryParams{
 			DigestID:    toUUID(digestID),
 			Title:       toText(e.Title),
 			Body:        e.Body,
 			SourcesJson: sourcesJSON,
 		})
-
 		if err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
 func (db *DB) SaveDigestError(ctx context.Context, start, end time.Time, chatID int64, err error) error {
 	errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+
 	return db.Queries.SaveDigestError(ctx, sqlc.SaveDigestErrorParams{
 		WindowStart:  toTimestamptz(start),
 		WindowEnd:    toTimestamptz(end),

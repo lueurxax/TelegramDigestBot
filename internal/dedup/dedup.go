@@ -32,13 +32,16 @@ func (d *semanticDeduplicator) IsDuplicate(ctx context.Context, m db.RawMessage,
 	if len(embedding) == 0 {
 		return false, "", nil
 	}
+
 	similarItemID, err := d.database.FindSimilarItem(ctx, embedding, d.threshold)
 	if err != nil {
 		return false, "", err
 	}
+
 	if similarItemID != "" {
 		return true, similarItemID, nil
 	}
+
 	return false, "", nil
 }
 
@@ -57,9 +60,11 @@ func (d *strictDeduplicator) IsDuplicate(ctx context.Context, m db.RawMessage, _
 	if err != nil {
 		return false, "", err
 	}
+
 	if exists {
 		return true, "strict_duplicate", nil
 	}
+
 	return false, "", nil
 }
 
@@ -75,8 +80,10 @@ func CosineSimilarity(a, b []float32) float32 {
 		normA += a[i] * a[i]
 		normB += b[i] * b[i]
 	}
+
 	if normA == 0 || normB == 0 {
 		return 0
 	}
+
 	return dotProduct / (float32(math.Sqrt(float64(normA))) * float32(math.Sqrt(float64(normB))))
 }

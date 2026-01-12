@@ -44,6 +44,7 @@ func (db *DB) GetActiveChannels(ctx context.Context) ([]Channel, error) {
 		if !c.ImportanceWeight.Valid || weight == 0 {
 			weight = 1.0
 		}
+
 		channels[i] = Channel{
 			ID:                      fromUUID(c.ID),
 			TGPeerID:                c.TgPeerID,
@@ -67,6 +68,7 @@ func (db *DB) GetActiveChannels(ctx context.Context) ([]Channel, error) {
 			RelevanceThresholdDelta: c.RelevanceThresholdDelta.Float32,
 		}
 	}
+
 	return channels, nil
 }
 
@@ -135,6 +137,7 @@ func (db *DB) GetChannelByPeerID(ctx context.Context, peerID int64) (*Channel, e
 	if err != nil {
 		return nil, err
 	}
+
 	return &Channel{
 		ID:                      fromUUID(c.ID),
 		TGPeerID:                c.TgPeerID,
@@ -212,6 +215,7 @@ func (db *DB) UpdateChannelWeight(ctx context.Context, identifier string, weight
 	if err != nil {
 		return nil, err
 	}
+
 	return &UpdateChannelWeightResult{
 		Username: row.Username.String,
 		Title:    row.Title.String,

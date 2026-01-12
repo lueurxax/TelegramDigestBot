@@ -24,12 +24,15 @@ func TestExtractMetaTags(t *testing.T) {
 	if meta.Title != "Test Page Title" {
 		t.Errorf("Expected Title 'Test Page Title', got '%s'", meta.Title)
 	}
+
 	if meta.Description != "This is a test description" {
 		t.Errorf("Expected Description 'This is a test description', got '%s'", meta.Description)
 	}
+
 	if meta.OGTitle != "OG Title" {
 		t.Errorf("Expected OGTitle 'OG Title', got '%s'", meta.OGTitle)
 	}
+
 	if meta.PublishedTime != "2026-01-09T08:00:00Z" {
 		t.Errorf("Expected PublishedTime '2026-01-09T08:00:00Z', got '%s'", meta.PublishedTime)
 	}
@@ -39,9 +42,11 @@ func TestCoalesce(t *testing.T) {
 	if got := coalesce("", "first", "second"); got != "first" {
 		t.Errorf("coalesce() = %s, want first", got)
 	}
+
 	if got := coalesce("zero", "first"); got != "zero" {
 		t.Errorf("coalesce() = %s, want zero", got)
 	}
+
 	if got := coalesce("", ""); got != "" {
 		t.Errorf("coalesce() = %s, want empty", got)
 	}

@@ -46,7 +46,9 @@ var blockedDomains = map[string]bool{
 
 func ExtractLinks(text string) []Link {
 	matches := urlRegex.FindAllStringIndex(text, -1)
+
 	var links []Link
+
 	seen := make(map[string]bool)
 
 	for _, match := range matches {
@@ -55,6 +57,7 @@ func ExtractLinks(text string) []Link {
 		if seen[rawURL] {
 			continue
 		}
+
 		seen[rawURL] = true
 
 		domain := extractDomain(rawURL)
@@ -85,6 +88,7 @@ func extractDomain(rawURL string) string {
 	if err != nil {
 		return ""
 	}
+
 	return strings.ToLower(u.Host)
 }
 
@@ -96,6 +100,7 @@ func parseTelegramLink(link *Link) {
 		} else {
 			link.Username = matches[2]
 		}
+
 		link.MessageID, _ = strconv.ParseInt(matches[3], 10, 64)
 	} else if tgInviteRegex.MatchString(link.URL) {
 		link.TelegramType = "invite"
@@ -108,6 +113,7 @@ func parseTelegramLink(link *Link) {
 func ExtractMentions(text string) []string {
 	matches := mentionRegex.FindAllStringSubmatch(text, -1)
 	seen := make(map[string]bool)
+
 	var mentions []string
 
 	for _, match := range matches {
@@ -119,5 +125,6 @@ func ExtractMentions(text string) []string {
 			}
 		}
 	}
+
 	return mentions
 }

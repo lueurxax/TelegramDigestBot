@@ -28,6 +28,7 @@ func (m *mockRepo) GetSetting(ctx context.Context, key string, target interface{
 	}
 	// For simplicity in tests, assume types match
 	data, _ := json.Marshal(val)
+
 	return json.Unmarshal(data, target)
 }
 
@@ -35,6 +36,7 @@ func (m *mockRepo) GetUnprocessedMessages(ctx context.Context, limit int) ([]db.
 	if len(m.unprocessedMessages) > limit {
 		return m.unprocessedMessages[:limit], nil
 	}
+
 	return m.unprocessedMessages, nil
 }
 
@@ -62,6 +64,7 @@ func (m *mockRepo) GetChannelStats(ctx context.Context) (map[string]db.ChannelSt
 func (m *mockRepo) SaveItem(ctx context.Context, item *db.Item) error {
 	m.savedItems = append(m.savedItems, item)
 	item.ID = "new-id"
+
 	return nil
 }
 
@@ -97,6 +100,7 @@ func (m *mockLLM) GetEmbedding(ctx context.Context, text string) ([]float32, err
 	if text == "Message 1 that is long enough to pass filters" {
 		return []float32{1.0, 0.0}, nil
 	}
+
 	return []float32{0.0, 1.0}, nil
 }
 
@@ -113,6 +117,7 @@ func (m *mockLLM) ProcessBatch(ctx context.Context, messages []llm.MessageInput,
 			SourceChannel:   messages[i].ChannelTitle,
 		}
 	}
+
 	return res, nil
 }
 
@@ -268,5 +273,6 @@ func (m *mockLLMWithImportance) ProcessBatch(ctx context.Context, messages []llm
 			SourceChannel:   messages[i].ChannelTitle,
 		}
 	}
+
 	return res, nil
 }

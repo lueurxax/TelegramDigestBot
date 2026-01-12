@@ -38,6 +38,7 @@ func (b *Bot) handleThreshold(msg *tgbotapi.Message, key string) {
 	ctx := context.Background()
 
 	var current float32
+
 	_ = b.database.GetSetting(ctx, key, &current)
 
 	if err := b.database.SaveSettingWithHistory(ctx, key, float32(val), msg.From.ID); err != nil {
@@ -347,6 +348,7 @@ func (b *Bot) handleTarget(msg *tgbotapi.Message) {
 		if err != nil {
 			// Try without @ if it's a username
 			username := strings.TrimPrefix(args, "@")
+
 			chat, err = b.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{SuperGroupUsername: username}})
 			if err != nil {
 				b.reply(msg, fmt.Sprintf("❌ Could not find chat %s: %s. Make sure the bot is an administrator in the channel.", html.EscapeString(args), html.EscapeString(err.Error())))
@@ -370,7 +372,9 @@ func (b *Bot) handleTarget(msg *tgbotapi.Message) {
 			// If it's a positive number, try adding -100 prefix (common for channels)
 			if chatID > 0 {
 				altID, _ := strconv.ParseInt("-100"+strconv.FormatInt(chatID, 10), 10, 64)
+
 				var errAlt error
+
 				chat, errAlt = b.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: altID}})
 				if errAlt == nil {
 					chatID = altID
@@ -421,7 +425,6 @@ func (b *Bot) handleWindow(msg *tgbotapi.Message) {
 	}
 
 	_, err := time.ParseDuration(args)
-
 	if err != nil {
 		b.reply(msg, "❌ Invalid duration format. Use something like <code>60m</code>, <code>6h</code>, <code>24h</code>.")
 
@@ -528,14 +531,12 @@ func (b *Bot) handleLinkCache(msg *tgbotapi.Message) {
 
 	if strings.HasSuffix(durationStr, "d") {
 		days, err := strconv.Atoi(strings.TrimSuffix(durationStr, "d"))
-
 		if err == nil {
 			durationStr = fmt.Sprintf("%dh", days*24)
 		}
 	}
 
 	_, err := time.ParseDuration(durationStr)
-
 	if err != nil {
 		b.reply(msg, "❌ Invalid duration format. Use something like <code>12h</code>, <code>24h</code>.")
 
@@ -670,8 +671,8 @@ func (b *Bot) handleModel(msg *tgbotapi.Message) {
 
 func (b *Bot) handleListChannels(msg *tgbotapi.Message) {
 	ctx := context.Background()
-	channels, err := b.database.GetActiveChannels(ctx)
 
+	channels, err := b.database.GetActiveChannels(ctx)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching channels: %s", html.EscapeString(err.Error())))
 
@@ -687,50 +688,61 @@ func (b *Bot) handleListChannels(msg *tgbotapi.Message) {
 	var sb strings.Builder
 
 	sb.WriteString("📋 <b>Active Tracked Channels:</b>\n\n")
+
 	for _, ch := range channels {
 		identifier := fmt.Sprintf("@%s", html.EscapeString(ch.Username))
 		if ch.Username == "" {
 			identifier = fmt.Sprintf("ID: <code>%d</code>", ch.TGPeerID)
 		}
+
 		title := ch.Title
 		if title == "" {
 			title = "Pending..."
 		}
+
 		sb.WriteString(fmt.Sprintf("• %s (%s)\n", html.EscapeString(title), identifier))
 		// Show weight
 		weightStr := fmt.Sprintf("%.1fx", ch.ImportanceWeight)
 		if ch.WeightOverride {
 			weightStr += " (manual)"
 		}
+
 		sb.WriteString(fmt.Sprintf("  Weight: <code>%s</code>\n", weightStr))
+
 		if ch.Context != "" {
 			sb.WriteString(fmt.Sprintf("  <i>Context: %s</i>\n", html.EscapeString(ch.Context)))
 		}
+
 		if ch.Description != "" {
 			sb.WriteString(fmt.Sprintf("  <i>Description: %s</i>\n", html.EscapeString(ch.Description)))
 		}
+
 		if ch.Category != "" || ch.Tone != "" || ch.UpdateFreq != "" {
 			meta := ""
 			if ch.Category != "" {
 				meta += "Category: " + ch.Category + " "
 			}
+
 			if ch.Tone != "" {
 				meta += "Tone: " + ch.Tone + " "
 			}
+
 			if ch.UpdateFreq != "" {
 				meta += "Freq: " + ch.UpdateFreq
 			}
+
 			sb.WriteString(fmt.Sprintf("  <i>Metadata: %s</i>\n", html.EscapeString(strings.TrimSpace(meta))))
 		}
 	}
+
 	sb.WriteString("\n💡 <i>Use <code>/channel weight</code> to view/set importance weight.</i>")
 	b.reply(msg, sb.String())
 }
 
 func (b *Bot) handleChannelStats(msg *tgbotapi.Message) {
 	ctx := context.Background()
-	stats, err := b.database.GetChannelStats(ctx)
 
+	stats, err := b.database.GetChannelStats(ctx)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching channel stats: %s", html.EscapeString(err.Error())))
 
@@ -738,7 +750,6 @@ func (b *Bot) handleChannelStats(msg *tgbotapi.Message) {
 	}
 
 	channels, err := b.database.GetActiveChannels(ctx)
-
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching channels: %s", html.EscapeString(err.Error())))
 
@@ -763,6 +774,7 @@ func (b *Bot) handleChannelStats(msg *tgbotapi.Message) {
 	for id, s := range stats {
 		ch, ok := channelMap[id]
 		name := id
+
 		if ok {
 			if ch.Username != "" {
 				name = "@" + ch.Username
@@ -799,8 +811,8 @@ func (b *Bot) handleRatings(msg *tgbotapi.Message) {
 
 	ctx := context.Background()
 	since := time.Now().AddDate(0, 0, -days)
-	summaries, err := b.database.GetItemRatingSummary(ctx, since)
 
+	summaries, err := b.database.GetItemRatingSummary(ctx, since)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching ratings: %s", html.EscapeString(err.Error())))
 
@@ -836,6 +848,7 @@ func (b *Bot) handleRatings(msg *tgbotapi.Message) {
 
 	for i := 0; i < limit; i++ {
 		s := summaries[i]
+
 		name := s.ChannelID
 		if s.Username != "" {
 			name = "@" + s.Username
@@ -847,6 +860,7 @@ func (b *Bot) handleRatings(msg *tgbotapi.Message) {
 		if s.TotalCount > 0 {
 			reliability = float64(s.GoodCount) / float64(s.TotalCount)
 		}
+
 		sb.WriteString(fmt.Sprintf("• <b>%s</b>: <code>%d</code> (g %d | b %d | i %d) rel <code>%.2f</code>\n",
 			html.EscapeString(name), s.TotalCount, s.GoodCount, s.BadCount, s.IrrelevantCount, reliability))
 	}
@@ -881,7 +895,6 @@ func (b *Bot) handleChannelWeight(msg *tgbotapi.Message) {
 	// Just identifier - show current weight
 	if len(args) == 1 {
 		weight, err := b.database.GetChannelWeight(ctx, identifier)
-
 		if err != nil {
 			if strings.Contains(err.Error(), "no rows") {
 				b.reply(msg, fmt.Sprintf("Channel <code>@%s</code> not found.", html.EscapeString(identifier)))
@@ -896,19 +909,25 @@ func (b *Bot) handleChannelWeight(msg *tgbotapi.Message) {
 
 		chanDisplay := formatChannelDisplay(weight.Username, weight.Title, identifier)
 		sb.WriteString(fmt.Sprintf("<b>Channel Weight: %s</b>\n\n", chanDisplay))
+
 		if weight.Title != "" && weight.Username != "" {
 			sb.WriteString(fmt.Sprintf("Title: %s\n", html.EscapeString(weight.Title)))
 		}
+
 		sb.WriteString(fmt.Sprintf("Weight: <code>%.2f</code>", weight.ImportanceWeight))
+
 		if weight.WeightOverride {
 			sb.WriteString(" (manual override)")
 		} else if weight.AutoWeightEnabled {
 			sb.WriteString(" (auto)")
 		}
+
 		sb.WriteString("\n")
+
 		if weight.WeightOverrideReason != "" {
 			sb.WriteString(fmt.Sprintf("Reason: <i>%s</i>\n", html.EscapeString(weight.WeightOverrideReason)))
 		}
+
 		if weight.WeightUpdatedAt != nil {
 			sb.WriteString(fmt.Sprintf("Updated: %s\n", *weight.WeightUpdatedAt))
 		}
@@ -924,7 +943,6 @@ func (b *Bot) handleChannelWeight(msg *tgbotapi.Message) {
 	if weightArg == "auto" {
 		// Enable auto-weight: autoEnabled=true, override=false
 		result, err := b.database.UpdateChannelWeight(ctx, identifier, 1.0, true, false, "", msg.From.ID)
-
 		if err != nil {
 			if strings.Contains(err.Error(), "no rows") {
 				b.reply(msg, fmt.Sprintf("Channel <code>%s</code> not found.", html.EscapeString(identifier)))
@@ -957,7 +975,6 @@ func (b *Bot) handleChannelWeight(msg *tgbotapi.Message) {
 
 	// Manual weight: autoEnabled=false, override=true
 	result, err := b.database.UpdateChannelWeight(ctx, identifier, float32(weight), false, true, reason, msg.From.ID)
-
 	if err != nil {
 		if strings.Contains(err.Error(), "no rows") {
 			b.reply(msg, fmt.Sprintf("Channel <code>%s</code> not found.", html.EscapeString(identifier)))
@@ -989,9 +1006,11 @@ func formatChannelDisplay(username, title, identifier string) string {
 	if username != "" {
 		return fmt.Sprintf("<code>@%s</code>", html.EscapeString(username))
 	}
+
 	if title != "" {
 		return fmt.Sprintf("<b>%s</b>", html.EscapeString(title))
 	}
+
 	return fmt.Sprintf("<code>%s</code>", html.EscapeString(identifier))
 }
 
@@ -1194,7 +1213,6 @@ func (b *Bot) handleFilters(msg *tgbotapi.Message) {
 	if len(args) == 0 {
 		// List filters
 		filters, err := b.database.GetActiveFilters(ctx)
-
 		if err != nil {
 			b.reply(msg, fmt.Sprintf("❌ Error fetching filters: %s", html.EscapeString(err.Error())))
 
@@ -1395,7 +1413,6 @@ func (b *Bot) handlePreview(msg *tgbotapi.Message) {
 	}
 
 	window, err := time.ParseDuration(windowStr)
-
 	if err != nil {
 		window = time.Hour
 	}
@@ -1414,7 +1431,6 @@ func (b *Bot) handlePreview(msg *tgbotapi.Message) {
 	s := digest.New(b.cfg, b.database, b, b.llmClient, b.logger)
 
 	text, items, _, _, err := s.BuildDigest(ctx, start, end, importanceThreshold, b.logger)
-
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error building digest preview: %s", html.EscapeString(err.Error())))
 
@@ -1516,7 +1532,6 @@ func (b *Bot) handleSettings(msg *tgbotapi.Message) {
 	}
 
 	dbSettings, err := b.database.GetAllSettings(ctx)
-
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("Error fetching settings: %s", html.EscapeString(err.Error())))
 
@@ -1563,6 +1578,7 @@ func (b *Bot) handleSettings(msg *tgbotapi.Message) {
 		if !ok {
 			val = s.def
 		}
+
 		if s.key == "filters_ads_keywords" {
 			if kwArr, ok := val.([]interface{}); ok {
 				val = len(kwArr)
@@ -1570,8 +1586,10 @@ func (b *Bot) handleSettings(msg *tgbotapi.Message) {
 				val = len(kwArr)
 			}
 		}
+
 		sb.WriteString(fmt.Sprintf("• <b>%s:</b> <code>%v</code>\n", s.title, html.EscapeString(fmt.Sprintf("%v", val))))
 	}
+
 	sb.WriteString(fmt.Sprintf("• <b>Static Admins:</b> <code>%v</code>\n", html.EscapeString(fmt.Sprintf("%v", b.cfg.AdminIDs))))
 	sb.WriteString("\n💡 <i>Use <code>/settings reset &lt;key&gt;</code> to return a setting to its default environment value.</i>")
 
@@ -1628,8 +1646,8 @@ func (b *Bot) handleHelp(msg *tgbotapi.Message) {
 
 func (b *Bot) handleErrors(msg *tgbotapi.Message) {
 	ctx := context.Background()
-	errors, err := b.database.GetRecentErrors(ctx, 10)
 
+	errors, err := b.database.GetRecentErrors(ctx, 10)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching errors: %s", html.EscapeString(err.Error())))
 
@@ -1645,12 +1663,14 @@ func (b *Bot) handleErrors(msg *tgbotapi.Message) {
 	var sb strings.Builder
 
 	sb.WriteString("⚠️ <b>Recent Processing Errors:</b>\n\n")
+
 	for _, e := range errors {
 		sb.WriteString(fmt.Sprintf("• <b>Channel:</b> %s\n", html.EscapeString(e.SourceChannel)))
 		sb.WriteString(fmt.Sprintf("  <b>Error:</b> %s\n", b.humanizeError(e.ErrorJSON)))
 		sb.WriteString(fmt.Sprintf("  <b>Time:</b> <code>%s</code>\n", e.CreatedAt.Format("2006-01-02 15:04:05")))
 		sb.WriteString(fmt.Sprintf("  %s | /retry_%s\n\n", FormatLink(e.SourceChannel, e.SourceChannelID, e.SourceMsgID, "[View Message]"), strings.ReplaceAll(e.ID, "-", "")))
 	}
+
 	b.reply(msg, sb.String())
 }
 
@@ -1679,8 +1699,8 @@ func (b *Bot) humanizeError(errJSON []byte) string {
 
 func (b *Bot) handleHistory(msg *tgbotapi.Message) {
 	ctx := context.Background()
-	history, err := b.database.GetRecentSettingHistory(ctx, 20)
 
+	history, err := b.database.GetRecentSettingHistory(ctx, 20)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching history: %s", html.EscapeString(err.Error())))
 
@@ -1697,6 +1717,7 @@ func (b *Bot) handleHistory(msg *tgbotapi.Message) {
 
 	for _, h := range history {
 		text += fmt.Sprintf("• <b>%s</b> changed by <code>%d</code>\n", html.EscapeString(h.Key), h.ChangedBy)
+
 		text += fmt.Sprintf("  🕒 %s\n", h.ChangedAt.Format("2006-01-02 15:04:05"))
 		if h.NewValue == "" {
 			text += "  🗑️ <i>Deleted/Reset</i>\n"
@@ -1705,9 +1726,11 @@ func (b *Bot) handleHistory(msg *tgbotapi.Message) {
 			if oldVal == "" {
 				oldVal = "<i>(none)</i>"
 			}
+
 			text += fmt.Sprintf("  📥 Old: <code>%s</code>\n", html.EscapeString(oldVal))
 			text += fmt.Sprintf("  📤 New: <code>%s</code>\n", html.EscapeString(h.NewValue))
 		}
+
 		text += "\n"
 	}
 
@@ -1797,8 +1820,8 @@ func (b *Bot) handleDiscoverNamespace(msg *tgbotapi.Message) {
 
 func (b *Bot) handleDiscoverList(msg *tgbotapi.Message) {
 	ctx := context.Background()
-	discoveries, err := b.database.GetPendingDiscoveries(ctx, 15)
 
+	discoveries, err := b.database.GetPendingDiscoveries(ctx, 15)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching discoveries: %s", html.EscapeString(err.Error())))
 
@@ -1837,6 +1860,7 @@ func (b *Bot) handleDiscoverList(msg *tgbotapi.Message) {
 		if d.MaxViews > 0 || d.MaxForwards > 0 {
 			infoLine += fmt.Sprintf(" | Engagement: %dv/%df", d.MaxViews, d.MaxForwards)
 		}
+
 		infoLine += fmt.Sprintf(" | Last: %s\n\n", d.LastSeenAt.Format("Jan 02"))
 		sb.WriteString(infoLine)
 	}
@@ -1894,8 +1918,8 @@ func (b *Bot) handleDiscoverReject(ctx context.Context, msg *tgbotapi.Message, u
 
 func (b *Bot) handleDiscoverStats(msg *tgbotapi.Message) {
 	ctx := context.Background()
-	stats, err := b.database.GetDiscoveryStats(ctx)
 
+	stats, err := b.database.GetDiscoveryStats(ctx)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching discovery stats: %s", html.EscapeString(err.Error())))
 
@@ -1937,13 +1961,11 @@ func (b *Bot) handleDiscoverCallback(query *tgbotapi.CallbackQuery) {
 	switch action {
 	case "approve":
 		err = b.database.ApproveDiscovery(ctx, username, query.From.ID)
-
 		if err == nil {
 			callbackText = fmt.Sprintf("✅ @%s approved and added to tracking", username)
 		}
 	case "reject":
 		err = b.database.RejectDiscovery(ctx, username, query.From.ID)
-
 		if err == nil {
 			callbackText = fmt.Sprintf("❌ @%s rejected", username)
 		}

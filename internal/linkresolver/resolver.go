@@ -129,6 +129,7 @@ func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, 
 				r.logger.Debug().Str("url", link.URL).Msg("skipping telegram link resolution: client not initialized")
 				continue
 			}
+
 			r.logger.Warn().Err(err).Str("url", link.URL).Msg("failed to resolve link")
 			// Save error to cache to avoid retrying immediately
 			r.database.SaveLinkCache(ctx, &db.ResolvedLink{
@@ -139,6 +140,7 @@ func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, 
 				ErrorMessage: err.Error(),
 				ExpiresAt:    time.Now().Add(1 * time.Hour), // Don't retry for 1h
 			})
+
 			continue
 		}
 

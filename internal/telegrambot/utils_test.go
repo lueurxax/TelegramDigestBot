@@ -147,6 +147,7 @@ func TestSplitHTML(t *testing.T) {
 				if strings.Contains(p, "<blockquote>") && !strings.Contains(p, "</blockquote>") {
 					t.Errorf("Part %d has open blockquote: %s", i, p)
 				}
+
 				if !strings.Contains(p, "<blockquote>") && strings.Contains(p, "</blockquote>") {
 					t.Errorf("Part %d has closed blockquote without opening: %s", i, p)
 				}

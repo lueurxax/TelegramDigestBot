@@ -122,6 +122,7 @@ func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) 
 		if ch, ok := chat.(*tg.Channel); ok {
 			channelTitle = ch.Title
 			channelUsername = ch.Username
+
 			break
 		}
 	}

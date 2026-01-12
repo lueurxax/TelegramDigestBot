@@ -32,6 +32,7 @@ func NewWebFetcher(rps float64, timeout time.Duration) *WebFetcher {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
+
 	return &WebFetcher{
 		client: &http.Client{
 			Timeout: timeout,
@@ -57,12 +58,13 @@ func (f *WebFetcher) Fetch(ctx context.Context, rawURL string) ([]byte, error) {
 
 	// Per-domain rate limit (1 req/sec per domain)
 	domain := f.extractDomain(rawURL)
+
 	domainLimiter := f.getDomainLimiter(domain)
 	if err := domainLimiter.Wait(ctx); err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", rawURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +106,7 @@ func (f *WebFetcher) getDomainLimiter(domain string) *rate.Limiter {
 
 	limiter = rate.NewLimiter(1, 2) // 1 req/sec per domain
 	f.domainLimiters[domain] = limiter
+
 	return limiter
 }
 
@@ -112,5 +115,6 @@ func (f *WebFetcher) extractDomain(rawURL string) string {
 	if err != nil {
 		return ""
 	}
+
 	return strings.ToLower(u.Host)
 }

@@ -16,5 +16,6 @@ func (db *DB) SaveRelevanceGateLog(ctx context.Context, rawMsgID string, decisio
 		INSERT INTO relevance_gate_log (raw_message_id, decision, confidence, reason, model, gate_version)
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`, toUUID(rawMsgID), decision, conf, toText(reason), toText(model), toText(gateVersion))
+
 	return err
 }

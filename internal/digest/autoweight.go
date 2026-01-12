@@ -53,6 +53,7 @@ func CalculateAutoWeight(stats *db.RollingStats, cfg AutoWeightConfig, days int)
 	if days < 1 {
 		days = 1
 	}
+
 	messagesPerDay := float32(stats.TotalMessages) / float32(days)
 	consistencyScore := float32(math.Min(1.0, float64(messagesPerDay/cfg.ExpectedFrequency)))
 
@@ -84,15 +85,19 @@ func (s *Scheduler) UpdateAutoWeights(ctx context.Context, logger *zerolog.Logge
 	if err := s.database.GetSetting(ctx, "auto_weight_min_messages", &cfg.MinMessages); err != nil {
 		logger.Debug().Err(err).Msg("using default min_messages for auto-weight")
 	}
+
 	if err := s.database.GetSetting(ctx, "auto_weight_expected_freq", &cfg.ExpectedFrequency); err != nil {
 		logger.Debug().Err(err).Msg("using default expected_frequency for auto-weight")
 	}
+
 	if err := s.database.GetSetting(ctx, "auto_weight_min", &cfg.AutoMin); err != nil {
 		logger.Debug().Err(err).Msg("using default auto_min for auto-weight")
 	}
+
 	if err := s.database.GetSetting(ctx, "auto_weight_max", &cfg.AutoMax); err != nil {
 		logger.Debug().Err(err).Msg("using default auto_max for auto-weight")
 	}
+
 	if err := s.database.GetSetting(ctx, "auto_weight_rolling_days", &cfg.RollingDays); err != nil {
 		logger.Debug().Err(err).Msg("using default rolling_days for auto-weight")
 	}
@@ -132,6 +137,7 @@ func (s *Scheduler) UpdateAutoWeights(ctx context.Context, logger *zerolog.Logge
 			Float32("old_weight", ch.ImportanceWeight).
 			Float32("new_weight", newWeight).
 			Msg("Updated channel auto-weight")
+
 		updated++
 	}
 

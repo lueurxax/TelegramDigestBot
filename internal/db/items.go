@@ -49,7 +49,9 @@ func (db *DB) SaveItem(ctx context.Context, item *Item) error {
 	if err != nil {
 		return err
 	}
+
 	item.ID = fromUUID(id)
+
 	return nil
 }
 
@@ -70,8 +72,10 @@ func (db *DB) FindSimilarItem(ctx context.Context, embedding []float32, threshol
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", nil
 		}
+
 		return "", err
 	}
+
 	return fromUUID(id), nil
 }
 
@@ -80,6 +84,7 @@ func (db *DB) MarkItemsAsDigested(ctx context.Context, ids []string) error {
 	for i, id := range ids {
 		uuids[i] = toUUID(id)
 	}
+
 	return db.Queries.MarkItemsAsDigested(ctx, uuids)
 }
 
@@ -88,6 +93,7 @@ func (db *DB) GetRecentErrors(ctx context.Context, limit int) ([]Item, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	items := make([]Item, len(rows))
 	for i, r := range rows {
 		items[i] = Item{
@@ -100,6 +106,7 @@ func (db *DB) GetRecentErrors(ctx context.Context, limit int) ([]Item, error) {
 			SourceMsgID:     r.SourceMsgID,
 		}
 	}
+
 	return items, nil
 }
 
@@ -116,6 +123,7 @@ func (db *DB) GetItemByID(ctx context.Context, id string) (*Item, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &Item{
 		ID:              fromUUID(r.ID),
 		RawMessageID:    fromUUID(r.RawMessageID),
@@ -150,6 +158,7 @@ func (db *DB) GetItemRatingsSince(ctx context.Context, since time.Time) ([]ItemR
 	if err != nil {
 		return nil, err
 	}
+
 	ratings := make([]ItemRating, 0, len(rows))
 
 	for _, row := range rows {
@@ -163,6 +172,7 @@ func (db *DB) GetItemRatingsSince(ctx context.Context, since time.Time) ([]ItemR
 			CreatedAt: row.CreatedAt.Time,
 		})
 	}
+
 	return ratings, nil
 }
 
@@ -176,5 +186,6 @@ func (db *DB) GetItemEmbedding(ctx context.Context, itemID string) ([]float32, e
 	if err := v.Parse(embeddingStr); err != nil {
 		return nil, err
 	}
+
 	return v.Slice(), nil
 }

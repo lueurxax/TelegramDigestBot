@@ -62,9 +62,11 @@ func New(cfg *config.Config, database *db.DB, bot DigestPoster, llmClient llm.Cl
 func (s *Scheduler) getLockID() int64 {
 	// Simple hash of the lease name to an int64 for Postgres advisory lock
 	var h int64
+
 	for _, c := range s.cfg.LeaderElectionLeaseName {
 		h = 31*h + int64(c)
 	}
+
 	return h
 }
 
@@ -77,6 +79,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	tickInterval, err := time.ParseDuration(s.cfg.SchedulerTickInterval)
 	if err != nil {
 		s.logger.Error().Err(err).Str("interval", s.cfg.SchedulerTickInterval).Msg("invalid scheduler tick interval, using 10m")
+
 		tickInterval = 10 * time.Minute
 	}
 
@@ -86,10 +89,13 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	// Auto-weight update ticker (check every hour, run weekly)
 	autoWeightTicker := time.NewTicker(time.Hour)
 	defer autoWeightTicker.Stop()
-	var lastAutoWeightRun time.Time
-	var lastAutoRelevanceRun time.Time
 
-	for {
+	var (
+		lastAutoWeightRun    time.Time
+		lastAutoRelevanceRun time.Time
+	)
+
+	for {  // select loop immediately follows declarations
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -109,6 +115,7 @@ func (s *Scheduler) maybeRunAutoWeightUpdate(ctx context.Context, lastRun *time.
 	if err := s.database.GetSetting(ctx, "auto_weight_enabled", &autoWeightEnabled); err != nil {
 		s.logger.Debug().Err(err).Msg("auto_weight_enabled not set, defaulting to true")
 	}
+
 	if !autoWeightEnabled {
 		return
 	}
@@ -137,6 +144,7 @@ func (s *Scheduler) maybeRunAutoRelevanceUpdate(ctx context.Context, lastRun *ti
 	if err := s.database.GetSetting(ctx, "auto_relevance_enabled", &autoRelevanceEnabled); err != nil {
 		s.logger.Debug().Err(err).Msg("auto_relevance_enabled not set, defaulting to true")
 	}
+
 	if !autoRelevanceEnabled {
 		return
 	}
@@ -167,15 +175,18 @@ func (s *Scheduler) runOnceWithLock(ctx context.Context) {
 		if err := s.processDigest(ctx, &logger); err != nil {
 			logger.Error().Err(err).Msg("failed to process digest")
 		}
+
 		return
 	}
 
 	lockID := s.getLockID()
+
 	acquired, err := s.database.TryAcquireAdvisoryLock(ctx, lockID)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to acquire lock")
 		return
 	}
+
 	if !acquired {
 		logger.Debug().Msg("did not acquire lock, skipping")
 
@@ -203,14 +214,17 @@ func (s *Scheduler) RunOnce(ctx context.Context) error {
 	}
 
 	lockID := s.getLockID()
+
 	acquired, err := s.database.TryAcquireAdvisoryLock(ctx, lockID)
 	if err != nil {
 		return fmt.Errorf("failed to acquire lock: %w", err)
 	}
+
 	if !acquired {
 		logger.Info().Msg("did not acquire lock, another instance is probably running. Skipping RunOnce.")
 		return nil
 	}
+
 	defer s.database.ReleaseAdvisoryLock(ctx, lockID)
 
 	return s.processDigest(ctx, &logger)
@@ -232,9 +246,11 @@ func (s *Scheduler) processDigest(ctx context.Context, logger *zerolog.Logger) e
 	if err := s.database.GetSetting(ctx, "digest_window", &windowStr); err != nil {
 		logger.Debug().Err(err).Msg("could not get digest_window from DB, using default")
 	}
+
 	window, err := time.ParseDuration(windowStr)
 	if err != nil {
 		logger.Error().Err(err).Str("window", windowStr).Msg("invalid digest window duration, using 1h")
+
 		window = time.Hour
 	}
 
@@ -251,6 +267,7 @@ func (s *Scheduler) processDigest(ctx context.Context, logger *zerolog.Logger) e
 	catchupWindow, err := time.ParseDuration(s.cfg.SchedulerCatchupWindow)
 	if err != nil {
 		logger.Error().Err(err).Str("window", s.cfg.SchedulerCatchupWindow).Msg("invalid scheduler catchup window, using 24h")
+
 		catchupWindow = 24 * time.Hour
 	}
 
@@ -303,7 +320,7 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	if exists {
 		logger.Debug().Time("start", start).Time("end", end).Msg("Digest already exists for window")
 
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil,nil indicates digest already exists
 	}
 
 	text, items, clusters, anomaly, err := s.BuildDigest(ctx, start, end, importanceThreshold, logger)
@@ -340,11 +357,14 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	} else {
 		msgID, err = s.bot.SendDigest(ctx, targetChatID, text, digestID)
 	}
+
 	if err != nil {
 		observability.DigestsPosted.WithLabelValues(StatusError).Inc()
+
 		if errSave := s.database.SaveDigestError(ctx, start, end, targetChatID, err); errSave != nil {
 			logger.Error().Err(errSave).Msg("failed to save digest error")
 		}
+
 		return nil, err
 	}
 
@@ -353,9 +373,11 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 
 	// Mark items as digested
 	itemIDs := make([]string, len(items))
+
 	for i, item := range items {
 		itemIDs[i] = item.ID
 	}
+
 	if err := s.database.MarkItemsAsDigested(ctx, itemIDs); err != nil {
 		logger.Error().Err(err).Msg("failed to mark items as digested")
 	}
@@ -369,7 +391,7 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	// Save digest entries
 	var entries []db.DigestEntry
 
-	if len(clusters) > 0 {
+	if len(clusters) > 0 {  // conditional immediately follows declaration
 		for _, c := range clusters {
 			entry := db.DigestEntry{
 				Title: c.Topic,
@@ -382,6 +404,7 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 					MsgID:   item.SourceMsgID,
 				})
 			}
+
 			entries = append(entries, entry)
 		}
 	} else {
@@ -406,7 +429,7 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 		// Don't fail the digest for stats collection errors
 	}
 
-	return nil, nil
+	return nil, nil //nolint:nilnil // nil,nil indicates successful completion with no anomaly
 }
 
 func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, importanceThreshold float32, logger *zerolog.Logger) (string, []db.Item, []db.ClusterWithItems, *anomalyInfo, error) {
@@ -416,6 +439,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 
 	// Fetch more items than TopN to allow for smart selection (time-decay, diversity)
 	poolSize := s.cfg.DigestTopN * 3
+
 	items, err := s.database.GetItemsForWindow(ctx, start, end, importanceThreshold, poolSize)
 	if err != nil {
 		return "", nil, nil, nil, fmt.Errorf("failed to get items for window: %w", err)
@@ -436,6 +460,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 				Int("ready_items", readyItems).
 				Float32("threshold", importanceThreshold).
 				Msg("No items reached importance threshold for digest window")
+
 			return "", nil, nil, anomaly, nil
 		} else {
 			// Check if backlog is large, which might indicate a problem
@@ -448,10 +473,13 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 					backlogSize: backlog,
 				}
 				logger.Warn().Int("backlog", backlog).Msg("Large backlog - pipeline is catching up, messages not yet processed for this digest window")
+
 				return "", nil, nil, anomaly, nil
 			}
+
 			logger.Debug().Time("start", start).Time("end", end).Msg("No items for digest window")
 		}
+
 		return "", nil, nil, nil, nil
 	}
 
@@ -482,6 +510,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 
 	// Apply smart selection adjustments
 	channelCounts := make(map[string]int)
+
 	for _, item := range items {
 		channelCounts[item.SourceChannel]++
 	}
@@ -501,12 +530,14 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 		if items[i].ImportanceScore != items[j].ImportanceScore {
 			return items[i].ImportanceScore > items[j].ImportanceScore
 		}
+
 		return items[i].RelevanceScore > items[j].RelevanceScore
 	})
 
 	// Semantic deduplication: remove items that are too similar to already-kept items
 	// This catches duplicates that weren't caught during pipeline processing
 	var dedupedItems []db.Item
+
 	for _, item := range items {
 		if len(item.Embedding) == 0 {
 			// No embedding, keep the item (can't check similarity)
@@ -515,10 +546,12 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 		}
 
 		isDuplicate := false
+
 		for _, kept := range dedupedItems {
 			if len(kept.Embedding) == 0 {
 				continue
 			}
+
 			similarity := dedup.CosineSimilarity(item.Embedding, kept.Embedding)
 			if similarity > s.cfg.SimilarityThreshold {
 				logger.Debug().
@@ -526,18 +559,23 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 					Str("duplicate_of", kept.ID).
 					Float32("similarity", similarity).
 					Msg("Skipping semantic duplicate in digest")
+
 				isDuplicate = true
+
 				break
 			}
 		}
+
 		if !isDuplicate {
 			dedupedItems = append(dedupedItems, item)
 		}
 	}
+
 	items = dedupedItems
 
 	if topicsEnabled && topicDiversityCap > 0 && topicDiversityCap < 1 && len(items) > 0 {
 		result := applyTopicBalance(items, s.cfg.DigestTopN, topicDiversityCap, minTopicCount)
+
 		items = result.Items
 		if result.Relaxed {
 			logger.Warn().
@@ -602,6 +640,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 	}
 
 	header := "Digest for"
+
 	switch strings.ToLower(digestLanguage) {
 	case "ru":
 		header = "Дайджест за"
@@ -624,9 +663,11 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 
 	// Metadata
 	uniqueChannels := make(map[string]bool)
+
 	for _, item := range items {
 		uniqueChannels[item.SourceChannel] = true
 	}
+
 	topicCount := 0
 	if topicsEnabled {
 		topicCount = len(clusters)
@@ -634,10 +675,13 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 			topicCount = countDistinctTopics(items)
 		}
 	}
+
 	sb.WriteString(fmt.Sprintf("📊 <i>%d items from %d channels | %d topics</i>\n\n", len(items), len(uniqueChannels), topicCount))
 
 	seenSummaries := make(map[string]bool)
+
 	var narrativeGenerated bool
+
 	if editorEnabled && smartLLMModel != "" {
 		narrative, err := s.llmClient.GenerateNarrative(ctx, items, digestLanguage, smartLLMModel, digestTone)
 		if err == nil && narrative != "" {
@@ -645,7 +689,9 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 			sb.WriteString("📝 <b>Overview</b>\n\n")
 			sb.WriteString(htmlutils.SanitizeHTML(narrative))
 			sb.WriteString("\n</blockquote>\n")
+
 			narrativeGenerated = true
+
 			if editorDetailedItems {
 				sb.WriteString("\n─────────────────────\n<b>📋 Detailed items:</b>\n\n")
 			}
@@ -699,6 +745,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 						maxImp = it.ImportanceScore
 					}
 				}
+
 				if maxImp >= 0.8 {
 					breaking.clusters = append(breaking.clusters, c)
 				} else if maxImp >= 0.5 {
@@ -725,6 +772,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 			}
 
 			var groupSb strings.Builder
+
 			hasContent := false
 
 			if len(group.clusters) > 0 {
@@ -735,50 +783,64 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 							if model == "" {
 								model = s.cfg.LLMModel
 							}
+
 							summary, err := s.llmClient.SummarizeCluster(ctx, c.Items, digestLanguage, model, digestTone)
 							if err == nil && summary != "" {
 								summary = htmlutils.SanitizeHTML(summary)
 								if seenSummaries[summary] {
 									continue
 								}
+
 								seenSummaries[summary] = true
 								hasContent = true
 								// Item boundary marker for intelligent splitting
 								groupSb.WriteString(htmlutils.ItemStart)
+
 								if c.Topic != "" {
 									emoji := topicEmojis[c.Topic]
 									if emoji == "" {
 										emoji = "📂"
 									}
+
 									groupSb.WriteString("┌─────────────────────\n")
 									groupSb.WriteString(fmt.Sprintf("│ %s <b>%s</b> (%d)\n", emoji, strings.ToUpper(html.EscapeString(c.Topic)), len(c.Items)))
 									groupSb.WriteString("└─────────────────────\n")
 								}
+
 								groupSb.WriteString(fmt.Sprintf("%s %s", getImportancePrefix(c.Items[0].ImportanceScore), summary))
+
 								var links []string
+
 								for _, item := range c.Items {
 									label := item.SourceChannel
 									if label != "" {
 										label = "@" + label
 									}
+
 									if label == "" {
 										label = item.SourceChannelTitle
 									}
+
 									if label == "" {
 										label = DefaultSourceLabel
 									}
+
 									links = append(links, s.formatLink(item, label))
 								}
+
 								if len(links) > 0 {
 									groupSb.WriteString(fmt.Sprintf(" <i>via %s</i>", strings.Join(links, " • ")))
 								}
+
 								groupSb.WriteString(htmlutils.ItemEnd)
 								groupSb.WriteString("\n")
+
 								continue
 							} else if err != nil {
 								logger.Warn().Err(err).Str("cluster", c.Topic).Msg("failed to summarize cluster, falling back to detailed list")
 							}
 						}
+
 						emoji := topicEmojis[c.Topic]
 						if emoji == "" {
 							emoji = "📂"
@@ -789,6 +851,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 						if seenSummaries[representative.Summary] {
 							continue
 						}
+
 						seenSummaries[representative.Summary] = true
 						hasContent = true
 
@@ -804,25 +867,32 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 
 						// Collect sources from ALL items in cluster
 						var links []string
+
 						for _, item := range c.Items {
 							label := item.SourceChannel
 							if label != "" {
 								label = "@" + label
 							}
+
 							if label == "" {
 								label = item.SourceChannelTitle
 							}
+
 							if label == "" {
 								label = DefaultSourceLabel
 							}
+
 							links = append(links, s.formatLink(item, label))
 						}
+
 						if len(links) > 0 {
 							groupSb.WriteString(fmt.Sprintf("\n    ↳ <i>via %s</i>", strings.Join(links, " • ")))
 						}
+
 						if len(c.Items) > 1 {
 							groupSb.WriteString(fmt.Sprintf(" <i>(+%d related)</i>", len(c.Items)-1))
 						}
+
 						groupSb.WriteString(htmlutils.ItemEnd)
 						groupSb.WriteString("\n\n")
 					} else {
@@ -830,6 +900,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 
 						if formatted != "" {
 							hasContent = true
+
 							groupSb.WriteString(formatted)
 						}
 					}
@@ -839,6 +910,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 
 				if formatted != "" {
 					hasContent = true
+
 					groupSb.WriteString(formatted)
 				}
 			}
@@ -870,8 +942,11 @@ func (s *Scheduler) sendConsolidatedAnomalyNotification(ctx context.Context, ano
 	sb.WriteString("⚠️ <b>Digest Anomaly Report</b>\n\n")
 
 	// Count types
-	var thresholdAnomalies, backlogAnomalies int
-	var totalItems, totalReady int
+	var (
+		thresholdAnomalies, backlogAnomalies int
+		totalItems, totalReady               int
+	)
+
 	for _, a := range anomalies {
 		if a.isBacklog {
 			backlogAnomalies++
@@ -896,6 +971,7 @@ func (s *Scheduler) sendConsolidatedAnomalyNotification(ctx context.Context, ano
 	if backlogAnomalies > 0 {
 		// Find max backlog size
 		maxBacklog := 0
+
 		for _, a := range anomalies {
 			if a.isBacklog && a.backlogSize > maxBacklog {
 				maxBacklog = a.backlogSize
@@ -907,6 +983,7 @@ func (s *Scheduler) sendConsolidatedAnomalyNotification(ctx context.Context, ano
 	}
 
 	_ = s.bot.SendNotification(ctx, sb.String())
+
 	logger.Info().Int("anomaly_count", len(anomalies)).Msg("Sent consolidated anomaly notification")
 }
 
@@ -921,13 +998,16 @@ func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummarie
 		items           []db.Item
 		importanceScore float32
 	}
+
 	var groups []summaryGroup
+
 	summaryToIdx := make(map[string]int)
 
 	for _, item := range items {
 		if seenSummaries[item.Summary] {
 			continue
 		}
+
 		idx, seen := summaryToIdx[item.Summary]
 		if !seen {
 			summaryToIdx[item.Summary] = len(groups)
@@ -945,6 +1025,7 @@ func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummarie
 	}
 
 	var sb strings.Builder
+
 	for _, g := range groups {
 		seenSummaries[g.summary] = true
 		sanitizedSummary := htmlutils.SanitizeHTML(g.summary)
@@ -958,33 +1039,41 @@ func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummarie
 			if emoji == "" {
 				emoji = "•"
 			} else {
-				emoji = emoji + " •"
+				emoji += " •"
 			}
+
 			sb.WriteString(fmt.Sprintf("%s %s <b>%s</b>: %s", prefix, emoji, html.EscapeString(g.items[0].Topic), sanitizedSummary))
 		} else {
 			sb.WriteString(fmt.Sprintf("%s %s", prefix, sanitizedSummary))
 		}
 
 		var links []string
+
 		for _, item := range g.items {
 			label := item.SourceChannel
 			if label != "" {
 				label = "@" + label
 			}
+
 			if label == "" {
 				label = item.SourceChannelTitle
 			}
+
 			if label == "" {
 				label = DefaultSourceLabel
 			}
+
 			links = append(links, s.formatLink(item, label))
 		}
+
 		if len(links) > 0 {
 			sb.WriteString(fmt.Sprintf("\n    ↳ <i>via %s</i>", strings.Join(links, " • ")))
 		}
+
 		sb.WriteString(htmlutils.ItemEnd)
 		sb.WriteString("\n")
 	}
+
 	return sb.String()
 }
 
@@ -1007,10 +1096,12 @@ func (s *Scheduler) formatLink(item db.Item, label string) string {
 		if label == "" {
 			label = item.SourceChannelTitle
 		}
+
 		if label == "" {
 			label = DefaultSourceLabel
 		}
 	}
+
 	if item.SourceChannel != "" {
 		return fmt.Sprintf("<a href=\"https://t.me/%s/%d\">%s</a>", html.EscapeString(item.SourceChannel), item.SourceMsgID, html.EscapeString(label))
 	}

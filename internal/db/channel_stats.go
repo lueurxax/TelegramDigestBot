@@ -168,5 +168,6 @@ func (db *DB) CollectAndSaveChannelStats(ctx context.Context, start, end time.Ti
 			return err
 		}
 	}
+
 	return nil
 }

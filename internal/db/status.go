@@ -18,10 +18,12 @@ func (db *DB) GetLastPostedDigest(ctx context.Context) (*LastDigestInfo, error) 
 	row, err := db.Queries.GetLastPostedDigest(ctx)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
+			return nil, nil //nolint:nilnil // nil,nil is idiomatic for "not found"
 		}
+
 		return nil, err
 	}
+
 	return &LastDigestInfo{
 		Start:    row.WindowStart.Time,
 		End:      row.WindowEnd.Time,
@@ -43,7 +45,9 @@ func (db *DB) GetChannelStats(ctx context.Context) (map[string]ChannelStats, err
 	if err != nil {
 		return nil, err
 	}
+
 	res := make(map[string]ChannelStats)
+
 	for _, row := range rows {
 		cID := fromUUID(row.ChannelID)
 		res[cID] = ChannelStats{
@@ -55,6 +59,7 @@ func (db *DB) GetChannelStats(ctx context.Context) (map[string]ChannelStats, err
 			StddevImportance: row.StddevImportance,
 		}
 	}
+
 	return res, nil
 }
 

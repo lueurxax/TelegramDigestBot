@@ -67,6 +67,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 	}()
 
 	dbSQL := stdlib.OpenDB(*db.Pool.Config().ConnConfig)
+
 	defer func() {
 		_ = dbSQL.Close()
 	}()
@@ -91,6 +92,7 @@ func toUUID(id string) pgtype.UUID {
 	if err != nil {
 		return pgtype.UUID{Valid: false}
 	}
+
 	return pgtype.UUID{Bytes: u, Valid: true}
 }
 
@@ -98,6 +100,7 @@ func fromUUID(uid pgtype.UUID) string {
 	if !uid.Valid {
 		return ""
 	}
+
 	return uuid.UUID(uid.Bytes).String()
 }
 
