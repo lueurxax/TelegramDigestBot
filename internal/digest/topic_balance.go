@@ -57,24 +57,62 @@ func applyTopicBalance(items []db.Item, topN int, capFraction float32, minTopics
 	targetN := min(topN, len(items))
 
 	if capFraction <= 0 || capFraction >= 1 {
-		selected := items
-		if len(selected) > targetN {
-			selected = selected[:targetN]
-		}
-
-		return topicBalanceResult{
-			Items:           selected,
-			TopicsSelected:  countDistinctTopics(selected),
-			TopicsAvailable: countDistinctTopics(items),
-		}
+		return selectInitialTopN(items, targetN)
 	}
 
-	maxPerTopic := int(math.Floor(float64(capFraction) * float64(targetN)))
+	maxPerTopic := calculateMaxPerTopic(targetN, capFraction)
+	minTopics = clampMinTopics(minTopics, targetN)
 
+	topics := getTopicCandidates(items)
+
+	selectedIndices := make(map[int]struct{})
+	topicCounts := make(map[string]int)
+
+	// Phase 1: Ensure minTopics diversity
+	for i := 0; i < minTopics && i < len(topics); i++ {
+		idx := topics[i].index
+		key, _ := topicKey(items[idx].Topic)
+
+		selectedIndices[idx] = struct{}{}
+		topicCounts[key]++
+	}
+
+	// Phase 2: Fill remaining slots respecting maxPerTopic
+	fillRemainingSlots(items, selectedIndices, topicCounts, targetN, maxPerTopic)
+
+	relaxed := false
+	if len(selectedIndices) < targetN {
+		relaxed = true
+
+		fillRemainingSlots(items, selectedIndices, topicCounts, targetN, -1) // -1 means no cap
+	}
+
+	return buildTopicBalanceResult(items, selectedIndices, relaxed, len(topics), maxPerTopic)
+}
+
+func selectInitialTopN(items []db.Item, targetN int) topicBalanceResult {
+	selected := items
+	if len(selected) > targetN {
+		selected = selected[:targetN]
+	}
+
+	return topicBalanceResult{
+		Items:           selected,
+		TopicsSelected:  countDistinctTopics(selected),
+		TopicsAvailable: countDistinctTopics(items),
+	}
+}
+
+func calculateMaxPerTopic(targetN int, capFraction float32) int {
+	maxPerTopic := int(math.Floor(float64(capFraction) * float64(targetN)))
 	if maxPerTopic < 1 {
 		maxPerTopic = 1
 	}
 
+	return maxPerTopic
+}
+
+func clampMinTopics(minTopics, targetN int) int {
 	if minTopics < 0 {
 		minTopics = 0
 	}
@@ -83,6 +121,10 @@ func applyTopicBalance(items []db.Item, topN int, capFraction float32, minTopics
 		minTopics = targetN
 	}
 
+	return minTopics
+}
+
+func getTopicCandidates(items []db.Item) []topicCandidate {
 	topicFirstIndex := make(map[string]int)
 	topicEligible := make(map[string]bool)
 
@@ -107,18 +149,10 @@ func applyTopicBalance(items []db.Item, topN int, capFraction float32, minTopics
 
 	sort.Slice(topics, func(i, j int) bool { return topics[i].index < topics[j].index })
 
-	topicsAvailable := len(topics)
-	selectedIndices := make(map[int]struct{})
-	topicCounts := make(map[string]int)
+	return topics
+}
 
-	for i := 0; i < minTopics && i < len(topics); i++ {
-		idx := topics[i].index
-		key, _ := topicKey(items[idx].Topic)
-
-		selectedIndices[idx] = struct{}{}
-		topicCounts[key]++
-	}
-
+func fillRemainingSlots(items []db.Item, selectedIndices map[int]struct{}, topicCounts map[string]int, targetN, maxPerTopic int) {
 	for idx, item := range items {
 		if len(selectedIndices) >= targetN {
 			break
@@ -129,38 +163,17 @@ func applyTopicBalance(items []db.Item, topN int, capFraction float32, minTopics
 		}
 
 		key, _ := topicKey(item.Topic)
-
-		if topicCounts[key] >= maxPerTopic {
+		if maxPerTopic != -1 && topicCounts[key] >= maxPerTopic {
 			continue
 		}
 
 		selectedIndices[idx] = struct{}{}
 		topicCounts[key]++
 	}
+}
 
-	relaxed := false
-
-	if len(selectedIndices) < targetN {
-		relaxed = true
-
-		for idx, item := range items {
-			if len(selectedIndices) >= targetN {
-				break
-			}
-
-			if _, ok := selectedIndices[idx]; ok {
-				continue
-			}
-
-			key, _ := topicKey(item.Topic)
-
-			selectedIndices[idx] = struct{}{}
-			topicCounts[key]++
-		}
-	}
-
-	selected := make([]db.Item, 0, targetN)
-
+func buildTopicBalanceResult(items []db.Item, selectedIndices map[int]struct{}, relaxed bool, topicsAvailable, maxPerTopic int) topicBalanceResult {
+	selected := make([]db.Item, 0, len(selectedIndices))
 	for idx, item := range items {
 		if _, ok := selectedIndices[idx]; ok {
 			selected = append(selected, item)

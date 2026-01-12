@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/db"
 	"github.com/rs/zerolog"
 )
 
@@ -11,12 +12,9 @@ const (
 	thresholdTuningWindowDays = 30
 )
 
+// UpdateGlobalThresholds recalculates the global importance and relevance thresholds based on recent data.
 func (s *Scheduler) UpdateGlobalThresholds(ctx context.Context, logger *zerolog.Logger) error {
-	enabled := s.cfg.AutoThresholdTuningEnabled
-	if err := s.database.GetSetting(ctx, "auto_threshold_tuning_enabled", &enabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get auto_threshold_tuning_enabled from DB")
-	}
-
+	enabled := s.getAutoThresholdTuningEnabled(ctx, logger)
 	if !enabled {
 		return nil
 	}
@@ -29,6 +27,33 @@ func (s *Scheduler) UpdateGlobalThresholds(ctx context.Context, logger *zerolog.
 		return err
 	}
 
+	_, _, net, ok := s.calculateNetScore(now, ratings, logger)
+	if !ok {
+		return nil
+	}
+
+	step := s.getThresholdTuningStep()
+	minVal, maxVal := s.getThresholdTuningBounds()
+
+	delta := s.calculateThresholdDelta(net, step)
+	if delta == 0 {
+		logger.Info().Float64(LogFieldNetScore, net).Msg("Threshold tuning skipped (within neutral band)")
+		return nil
+	}
+
+	return s.applyThresholdUpdates(ctx, delta, minVal, maxVal, net, logger)
+}
+
+func (s *Scheduler) getAutoThresholdTuningEnabled(ctx context.Context, logger *zerolog.Logger) bool {
+	enabled := s.cfg.AutoThresholdTuningEnabled
+	if err := s.database.GetSetting(ctx, "auto_threshold_tuning_enabled", &enabled); err != nil {
+		logger.Debug().Err(err).Msg("could not get auto_threshold_tuning_enabled from DB")
+	}
+
+	return enabled
+}
+
+func (s *Scheduler) calculateNetScore(now time.Time, ratings []db.ItemRating, logger *zerolog.Logger) (int, float64, float64, bool) {
 	var (
 		totalCount         int
 		weightedGood       float64
@@ -64,16 +89,24 @@ func (s *Scheduler) UpdateGlobalThresholds(ctx context.Context, logger *zerolog.
 			Int(LogFieldMinGlobal, s.cfg.RatingMinSampleGlobal).
 			Msg("Skipping threshold tuning due to insufficient ratings")
 
-		return nil
+		return 0, 0, 0, false
 	}
 
 	net := (weightedGood - (weightedBad + weightedIrrelevant)) / weightedTotal
-	step := s.cfg.ThresholdTuningStep
 
+	return totalCount, weightedTotal, net, true
+}
+
+func (s *Scheduler) getThresholdTuningStep() float32 {
+	step := s.cfg.ThresholdTuningStep
 	if step <= 0 {
 		step = 0.05
 	}
 
+	return step
+}
+
+func (s *Scheduler) getThresholdTuningBounds() (float32, float32) {
 	minVal := s.cfg.ThresholdTuningMin
 	maxVal := s.cfg.ThresholdTuningMax
 
@@ -89,19 +122,20 @@ func (s *Scheduler) UpdateGlobalThresholds(ctx context.Context, logger *zerolog.
 		maxVal = minVal
 	}
 
-	delta := float32(0)
+	return minVal, maxVal
+}
+
+func (s *Scheduler) calculateThresholdDelta(net float64, step float32) float32 {
 	if net > float64(s.cfg.ThresholdTuningNetPositive) {
-		delta = -step
+		return -step
 	} else if net < float64(s.cfg.ThresholdTuningNetNegative) {
-		delta = step
+		return step
 	}
 
-	if delta == 0 {
-		logger.Info().Float64(LogFieldNetScore, net).Msg("Threshold tuning skipped (within neutral band)")
+	return 0
+}
 
-		return nil
-	}
-
+func (s *Scheduler) applyThresholdUpdates(ctx context.Context, delta, minVal, maxVal float32, net float64, logger *zerolog.Logger) error {
 	relevance := s.cfg.RelevanceThreshold
 	if err := s.database.GetSetting(ctx, SettingRelevanceThreshold, &relevance); err != nil {
 		logger.Debug().Err(err).Msg("could not get relevance_threshold from DB")

@@ -25,36 +25,37 @@ const (
 
 // Log field name constants
 const (
-	LogFieldGlobalCount    = "global_count"
-	LogFieldMinGlobal      = "min_global"
-	LogFieldChannelID      = "channel_id"
-	LogFieldChannel        = "channel"
-	LogFieldUpdated        = "updated"
-	LogFieldSkipped        = "skipped"
-	LogFieldTotal          = "total"
-	LogFieldCount          = "count"
-	LogFieldTask           = "task"
-	LogFieldCorrelationID  = "correlation_id"
-	LogFieldWindow         = "window"
-	LogFieldStart          = "start"
-	LogFieldEnd            = "end"
-	LogFieldNetScore       = "net_score"
+	LogFieldGlobalCount   = "global_count"
+	LogFieldMinGlobal     = "min_global"
+	LogFieldChannelID     = "channel_id"
+	LogFieldChannel       = "channel"
+	LogFieldUpdated       = "updated"
+	LogFieldSkipped       = "skipped"
+	LogFieldTotal         = "total"
+	LogFieldCount         = "count"
+	LogFieldTask          = "task"
+	LogFieldCorrelationID = "correlation_id"
+	LogFieldWindow        = "window"
+	LogFieldStart         = "start"
+	LogFieldEnd           = "end"
+	LogFieldNetScore      = "net_score"
+	LogFieldRatingCount   = "rating_count"
 )
 
 // Database setting key constants
 const (
-	SettingDigestLanguage          = "digest_language"
-	SettingSmartLLMModel           = "smart_llm_model"
-	SettingTargetChatID            = "target_chat_id"
-	SettingImportanceThreshold     = "importance_threshold"
-	SettingRelevanceThreshold      = "relevance_threshold"
+	SettingDigestLanguage      = "digest_language"
+	SettingSmartLLMModel       = "smart_llm_model"
+	SettingTargetChatID        = "target_chat_id"
+	SettingImportanceThreshold = "importance_threshold"
+	SettingRelevanceThreshold  = "relevance_threshold"
 )
 
 // Log message constants
 const (
-	MsgCouldNotGetDigestLanguage  = "could not get digest_language from DB"
-	MsgCouldNotGetSmartLLMModel   = "could not get smart_llm_model from DB"
-	MsgFailedToProcessDigest      = "failed to process digest"
+	MsgCouldNotGetDigestLanguage = "could not get digest_language from DB"
+	MsgCouldNotGetSmartLLMModel  = "could not get smart_llm_model from DB"
+	MsgFailedToProcessDigest     = "failed to process digest"
 )
 
 // Time format constants
@@ -103,20 +104,26 @@ const (
 
 // Default duration constants
 const (
-	DefaultTickIntervalMinutes     = 10
-	DefaultCatchupWindowHours      = 24
+	DefaultTickIntervalMinutes = 10
+	DefaultCatchupWindowHours  = 24
 )
 
 // Digest pool and threshold constants
 const (
-	DigestPoolMultiplier        = 3
-	ImportanceScoreBreaking     = 0.8
-	ImportanceScoreNotable      = 0.6
-	ImportanceScoreStandard     = 0.4
+	DigestPoolMultiplier    = 3
+	ImportanceScoreBreaking = 0.8
+	ImportanceScoreNotable  = 0.6
+	ImportanceScoreStandard = 0.4
 )
 
 // Clustering constants
 const (
-	ClusterMaxItemsLimit              = 500
-	ClusterDefaultCoherenceThreshold  = 0.7
+	ClusterMaxItemsLimit             = 500
+	ClusterDefaultCoherenceThreshold = 0.7
+)
+
+// Smart selection constants
+const (
+	SourceDiversityBonus = 0.1
+	BacklogThreshold     = 100
 )

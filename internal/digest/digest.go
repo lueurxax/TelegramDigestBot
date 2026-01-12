@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"html"
-	"sort"
 	"strings"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 
 	"github.com/lueurxax/telegram-digest-bot/internal/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/db"
-	"github.com/lueurxax/telegram-digest-bot/internal/dedup"
 	"github.com/lueurxax/telegram-digest-bot/internal/htmlutils"
 	"github.com/lueurxax/telegram-digest-bot/internal/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/observability"
@@ -94,6 +92,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		lastAutoWeightRun    time.Time
 		lastAutoRelevanceRun time.Time
 		lastThresholdRun     time.Time
+		lastRatingStatsRun   time.Time
 	)
 
 	for { // select loop immediately follows declarations
@@ -106,6 +105,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			s.maybeRunAutoWeightUpdate(ctx, &lastAutoWeightRun)
 			s.maybeRunAutoRelevanceUpdate(ctx, &lastAutoRelevanceRun)
 			s.maybeRunThresholdTuning(ctx, &lastThresholdRun)
+			s.maybeRunRatingStatsUpdate(ctx, &lastRatingStatsRun)
 		}
 	}
 }
@@ -180,6 +180,24 @@ func (s *Scheduler) maybeRunThresholdTuning(ctx context.Context, lastRun *time.T
 
 		if err := s.UpdateGlobalThresholds(ctx, &logger); err != nil {
 			logger.Error().Err(err).Msg("failed to update global thresholds")
+		} else {
+			*lastRun = now
+		}
+	}
+}
+
+func (s *Scheduler) maybeRunRatingStatsUpdate(ctx context.Context, lastRun *time.Time) {
+	now := time.Now()
+	isSunday := now.Weekday() == time.Sunday
+	isMidnightHour := now.Hour() == 0
+	notRunThisWeek := lastRun.IsZero() || now.Sub(*lastRun) > 6*HoursPerDay*time.Hour
+
+	if isSunday && isMidnightHour && notRunThisWeek {
+		logger := s.logger.With().Str(LogFieldTask, "rating-stats").Logger()
+		logger.Info().Msg("Starting weekly rating stats aggregation")
+
+		if err := s.UpdateRatingStats(ctx, &logger); err != nil {
+			logger.Error().Err(err).Msg("failed to update rating stats")
 		} else {
 			*lastRun = now
 		}
@@ -355,6 +373,17 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	// Generate digest ID early to use in rating buttons
 	digestID := uuid.New().String()
 
+	msgID, err := s.postDigest(ctx, targetChatID, text, digestID, start, end, importanceThreshold, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	s.finalizeDigest(ctx, digestID, start, end, targetChatID, msgID, items, clusters, logger)
+
+	return nil, nil //nolint:nilnil // nil,nil indicates successful completion with no anomaly
+}
+
+func (s *Scheduler) postDigest(ctx context.Context, targetChatID int64, text, digestID string, start, end time.Time, importanceThreshold float32, logger *zerolog.Logger) (int64, error) {
 	// Check if cover images are enabled
 	var coverImageEnabled = true
 	if err := s.database.GetSetting(ctx, "digest_cover_image", &coverImageEnabled); err != nil {
@@ -362,7 +391,11 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	}
 
 	// Fetch cover image if enabled
-	var coverImage []byte
+	var (
+		coverImage []byte
+		err        error
+	)
+
 	if coverImageEnabled {
 		coverImage, err = s.database.GetDigestCoverImage(ctx, start, end, importanceThreshold)
 		if err != nil {
@@ -385,12 +418,16 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 			logger.Error().Err(errSave).Msg("failed to save digest error")
 		}
 
-		return nil, err
+		return 0, err
 	}
 
 	logger.Info().Int64("msg_id", msgID).Msg("Digest posted successfully")
 	observability.DigestsPosted.WithLabelValues(StatusPosted).Inc()
 
+	return msgID, nil
+}
+
+func (s *Scheduler) finalizeDigest(ctx context.Context, digestID string, start, end time.Time, targetChatID, msgID int64, items []db.Item, clusters []db.ClusterWithItems, logger *zerolog.Logger) {
 	// Mark items as digested
 	itemIDs := make([]string, len(items))
 
@@ -403,15 +440,27 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	}
 
 	// Save digest record
-	_, err = s.database.SaveDigest(ctx, digestID, start, end, targetChatID, msgID)
+	_, err := s.database.SaveDigest(ctx, digestID, start, end, targetChatID, msgID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to save digest record: %w", err)
+		logger.Error().Err(err).Msg("failed to save digest record")
 	}
 
 	// Save digest entries
+	entries := s.createDigestEntries(items, clusters)
+
+	if err := s.database.SaveDigestEntries(ctx, digestID, entries); err != nil {
+		logger.Error().Err(err).Msg("failed to save digest entries")
+	}
+
+	if err := s.updateStatsAfterDigest(ctx, start, end, logger); err != nil {
+		logger.Debug().Err(err).Msg("stats collection failed (non-fatal)")
+	}
+}
+
+func (s *Scheduler) createDigestEntries(items []db.Item, clusters []db.ClusterWithItems) []db.DigestEntry {
 	var entries []db.DigestEntry
 
-	if len(clusters) > 0 { // conditional immediately follows declaration
+	if len(clusters) > 0 {
 		for _, c := range clusters {
 			entry := db.DigestEntry{
 				Title: c.Topic,
@@ -439,516 +488,93 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 		}
 	}
 
-	if err := s.database.SaveDigestEntries(ctx, digestID, entries); err != nil {
-		return nil, fmt.Errorf("failed to save digest entries: %w", err)
-	}
-
-	// Collect and save channel stats for this window
-	if err := s.database.CollectAndSaveChannelStats(ctx, start, end); err != nil {
-		logger.Error().Err(err).Msg("failed to collect channel stats")
-		// Don't fail the digest for stats collection errors
-	}
-
-	return nil, nil //nolint:nilnil // nil,nil indicates successful completion with no anomaly
+	return entries
 }
 
+func (s *Scheduler) updateStatsAfterDigest(ctx context.Context, start, end time.Time, logger *zerolog.Logger) error {
+	if err := s.database.CollectAndSaveChannelStats(ctx, start, end); err != nil {
+		logger.Error().Err(err).Msg("failed to collect channel stats")
+		return err
+	}
+
+	return nil
+}
+
+// BuildDigest builds a digest for the given window.
 func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, importanceThreshold float32, logger *zerolog.Logger) (string, []db.Item, []db.ClusterWithItems, *anomalyInfo, error) {
-	// Diagnostic logging
 	totalItems, _ := s.database.CountItemsInWindow(ctx, start, end)
 	readyItems, _ := s.database.CountReadyItemsInWindow(ctx, start, end)
 
-	// Fetch more items than TopN to allow for smart selection (time-decay, diversity)
-	poolSize := s.cfg.DigestTopN * DigestPoolMultiplier
-
-	items, err := s.database.GetItemsForWindow(ctx, start, end, importanceThreshold, poolSize)
+	items, err := s.database.GetItemsForWindow(ctx, start, end, importanceThreshold, s.cfg.DigestTopN*DigestPoolMultiplier)
 	if err != nil {
 		return "", nil, nil, nil, fmt.Errorf("failed to get items for window: %w", err)
 	}
 
-	if len(items) == 0 {
-		if totalItems > 0 {
-			// Return anomaly info instead of sending notification immediately
-			anomaly := &anomalyInfo{
-				start:      start,
-				end:        end,
-				totalItems: totalItems,
-				readyItems: readyItems,
-				threshold:  importanceThreshold,
-			}
-			logger.Info().Time(LogFieldStart, start).Time(LogFieldEnd, end).
-				Int("total_items", totalItems).
-				Int("ready_items", readyItems).
-				Float32("threshold", importanceThreshold).
-				Msg("No items reached importance threshold for digest window")
-
-			return "", nil, nil, anomaly, nil
-		} else {
-			// Check if backlog is large, which might indicate a problem
-			backlog, _ := s.database.GetBacklogCount(ctx)
-			if backlog > 100 {
-				anomaly := &anomalyInfo{
-					start:       start,
-					end:         end,
-					isBacklog:   true,
-					backlogSize: backlog,
-				}
-				logger.Warn().Int("backlog", backlog).Msg("Large backlog - pipeline is catching up, messages not yet processed for this digest window")
-
-				return "", nil, nil, anomaly, nil
-			}
-
-			logger.Debug().Time(LogFieldStart, start).Time(LogFieldEnd, end).Msg("No items for digest window")
-		}
-
-		return "", nil, nil, nil, nil
+	if anomaly := s.checkEmptyWindow(ctx, items, start, end, totalItems, readyItems, importanceThreshold, logger); anomaly != nil || len(items) == 0 {
+		return "", nil, nil, anomaly, nil
 	}
 
-	var topicsEnabled = true
-	if err := s.database.GetSetting(ctx, "topics_enabled", &topicsEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get topics_enabled from DB")
+	settings := s.getDigestSettings(ctx, logger)
+	items = s.applySmartSelection(items, settings)
+	items = s.deduplicateItems(items, logger)
+	items = s.applyTopicBalanceAndLimit(items, settings, logger)
+
+	logger.Info().Time(LogFieldStart, start).Time(LogFieldEnd, end).Int(LogFieldCount, len(items)).Msg("Processing items for digest")
+
+	clusters, err := s.performClusteringIfEnabled(ctx, items, start, end, settings, logger)
+	if err != nil {
+		return "", nil, nil, nil, err
 	}
 
-	freshnessDecayHours := s.cfg.FreshnessDecayHours
-	if err := s.database.GetSetting(ctx, "freshness_decay_hours", &freshnessDecayHours); err != nil {
-		logger.Debug().Err(err).Msg("could not get freshness_decay_hours from DB")
+	return s.renderDigest(ctx, items, clusters, start, end, settings, logger)
+}
+
+// performClusteringIfEnabled runs clustering and fetches clusters if topics are enabled
+func (s *Scheduler) performClusteringIfEnabled(ctx context.Context, items []db.Item, start, end time.Time, settings digestSettings, logger *zerolog.Logger) ([]db.ClusterWithItems, error) {
+	if !settings.topicsEnabled {
+		return nil, nil
 	}
 
-	freshnessFloor := s.cfg.FreshnessFloor
-	if err := s.database.GetSetting(ctx, "freshness_floor", &freshnessFloor); err != nil {
-		logger.Debug().Err(err).Msg("could not get freshness_floor from DB")
+	if err := s.clusterItems(ctx, items, start, end, logger); err != nil {
+		logger.Error().Err(err).Msg("failed to cluster items")
 	}
 
-	topicDiversityCap := s.cfg.TopicDiversityCap
-	if err := s.database.GetSetting(ctx, "topic_diversity_cap", &topicDiversityCap); err != nil {
-		logger.Debug().Err(err).Msg("could not get topic_diversity_cap from DB")
+	clusters, err := s.database.GetClustersForWindow(ctx, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get clusters: %w", err)
 	}
 
-	minTopicCount := s.cfg.MinTopicCount
-	if err := s.database.GetSetting(ctx, "min_topic_count", &minTopicCount); err != nil {
-		logger.Debug().Err(err).Msg("could not get min_topic_count from DB")
-	}
+	return clusters, nil
+}
 
-	// Apply smart selection adjustments
-	channelCounts := make(map[string]int)
+// renderDigest builds the final digest text
+func (s *Scheduler) renderDigest(ctx context.Context, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, settings digestSettings, logger *zerolog.Logger) (string, []db.Item, []db.ClusterWithItems, *anomalyInfo, error) {
+	rc := s.newRenderContext(ctx, settings, items, clusters, start, end, logger)
 
-	for _, item := range items {
-		channelCounts[item.SourceChannel]++
-	}
-
-	for i := range items {
-		// 1. Time-decay: reduce importance of older items
-		items[i].ImportanceScore = applyFreshnessDecay(items[i].ImportanceScore, items[i].TGDate, freshnessDecayHours, freshnessFloor)
-
-		// 2. Source Diversity Bonus: boost items from channels that only have 1 item in the pool
-		if channelCounts[items[i].SourceChannel] == 1 {
-			items[i].ImportanceScore += 0.1
-		}
-	}
-
-	// Re-sort by adjusted importance
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].ImportanceScore != items[j].ImportanceScore {
-			return items[i].ImportanceScore > items[j].ImportanceScore
-		}
-
-		return items[i].RelevanceScore > items[j].RelevanceScore
-	})
-
-	// Semantic deduplication: remove items that are too similar to already-kept items
-	// This catches duplicates that weren't caught during pipeline processing
-	var dedupedItems []db.Item
-
-	for _, item := range items {
-		if len(item.Embedding) == 0 {
-			// No embedding, keep the item (can't check similarity)
-			dedupedItems = append(dedupedItems, item)
-			continue
-		}
-
-		isDuplicate := false
-
-		for _, kept := range dedupedItems {
-			if len(kept.Embedding) == 0 {
-				continue
-			}
-
-			similarity := dedup.CosineSimilarity(item.Embedding, kept.Embedding)
-			if similarity > s.cfg.SimilarityThreshold {
-				logger.Debug().
-					Str("skipped_id", item.ID).
-					Str("duplicate_of", kept.ID).
-					Float32("similarity", similarity).
-					Msg("Skipping semantic duplicate in digest")
-
-				isDuplicate = true
-
-				break
-			}
-		}
-
-		if !isDuplicate {
-			dedupedItems = append(dedupedItems, item)
-		}
-	}
-
-	items = dedupedItems
-
-	if topicsEnabled && topicDiversityCap > 0 && topicDiversityCap < 1 && len(items) > 0 {
-		result := applyTopicBalance(items, s.cfg.DigestTopN, topicDiversityCap, minTopicCount)
-
-		items = result.Items
-		if result.Relaxed {
-			logger.Warn().
-				Int("topics_available", result.TopicsAvailable).
-				Int("topics_selected", result.TopicsSelected).
-				Int("max_per_topic", result.MaxPerTopic).
-				Float32("cap", topicDiversityCap).
-				Msg("Topic diversity cap relaxed due to limited candidates")
-		}
-	} else if len(items) > s.cfg.DigestTopN {
-		items = items[:s.cfg.DigestTopN]
-	}
-
-	logger.Info().Time(LogFieldStart, start).Time(LogFieldEnd, end).
-		Int(LogFieldCount, len(items)).
-		Msg("Processing items for digest")
-
-	var editorEnabled bool
-	if err := s.database.GetSetting(ctx, "editor_enabled", &editorEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get editor_enabled from DB")
-	}
-
-	var smartLLMModel string
-	if err := s.database.GetSetting(ctx, SettingSmartLLMModel, &smartLLMModel); err != nil {
-		logger.Debug().Err(err).Msg(MsgCouldNotGetSmartLLMModel)
-	}
-
-	var consolidatedClustersEnabled bool
-	if err := s.database.GetSetting(ctx, "consolidated_clusters_enabled", &consolidatedClustersEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get consolidated_clusters_enabled from DB")
-	}
-
-	var editorDetailedItems = true
-	if err := s.database.GetSetting(ctx, "editor_detailed_items", &editorDetailedItems); err != nil {
-		logger.Debug().Err(err).Msg("could not get editor_detailed_items from DB")
-	}
-
-	// 1. Perform semantic clustering if enabled
-	if topicsEnabled {
-		if err := s.clusterItems(ctx, items, start, end, logger); err != nil {
-			logger.Error().Err(err).Msg("failed to cluster items")
-		}
-	}
-
-	// 2. Fetch clusters
-	var clusters []db.ClusterWithItems
-	if topicsEnabled {
-		clusters, err = s.database.GetClustersForWindow(ctx, start, end)
-		if err != nil {
-			return "", nil, nil, nil, fmt.Errorf("failed to get clusters: %w", err)
-		}
-	}
-
-	var digestLanguage string
-	if err := s.database.GetSetting(ctx, SettingDigestLanguage, &digestLanguage); err != nil {
-		logger.Debug().Err(err).Msg(MsgCouldNotGetDigestLanguage)
-	}
-
-	var digestTone string
-	if err := s.database.GetSetting(ctx, "digest_tone", &digestTone); err != nil {
-		logger.Debug().Err(err).Msg("could not get digest_tone from DB")
-	}
-
-	header := "Digest for"
-
-	switch strings.ToLower(digestLanguage) {
-	case "ru":
-		header = "Дайджест за"
-	case "de":
-		header = "Digest für"
-	case "es":
-		header = "Resumen para"
-	case "fr":
-		header = "Résumé pour"
-	case "it":
-		header = "Riassunto per"
-	}
-
-	// Format digest
 	var sb strings.Builder
 
-	sb.WriteString(DigestSeparatorLine)
-	sb.WriteString(fmt.Sprintf("📰 <b>%s</b> • %s - %s\n", html.EscapeString(header), start.Format(TimeFormatHourMinute), end.Format(TimeFormatHourMinute)))
-	sb.WriteString(DigestSeparatorLine)
+	rc.buildHeaderSection(&sb)
+	rc.buildMetadataSection(&sb)
 
-	// Metadata
-	uniqueChannels := make(map[string]bool)
+	narrativeGenerated := rc.generateNarrative(ctx, &sb)
 
-	for _, item := range items {
-		uniqueChannels[item.SourceChannel] = true
-	}
-
-	topicCount := 0
-	if topicsEnabled {
-		topicCount = len(clusters)
-		if topicCount == 0 {
-			topicCount = countDistinctTopics(items)
-		}
-	}
-
-	sb.WriteString(fmt.Sprintf("📊 <i>%d items from %d channels | %d topics</i>\n\n", len(items), len(uniqueChannels), topicCount))
-
-	seenSummaries := make(map[string]bool)
-
-	var narrativeGenerated bool
-
-	if editorEnabled && smartLLMModel != "" {
-		narrative, err := s.llmClient.GenerateNarrative(ctx, items, digestLanguage, smartLLMModel, digestTone)
-		if err == nil && narrative != "" {
-			sb.WriteString("<blockquote>\n")
-			sb.WriteString("📝 <b>Overview</b>\n\n")
-			sb.WriteString(htmlutils.SanitizeHTML(narrative))
-			sb.WriteString("\n</blockquote>\n")
-
-			narrativeGenerated = true
-
-			if editorDetailedItems {
-				sb.WriteString("\n─────────────────────\n<b>📋 Detailed items:</b>\n\n")
-			}
-		} else if err != nil {
-			logger.Warn().Err(err).Msg("Editor-in-Chief narrative generation failed")
-		}
-	}
-
-	if !narrativeGenerated || editorDetailedItems {
-		breakingTitle := "Breaking"
-		notableTitle := "Notable"
-		alsoTitle := "Also"
-
-		switch strings.ToLower(digestLanguage) {
-		case "ru":
-			breakingTitle = "Срочно"
-			notableTitle = "Важное"
-			alsoTitle = "Остальное"
-		case "de":
-			breakingTitle = "Eilmeldung"
-			notableTitle = "Wichtig"
-			alsoTitle = "Weiteres"
-		case "es":
-			breakingTitle = "Última hora"
-			notableTitle = "Destacado"
-			alsoTitle = "Otros"
-		case "fr":
-			breakingTitle = "Flash info"
-			notableTitle = "Important"
-			alsoTitle = "Autres"
-		case "it":
-			breakingTitle = "Ultime notizie"
-			notableTitle = "Importante"
-			alsoTitle = "Altro"
-		}
-
-		type clusterGroup struct {
-			clusters []db.ClusterWithItems
-			items    []db.Item
-		}
-
-		breaking := clusterGroup{}
-		notable := clusterGroup{}
-		also := clusterGroup{}
-
-		if topicsEnabled && len(clusters) > 0 {
-			for _, c := range clusters {
-				maxImp := float32(0)
-				for _, it := range c.Items {
-					if it.ImportanceScore > maxImp {
-						maxImp = it.ImportanceScore
-					}
-				}
-
-				if maxImp >= ImportanceScoreBreaking {
-					breaking.clusters = append(breaking.clusters, c)
-				} else if maxImp >= 0.5 {
-					notable.clusters = append(notable.clusters, c)
-				} else {
-					also.clusters = append(also.clusters, c)
-				}
-			}
-		} else {
-			for _, it := range items {
-				if it.ImportanceScore >= ImportanceScoreBreaking {
-					breaking.items = append(breaking.items, it)
-				} else if it.ImportanceScore >= 0.5 {
-					notable.items = append(notable.items, it)
-				} else {
-					also.items = append(also.items, it)
-				}
-			}
-		}
-
-		renderGroup := func(group clusterGroup, emoji, title string) {
-			if len(group.clusters) == 0 && len(group.items) == 0 {
-				return
-			}
-
-			var groupSb strings.Builder
-
-			hasContent := false
-
-			if len(group.clusters) > 0 {
-				for _, c := range group.clusters {
-					if len(c.Items) > 1 {
-						if consolidatedClustersEnabled {
-							model := smartLLMModel
-							if model == "" {
-								model = s.cfg.LLMModel
-							}
-
-							summary, err := s.llmClient.SummarizeCluster(ctx, c.Items, digestLanguage, model, digestTone)
-							if err == nil && summary != "" {
-								summary = htmlutils.SanitizeHTML(summary)
-								if seenSummaries[summary] {
-									continue
-								}
-
-								seenSummaries[summary] = true
-								hasContent = true
-								// Item boundary marker for intelligent splitting
-								groupSb.WriteString(htmlutils.ItemStart)
-
-								if c.Topic != "" {
-									emoji := topicEmojis[c.Topic]
-									if emoji == "" {
-										emoji = DefaultTopicEmoji
-									}
-
-									groupSb.WriteString(DigestTopicBorderTop)
-									groupSb.WriteString(fmt.Sprintf("│ %s <b>%s</b> (%d)\n", emoji, strings.ToUpper(html.EscapeString(c.Topic)), len(c.Items)))
-									groupSb.WriteString(DigestTopicBorderBot)
-								}
-
-								groupSb.WriteString(fmt.Sprintf(FormatPrefixSummary, getImportancePrefix(c.Items[0].ImportanceScore), summary))
-
-								var links []string
-
-								for _, item := range c.Items {
-									label := item.SourceChannel
-									if label != "" {
-										label = "@" + label
-									}
-
-									if label == "" {
-										label = item.SourceChannelTitle
-									}
-
-									if label == "" {
-										label = DefaultSourceLabel
-									}
-
-									links = append(links, s.formatLink(item, label))
-								}
-
-								if len(links) > 0 {
-									groupSb.WriteString(fmt.Sprintf(" <i>via %s</i>", strings.Join(links, DigestSourceSeparator)))
-								}
-
-								groupSb.WriteString(htmlutils.ItemEnd)
-								groupSb.WriteString("\n")
-
-								continue
-							} else if err != nil {
-								logger.Warn().Err(err).Str("cluster", c.Topic).Msg("failed to summarize cluster, falling back to detailed list")
-							}
-						}
-
-						emoji := topicEmojis[c.Topic]
-						if emoji == "" {
-							emoji = DefaultTopicEmoji
-						}
-						// Show only the representative (first item, sorted by importance)
-						// but aggregate sources from all cluster items
-						representative := c.Items[0]
-						if seenSummaries[representative.Summary] {
-							continue
-						}
-
-						seenSummaries[representative.Summary] = true
-						hasContent = true
-
-						// Item boundary marker for intelligent splitting
-						groupSb.WriteString(htmlutils.ItemStart)
-						groupSb.WriteString(DigestTopicBorderTop)
-						groupSb.WriteString(fmt.Sprintf("│ %s <b>%s</b>\n", emoji, strings.ToUpper(html.EscapeString(c.Topic))))
-						groupSb.WriteString(DigestTopicBorderBot)
-
-						sanitizedSummary := htmlutils.SanitizeHTML(representative.Summary)
-						prefix := getImportancePrefix(representative.ImportanceScore)
-						groupSb.WriteString(fmt.Sprintf(FormatPrefixSummary, prefix, sanitizedSummary))
-
-						// Collect sources from ALL items in cluster
-						var links []string
-
-						for _, item := range c.Items {
-							label := item.SourceChannel
-							if label != "" {
-								label = "@" + label
-							}
-
-							if label == "" {
-								label = item.SourceChannelTitle
-							}
-
-							if label == "" {
-								label = DefaultSourceLabel
-							}
-
-							links = append(links, s.formatLink(item, label))
-						}
-
-						if len(links) > 0 {
-							groupSb.WriteString(fmt.Sprintf(DigestSourceVia, strings.Join(links, DigestSourceSeparator)))
-						}
-
-						if len(c.Items) > 1 {
-							groupSb.WriteString(fmt.Sprintf(" <i>(+%d related)</i>", len(c.Items)-1))
-						}
-
-						groupSb.WriteString(htmlutils.ItemEnd)
-						groupSb.WriteString("\n\n")
-					} else {
-						formatted := s.formatItems(c.Items, true, seenSummaries)
-
-						if formatted != "" {
-							hasContent = true
-
-							groupSb.WriteString(formatted)
-						}
-					}
-				}
-			} else {
-				formatted := s.formatItems(group.items, true, seenSummaries)
-
-				if formatted != "" {
-					hasContent = true
-
-					groupSb.WriteString(formatted)
-				}
-			}
-
-			if hasContent {
-				sb.WriteString(fmt.Sprintf("\n%s <b>%s</b>\n", emoji, title))
-				sb.WriteString(groupSb.String())
-			}
-		}
-
-		renderGroup(breaking, EmojiBreaking, breakingTitle)
-		renderGroup(notable, EmojiNotable, notableTitle)
-		renderGroup(also, EmojiStandard, alsoTitle)
+	if !narrativeGenerated || settings.editorDetailedItems {
+		s.renderDetailedItems(ctx, &sb, rc)
 	}
 
 	sb.WriteString("\n" + DigestSeparatorLine)
 
 	return sb.String(), items, clusters, nil, nil
+}
+
+// renderDetailedItems renders the breaking/notable/also sections
+func (s *Scheduler) renderDetailedItems(ctx context.Context, sb *strings.Builder, rc *digestRenderContext) {
+	breakingTitle, notableTitle, alsoTitle := rc.getSectionTitles()
+	breaking, notable, also := rc.categorizeByImportance()
+
+	rc.renderGroup(ctx, sb, breaking, EmojiBreaking, breakingTitle)
+	rc.renderGroup(ctx, sb, notable, EmojiNotable, notableTitle)
+	rc.renderGroup(ctx, sb, also, EmojiStandard, alsoTitle)
 }
 
 // sendConsolidatedAnomalyNotification sends a single notification summarizing all anomalies

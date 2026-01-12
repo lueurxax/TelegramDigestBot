@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/db"
 )
 
 const (
@@ -44,6 +46,27 @@ func computeRelevanceDelta(reliability float64) float32 {
 	return float32(penalty)
 }
 
+func applyRating(stats *ratingStats, rating string, weight float64) {
+	if stats == nil {
+		return
+	}
+
+	stats.count++
+	stats.weightedTotal += weight
+
+	switch strings.ToLower(rating) {
+	case RatingGood:
+		stats.weightedGood += weight
+	case RatingBad:
+		stats.weightedBad += weight
+	case RatingIrrelevant:
+		stats.weightedIrrelevant += weight
+	default:
+		stats.weightedBad += weight
+	}
+}
+
+// UpdateAutoRelevance updates the auto-relevance delta for all active channels.
 func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Logger) error {
 	now := time.Now()
 	since := now.AddDate(0, 0, -autoRelevanceWindowDays)
@@ -53,47 +76,11 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 		return err
 	}
 
-	stats := make(map[string]*ratingStats)
-	globalCount := 0
-	globalWeighted := 0.0
+	stats, globalStats := s.aggregateRatingStats(now, ratings)
 
-	for _, r := range ratings {
-		if r.ChannelID == "" {
-			continue
-		}
-
-		weight := decayWeight(now, r.CreatedAt)
-		if weight <= 0 {
-			continue
-		}
-
-		globalCount++
-		globalWeighted += weight
-
-		st := stats[r.ChannelID]
-		if st == nil {
-			st = &ratingStats{}
-			stats[r.ChannelID] = st
-		}
-
-		st.count++
-		st.weightedTotal += weight
-
-		switch strings.ToLower(r.Rating) {
-		case RatingGood:
-			st.weightedGood += weight
-		case RatingBad:
-			st.weightedBad += weight
-		case RatingIrrelevant:
-			st.weightedIrrelevant += weight
-		default:
-			st.weightedBad += weight
-		}
-	}
-
-	if globalCount < s.cfg.RatingMinSampleGlobal {
+	if globalStats.count < s.cfg.RatingMinSampleGlobal {
 		logger.Info().
-			Int(LogFieldGlobalCount, globalCount).
+			Int(LogFieldGlobalCount, globalStats.count).
 			Int(LogFieldMinGlobal, s.cfg.RatingMinSampleGlobal).
 			Msg("Skipping auto-relevance update due to insufficient global ratings")
 
@@ -105,6 +92,48 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 		return err
 	}
 
+	updated, skipped := s.processChannelsAutoRelevance(ctx, channels, stats, logger)
+
+	logger.Info().
+		Int(LogFieldUpdated, updated).
+		Int(LogFieldSkipped, skipped).
+		Int(LogFieldTotal, len(channels)).
+		Int(LogFieldGlobalCount, globalStats.count).
+		Float64("global_weighted", globalStats.weightedTotal).
+		Msg("Auto-relevance update completed")
+
+	return nil
+}
+
+func (s *Scheduler) aggregateRatingStats(now time.Time, ratings []db.ItemRating) (map[string]*ratingStats, *ratingStats) {
+	stats := make(map[string]*ratingStats)
+	globalStats := &ratingStats{}
+
+	for _, r := range ratings {
+		if r.ChannelID == "" {
+			continue
+		}
+
+		weight := decayWeight(now, r.CreatedAt)
+		if weight <= 0 {
+			continue
+		}
+
+		applyRating(globalStats, r.Rating, weight)
+
+		st := stats[r.ChannelID]
+		if st == nil {
+			st = &ratingStats{}
+			stats[r.ChannelID] = st
+		}
+
+		applyRating(st, r.Rating, weight)
+	}
+
+	return stats, globalStats
+}
+
+func (s *Scheduler) processChannelsAutoRelevance(ctx context.Context, channels []db.Channel, stats map[string]*ratingStats, logger *zerolog.Logger) (int, int) {
 	updated := 0
 	skipped := 0
 
@@ -149,33 +178,29 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 			continue
 		}
 
-		name := ch.Username
-		if name == "" {
-			if ch.Title != "" {
-				name = ch.Title
-			} else {
-				name = ch.ID
-			}
-		}
-
-		logger.Info().
-			Str(LogFieldChannel, name).
-			Float32("old_delta", ch.RelevanceThresholdDelta).
-			Float32("new_delta", delta).
-			Int("rating_count", st.count).
-			Float64("reliability", reliability).
-			Msg("Updated auto-relevance delta")
+		s.logAutoRelevanceUpdate(ch, delta, st, reliability, logger)
 
 		updated++
 	}
 
-	logger.Info().
-		Int(LogFieldUpdated, updated).
-		Int(LogFieldSkipped, skipped).
-		Int(LogFieldTotal, len(channels)).
-		Int(LogFieldGlobalCount, globalCount).
-		Float64("global_weighted", globalWeighted).
-		Msg("Auto-relevance update completed")
+	return updated, skipped
+}
 
-	return nil
+func (s *Scheduler) logAutoRelevanceUpdate(ch db.Channel, delta float32, st *ratingStats, reliability float64, logger *zerolog.Logger) {
+	name := ch.Username
+	if name == "" {
+		if ch.Title != "" {
+			name = ch.Title
+		} else {
+			name = ch.ID
+		}
+	}
+
+	logger.Info().
+		Str(LogFieldChannel, name).
+		Float32("old_delta", ch.RelevanceThresholdDelta).
+		Float32("new_delta", delta).
+		Int(LogFieldRatingCount, st.count).
+		Float64("reliability", reliability).
+		Msg("Updated auto-relevance delta")
 }

@@ -421,7 +421,7 @@ func (b *Bot) handleSystemNamespace(msg *tgbotapi.Message) {
 		b.handleErrors(&newMsg)
 	case "retry":
 		b.handleRetry(&newMsg)
-	case "scores":
+	case CmdScores:
 		b.handleScores(&newMsg)
 	default:
 		b.reply(msg, fmt.Sprintf("❓ Unknown system subcommand: <code>%s</code>", html.EscapeString(subcommand)))
