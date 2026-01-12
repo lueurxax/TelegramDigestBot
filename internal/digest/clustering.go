@@ -29,16 +29,53 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 		logger.Error().Err(err).Msg("failed to delete old clusters")
 	}
 
+	similarityThreshold := s.cfg.ClusterSimilarityThreshold
+	if err := s.database.GetSetting(ctx, "cluster_similarity_threshold", &similarityThreshold); err != nil {
+		logger.Debug().Err(err).Msg("could not get cluster_similarity_threshold from DB")
+	}
+	if similarityThreshold <= 0 {
+		similarityThreshold = s.cfg.SimilarityThreshold
+	}
+
+	crossTopicEnabled := s.cfg.CrossTopicClusteringEnabled
+	if err := s.database.GetSetting(ctx, "cross_topic_clustering_enabled", &crossTopicEnabled); err != nil {
+		logger.Debug().Err(err).Msg("could not get cross_topic_clustering_enabled from DB")
+	}
+
+	crossTopicThreshold := s.cfg.CrossTopicSimilarityThreshold
+	if err := s.database.GetSetting(ctx, "cross_topic_similarity_threshold", &crossTopicThreshold); err != nil {
+		logger.Debug().Err(err).Msg("could not get cross_topic_similarity_threshold from DB")
+	}
+	if crossTopicThreshold <= 0 {
+		crossTopicThreshold = similarityThreshold
+	}
+
+	coherenceThreshold := s.cfg.ClusterCoherenceThreshold
+	if err := s.database.GetSetting(ctx, "cluster_coherence_threshold", &coherenceThreshold); err != nil {
+		logger.Debug().Err(err).Msg("could not get cluster_coherence_threshold from DB")
+	}
+	if coherenceThreshold <= 0 {
+		coherenceThreshold = 0.7
+	}
+
+	clusterWindowHours := s.cfg.ClusterTimeWindowHours
+	if err := s.database.GetSetting(ctx, "cluster_time_window_hours", &clusterWindowHours); err != nil {
+		logger.Debug().Err(err).Msg("could not get cluster_time_window_hours from DB")
+	}
+	var clusterWindow time.Duration
+	if clusterWindowHours > 0 {
+		clusterWindow = time.Duration(clusterWindowHours) * time.Hour
+	}
+
 	// 1. Group items by topic for hierarchical clustering (with normalization)
 	topicGroups := make(map[string][]db.Item)
+	topicIndex := make(map[string]string)
 
 	for _, item := range items {
-		topic := strings.TrimSpace(cases.Title(language.English).String(strings.ToLower(item.Topic)))
-		if topic == "" {
-			topic = DefaultTopic
-		}
+		topic := normalizeClusterTopic(item.Topic)
 
 		topicGroups[topic] = append(topicGroups[topic], item)
+		topicIndex[item.ID] = topic
 	}
 
 	embeddings := make(map[string][]float32)
@@ -65,10 +102,10 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 		logger.Debug().Err(err).Msg("could not get smart_llm_model from DB")
 	}
 
-	for topic, groupItems := range topicGroups {
-		assigned := make(map[string]bool)
+	assigned := make(map[string]bool)
 
-		for i, itemA := range groupItems {
+	for topic, groupItems := range topicGroups {
+		for _, itemA := range groupItems {
 			if assigned[itemA.ID] {
 				continue
 			}
@@ -77,8 +114,15 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 			embA, okA := embeddings[itemA.ID]
 
 			if okA {
-				for j := i + 1; j < len(groupItems); j++ {
-					itemB := groupItems[j]
+				candidateItems := groupItems
+				if crossTopicEnabled {
+					candidateItems = items
+				}
+
+				for _, itemB := range candidateItems {
+					if itemB.ID == itemA.ID {
+						continue
+					}
 					if assigned[itemB.ID] {
 						continue
 					}
@@ -88,7 +132,22 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 						continue
 					}
 
-					if dedup.CosineSimilarity(embA, embB) > s.cfg.SimilarityThreshold {
+					topicA := topicIndex[itemA.ID]
+					topicB := topicIndex[itemB.ID]
+					if !crossTopicEnabled && topicA != topicB {
+						continue
+					}
+
+					if clusterWindow > 0 && !withinClusterWindow(itemA.TGDate, itemB.TGDate, clusterWindow) {
+						continue
+					}
+
+					threshold := similarityThreshold
+					if topicA != topicB {
+						threshold = crossTopicThreshold
+					}
+
+					if dedup.CosineSimilarity(embA, embB) > threshold {
 						clusterItemsList = append(clusterItemsList, itemB)
 						assigned[itemB.ID] = true
 					}
@@ -100,7 +159,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 			// Reject clusters with coherence < 0.7 if they have more than 2 items
 			coherence := s.calculateCoherence(clusterItemsList, embeddings)
 
-			if len(clusterItemsList) > 2 && coherence < 0.7 {
+			if len(clusterItemsList) > 2 && coherence < coherenceThreshold {
 				logger.Debug().Float32("coherence", coherence).Int("size", len(clusterItemsList)).Msg("Rejecting cluster due to low coherence")
 				// Only keep the first item, mark others as unassigned for later
 				for k := 1; k < len(clusterItemsList); k++ {
@@ -183,4 +242,23 @@ func (s *Scheduler) calculateCoherence(items []db.Item, embeddings map[string][]
 	}
 
 	return sum / float32(count)
+}
+
+func normalizeClusterTopic(topic string) string {
+	normalized := strings.TrimSpace(cases.Title(language.English).String(strings.ToLower(topic)))
+	if normalized == "" {
+		return DefaultTopic
+	}
+	return normalized
+}
+
+func withinClusterWindow(a, b time.Time, window time.Duration) bool {
+	if a.IsZero() || b.IsZero() {
+		return true
+	}
+	diff := a.Sub(b)
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= window
 }
