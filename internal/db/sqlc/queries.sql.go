@@ -515,10 +515,10 @@ func (q *Queries) GetChannelByPeerID(ctx context.Context, tgPeerID int64) (Chann
 const getChannelStats = `-- name: GetChannelStats :many
 SELECT rm.channel_id, 
        (COUNT(i.id) FILTER (WHERE i.status = 'ready')::float4 * 100.0 / NULLIF(COUNT(rm.id), 0)::float4)::float4 as conversion_rate,
-       AVG(i.relevance_score) FILTER (WHERE i.status = 'ready')::float4 as avg_relevance, 
-       STDDEV(i.relevance_score) FILTER (WHERE i.status = 'ready')::float4 as stddev_relevance,
-       AVG(i.importance_score) FILTER (WHERE i.status = 'ready')::float4 as avg_importance,
-       STDDEV(i.importance_score) FILTER (WHERE i.status = 'ready')::float4 as stddev_importance
+       COALESCE(AVG(i.relevance_score) FILTER (WHERE i.status = 'ready'), 0)::float4 as avg_relevance,
+       COALESCE(STDDEV(i.relevance_score) FILTER (WHERE i.status = 'ready'), 0)::float4 as stddev_relevance,
+       COALESCE(AVG(i.importance_score) FILTER (WHERE i.status = 'ready'), 0)::float4 as avg_importance,
+       COALESCE(STDDEV(i.importance_score) FILTER (WHERE i.status = 'ready'), 0)::float4 as stddev_importance
 FROM raw_messages rm
 LEFT JOIN items i ON rm.id = i.raw_message_id
 WHERE rm.tg_date > now() - interval '7 days'
