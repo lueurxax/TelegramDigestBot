@@ -39,6 +39,12 @@ type Config struct {
 	FreshnessDecayHours           int     `env:"FRESHNESS_DECAY_HOURS" envDefault:"36"`
 	FreshnessFloor                float32 `env:"FRESHNESS_FLOOR" envDefault:"0.4"`
 	MinTopicCount                 int     `env:"MIN_TOPIC_COUNT" envDefault:"3"`
+	AutoThresholdTuningEnabled    bool    `env:"AUTO_THRESHOLD_TUNING_ENABLED" envDefault:"false"`
+	ThresholdTuningStep           float32 `env:"THRESHOLD_TUNING_STEP" envDefault:"0.05"`
+	ThresholdTuningMin            float32 `env:"THRESHOLD_TUNING_MIN" envDefault:"0.10"`
+	ThresholdTuningMax            float32 `env:"THRESHOLD_TUNING_MAX" envDefault:"0.90"`
+	ThresholdTuningNetPositive    float32 `env:"THRESHOLD_TUNING_NET_POSITIVE" envDefault:"0.20"`
+	ThresholdTuningNetNegative    float32 `env:"THRESHOLD_TUNING_NET_NEGATIVE" envDefault:"-0.20"`
 	ClusterSimilarityThreshold    float32 `env:"CLUSTER_SIMILARITY_THRESHOLD" envDefault:"0.75"`
 	ClusterCoherenceThreshold     float32 `env:"CLUSTER_COHERENCE_THRESHOLD" envDefault:"0.70"`
 	ClusterTimeWindowHours        int     `env:"CLUSTER_TIME_WINDOW_HOURS" envDefault:"36"`

@@ -93,9 +93,10 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	var (
 		lastAutoWeightRun    time.Time
 		lastAutoRelevanceRun time.Time
+		lastThresholdRun     time.Time
 	)
 
-	for {  // select loop immediately follows declarations
+	for { // select loop immediately follows declarations
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -104,6 +105,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		case <-autoWeightTicker.C:
 			s.maybeRunAutoWeightUpdate(ctx, &lastAutoWeightRun)
 			s.maybeRunAutoRelevanceUpdate(ctx, &lastAutoRelevanceRun)
+			s.maybeRunThresholdTuning(ctx, &lastThresholdRun)
 		}
 	}
 }
@@ -160,6 +162,24 @@ func (s *Scheduler) maybeRunAutoRelevanceUpdate(ctx context.Context, lastRun *ti
 
 		if err := s.UpdateAutoRelevance(ctx, &logger); err != nil {
 			logger.Error().Err(err).Msg("failed to update auto-relevance deltas")
+		} else {
+			*lastRun = now
+		}
+	}
+}
+
+func (s *Scheduler) maybeRunThresholdTuning(ctx context.Context, lastRun *time.Time) {
+	now := time.Now()
+	isSunday := now.Weekday() == time.Sunday
+	isMidnightHour := now.Hour() == 0
+	notRunThisWeek := lastRun.IsZero() || now.Sub(*lastRun) > 6*24*time.Hour
+
+	if isSunday && isMidnightHour && notRunThisWeek {
+		logger := s.logger.With().Str("task", "threshold-tuning").Logger()
+		logger.Info().Msg("Starting weekly threshold tuning")
+
+		if err := s.UpdateGlobalThresholds(ctx, &logger); err != nil {
+			logger.Error().Err(err).Msg("failed to update global thresholds")
 		} else {
 			*lastRun = now
 		}
@@ -391,7 +411,7 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	// Save digest entries
 	var entries []db.DigestEntry
 
-	if len(clusters) > 0 {  // conditional immediately follows declaration
+	if len(clusters) > 0 { // conditional immediately follows declaration
 		for _, c := range clusters {
 			entry := db.DigestEntry{
 				Title: c.Topic,

@@ -45,6 +45,32 @@ type Pipeline struct {
 	logger       *zerolog.Logger
 }
 
+type pipelineSettings struct {
+	batchSize               int
+	filterList              []db.Filter
+	adsFilterEnabled        bool
+	minLength               int
+	adsKeywords             []string
+	skipForwards            bool
+	filtersMode             string
+	dedupMode               string
+	topicsEnabled           bool
+	relevanceThreshold      float32
+	digestLanguage          string
+	llmModel                string
+	smartLLMModel           string
+	visionRoutingEnabled    bool
+	tieredImportanceEnabled bool
+	digestTone              string
+	normalizeScores         bool
+	relevanceGateEnabled    bool
+	channelStats            map[string]db.ChannelStats
+	linkEnrichmentEnabled   bool
+	maxLinks                int
+	linkCacheTTL            time.Duration
+	tgLinkCacheTTL          time.Duration
+}
+
 func New(cfg *config.Config, database Repository, llmClient llm.Client, linkResolver *linkresolver.Resolver, logger *zerolog.Logger) *Pipeline {
 	return &Pipeline{
 		cfg:          cfg,
@@ -82,12 +108,12 @@ func (p *Pipeline) Run(ctx context.Context) error {
 func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) error {
 	logger := p.logger.With().Str("correlation_id", correlationID).Logger()
 
-	batchSize := p.cfg.WorkerBatchSize
-	if err := p.database.GetSetting(ctx, "worker_batch_size", &batchSize); err != nil {
-		logger.Debug().Err(err).Msg("could not get worker_batch_size from DB")
+	s, err := p.loadPipelineSettings(ctx, logger)
+	if err != nil {
+		return err
 	}
 
-	messages, err := p.database.GetUnprocessedMessages(ctx, batchSize)
+	messages, err := p.database.GetUnprocessedMessages(ctx, s.batchSize)
 	if err != nil {
 		return err
 	}
@@ -103,512 +129,21 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		observability.PipelineBacklog.Set(float64(backlog))
 	}
 
-	filterList, err := p.database.GetActiveFilters(ctx)
+	candidates, embeddings, err := p.prepareCandidates(ctx, logger, messages, s)
 	if err != nil {
-		logger.Warn().Err(err).Msg("failed to get active filters")
-	}
-
-	var adsFilterEnabled bool
-
-	if err := p.database.GetSetting(ctx, "filters_ads", &adsFilterEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get filters_ads from DB")
-	}
-
-	minLength := 20
-
-	if err := p.database.GetSetting(ctx, "filters_min_length", &minLength); err != nil {
-		logger.Debug().Err(err).Msg("could not get filters_min_length from DB")
-	}
-
-	var adsKeywords []string
-
-	if err := p.database.GetSetting(ctx, "filters_ads_keywords", &adsKeywords); err != nil {
-		logger.Debug().Err(err).Msg("could not get filters_ads_keywords from DB")
-	}
-
-	var skipForwards bool
-
-	if err := p.database.GetSetting(ctx, "filters_skip_forwards", &skipForwards); err != nil {
-		logger.Debug().Err(err).Msg("could not get filters_skip_forwards from DB")
-	}
-
-	filtersMode := FilterModeMixed
-
-	if err := p.database.GetSetting(ctx, "filters_mode", &filtersMode); err != nil {
-		logger.Debug().Err(err).Msg("could not get filters_mode from DB")
-	}
-
-	dedupMode := DedupModeSemantic
-
-	if err := p.database.GetSetting(ctx, "dedup_mode", &dedupMode); err != nil {
-		logger.Debug().Err(err).Msg("could not get dedup_mode from DB")
-	}
-
-	topicsEnabled := true
-
-	if err := p.database.GetSetting(ctx, "topics_enabled", &topicsEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get topics_enabled from DB")
-	}
-
-	relevanceThreshold := p.cfg.RelevanceThreshold
-
-	if err := p.database.GetSetting(ctx, "relevance_threshold", &relevanceThreshold); err != nil {
-		logger.Debug().Err(err).Msg("could not get relevance_threshold from DB")
-	}
-
-	var digestLanguage string
-
-	if err := p.database.GetSetting(ctx, "digest_language", &digestLanguage); err != nil {
-		logger.Debug().Err(err).Msg("could not get digest_language from DB")
-	}
-
-	var llmModel string
-
-	if err := p.database.GetSetting(ctx, "llm_model", &llmModel); err != nil {
-		logger.Debug().Err(err).Msg("could not get llm_model from DB")
-	}
-
-	var smartLLMModel string
-
-	if err := p.database.GetSetting(ctx, "smart_llm_model", &smartLLMModel); err != nil {
-		logger.Debug().Err(err).Msg("could not get smart_llm_model from DB")
-	}
-
-	var visionRoutingEnabled bool
-
-	if err := p.database.GetSetting(ctx, "vision_routing_enabled", &visionRoutingEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get vision_routing_enabled from DB")
-	}
-
-	var tieredImportanceEnabled bool
-
-	if err := p.database.GetSetting(ctx, "tiered_importance_enabled", &tieredImportanceEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get tiered_importance_enabled from DB")
-	}
-
-	var digestTone string
-
-	if err := p.database.GetSetting(ctx, "digest_tone", &digestTone); err != nil {
-		logger.Debug().Err(err).Msg("could not get digest_tone from DB")
-	}
-
-	var normalizeScores bool
-
-	if err := p.database.GetSetting(ctx, "normalize_scores", &normalizeScores); err != nil {
-		logger.Debug().Err(err).Msg("could not get normalize_scores from DB")
-	}
-
-	relevanceGateEnabled := p.cfg.RelevanceGateEnabled
-
-	if err := p.database.GetSetting(ctx, "relevance_gate_enabled", &relevanceGateEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get relevance_gate_enabled from DB")
-	}
-
-	var channelStats map[string]db.ChannelStats
-
-	if normalizeScores {
-		var err error
-
-		channelStats, err = p.database.GetChannelStats(ctx)
-		if err != nil {
-			logger.Warn().Err(err).Msg("failed to fetch channel stats for normalization")
-
-			normalizeScores = false
-		}
-	}
-
-	var linkEnrichmentEnabled bool
-
-	if err := p.database.GetSetting(ctx, "link_enrichment_enabled", &linkEnrichmentEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get link_enrichment_enabled from DB")
-
-		linkEnrichmentEnabled = p.cfg.LinkEnrichmentEnabled
-	}
-
-	maxLinks := p.cfg.MaxLinksPerMessage
-
-	if err := p.database.GetSetting(ctx, "max_links_per_message", &maxLinks); err != nil {
-		logger.Debug().Err(err).Msg("could not get max_links_per_message from DB")
-	}
-
-	linkCacheTTLStr := p.cfg.LinkCacheTTL.String()
-
-	if err := p.database.GetSetting(ctx, "link_cache_ttl", &linkCacheTTLStr); err != nil {
-		logger.Debug().Err(err).Msg("could not get link_cache_ttl from DB")
-	}
-
-	linkCacheTTL, _ := time.ParseDuration(linkCacheTTLStr)
-
-	tgLinkCacheTTLStr := p.cfg.TelegramLinkCacheTTL.String()
-
-	if err := p.database.GetSetting(ctx, "tg_link_cache_ttl", &tgLinkCacheTTLStr); err != nil {
-		logger.Debug().Err(err).Msg("could not get tg_link_cache_ttl from DB")
-	}
-
-	tgLinkCacheTTL, _ := time.ParseDuration(tgLinkCacheTTLStr)
-
-	// 1. Filtering (MVP)
-	f := filters.New(filterList, adsFilterEnabled, minLength, adsKeywords, filtersMode)
-
-	var deduplicator dedup.Deduplicator
-
-	if dedupMode == DedupModeSemantic {
-		deduplicator = dedup.NewSemantic(p.database, p.cfg.SimilarityThreshold)
-	} else {
-		deduplicator = dedup.NewStrict(p.database)
-	}
-
-	var candidates []llm.MessageInput
-
-	embeddings := make(map[string][]float32)
-	seenHashes := make(map[string]string) // hash -> msg_id
-
-	for _, m := range messages {
-		if dupID, seen := seenHashes[m.CanonicalHash]; seen {
-			logger.Info().Str("msg_id", m.ID).Str("duplicate_id", dupID).Msg("skipping strict duplicate in batch")
-
-			if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
-				logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
-			}
-
-			continue
-		}
-
-		if skipForwards && m.IsForward {
-			logger.Info().Str("msg_id", m.ID).Msg("skipping forwarded message")
-
-			if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
-				logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
-			}
-
-			continue
-		}
-
-		if f.IsFiltered(m.Text) {
-			if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
-				logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
-			}
-
-			continue
-		}
-
-		if relevanceGateEnabled {
-			decision := evaluateRelevanceGate(m.Text)
-			confidence := decision.confidence
-
-			if err := p.database.SaveRelevanceGateLog(ctx, m.ID, decision.decision, &confidence, decision.reason, gateModel, gateVersion); err != nil {
-				logger.Warn().Str("msg_id", m.ID).Err(err).Msg("failed to save relevance gate log")
-			}
-
-			if decision.decision == DecisionIrrelevant {
-				logger.Info().Str("msg_id", m.ID).Str("reason", decision.reason).Msg("skipping message by relevance gate")
-
-				if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
-					logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
-				}
-
-				continue
-			}
-		}
-
-		// 2. Deduplication
-		var emb []float32
-
-		if dedupMode == DedupModeSemantic || topicsEnabled {
-			var err error
-
-			emb, err = p.llmClient.GetEmbedding(ctx, m.Text)
-			if err != nil {
-				logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to get embedding")
-				continue
-			}
-
-			embeddings[m.ID] = emb
-		}
-
-		// Semantic check in batch
-		if dedupMode == DedupModeSemantic {
-			foundInBatch := false
-
-			for _, cand := range candidates {
-				if dedup.CosineSimilarity(embeddings[cand.ID], emb) > p.cfg.SimilarityThreshold {
-					logger.Info().Str("msg_id", m.ID).Str("duplicate_id", cand.ID).Msg("skipping semantic duplicate in batch")
-
-					if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
-						logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
-					}
-
-					foundInBatch = true
-
-					break
-				}
-			}
-
-			if foundInBatch {
-				continue
-			}
-		}
-
-		isDup, dupID, dErr := deduplicator.IsDuplicate(ctx, m, emb)
-		if dErr == nil && isDup {
-			logger.Info().Str("msg_id", m.ID).Str("duplicate_id", dupID).Msg("skipping duplicate message")
-
-			if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
-				logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
-			}
-
-			continue
-		} else if dErr != nil {
-			logger.Error().Str("msg_id", m.ID).Err(dErr).Msg("failed to check for duplicates")
-		}
-
-		// Fetch channel context for better quality
-		channelCtx, cErr := p.database.GetRecentMessagesForChannel(ctx, m.ChannelID, m.TGDate, 5)
-		if cErr != nil {
-			logger.Warn().Err(cErr).Str("msg_id", m.ID).Msg("failed to fetch channel context")
-		}
-
-		resolvedLinks, eErr := p.enrichWithLinks(ctx, &m, linkEnrichmentEnabled, maxLinks, linkCacheTTL, tgLinkCacheTTL)
-		if eErr != nil {
-			logger.Warn().Err(eErr).Str("msg_id", m.ID).Msg("link enrichment failed")
-		}
-
-		candidates = append(candidates, llm.MessageInput{
-			RawMessage:          m,
-			ChannelTitle:        m.ChannelTitle,
-			ChannelContext:      m.ChannelContext,
-			ChannelDescription:  m.ChannelDescription,
-			ChannelCategory:     m.ChannelCategory,
-			ChannelTone:         m.ChannelTone,
-			ChannelUpdateFreq:   m.ChannelUpdateFreq,
-			RelevanceThreshold:  m.RelevanceThreshold,
-			ImportanceThreshold: m.ImportanceThreshold,
-			ImportanceWeight:    m.ImportanceWeight,
-			Context:             channelCtx,
-			ResolvedLinks:       resolvedLinks,
-		})
-		seenHashes[m.CanonicalHash] = m.ID
+		return err
 	}
 
 	if len(candidates) == 0 {
 		return nil
 	}
 
-	// 2. Batched LLM processing
-	start := time.Now()
-	results := make([]llm.BatchResult, len(candidates))
-	modelUsed := make([]string, len(candidates))
-
-	// Group indices by model for Vision Routing
-	modelGroups := make(map[string][]int)
-
-	for i, c := range candidates {
-		model := llmModel
-
-		if visionRoutingEnabled && len(c.MediaData) > 0 && smartLLMModel != "" {
-			model = smartLLMModel
-		}
-
-		modelGroups[model] = append(modelGroups[model], i)
+	results, err := p.runLLMProcessing(ctx, logger, candidates, s)
+	if err != nil {
+		return err
 	}
 
-	for model, indices := range modelGroups {
-		groupCandidates := make([]llm.MessageInput, len(indices))
-		for j, idx := range indices {
-			groupCandidates[j] = candidates[idx]
-		}
-
-		llmStart := time.Now()
-
-		groupResults, err := p.llmClient.ProcessBatch(ctx, groupCandidates, digestLanguage, model, digestTone)
-		if err != nil {
-			logger.Error().Err(err).Str("model", model).Msg("LLM batch processing failed")
-			observability.PipelineProcessed.WithLabelValues(StatusError).Add(float64(len(indices)))
-
-			for _, idx := range indices {
-				errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
-				_ = p.database.SaveItemError(ctx, candidates[idx].ID, errJSON)
-				_ = p.database.MarkAsProcessed(ctx, candidates[idx].ID)
-			}
-
-			return err
-		}
-
-		observability.LLMRequestDuration.WithLabelValues(model).Observe(time.Since(llmStart).Seconds())
-
-		if len(groupResults) != len(indices) {
-			logger.Warn().Int("expected", len(indices)).Int("actual", len(groupResults)).Str("model", model).Msg("LLM batch size mismatch, results might be misaligned")
-			// We proceed anyway, but results will be aligned based on whatever ProcessBatch returned.
-			// openaiClient usually guarantees alignment by index.
-		}
-
-		for j, idx := range indices {
-			if j < len(groupResults) {
-				results[idx] = groupResults[j]
-				modelUsed[idx] = model
-			}
-		}
-	}
-
-	// 2.1 Tiered Importance Analysis
-	if tieredImportanceEnabled && smartLLMModel != "" {
-		var (
-			tieredIndices    []int
-			tieredCandidates []llm.MessageInput
-		)
-
-		for i, res := range results { 			if res.ImportanceScore > 0.8 && modelUsed[i] != smartLLMModel {
-				tieredIndices = append(tieredIndices, i)
-				tieredCandidates = append(tieredCandidates, candidates[i])
-			}
-		}
-
-		if len(tieredCandidates) > 0 {
-			logger.Info().Int("count", len(tieredCandidates)).Msg("Performing tiered importance analysis with smart model")
-
-			llmStart := time.Now()
-
-			tieredResults, err := p.llmClient.ProcessBatch(ctx, tieredCandidates, digestLanguage, smartLLMModel, digestTone)
-			if err == nil && len(tieredResults) == len(tieredCandidates) {
-				observability.LLMRequestDuration.WithLabelValues(smartLLMModel).Observe(time.Since(llmStart).Seconds())
-
-				for j, idx := range tieredIndices {
-					results[idx] = tieredResults[j]
-				}
-			} else if err != nil {
-				logger.Warn().Err(err).Msg("Tiered importance analysis failed, keeping original results")
-			}
-		}
-	}
-
-	duration := time.Since(start)
-	logger.Info().Int("count", len(candidates)).Dur("duration", duration).Msg("LLM processing finished")
-
-	// 3. Normalization (Optional)
-	if normalizeScores && channelStats != nil {
-		for i := range results {
-			if results[i].Summary == "" {
-				continue
-			}
-
-			stats, ok := channelStats[candidates[i].ChannelID]
-			if ok {
-				if stats.StddevRelevance > 0.01 {
-					results[i].RelevanceScore = (results[i].RelevanceScore - stats.AvgRelevance) / stats.StddevRelevance
-				}
-
-				if stats.StddevImportance > 0.01 {
-					results[i].ImportanceScore = (results[i].ImportanceScore - stats.AvgImportance) / stats.StddevImportance
-				}
-			}
-		}
-	}
-
-	// 4. Store results
-	readyCount := 0
-	rejectedCount := 0
-
-	for i, res := range results {
-		// If summary is empty, it means LLM failed to process this specific item
-		if res.Summary == "" {
-			logger.Warn().Str("msg_id", candidates[i].ID).Int("index", i).Msg("LLM summary empty for item, marking as error")
-			observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
-
-			errJSON, _ := json.Marshal(map[string]string{"error": "empty summary from LLM"})
-			_ = p.database.SaveItemError(ctx, candidates[i].ID, errJSON)
-			_ = p.database.MarkAsProcessed(ctx, candidates[i].ID)
-
-			continue
-		}
-
-		// Apply channel importance weight multiplier
-		channelWeight := candidates[i].ImportanceWeight
-		// Clamp weight to valid range [0.1, 2.0], default to 1.0 if invalid
-		if channelWeight < 0.1 {
-			channelWeight = 1.0
-		} else if channelWeight > 2.0 {
-			channelWeight = 2.0
-		}
-
-		importance := res.ImportanceScore * channelWeight
-		// Cap at 1.0 to maintain valid range
-		if importance > 1.0 {
-			importance = 1.0
-		}
-
-		if !p.hasUniqueInfo(res.Summary) {
-			importance -= 0.2
-			if importance < 0 {
-				importance = 0
-			}
-
-			logger.Debug().Str("msg_id", candidates[i].ID).Msg("Applied penalty for lack of unique info")
-		}
-
-		item := &db.Item{
-			RawMessageID:    candidates[i].ID,
-			RelevanceScore:  res.RelevanceScore,
-			ImportanceScore: importance,
-			Topic:           res.Topic,
-			Summary:         res.Summary,
-			Language:        res.Language,
-			Status:          StatusReady,
-		}
-		itemRelThreshold := relevanceThreshold
-
-		if candidates[i].RelevanceThreshold > 0 {
-			itemRelThreshold = candidates[i].RelevanceThreshold
-		}
-
-		if candidates[i].AutoRelevanceEnabled {
-			itemRelThreshold += candidates[i].RelevanceThresholdDelta
-		}
-
-		if itemRelThreshold < 0 {
-			itemRelThreshold = 0
-		} else if itemRelThreshold > 1 {
-			itemRelThreshold = 1
-		}
-
-		if res.RelevanceScore < itemRelThreshold {
-			item.Status = StatusRejected
-			rejectedCount++
-
-			observability.PipelineProcessed.WithLabelValues(StatusRejected).Inc()
-		} else {
-			readyCount++
-
-			observability.PipelineProcessed.WithLabelValues(StatusReady).Inc()
-		}
-
-		if err := p.database.SaveItem(ctx, item); err != nil {
-			logger.Error().Str("msg_id", candidates[i].ID).Err(err).Msg("failed to save item")
-			observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
-
-			errJSON, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("failed to save item: %v", err)})
-			_ = p.database.SaveItemError(ctx, candidates[i].ID, errJSON)
-			_ = p.database.MarkAsProcessed(ctx, candidates[i].ID)
-
-			continue
-		}
-
-		// Save embedding
-		emb := embeddings[candidates[i].ID]
-
-		if len(emb) > 0 {
-			if err := p.database.SaveEmbedding(ctx, item.ID, emb); err != nil {
-				logger.Error().Str("item_id", item.ID).Err(err).Msg("failed to save embedding")
-			}
-		}
-
-		if err := p.database.MarkAsProcessed(ctx, candidates[i].ID); err != nil {
-			logger.Error().Str("msg_id", candidates[i].ID).Err(err).Msg("failed to mark message as processed")
-		}
-	}
-
-	logger.Info().Int("ready", readyCount).Int("rejected", rejectedCount).Msg("Batch results stored")
-
-	return nil
+	return p.storeResults(ctx, logger, candidates, results, embeddings, s)
 }
 
 var (
@@ -625,4 +160,491 @@ func (p *Pipeline) hasUniqueInfo(summary string) bool {
 	}
 
 	return nameRegex.MatchString(clean) || numberRegex.MatchString(clean) || dateRegex.MatchString(clean)
+}
+
+func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logger) (*pipelineSettings, error) {
+	s := &pipelineSettings{
+		batchSize:             p.cfg.WorkerBatchSize,
+		relevanceThreshold:    p.cfg.RelevanceThreshold,
+		relevanceGateEnabled:  p.cfg.RelevanceGateEnabled,
+		linkEnrichmentEnabled: p.cfg.LinkEnrichmentEnabled,
+		maxLinks:              p.cfg.MaxLinksPerMessage,
+		linkCacheTTL:          p.cfg.LinkCacheTTL,
+		tgLinkCacheTTL:        p.cfg.TelegramLinkCacheTTL,
+		filtersMode:           FilterModeMixed,
+		dedupMode:             DedupModeSemantic,
+		topicsEnabled:         true,
+		minLength:             20,
+	}
+
+	p.getSetting(ctx, "worker_batch_size", &s.batchSize, logger)
+
+	filterList, err := p.database.GetActiveFilters(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to get active filters")
+	}
+
+	s.filterList = filterList
+
+	p.getSetting(ctx, "filters_ads", &s.adsFilterEnabled, logger)
+	p.getSetting(ctx, "filters_min_length", &s.minLength, logger)
+	p.getSetting(ctx, "filters_ads_keywords", &s.adsKeywords, logger)
+	p.getSetting(ctx, "filters_skip_forwards", &s.skipForwards, logger)
+	p.getSetting(ctx, "filters_mode", &s.filtersMode, logger)
+	p.getSetting(ctx, "dedup_mode", &s.dedupMode, logger)
+	p.getSetting(ctx, "topics_enabled", &s.topicsEnabled, logger)
+	p.getSetting(ctx, "relevance_threshold", &s.relevanceThreshold, logger)
+	p.getSetting(ctx, "digest_language", &s.digestLanguage, logger)
+	p.getSetting(ctx, "llm_model", &s.llmModel, logger)
+	p.getSetting(ctx, "smart_llm_model", &s.smartLLMModel, logger)
+	p.getSetting(ctx, "vision_routing_enabled", &s.visionRoutingEnabled, logger)
+	p.getSetting(ctx, "tiered_importance_enabled", &s.tieredImportanceEnabled, logger)
+	p.getSetting(ctx, "digest_tone", &s.digestTone, logger)
+	p.getSetting(ctx, "normalize_scores", &s.normalizeScores, logger)
+	p.getSetting(ctx, "relevance_gate_enabled", &s.relevanceGateEnabled, logger)
+
+	if s.normalizeScores {
+		var err error
+
+		s.channelStats, err = p.database.GetChannelStats(ctx)
+		if err != nil {
+			logger.Warn().Err(err).Msg("failed to fetch channel stats for normalization")
+
+			s.normalizeScores = false
+		}
+	}
+
+	p.getSetting(ctx, "link_enrichment_enabled", &s.linkEnrichmentEnabled, logger)
+	p.getSetting(ctx, "max_links_per_message", &s.maxLinks, logger)
+
+	linkCacheTTLStr := p.cfg.LinkCacheTTL.String()
+	p.getSetting(ctx, "link_cache_ttl", &linkCacheTTLStr, logger)
+	s.linkCacheTTL, _ = time.ParseDuration(linkCacheTTLStr)
+
+	tgLinkCacheTTLStr := p.cfg.TelegramLinkCacheTTL.String()
+	p.getSetting(ctx, "tg_link_cache_ttl", &tgLinkCacheTTLStr, logger)
+	s.tgLinkCacheTTL, _ = time.ParseDuration(tgLinkCacheTTLStr)
+
+	return s, nil
+}
+
+func (p *Pipeline) getSetting(ctx context.Context, key string, target interface{}, logger zerolog.Logger) {
+	if err := p.database.GetSetting(ctx, key, target); err != nil {
+		logger.Debug().Err(err).Str("key", key).Msg("could not get setting from DB")
+	}
+}
+
+func (p *Pipeline) markProcessed(ctx context.Context, logger zerolog.Logger, msgID string) {
+	if err := p.database.MarkAsProcessed(ctx, msgID); err != nil {
+		logger.Error().Str("msg_id", msgID).Err(err).Msg("failed to mark message as processed")
+	}
+}
+
+func (p *Pipeline) recordRelevanceGateDecision(ctx context.Context, logger zerolog.Logger, msgID string, decision gateDecision) {
+	confidence := decision.confidence
+	if err := p.database.SaveRelevanceGateLog(ctx, msgID, decision.decision, &confidence, decision.reason, gateModel, gateVersion); err != nil {
+		logger.Warn().Str("msg_id", msgID).Err(err).Msg("failed to save relevance gate log")
+	}
+}
+
+func (p *Pipeline) prepareCandidates(ctx context.Context, logger zerolog.Logger, messages []db.RawMessage, s *pipelineSettings) ([]llm.MessageInput, map[string][]float32, error) {
+	f := filters.New(s.filterList, s.adsFilterEnabled, s.minLength, s.adsKeywords, s.filtersMode)
+
+	var deduplicator dedup.Deduplicator
+	if s.dedupMode == DedupModeSemantic {
+		deduplicator = dedup.NewSemantic(p.database, p.cfg.SimilarityThreshold)
+	} else {
+		deduplicator = dedup.NewStrict(p.database)
+	}
+
+	var candidates []llm.MessageInput
+
+	embeddings := make(map[string][]float32)
+	seenHashes := make(map[string]string) // hash -> msg_id
+
+	for _, m := range messages {
+		if p.skipMessage(ctx, logger, &m, s, seenHashes, f) {
+			continue
+		}
+
+		// 2. Deduplication
+		_, skip := p.handleDeduplication(ctx, logger, &m, s, candidates, embeddings, deduplicator)
+		if skip {
+			continue
+		}
+
+		// Fetch channel context and enrich
+		candidates = append(candidates, p.enrichMessage(ctx, logger, m, s))
+		seenHashes[m.CanonicalHash] = m.ID
+	}
+
+	return candidates, embeddings, nil
+}
+
+func (p *Pipeline) skipMessage(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, seenHashes map[string]string, f *filters.Filterer) bool {
+	if dupID, seen := seenHashes[m.CanonicalHash]; seen {
+		logger.Info().Str("msg_id", m.ID).Str("duplicate_id", dupID).Msg("skipping strict duplicate in batch")
+		p.markProcessed(ctx, logger, m.ID)
+
+		return true
+	}
+
+	if s.skipForwards && m.IsForward {
+		logger.Info().Str("msg_id", m.ID).Msg("skipping forwarded message")
+		p.markProcessed(ctx, logger, m.ID)
+
+		return true
+	}
+
+	if f.IsFiltered(m.Text) {
+		p.markProcessed(ctx, logger, m.ID)
+
+		return true
+	}
+
+	if s.relevanceGateEnabled {
+		decision := evaluateRelevanceGate(m.Text)
+		p.recordRelevanceGateDecision(ctx, logger, m.ID, decision)
+
+		if decision.decision == DecisionIrrelevant {
+			logger.Info().Str("msg_id", m.ID).Str("reason", decision.reason).Msg("skipping message by relevance gate")
+			p.markProcessed(ctx, logger, m.ID)
+
+			return true
+		}
+	}
+
+	return false
+}
+
+func (p *Pipeline) handleDeduplication(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, candidates []llm.MessageInput, embeddings map[string][]float32, deduplicator dedup.Deduplicator) ([]float32, bool) {
+	var emb []float32
+
+	if s.dedupMode == DedupModeSemantic || s.topicsEnabled {
+		var err error
+
+		emb, err = p.llmClient.GetEmbedding(ctx, m.Text)
+		if err != nil {
+			logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to get embedding")
+
+			return nil, true
+		}
+
+		embeddings[m.ID] = emb
+	}
+
+	if s.dedupMode == DedupModeSemantic {
+		for _, cand := range candidates {
+			if dedup.CosineSimilarity(embeddings[cand.ID], emb) > p.cfg.SimilarityThreshold {
+				logger.Info().Str("msg_id", m.ID).Str("duplicate_id", cand.ID).Msg("skipping semantic duplicate in batch")
+				p.markProcessed(ctx, logger, m.ID)
+
+				return nil, true
+			}
+		}
+	}
+
+	isDup, dupID, dErr := deduplicator.IsDuplicate(ctx, *m, emb)
+	if dErr == nil && isDup {
+		logger.Info().Str("msg_id", m.ID).Str("duplicate_id", dupID).Msg("skipping duplicate message")
+		p.markProcessed(ctx, logger, m.ID)
+
+		return nil, true
+	} else if dErr != nil {
+		logger.Error().Str("msg_id", m.ID).Err(dErr).Msg("failed to check for duplicates")
+	}
+
+	return emb, false
+}
+
+func (p *Pipeline) enrichMessage(ctx context.Context, logger zerolog.Logger, m db.RawMessage, s *pipelineSettings) llm.MessageInput {
+	channelCtx, cErr := p.database.GetRecentMessagesForChannel(ctx, m.ChannelID, m.TGDate, 5)
+	if cErr != nil {
+		logger.Warn().Err(cErr).Str("msg_id", m.ID).Msg("failed to fetch channel context")
+	}
+
+	resolvedLinks, eErr := p.enrichWithLinks(ctx, &m, s.linkEnrichmentEnabled, s.maxLinks, s.linkCacheTTL, s.tgLinkCacheTTL)
+	if eErr != nil {
+		logger.Warn().Err(eErr).Str("msg_id", m.ID).Msg("link enrichment failed")
+	}
+
+	return llm.MessageInput{
+		RawMessage:          m,
+		ChannelTitle:        m.ChannelTitle,
+		ChannelContext:      m.ChannelContext,
+		ChannelDescription:  m.ChannelDescription,
+		ChannelCategory:     m.ChannelCategory,
+		ChannelTone:         m.ChannelTone,
+		ChannelUpdateFreq:   m.ChannelUpdateFreq,
+		RelevanceThreshold:  m.RelevanceThreshold,
+		ImportanceThreshold: m.ImportanceThreshold,
+		ImportanceWeight:    m.ImportanceWeight,
+		Context:             channelCtx,
+		ResolvedLinks:       resolvedLinks,
+	}
+}
+
+func (p *Pipeline) runLLMProcessing(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, s *pipelineSettings) ([]llm.BatchResult, error) {
+	start := time.Now()
+
+	results := make([]llm.BatchResult, len(candidates))
+	modelUsed := make([]string, len(candidates))
+
+	// Group indices by model for Vision Routing
+	modelGroups := p.groupIndicesByModel(candidates, s)
+
+	for model, indices := range modelGroups {
+		if err := p.processModelBatch(ctx, logger, candidates, results, modelUsed, model, indices, s); err != nil {
+			return nil, err
+		}
+	}
+
+	// 2.1 Tiered Importance Analysis
+	p.performTieredImportanceAnalysis(ctx, logger, candidates, results, modelUsed, s)
+
+	logger.Info().Int("count", len(candidates)).Dur("duration", time.Since(start)).Msg("LLM processing finished")
+
+	return results, nil
+}
+
+func (p *Pipeline) groupIndicesByModel(candidates []llm.MessageInput, s *pipelineSettings) map[string][]int {
+	modelGroups := make(map[string][]int)
+
+	for i, c := range candidates {
+		model := s.llmModel
+
+		if s.visionRoutingEnabled && len(c.MediaData) > 0 && s.smartLLMModel != "" {
+			model = s.smartLLMModel
+		}
+
+		modelGroups[model] = append(modelGroups[model], i)
+	}
+
+	return modelGroups
+}
+
+func (p *Pipeline) processModelBatch(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, modelUsed []string, model string, indices []int, s *pipelineSettings) error {
+	groupCandidates := make([]llm.MessageInput, len(indices))
+	for j, idx := range indices {
+		groupCandidates[j] = candidates[idx]
+	}
+
+	llmStart := time.Now()
+
+	groupResults, err := p.llmClient.ProcessBatch(ctx, groupCandidates, s.digestLanguage, model, s.digestTone)
+	if err != nil {
+		logger.Error().Err(err).Str("model", model).Msg("LLM batch processing failed")
+		observability.PipelineProcessed.WithLabelValues(StatusError).Add(float64(len(indices)))
+
+		for _, idx := range indices {
+			errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+			_ = p.database.SaveItemError(ctx, candidates[idx].ID, errJSON)
+			_ = p.database.MarkAsProcessed(ctx, candidates[idx].ID)
+		}
+
+		return err
+	}
+
+	observability.LLMRequestDuration.WithLabelValues(model).Observe(time.Since(llmStart).Seconds())
+
+	if len(groupResults) != len(indices) {
+		logger.Warn().Int("expected", len(indices)).Int("actual", len(groupResults)).Str("model", model).Msg("LLM batch size mismatch, results might be misaligned")
+	}
+
+	for j, idx := range indices {
+		if j < len(groupResults) {
+			results[idx] = groupResults[j]
+			modelUsed[idx] = model
+		}
+	}
+
+	return nil
+}
+
+func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, modelUsed []string, s *pipelineSettings) {
+	if !s.tieredImportanceEnabled || s.smartLLMModel == "" {
+		return
+	}
+
+	var (
+		tieredIndices    []int
+		tieredCandidates []llm.MessageInput
+	)
+
+	for i, res := range results {
+		if res.ImportanceScore > 0.8 && modelUsed[i] != s.smartLLMModel {
+			tieredIndices = append(tieredIndices, i)
+			tieredCandidates = append(tieredCandidates, candidates[i])
+		}
+	}
+
+	if len(tieredCandidates) > 0 {
+		logger.Info().Int("count", len(tieredCandidates)).Msg("Performing tiered importance analysis with smart model")
+
+		llmStart := time.Now()
+
+		tieredResults, err := p.llmClient.ProcessBatch(ctx, tieredCandidates, s.digestLanguage, s.smartLLMModel, s.digestTone)
+		if err == nil && len(tieredResults) == len(tieredCandidates) {
+			observability.LLMRequestDuration.WithLabelValues(s.smartLLMModel).Observe(time.Since(llmStart).Seconds())
+
+			for j, idx := range tieredIndices {
+				results[idx] = tieredResults[j]
+			}
+		} else if err != nil {
+			logger.Warn().Err(err).Msg("Tiered importance analysis failed, keeping original results")
+		}
+	}
+}
+
+func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, embeddings map[string][]float32, s *pipelineSettings) error {
+	p.normalizeResults(candidates, results, s)
+
+	readyCount := 0
+	rejectedCount := 0
+
+	for i, res := range results {
+		if res.Summary == "" {
+			p.handleEmptySummary(ctx, logger, candidates[i].ID, i)
+
+			continue
+		}
+
+		item := p.createItem(logger, candidates[i], res, s)
+
+		if p.saveAndMarkProcessed(ctx, logger, candidates[i], item, embeddings) {
+			if item.Status == StatusReady {
+				readyCount++
+			} else {
+				rejectedCount++
+			}
+		}
+	}
+
+	logger.Info().Int("ready", readyCount).Int("rejected", rejectedCount).Msg("Batch results stored")
+
+	return nil
+}
+
+func (p *Pipeline) normalizeResults(candidates []llm.MessageInput, results []llm.BatchResult, s *pipelineSettings) {
+	if !s.normalizeScores || s.channelStats == nil {
+		return
+	}
+
+	for i := range results {
+		if results[i].Summary == "" {
+			continue
+		}
+
+		stats, ok := s.channelStats[candidates[i].ChannelID]
+		if ok {
+			if stats.StddevRelevance > 0.01 {
+				results[i].RelevanceScore = (results[i].RelevanceScore - stats.AvgRelevance) / stats.StddevRelevance
+			}
+
+			if stats.StddevImportance > 0.01 {
+				results[i].ImportanceScore = (results[i].ImportanceScore - stats.AvgImportance) / stats.StddevImportance
+			}
+		}
+	}
+}
+
+func (p *Pipeline) handleEmptySummary(ctx context.Context, logger zerolog.Logger, msgID string, index int) {
+	logger.Warn().Str("msg_id", msgID).Int("index", index).Msg("LLM summary empty for item, marking as error")
+	observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
+
+	errJSON, _ := json.Marshal(map[string]string{"error": "empty summary from LLM"})
+	_ = p.database.SaveItemError(ctx, msgID, errJSON)
+	p.markProcessed(ctx, logger, msgID)
+}
+
+func (p *Pipeline) createItem(logger zerolog.Logger, c llm.MessageInput, res llm.BatchResult, s *pipelineSettings) *db.Item {
+	importance := p.calculateImportance(logger, c, res)
+	status := p.determineStatus(c, res.RelevanceScore, s)
+
+	return &db.Item{
+		RawMessageID:    c.ID,
+		RelevanceScore:  res.RelevanceScore,
+		ImportanceScore: importance,
+		Topic:           res.Topic,
+		Summary:         res.Summary,
+		Language:        res.Language,
+		Status:          status,
+	}
+}
+
+func (p *Pipeline) calculateImportance(logger zerolog.Logger, c llm.MessageInput, res llm.BatchResult) float32 {
+	channelWeight := c.ImportanceWeight
+	if channelWeight < 0.1 {
+		channelWeight = 1.0
+	} else if channelWeight > 2.0 {
+		channelWeight = 2.0
+	}
+
+	importance := res.ImportanceScore * channelWeight
+	if importance > 1.0 {
+		importance = 1.0
+	}
+
+	if !p.hasUniqueInfo(res.Summary) {
+		importance -= 0.2
+		if importance < 0 {
+			importance = 0
+		}
+
+		logger.Debug().Str("msg_id", c.ID).Msg("Applied penalty for lack of unique info")
+	}
+
+	return importance
+}
+
+func (p *Pipeline) determineStatus(c llm.MessageInput, relevanceScore float32, s *pipelineSettings) string {
+	itemRelThreshold := s.relevanceThreshold
+	if c.RelevanceThreshold > 0 {
+		itemRelThreshold = c.RelevanceThreshold
+	}
+
+	if c.AutoRelevanceEnabled {
+		itemRelThreshold += c.RelevanceThresholdDelta
+	}
+
+	if itemRelThreshold < 0 {
+		itemRelThreshold = 0
+	} else if itemRelThreshold > 1 {
+		itemRelThreshold = 1
+	}
+
+	if relevanceScore < itemRelThreshold {
+		return StatusRejected
+	}
+
+	return StatusReady
+}
+
+func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, item *db.Item, embeddings map[string][]float32) bool {
+	if err := p.database.SaveItem(ctx, item); err != nil {
+		logger.Error().Str("msg_id", c.ID).Err(err).Msg("failed to save item")
+		observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
+
+		errJSON, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("failed to save item: %v", err)})
+		_ = p.database.SaveItemError(ctx, c.ID, errJSON)
+		_ = p.database.MarkAsProcessed(ctx, c.ID)
+
+		return false
+	}
+
+	observability.PipelineProcessed.WithLabelValues(item.Status).Inc()
+
+	// Save embedding
+	emb := embeddings[c.ID]
+	if len(emb) > 0 {
+		if err := p.database.SaveEmbedding(ctx, item.ID, emb); err != nil {
+			logger.Error().Str("item_id", item.ID).Err(err).Msg("failed to save embedding")
+		}
+	}
+
+	if err := p.database.MarkAsProcessed(ctx, c.ID); err != nil {
+		logger.Error().Str("msg_id", c.ID).Err(err).Msg("failed to mark message as processed")
+	}
+
+	return true
 }

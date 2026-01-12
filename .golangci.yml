@@ -195,12 +195,6 @@ linters:
           - dupl
           - mnd
           - revive
-      # Pipeline has complex processing logic
-      - path: internal/pipeline/
-        linters:
-          - gocyclo
-          - funlen
-          - wrapcheck
       # Digest generation is inherently complex
       - path: internal/digest/
         linters:
