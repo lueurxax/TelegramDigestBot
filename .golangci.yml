@@ -234,14 +234,6 @@ linters:
           - gocyclo
           - funlen
           - errcheck
-      # Allow magic numbers everywhere - too noisy
-      - path: \.go$
-        linters:
-          - mnd
-      # Allow repeated strings - too noisy
-      - path: \.go$
-        linters:
-          - goconst
       # Exclude db package from errcheck for intentional ignores
       - path: internal/db/
         linters:
