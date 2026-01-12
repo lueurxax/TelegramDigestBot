@@ -76,11 +76,11 @@ func (s *Scheduler) UpdateAutoRelevance(ctx context.Context, logger *zerolog.Log
 		st.weightedTotal += weight
 
 		switch strings.ToLower(r.Rating) {
-		case "good":
+		case RatingGood:
 			st.weightedGood += weight
-		case "bad":
+		case RatingBad:
 			st.weightedBad += weight
-		case "irrelevant":
+		case RatingIrrelevant:
 			st.weightedIrrelevant += weight
 		default:
 			st.weightedBad += weight

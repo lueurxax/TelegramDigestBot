@@ -151,10 +151,12 @@ func (db *DB) GetItemRatingsSince(ctx context.Context, since time.Time) ([]ItemR
 		return nil, err
 	}
 	ratings := make([]ItemRating, 0, len(rows))
+
 	for _, row := range rows {
 		if !row.CreatedAt.Valid {
 			continue
 		}
+
 		ratings = append(ratings, ItemRating{
 			ChannelID: fromUUID(row.ChannelID),
 			Rating:    row.Rating,

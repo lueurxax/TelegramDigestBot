@@ -34,7 +34,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	for _, item := range items {
 		topic := strings.TrimSpace(cases.Title(language.English).String(strings.ToLower(item.Topic)))
 		if topic == "" {
-			topic = "General"
+			topic = DefaultTopic
 		}
 		topicGroups[topic] = append(topicGroups[topic], item)
 	}
@@ -124,6 +124,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 
 			// Smart Cluster Naming
 			clusterTopic := topic
+
 			if smartLLMModel != "" && len(clusterItemsList) > 1 {
 				if betterTopic, err := s.llmClient.GenerateClusterTopic(ctx, clusterItemsList, digestLanguage, smartLLMModel); err == nil && betterTopic != "" {
 					clusterTopic = betterTopic
@@ -149,8 +150,11 @@ func (s *Scheduler) calculateCoherence(items []db.Item, embeddings map[string][]
 	if len(items) < 2 {
 		return 1.0
 	}
+
 	var sum float32
+
 	var count int
+
 	for i := 0; i < len(items); i++ {
 		for j := i + 1; j < len(items); j++ {
 			embI, okI := embeddings[items[i].ID]

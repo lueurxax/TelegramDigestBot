@@ -2,6 +2,7 @@ package linkresolver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,12 @@ import (
 
 	"golang.org/x/time/rate"
 )
+
+// ErrTooManyRedirects indicates too many HTTP redirects.
+var ErrTooManyRedirects = errors.New("too many redirects")
+
+// ErrHTTPStatusNotOK indicates an HTTP response with a non-200 status code.
+var ErrHTTPStatusNotOK = errors.New("HTTP status not OK")
 
 type WebFetcher struct {
 	client         *http.Client
@@ -30,8 +37,9 @@ func NewWebFetcher(rps float64, timeout time.Duration) *WebFetcher {
 			Timeout: timeout,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 5 {
-					return fmt.Errorf("too many redirects")
+					return ErrTooManyRedirects
 				}
+
 				return nil
 			},
 		},
@@ -70,7 +78,7 @@ func (f *WebFetcher) Fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("%w: %d", ErrHTTPStatusNotOK, resp.StatusCode)
 	}
 
 	// Limit to 5MB

@@ -22,19 +22,19 @@ var gateURLRegex = regexp.MustCompile(`(?i)\bhttps?://\S+|\bt\.me/\S+`)
 func evaluateRelevanceGate(text string) gateDecision {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
-		return gateDecision{decision: "irrelevant", confidence: 1.0, reason: "empty"}
+		return gateDecision{decision: DecisionIrrelevant, confidence: 1.0, reason: ReasonEmpty}
 	}
 
 	withoutLinks := strings.TrimSpace(gateURLRegex.ReplaceAllString(trimmed, ""))
 	if withoutLinks == "" {
-		return gateDecision{decision: "irrelevant", confidence: 0.9, reason: "link_only"}
+		return gateDecision{decision: DecisionIrrelevant, confidence: 0.9, reason: ReasonLinkOnly}
 	}
 
 	if !hasAlphaNum(withoutLinks) {
-		return gateDecision{decision: "irrelevant", confidence: 0.8, reason: "no_text"}
+		return gateDecision{decision: DecisionIrrelevant, confidence: 0.8, reason: ReasonNoText}
 	}
 
-	return gateDecision{decision: "relevant", confidence: 0.6, reason: "passed"}
+	return gateDecision{decision: DecisionRelevant, confidence: 0.6, reason: ReasonPassed}
 }
 
 func hasAlphaNum(s string) bool {

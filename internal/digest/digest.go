@@ -178,8 +178,10 @@ func (s *Scheduler) runOnceWithLock(ctx context.Context) {
 	}
 	if !acquired {
 		logger.Debug().Msg("did not acquire lock, skipping")
+
 		return
 	}
+
 	defer func() {
 		if err := s.database.ReleaseAdvisoryLock(ctx, lockID); err != nil {
 			logger.Error().Err(err).Msg("failed to release lock")
@@ -262,6 +264,7 @@ func (s *Scheduler) processDigest(ctx context.Context, logger *zerolog.Logger) e
 	var anomalies []anomalyInfo
 
 	now := time.Now().Truncate(window)
+
 	// Check windows from now-catchupWindow to now
 	// This allows catching up on missed digests if the bot was down.
 	for t := now.Add(-catchupWindow); !t.After(now.Add(-window)); t = t.Add(window) {
@@ -276,6 +279,7 @@ func (s *Scheduler) processDigest(ctx context.Context, logger *zerolog.Logger) e
 				Int64("target_chat_id", targetChatID).
 				Msg("failed to process window")
 		}
+
 		if anomaly != nil {
 			anomalies = append(anomalies, *anomaly)
 		}
@@ -295,8 +299,10 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	if err != nil {
 		return nil, fmt.Errorf("failed to check if digest exists: %w", err)
 	}
+
 	if exists {
 		logger.Debug().Time("start", start).Time("end", end).Msg("Digest already exists for window")
+
 		return nil, nil
 	}
 
@@ -304,6 +310,7 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	if err != nil {
 		return nil, err
 	}
+
 	if text == "" {
 		return anomaly, nil
 	}
@@ -334,7 +341,7 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 		msgID, err = s.bot.SendDigest(ctx, targetChatID, text, digestID)
 	}
 	if err != nil {
-		observability.DigestsPosted.WithLabelValues("error").Inc()
+		observability.DigestsPosted.WithLabelValues(StatusError).Inc()
 		if errSave := s.database.SaveDigestError(ctx, start, end, targetChatID, err); errSave != nil {
 			logger.Error().Err(errSave).Msg("failed to save digest error")
 		}
@@ -342,7 +349,7 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	}
 
 	logger.Info().Int64("msg_id", msgID).Msg("Digest posted successfully")
-	observability.DigestsPosted.WithLabelValues("posted").Inc()
+	observability.DigestsPosted.WithLabelValues(StatusPosted).Inc()
 
 	// Mark items as digested
 	itemIDs := make([]string, len(items))
@@ -361,6 +368,7 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 
 	// Save digest entries
 	var entries []db.DigestEntry
+
 	if len(clusters) > 0 {
 		for _, c := range clusters {
 			entry := db.DigestEntry{
@@ -609,6 +617,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 
 	// Format digest
 	var sb strings.Builder
+
 	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━\n")
 	sb.WriteString(fmt.Sprintf("📰 <b>%s</b> • %s - %s\n", html.EscapeString(header), start.Format("15:04"), end.Format("15:04")))
 	sb.WriteString("━━━━━━━━━━━━━━━━━━━━━━\n")
@@ -649,6 +658,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 		breakingTitle := "Breaking"
 		notableTitle := "Notable"
 		alsoTitle := "Also"
+
 		switch strings.ToLower(digestLanguage) {
 		case "ru":
 			breakingTitle = "Срочно"
@@ -755,7 +765,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 										label = item.SourceChannelTitle
 									}
 									if label == "" {
-										label = "Source"
+										label = DefaultSourceLabel
 									}
 									links = append(links, s.formatLink(item, label))
 								}
@@ -803,7 +813,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 								label = item.SourceChannelTitle
 							}
 							if label == "" {
-								label = "Source"
+								label = DefaultSourceLabel
 							}
 							links = append(links, s.formatLink(item, label))
 						}
@@ -817,6 +827,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 						groupSb.WriteString("\n\n")
 					} else {
 						formatted := s.formatItems(c.Items, true, seenSummaries)
+
 						if formatted != "" {
 							hasContent = true
 							groupSb.WriteString(formatted)
@@ -825,6 +836,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 				}
 			} else {
 				formatted := s.formatItems(group.items, true, seenSummaries)
+
 				if formatted != "" {
 					hasContent = true
 					groupSb.WriteString(formatted)
@@ -854,6 +866,7 @@ func (s *Scheduler) sendConsolidatedAnomalyNotification(ctx context.Context, ano
 	}
 
 	var sb strings.Builder
+
 	sb.WriteString("⚠️ <b>Digest Anomaly Report</b>\n\n")
 
 	// Count types
@@ -888,6 +901,7 @@ func (s *Scheduler) sendConsolidatedAnomalyNotification(ctx context.Context, ano
 				maxBacklog = a.backlogSize
 			}
 		}
+
 		sb.WriteString(fmt.Sprintf("\n🔄 <b>Large backlog detected</b> (<code>%d</code> messages)\n", maxBacklog))
 		sb.WriteString("Pipeline is catching up - messages pending LLM processing.\n")
 	}
@@ -961,7 +975,7 @@ func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummarie
 				label = item.SourceChannelTitle
 			}
 			if label == "" {
-				label = "Source"
+				label = DefaultSourceLabel
 			}
 			links = append(links, s.formatLink(item, label))
 		}
@@ -994,7 +1008,7 @@ func (s *Scheduler) formatLink(item db.Item, label string) string {
 			label = item.SourceChannelTitle
 		}
 		if label == "" {
-			label = "Source"
+			label = DefaultSourceLabel
 		}
 	}
 	if item.SourceChannel != "" {

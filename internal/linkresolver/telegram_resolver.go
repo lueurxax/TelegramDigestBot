@@ -32,7 +32,29 @@ type TelegramContent struct {
 	MediaType       string
 }
 
+// ErrClientNotInitialized indicates the telegram client is not initialized.
 var ErrClientNotInitialized = errors.New("telegram client not initialized")
+
+// ErrUnsupportedTelegramLinkType indicates an unsupported telegram link type.
+var ErrUnsupportedTelegramLinkType = errors.New("unsupported telegram link type")
+
+// ErrNoUsernameOrChannelID indicates no username or channel ID was provided.
+var ErrNoUsernameOrChannelID = errors.New("no username or channel ID")
+
+// ErrMessageNotFound indicates the message was not found.
+var ErrMessageNotFound = errors.New("message not found")
+
+// ErrUnexpectedMessageType indicates an unexpected message type.
+var ErrUnexpectedMessageType = errors.New("unexpected message type")
+
+// ErrChannelNotFound indicates the channel was not found.
+var ErrChannelNotFound = errors.New("channel not found")
+
+// ErrNotAChannel indicates the peer is not a channel.
+var ErrNotAChannel = errors.New("not a channel")
+
+// ErrPrivateChannelNotTracked indicates a private channel is not tracked.
+var ErrPrivateChannelNotTracked = errors.New("private channel not tracked")
 
 func NewTelegramResolver(client *telegram.Client, database *db.DB) *TelegramResolver {
 	return &TelegramResolver{
@@ -47,7 +69,7 @@ func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) 
 		return nil, ErrClientNotInitialized
 	}
 	if link.TelegramType != "post" {
-		return nil, fmt.Errorf("unsupported telegram link type: %s", link.TelegramType)
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedTelegramLinkType, link.TelegramType)
 	}
 
 	if err := r.rateLimiter.Wait(ctx); err != nil {
@@ -65,7 +87,7 @@ func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) 
 	} else if link.ChannelID != 0 {
 		inputChannel, err = r.resolveByID(ctx, link.ChannelID)
 	} else {
-		return nil, fmt.Errorf("no username or channel ID")
+		return nil, ErrNoUsernameOrChannelID
 	}
 
 	if err != nil {
@@ -83,12 +105,12 @@ func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) 
 
 	channelMessages, ok := messages.(*tg.MessagesChannelMessages)
 	if !ok || len(channelMessages.Messages) == 0 {
-		return nil, fmt.Errorf("message not found")
+		return nil, ErrMessageNotFound
 	}
 
 	msg, ok := channelMessages.Messages[0].(*tg.Message)
 	if !ok {
-		return nil, fmt.Errorf("unexpected message type")
+		return nil, ErrUnexpectedMessageType
 	}
 
 	// Get channel info
@@ -135,12 +157,12 @@ func (r *TelegramResolver) resolveByUsername(ctx context.Context, api *tg.Client
 	}
 
 	if len(resolved.Chats) == 0 {
-		return nil, fmt.Errorf("channel not found: %s", username)
+		return nil, fmt.Errorf("%w: %s", ErrChannelNotFound, username)
 	}
 
 	channel, ok := resolved.Chats[0].(*tg.Channel)
 	if !ok {
-		return nil, fmt.Errorf("not a channel: %s", username)
+		return nil, fmt.Errorf("%w: %s", ErrNotAChannel, username)
 	}
 
 	return &tg.InputChannel{
@@ -153,7 +175,7 @@ func (r *TelegramResolver) resolveByID(ctx context.Context, channelID int64) (*t
 	// Check if we're tracking this channel
 	ch, err := r.database.GetChannelByPeerID(ctx, channelID)
 	if err != nil {
-		return nil, fmt.Errorf("private channel not tracked: %d", channelID)
+		return nil, fmt.Errorf("%w: %d", ErrPrivateChannelNotTracked, channelID)
 	}
 
 	return &tg.InputChannel{

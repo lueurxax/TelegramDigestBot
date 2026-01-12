@@ -74,6 +74,7 @@ func (c *mockClient) ProcessBatch(ctx context.Context, messages []MessageInput, 
 	// In a real implementation, this would call OpenAI or another LLM provider.
 	// Construct prompt (simplified)
 	var sb strings.Builder
+
 	sb.WriteString(fmt.Sprintf("Summarize and score these Telegram messages in JSON format (target language: %s, model: %s, tone: %s):\n", targetLanguage, model, tone))
 	for i, m := range messages {
 		sb.WriteString(fmt.Sprintf("%d. [Context: %v] %s\n", i, m.Context, m.Text))
@@ -86,7 +87,7 @@ func (c *mockClient) ProcessBatch(ctx context.Context, messages []MessageInput, 
 			Index:           i,
 			RelevanceScore:  0.8,
 			ImportanceScore: 0.5,
-			Topic:           "General",
+			Topic:           DefaultTopic,
 			Summary:         "This is a summary of the message.",
 			Language:        "en",
 			SourceChannel:   messages[i].ChannelTitle,
@@ -108,5 +109,5 @@ func (c *mockClient) GenerateClusterTopic(ctx context.Context, items []db.Item, 
 	if len(items) > 0 {
 		return items[0].Topic, nil
 	}
-	return "General", nil
+	return DefaultTopic, nil
 }

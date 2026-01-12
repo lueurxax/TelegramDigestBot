@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -32,6 +33,12 @@ type openaiClient struct {
 	mu                  sync.Mutex
 }
 
+// ErrCircuitBreakerOpen indicates the circuit breaker is open.
+var ErrCircuitBreakerOpen = errors.New("circuit breaker is open")
+
+// ErrNoResultsExtracted indicates no results could be extracted from LLM response.
+var ErrNoResultsExtracted = errors.New("failed to extract any results from LLM response")
+
 const (
 	circuitBreakerThreshold = 5
 	circuitBreakerTimeout   = 1 * time.Minute
@@ -52,8 +59,9 @@ func (c *openaiClient) checkCircuit() error {
 	defer c.mu.Unlock()
 
 	if time.Now().Before(c.circuitOpenUntil) {
-		return fmt.Errorf("circuit breaker is open until %v", c.circuitOpenUntil)
+		return fmt.Errorf("%w until %v", ErrCircuitBreakerOpen, c.circuitOpenUntil)
 	}
+
 	return nil
 }
 
@@ -81,7 +89,7 @@ func (c *openaiClient) GetEmbedding(ctx context.Context, text string) ([]float32
 		return nil, err
 	}
 	if err := c.rateLimiter.Wait(ctx); err != nil {
-		return nil, fmt.Errorf("rate limiter error: %w", err)
+		return nil, fmt.Errorf(errRateLimiter, err)
 	}
 	resp, err := c.client.CreateEmbeddings(ctx, openai.EmbeddingRequest{
 		Input: []string{text},
@@ -146,8 +154,9 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 		}
 		if len(m.ResolvedLinks) > 0 {
 			textPart += "[Referenced Content: "
+
 			for _, link := range m.ResolvedLinks {
-				if link.LinkType == "telegram" {
+				if link.LinkType == LinkTypeTelegram {
 					textPart += fmt.Sprintf("[Telegram] From %s: \"%s\" ", link.ChannelTitle, truncate(link.Content, 500))
 					if link.Views > 0 {
 						textPart += fmt.Sprintf("[%d views] ", link.Views)
@@ -182,7 +191,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 		return nil, err
 	}
 	if err := c.rateLimiter.Wait(ctx); err != nil {
-		return nil, fmt.Errorf("rate limiter error: %w", err)
+		return nil, fmt.Errorf(errRateLimiter, err)
 	}
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: model,
@@ -198,8 +207,9 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	})
 	if err != nil {
 		c.recordFailure()
-		return nil, fmt.Errorf("openai chat completion error: %w", err)
+		return nil, fmt.Errorf(errOpenAIChatCompletion, err)
 	}
+
 	c.recordSuccess()
 
 	content := resp.Choices[0].Message.Content
@@ -231,7 +241,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	}
 
 	if len(results) == 0 {
-		return nil, fmt.Errorf("failed to extract any results from LLM response: %s", content)
+		return nil, fmt.Errorf("%w: %s", ErrNoResultsExtracted, content)
 	}
 
 	// Align results by index and ensure same length as input
@@ -303,13 +313,17 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 							aligned[i].Index = i
 							usedResults[unmatchedResultIdx] = true
 							unmatchedResultIdx++
+
 							break
 						}
+
 						unmatchedResultIdx++
 					}
 				}
 			}
+
 			c.logger.Info().Int("matched_by_channel", matchedByChannel).Int("total", len(messages)).Msg("Aligned results by source_channel")
+
 			return aligned, nil
 		}
 
@@ -356,7 +370,7 @@ func (c *openaiClient) GenerateNarrative(ctx context.Context, items []db.Item, t
 		return "", err
 	}
 	if err := c.rateLimiter.Wait(ctx); err != nil {
-		return "", fmt.Errorf("rate limiter error: %w", err)
+		return "", fmt.Errorf(errRateLimiter, err)
 	}
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: model,
@@ -369,7 +383,7 @@ func (c *openaiClient) GenerateNarrative(ctx context.Context, items []db.Item, t
 	})
 	if err != nil {
 		c.recordFailure()
-		return "", fmt.Errorf("openai chat completion error: %w", err)
+		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 	c.recordSuccess()
 
@@ -404,7 +418,7 @@ func (c *openaiClient) SummarizeCluster(ctx context.Context, items []db.Item, ta
 		return "", err
 	}
 	if err := c.rateLimiter.Wait(ctx); err != nil {
-		return "", fmt.Errorf("rate limiter error: %w", err)
+		return "", fmt.Errorf(errRateLimiter, err)
 	}
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: model,
@@ -417,7 +431,7 @@ func (c *openaiClient) SummarizeCluster(ctx context.Context, items []db.Item, ta
 	})
 	if err != nil {
 		c.recordFailure()
-		return "", fmt.Errorf("openai chat completion error: %w", err)
+		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 	c.recordSuccess()
 
@@ -449,7 +463,7 @@ func (c *openaiClient) GenerateClusterTopic(ctx context.Context, items []db.Item
 		return "", err
 	}
 	if err := c.rateLimiter.Wait(ctx); err != nil {
-		return "", fmt.Errorf("rate limiter error: %w", err)
+		return "", fmt.Errorf(errRateLimiter, err)
 	}
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model: model,
@@ -462,7 +476,7 @@ func (c *openaiClient) GenerateClusterTopic(ctx context.Context, items []db.Item
 	})
 	if err != nil {
 		c.recordFailure()
-		return "", fmt.Errorf("openai chat completion error: %w", err)
+		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 	c.recordSuccess()
 
@@ -471,11 +485,11 @@ func (c *openaiClient) GenerateClusterTopic(ctx context.Context, items []db.Item
 
 func getToneInstruction(tone string) string {
 	switch strings.ToLower(tone) {
-	case "professional":
+	case ToneProfessional:
 		return "Write in a formal, journalistic tone."
-	case "casual":
+	case ToneCasual:
 		return "Write in a conversational, accessible tone."
-	case "brief":
+	case ToneBrief:
 		return "Be extremely concise, telegram-style."
 	default:
 		return ""

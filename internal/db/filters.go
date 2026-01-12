@@ -18,7 +18,9 @@ func (db *DB) GetActiveFilters(ctx context.Context) ([]Filter, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	filters := make([]Filter, len(sqlcFilters))
+
 	for i, f := range sqlcFilters {
 		filters[i] = Filter{
 			ID:       fromUUID(f.ID),
@@ -27,6 +29,7 @@ func (db *DB) GetActiveFilters(ctx context.Context) ([]Filter, error) {
 			IsActive: f.IsActive,
 		}
 	}
+
 	return filters, nil
 }
 

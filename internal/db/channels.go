@@ -37,6 +37,7 @@ func (db *DB) GetActiveChannels(ctx context.Context) ([]Channel, error) {
 	}
 
 	channels := make([]Channel, len(sqlcChannels))
+
 	for i, c := range sqlcChannels {
 		// Default weight to 1.0 if not set
 		weight := c.ImportanceWeight.Float32
@@ -176,6 +177,7 @@ func (db *DB) GetChannelWeight(ctx context.Context, identifier string) (*Channel
 	}
 
 	var updatedAt *string
+
 	if c.WeightUpdatedAt.Valid {
 		s := c.WeightUpdatedAt.Time.Format("2006-01-02 15:04")
 		updatedAt = &s

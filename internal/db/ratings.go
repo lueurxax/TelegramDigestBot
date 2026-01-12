@@ -40,17 +40,26 @@ func (db *DB) GetItemRatingSummary(ctx context.Context, since time.Time) ([]Rati
 	defer rows.Close()
 
 	var res []RatingSummary
+
 	for rows.Next() {
 		var channelID pgtype.UUID
+
 		var username pgtype.Text
+
 		var title pgtype.Text
+
 		var goodCount int64
+
 		var badCount int64
+
 		var irrelevantCount int64
+
 		var totalCount int64
+
 		if err := rows.Scan(&channelID, &username, &title, &goodCount, &badCount, &irrelevantCount, &totalCount); err != nil {
 			return nil, err
 		}
+
 		res = append(res, RatingSummary{
 			ChannelID:       fromUUID(channelID),
 			Username:        username.String,

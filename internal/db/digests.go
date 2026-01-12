@@ -99,6 +99,7 @@ func (db *DB) SaveDigestEntries(ctx context.Context, digestID string, entries []
 			Body:        e.Body,
 			SourcesJson: sourcesJSON,
 		})
+
 		if err != nil {
 			return err
 		}

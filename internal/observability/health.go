@@ -29,17 +29,19 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "OK")
+		_, _ = fmt.Fprint(w, "OK")
 	})
 
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.db.Pool.Ping(r.Context()); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(w, "DB error: %v", err)
+			_, _ = fmt.Fprintf(w, "DB error: %v", err)
+
 			return
 		}
+
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "OK")
+		_, _ = fmt.Fprint(w, "OK")
 	})
 
 	mux.Handle("/metrics", promhttp.Handler())
@@ -51,8 +53,11 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
+
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
 		defer cancel()
+
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 

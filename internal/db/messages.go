@@ -52,6 +52,7 @@ func (db *DB) GetUnprocessedMessages(ctx context.Context, limit int) ([]RawMessa
 	}
 
 	messages := make([]RawMessage, len(sqlcMessages))
+
 	for i, m := range sqlcMessages {
 		// Default importance weight to 1.0 if not set
 		weight := m.ChannelImportanceWeight.Float32

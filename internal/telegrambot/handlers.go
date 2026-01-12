@@ -22,13 +22,17 @@ func (b *Bot) handleThreshold(msg *tgbotapi.Message, key string) {
 		// Derive command name from key (e.g., "relevance_threshold" -> "relevance")
 		cmdName := strings.TrimSuffix(key, "_threshold")
 		b.reply(msg, fmt.Sprintf("Usage: <code>/%s &lt;0.0-1.0&gt;</code>", html.EscapeString(cmdName)))
+
 		return
 	}
+
 	val, err := strconv.ParseFloat(args, 32)
 	if err != nil || val < 0 || val > 1 {
 		b.reply(msg, "❌ Invalid value. Please provide a number between 0.0 and 1.0.")
+
 		return
 	}
+
 	ctx := context.Background()
 
 	var current float32
@@ -36,8 +40,10 @@ func (b *Bot) handleThreshold(msg *tgbotapi.Message, key string) {
 
 	if err := b.database.SaveSettingWithHistory(ctx, key, float32(val), msg.From.ID); err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error saving %s: %s", html.EscapeString(key), html.EscapeString(err.Error())))
+
 		return
 	}
+
 	label := cases.Title(language.English).String(strings.ReplaceAll(key, "_", " "))
 	b.reply(msg, fmt.Sprintf("✅ <b>%s</b> updated.\nOld value: <code>%v</code>\nNew value: <code>%v</code>", html.EscapeString(label), current, val))
 }
@@ -71,6 +77,7 @@ func (b *Bot) handleChannelNamespace(msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 	if len(args) == 0 {
 		b.reply(msg, "Usage: <code>/channel &lt;add|remove|list|context|metadata|weight&gt;</code>")
+
 		return
 	}
 
@@ -116,6 +123,7 @@ func (b *Bot) handleFilterNamespace(msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 	if len(args) == 0 {
 		b.handleFilters(msg)
+
 		return
 	}
 
@@ -153,6 +161,7 @@ func (b *Bot) handleConfigNamespace(msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 	if len(args) == 0 {
 		b.reply(msg, "Usage: <code>/config &lt;links|max_links|link_cache|target|window|language|tone|relevance|importance|reset&gt;</code>")
+
 		return
 	}
 
@@ -202,6 +211,7 @@ func (b *Bot) handleAINamespace(msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 	if len(args) == 0 {
 		b.reply(msg, "Usage: <code>/ai &lt;model|smart_model|tone|editor|tiered|vision|consolidated|details|topics|dedup&gt;</code>")
+
 		return
 	}
 
@@ -253,6 +263,7 @@ func (b *Bot) handleSystemNamespace(msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 	if len(args) == 0 {
 		b.reply(msg, "Usage: <code>/system &lt;status|settings|history|errors|retry&gt;</code>")
+
 		return
 	}
 
@@ -292,6 +303,7 @@ func (b *Bot) handleTarget(msg *tgbotapi.Message) {
 	args := msg.CommandArguments()
 	if args == "" {
 		b.reply(msg, "Usage: <code>/target &lt;channel_id or @username&gt;</code>")
+
 		return
 	}
 
@@ -307,14 +319,17 @@ func (b *Bot) handleTarget(msg *tgbotapi.Message) {
 			chat, err = b.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{SuperGroupUsername: username}})
 			if err != nil {
 				b.reply(msg, fmt.Sprintf("❌ Could not find chat %s: %s. Make sure the bot is an administrator in the channel.", html.EscapeString(args), html.EscapeString(err.Error())))
+
 				return
 			}
 		}
+
 		chatID = chat.ID
 	} else {
 		chatID, err = strconv.ParseInt(args, 10, 64)
 		if err != nil {
 			b.reply(msg, "❌ Invalid channel ID. It should be a number (don't forget the <code>-100</code> prefix for channels) or a <code>@username</code>.")
+
 			return
 		}
 
@@ -330,10 +345,12 @@ func (b *Bot) handleTarget(msg *tgbotapi.Message) {
 					chatID = altID
 				} else {
 					b.reply(msg, fmt.Sprintf("❌ Could not find chat %d (nor %d): %s. Make sure the bot is added to the chat.", chatID, altID, html.EscapeString(errAlt.Error())))
+
 					return
 				}
 			} else {
 				b.reply(msg, fmt.Sprintf("❌ Could not find chat %d: %s. Make sure the bot is added to the chat.", chatID, html.EscapeString(err.Error())))
+
 				return
 			}
 		}
@@ -343,12 +360,15 @@ func (b *Bot) handleTarget(msg *tgbotapi.Message) {
 	testMsg := tgbotapi.NewMessage(chatID, "✅ This channel has been set as the target for digest posts.")
 	if _, err := b.api.Send(testMsg); err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Found chat <b>%s</b> but could not send a message to it: %s. Make sure the bot is an administrator with permission to post messages.", html.EscapeString(chat.Title), html.EscapeString(err.Error())))
+
 		return
 	}
 
 	ctx := context.Background()
+
 	if err := b.database.SaveSettingWithHistory(ctx, "target_chat_id", chatID, msg.From.ID); err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error saving target chat ID: %s", html.EscapeString(err.Error())))
+
 		return
 	}
 
@@ -364,18 +384,25 @@ func (b *Bot) handleWindow(msg *tgbotapi.Message) {
 	args := msg.CommandArguments()
 	if args == "" {
 		b.reply(msg, "Usage: <code>/window &lt;duration&gt;</code> (e.g. <code>60m</code>, <code>6h</code>, <code>24h</code>)")
+
 		return
 	}
+
 	_, err := time.ParseDuration(args)
 	if err != nil {
 		b.reply(msg, "❌ Invalid duration format. Use something like <code>60m</code>, <code>6h</code>, <code>24h</code>.")
+
 		return
 	}
+
 	ctx := context.Background()
+
 	if err := b.database.SaveSettingWithHistory(ctx, "digest_window", args, msg.From.ID); err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error saving digest window: %s", html.EscapeString(err.Error())))
+
 		return
 	}
+
 	b.reply(msg, fmt.Sprintf("✅ Digest window updated to <code>%s</code>.", html.EscapeString(args)))
 }
 
@@ -383,13 +410,18 @@ func (b *Bot) handleLanguage(msg *tgbotapi.Message) {
 	args := msg.CommandArguments()
 	if args == "" {
 		b.reply(msg, "Usage: <code>/language &lt;lang_code&gt;</code> (e.g. <code>en</code>, <code>ru</code>, <code>de</code>)")
+
 		return
 	}
+
 	ctx := context.Background()
+
 	if err := b.database.SaveSettingWithHistory(ctx, "digest_language", args, msg.From.ID); err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error saving digest language: %s", html.EscapeString(err.Error())))
+
 		return
 	}
+
 	b.reply(msg, fmt.Sprintf("✅ Digest language updated to <code>%s</code>.", html.EscapeString(args)))
 }
 
@@ -397,18 +429,25 @@ func (b *Bot) handleMinLength(msg *tgbotapi.Message) {
 	args := msg.CommandArguments()
 	if args == "" {
 		b.reply(msg, "Usage: <code>/minlength &lt;number&gt;</code>")
+
 		return
 	}
+
 	val, err := strconv.Atoi(args)
 	if err != nil || val < 0 {
 		b.reply(msg, "❌ Invalid value. Please provide a positive number.")
+
 		return
 	}
+
 	ctx := context.Background()
+
 	if err := b.database.SaveSettingWithHistory(ctx, "filters_min_length", val, msg.From.ID); err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error saving min length: %s", html.EscapeString(err.Error())))
+
 		return
 	}
+
 	b.reply(msg, fmt.Sprintf("✅ Minimum message length updated to <code>%d</code>.", val))
 }
 
@@ -416,18 +455,25 @@ func (b *Bot) handleMaxLinks(msg *tgbotapi.Message) {
 	args := msg.CommandArguments()
 	if args == "" {
 		b.reply(msg, "Usage: <code>/max_links &lt;1-5&gt;</code>")
+
 		return
 	}
+
 	val, err := strconv.Atoi(args)
 	if err != nil || val < 1 || val > 5 {
 		b.reply(msg, "❌ Invalid value. Please provide a number between 1 and 5.")
+
 		return
 	}
+
 	ctx := context.Background()
+
 	if err := b.database.SaveSettingWithHistory(ctx, "max_links_per_message", val, msg.From.ID); err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error saving max links: %s", html.EscapeString(err.Error())))
+
 		return
 	}
+
 	b.reply(msg, fmt.Sprintf("✅ Max links per message updated to <code>%d</code>.", val))
 }
 
@@ -435,8 +481,10 @@ func (b *Bot) handleLinkCache(msg *tgbotapi.Message) {
 	args := msg.CommandArguments()
 	if args == "" {
 		b.reply(msg, "Usage: <code>/link_cache &lt;duration&gt;</code> (e.g. <code>12h</code>, <code>24h</code>, <code>7d</code>)")
+
 		return
 	}
+
 	durationStr := args
 	if strings.HasSuffix(durationStr, "d") {
 		days, err := strconv.Atoi(strings.TrimSuffix(durationStr, "d"))
@@ -448,13 +496,18 @@ func (b *Bot) handleLinkCache(msg *tgbotapi.Message) {
 	_, err := time.ParseDuration(durationStr)
 	if err != nil {
 		b.reply(msg, "❌ Invalid duration format. Use something like <code>12h</code>, <code>24h</code>.")
+
 		return
 	}
+
 	ctx := context.Background()
+
 	if err := b.database.SaveSettingWithHistory(ctx, "link_cache_ttl", args, msg.From.ID); err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error saving link cache TTL: %s", html.EscapeString(err.Error())))
+
 		return
 	}
+
 	b.reply(msg, fmt.Sprintf("✅ Link cache TTL updated to <code>%s</code>.", html.EscapeString(args)))
 }
 
@@ -560,6 +613,7 @@ func (b *Bot) handleListChannels(msg *tgbotapi.Message) {
 	}
 
 	var sb strings.Builder
+
 	sb.WriteString("📋 <b>Active Tracked Channels:</b>\n\n")
 	for _, ch := range channels {
 		identifier := fmt.Sprintf("@%s", html.EscapeString(ch.Username))
@@ -626,7 +680,9 @@ func (b *Bot) handleChannelStats(msg *tgbotapi.Message) {
 	}
 
 	var sb strings.Builder
+
 	sb.WriteString("📈 <b>Channel Quality Metrics (Last 7 Days)</b>\n\n")
+
 	for id, s := range stats {
 		ch, ok := channelMap[id]
 		name := id
@@ -872,7 +928,7 @@ func (b *Bot) handleFeedback(msg *tgbotapi.Message) {
 
 	itemID := args[0]
 	rating := strings.ToLower(args[1])
-	if rating != "good" && rating != "bad" && rating != "irrelevant" {
+	if rating != RatingGood && rating != RatingBad && rating != RatingIrrelevant {
 		b.reply(msg, "❌ Invalid rating. Use <code>good</code>, <code>bad</code>, or <code>irrelevant</code>.")
 		return
 	}
@@ -1008,6 +1064,7 @@ func (b *Bot) handleFilters(msg *tgbotapi.Message) {
 		_ = b.database.GetSetting(ctx, "filters_ads", &adsEnabled)
 
 		var sb strings.Builder
+
 		sb.WriteString("🔍 <b>Filter Management</b>\n\n")
 		sb.WriteString(fmt.Sprintf("• <b>Ads filter:</b> <code>%s</code>\n", map[bool]string{true: "ON", false: "OFF"}[adsEnabled]))
 		if len(filters) == 0 {
@@ -1121,6 +1178,7 @@ func (b *Bot) handleSetup(msg *tgbotapi.Message) {
 	channels, _ := b.database.GetActiveChannels(ctx)
 
 	var sb strings.Builder
+
 	sb.WriteString("🚀 <b>Getting Started with Digest Bot</b>\n\n")
 
 	if targetID == 0 {
@@ -1254,6 +1312,7 @@ func (b *Bot) handleSettings(msg *tgbotapi.Message) {
 	}
 
 	var sb strings.Builder
+
 	sb.WriteString("⚙️ <b>Current Settings:</b>\n\n")
 
 	// Define all settings we care about with their keys, titles and defaults
@@ -1385,6 +1444,7 @@ func (b *Bot) humanizeError(errJSON []byte) string {
 		return "<code>" + html.EscapeString(string(errJSON)) + "</code>"
 	}
 	rawErr := data["error"]
+
 	switch {
 	case strings.Contains(rawErr, "empty summary"):
 		return "🤖 LLM could not generate a summary for this message."
@@ -1595,6 +1655,7 @@ func (b *Bot) handleDiscoverStats(msg *tgbotapi.Message) {
 	}
 
 	var sb strings.Builder
+
 	sb.WriteString("📊 <b>Channel Discovery Statistics</b>\n\n")
 	sb.WriteString(fmt.Sprintf("• <b>Pending:</b> <code>%d</code>\n", stats.PendingCount))
 	if stats.UnresolvedCount > 0 {

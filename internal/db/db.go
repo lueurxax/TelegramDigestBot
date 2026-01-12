@@ -33,9 +33,11 @@ func New(ctx context.Context, dsn string) (*DB, error) {
 				return &DB{Pool: pool, Queries: sqlc.New(pool)}, nil
 			}
 		}
+
 		if pool != nil {
 			pool.Close()
 		}
+
 		time.Sleep(2 * time.Second)
 	}
 
@@ -59,10 +61,15 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrationLockID); err != nil {
 		return err
 	}
-	defer conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", migrationLockID)
+
+	defer func() {
+		_, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", migrationLockID)
+	}()
 
 	dbSQL := stdlib.OpenDB(*db.Pool.Config().ConnConfig)
-	defer dbSQL.Close()
+	defer func() {
+		_ = dbSQL.Close()
+	}()
 
 	goose.SetBaseFS(migrations.FS)
 

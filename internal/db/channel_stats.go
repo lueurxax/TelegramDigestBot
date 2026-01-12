@@ -58,6 +58,7 @@ func (db *DB) GetChannelStatsRolling(ctx context.Context, channelID string, sinc
 	if err != nil {
 		return nil, err
 	}
+
 	return &RollingStats{
 		TotalMessages:      int(row.TotalMessages),
 		TotalItemsCreated:  int(row.TotalItemsCreated),
@@ -72,12 +73,15 @@ func (db *DB) GetChannelsForAutoWeight(ctx context.Context) ([]ChannelForAutoWei
 	if err != nil {
 		return nil, err
 	}
+
 	result := make([]ChannelForAutoWeight, len(rows))
+
 	for i, r := range rows {
 		weight := r.ImportanceWeight.Float32
 		if !r.ImportanceWeight.Valid || weight == 0 {
 			weight = 1.0
 		}
+
 		result[i] = ChannelForAutoWeight{
 			ID:               fromUUID(r.ID),
 			Username:         r.Username.String,
@@ -85,6 +89,7 @@ func (db *DB) GetChannelsForAutoWeight(ctx context.Context) ([]ChannelForAutoWei
 			ImportanceWeight: weight,
 		}
 	}
+
 	return result, nil
 }
 
@@ -113,7 +118,9 @@ func (db *DB) GetChannelStatsForWindow(ctx context.Context, start, end time.Time
 	if err != nil {
 		return nil, err
 	}
+
 	result := make([]WindowChannelStats, len(rows))
+
 	for i, r := range rows {
 		// Type assert interface{} to float64
 		avgImportance, _ := r.AvgImportance.(float64)
@@ -128,6 +135,7 @@ func (db *DB) GetChannelStatsForWindow(ctx context.Context, start, end time.Time
 			AvgRelevance:     avgRelevance,
 		}
 	}
+
 	return result, nil
 }
 
@@ -140,6 +148,7 @@ func (db *DB) CollectAndSaveChannelStats(ctx context.Context, start, end time.Ti
 
 	periodStart := start.Truncate(24 * time.Hour)
 	periodEnd := end.Truncate(24 * time.Hour)
+
 	if periodEnd.Equal(periodStart) {
 		periodEnd = periodStart.Add(24 * time.Hour)
 	}

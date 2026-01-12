@@ -10,7 +10,7 @@ data:
   DIGEST_TOP_N: "20"
   RELEVANCE_THRESHOLD: "0.5"
   IMPORTANCE_THRESHOLD: "0.3"
-  SIMILARITY_THRESHOLD: "0.5"
+  SIMILARITY_THRESHOLD: "0.3"
   # Health & monitoring
   HEALTH_PORT: "8080"
   # Leader election

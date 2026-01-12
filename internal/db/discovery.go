@@ -58,6 +58,7 @@ func (db *DB) RecordDiscovery(ctx context.Context, d Discovery) error {
 	if err != nil {
 		return err
 	}
+
 	if tracked {
 		return nil // Already tracking this channel, skip
 	}
@@ -71,6 +72,7 @@ func (db *DB) RecordDiscovery(ctx context.Context, d Discovery) error {
 	if err != nil {
 		return err
 	}
+
 	if rejected {
 		return nil // Previously rejected, skip
 	}
@@ -151,7 +153,7 @@ func (db *DB) ApproveDiscovery(ctx context.Context, username string, adminID int
 	// Update status to added (not just approved)
 	return db.Queries.UpdateDiscoveryStatusByUsername(ctx, sqlc.UpdateDiscoveryStatusByUsernameParams{
 		Username:        toText(username),
-		Status:          "added",
+		Status:          DiscoveryStatusAdded,
 		StatusChangedBy: toInt8(adminID),
 	})
 }
@@ -160,7 +162,7 @@ func (db *DB) ApproveDiscovery(ctx context.Context, username string, adminID int
 func (db *DB) RejectDiscovery(ctx context.Context, username string, adminID int64) error {
 	return db.Queries.UpdateDiscoveryStatusByUsername(ctx, sqlc.UpdateDiscoveryStatusByUsernameParams{
 		Username:        toText(username),
-		Status:          "rejected",
+		Status:          DiscoveryStatusRejected,
 		StatusChangedBy: toInt8(adminID),
 	})
 }

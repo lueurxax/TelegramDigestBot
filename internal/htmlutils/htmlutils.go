@@ -19,16 +19,20 @@ func utf16Len(s string) int {
 func utf16Slice(s string, maxUnits int) string {
 	runes := []rune(s)
 	units := 0
+
 	for i, r := range runes {
 		runeUnits := 1
 		if r > 0xFFFF {
 			runeUnits = 2 // Surrogate pair needed
 		}
+
 		if units+runeUnits > maxUnits {
 			return string(runes[:i])
 		}
+
 		units += runeUnits
 	}
+
 	return s
 }
 
@@ -58,8 +62,10 @@ var dangerousProtocols = []string{
 // For <a> tags, only safe href attributes are preserved. All other tags have attributes stripped.
 func SanitizeHTML(text string) string {
 	var sb strings.Builder
+
 	indices := tagRegex.FindAllStringIndex(text, -1)
 	lastPos := 0
+
 	for _, idx := range indices {
 		if idx[0] > lastPos {
 			sb.WriteString(html.EscapeString(text[lastPos:idx[0]]))
@@ -67,9 +73,11 @@ func SanitizeHTML(text string) string {
 
 		tag := text[idx[0]:idx[1]]
 		matches := tagRegex.FindStringSubmatch(tag)
+
 		if len(matches) >= 3 {
 			isClosing := matches[1] == "/"
 			tagName := strings.ToLower(matches[2])
+
 			if allowedTags[tagName] {
 				if tagName == "a" && !isClosing {
 					// Sanitize <a> tag - only allow safe href
@@ -89,9 +97,11 @@ func SanitizeHTML(text string) string {
 
 		lastPos = idx[1]
 	}
+
 	if lastPos < len(text) {
 		sb.WriteString(html.EscapeString(text[lastPos:]))
 	}
+
 	return sb.String()
 }
 

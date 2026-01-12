@@ -49,6 +49,7 @@ func (db *DB) GetClustersForWindow(ctx context.Context, start, end time.Time) ([
 	}
 
 	clusterMap := make(map[string]*ClusterWithItems)
+
 	var clusters []string // to keep order
 
 	for _, row := range sqlcRows {
@@ -57,6 +58,7 @@ func (db *DB) GetClustersForWindow(ctx context.Context, start, end time.Time) ([
 			clusterMap[cID] = &ClusterWithItems{ID: cID, Topic: row.ClusterTopic.String}
 			clusters = append(clusters, cID)
 		}
+
 		clusterMap[cID].Items = append(clusterMap[cID].Items, Item{
 			ID:              fromUUID(row.ItemID),
 			Summary:         row.ItemSummary.String,

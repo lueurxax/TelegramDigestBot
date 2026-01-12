@@ -105,6 +105,7 @@ Summaries:
 
 func (c *openaiClient) loadPrompt(ctx context.Context, baseKey string, fallback string) (string, string) {
 	version := promptDefaultVersion
+
 	if c.promptStore != nil {
 		var active string
 		if err := c.promptStore.GetSetting(ctx, promptActiveKey(baseKey), &active); err == nil {

@@ -65,6 +65,7 @@ func (p *Pipeline) Run(ctx context.Context) error {
 	for {
 		correlationID := uuid.New().String()
 		p.logger.Info().Str("correlation_id", correlationID).Msg("Starting pipeline batch")
+
 		if err := p.processNextBatch(ctx, correlationID); err != nil {
 			p.logger.Error().Err(err).Str("correlation_id", correlationID).Msg("failed to process batch")
 		}
@@ -126,12 +127,12 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		logger.Debug().Err(err).Msg("could not get filters_skip_forwards from DB")
 	}
 
-	var filtersMode = "mixed"
+	var filtersMode = FilterModeMixed
 	if err := p.database.GetSetting(ctx, "filters_mode", &filtersMode); err != nil {
 		logger.Debug().Err(err).Msg("could not get filters_mode from DB")
 	}
 
-	var dedupMode = "semantic"
+	var dedupMode = DedupModeSemantic
 	if err := p.database.GetSetting(ctx, "dedup_mode", &dedupMode); err != nil {
 		logger.Debug().Err(err).Msg("could not get dedup_mode from DB")
 	}
@@ -183,6 +184,7 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 	}
 
 	var channelStats map[string]db.ChannelStats
+
 	if normalizeScores {
 		var err error
 		channelStats, err = p.database.GetChannelStats(ctx)
@@ -217,31 +219,37 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 
 	// 1. Filtering (MVP)
 	f := filters.New(filterList, adsFilterEnabled, minLength, adsKeywords, filtersMode)
+
 	var deduplicator dedup.Deduplicator
-	if dedupMode == "semantic" {
+	if dedupMode == DedupModeSemantic {
 		deduplicator = dedup.NewSemantic(p.database, p.cfg.SimilarityThreshold)
 	} else {
 		deduplicator = dedup.NewStrict(p.database)
 	}
 
 	var candidates []llm.MessageInput
+
 	embeddings := make(map[string][]float32)
 	seenHashes := make(map[string]string) // hash -> msg_id
 
 	for _, m := range messages {
 		if dupID, seen := seenHashes[m.CanonicalHash]; seen {
 			logger.Info().Str("msg_id", m.ID).Str("duplicate_id", dupID).Msg("skipping strict duplicate in batch")
+
 			if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
 				logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
 			}
+
 			continue
 		}
 
 		if skipForwards && m.IsForward {
 			logger.Info().Str("msg_id", m.ID).Msg("skipping forwarded message")
+
 			if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
 				logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
 			}
+
 			continue
 		}
 
@@ -249,27 +257,33 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 			if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
 				logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
 			}
+
 			continue
 		}
 
 		if relevanceGateEnabled {
 			decision := evaluateRelevanceGate(m.Text)
 			confidence := decision.confidence
+
 			if err := p.database.SaveRelevanceGateLog(ctx, m.ID, decision.decision, &confidence, decision.reason, gateModel, gateVersion); err != nil {
 				logger.Warn().Str("msg_id", m.ID).Err(err).Msg("failed to save relevance gate log")
 			}
-			if decision.decision == "irrelevant" {
+
+			if decision.decision == DecisionIrrelevant {
 				logger.Info().Str("msg_id", m.ID).Str("reason", decision.reason).Msg("skipping message by relevance gate")
+
 				if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
 					logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
 				}
+
 				continue
 			}
 		}
 
 		// 2. Deduplication
 		var emb []float32
-		if dedupMode == "semantic" || topicsEnabled {
+
+		if dedupMode == DedupModeSemantic || topicsEnabled {
 			var err error
 			emb, err = p.llmClient.GetEmbedding(ctx, m.Text)
 			if err != nil {
@@ -280,18 +294,23 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		}
 
 		// Semantic check in batch
-		if dedupMode == "semantic" {
+		if dedupMode == DedupModeSemantic {
 			foundInBatch := false
+
 			for _, cand := range candidates {
 				if dedup.CosineSimilarity(embeddings[cand.ID], emb) > p.cfg.SimilarityThreshold {
 					logger.Info().Str("msg_id", m.ID).Str("duplicate_id", cand.ID).Msg("skipping semantic duplicate in batch")
+
 					if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
 						logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
 					}
+
 					foundInBatch = true
+
 					break
 				}
 			}
+
 			if foundInBatch {
 				continue
 			}
@@ -300,9 +319,11 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		isDup, dupID, dErr := deduplicator.IsDuplicate(ctx, m, emb)
 		if dErr == nil && isDup {
 			logger.Info().Str("msg_id", m.ID).Str("duplicate_id", dupID).Msg("skipping duplicate message")
+
 			if err := p.database.MarkAsProcessed(ctx, m.ID); err != nil {
 				logger.Error().Str("msg_id", m.ID).Err(err).Msg("failed to mark message as processed")
 			}
+
 			continue
 		} else if dErr != nil {
 			logger.Error().Str("msg_id", m.ID).Err(dErr).Msg("failed to check for duplicates")
@@ -365,7 +386,7 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		groupResults, err := p.llmClient.ProcessBatch(ctx, groupCandidates, digestLanguage, model, digestTone)
 		if err != nil {
 			logger.Error().Err(err).Str("model", model).Msg("LLM batch processing failed")
-			observability.PipelineProcessed.WithLabelValues("error").Add(float64(len(indices)))
+			observability.PipelineProcessed.WithLabelValues(StatusError).Add(float64(len(indices)))
 			for _, idx := range indices {
 				errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
 				_ = p.database.SaveItemError(ctx, candidates[idx].ID, errJSON)
@@ -442,7 +463,7 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		// If summary is empty, it means LLM failed to process this specific item
 		if res.Summary == "" {
 			logger.Warn().Str("msg_id", candidates[i].ID).Int("index", i).Msg("LLM summary empty for item, marking as error")
-			observability.PipelineProcessed.WithLabelValues("error").Inc()
+			observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
 			errJSON, _ := json.Marshal(map[string]string{"error": "empty summary from LLM"})
 			_ = p.database.SaveItemError(ctx, candidates[i].ID, errJSON)
 			_ = p.database.MarkAsProcessed(ctx, candidates[i].ID)
@@ -478,7 +499,7 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 			Topic:           res.Topic,
 			Summary:         res.Summary,
 			Language:        res.Language,
-			Status:          "ready",
+			Status:          StatusReady,
 		}
 		itemRelThreshold := relevanceThreshold
 		if candidates[i].RelevanceThreshold > 0 {
@@ -494,17 +515,17 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		}
 
 		if res.RelevanceScore < itemRelThreshold {
-			item.Status = "rejected"
+			item.Status = StatusRejected
 			rejectedCount++
-			observability.PipelineProcessed.WithLabelValues("rejected").Inc()
+			observability.PipelineProcessed.WithLabelValues(StatusRejected).Inc()
 		} else {
 			readyCount++
-			observability.PipelineProcessed.WithLabelValues("ready").Inc()
+			observability.PipelineProcessed.WithLabelValues(StatusReady).Inc()
 		}
 
 		if err := p.database.SaveItem(ctx, item); err != nil {
 			logger.Error().Str("msg_id", candidates[i].ID).Err(err).Msg("failed to save item")
-			observability.PipelineProcessed.WithLabelValues("error").Inc()
+			observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
 			errJSON, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("failed to save item: %v", err)})
 			_ = p.database.SaveItemError(ctx, candidates[i].ID, errJSON)
 			_ = p.database.MarkAsProcessed(ctx, candidates[i].ID)

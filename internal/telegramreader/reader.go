@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/gotd/td/telegram/downloader"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
+
 	"github.com/lueurxax/telegram-digest-bot/internal/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/db"
 	"github.com/lueurxax/telegram-digest-bot/internal/linkextract"
@@ -19,6 +21,21 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/observability"
 	"github.com/rs/zerolog"
 )
+
+// ErrChannelNotFound indicates the channel was not found.
+var ErrChannelNotFound = errors.New("channel not found")
+
+// ErrNotAChannel indicates the peer is not a channel.
+var ErrNotAChannel = errors.New("peer is not a channel")
+
+// ErrMissingAccessHash indicates the channel is missing an access hash.
+var ErrMissingAccessHash = errors.New("missing access_hash for channel")
+
+// ErrNoChannelIdentifier indicates no username, ID, or invite link is available.
+var ErrNoChannelIdentifier = errors.New("channel has no username, ID or invite link")
+
+// ErrUnexpectedInviteType indicates an unexpected invite type was returned.
+var ErrUnexpectedInviteType = errors.New("chat invite returned unexpected type")
 
 type Reader struct {
 	cfg         *config.Config
@@ -36,9 +53,11 @@ func New(cfg *config.Config, database *db.DB, logger *zerolog.Logger) *Reader {
 	// With RateLimitRPS=1, we can process 1 channel per second
 	// With RateLimitRPS=5, we can process 5 channels per second (with staggered delays)
 	workerCount := cfg.RateLimitRPS
+
 	if workerCount < 1 {
 		workerCount = 1
 	}
+
 	if workerCount > 10 {
 		workerCount = 10 // Cap at 10 to avoid overwhelming Telegram API
 	}
@@ -62,7 +81,8 @@ func (r *Reader) Run(ctx context.Context) error {
 	r.client = client
 
 	return client.Run(ctx, func(ctx context.Context) error {
-		if err := client.Auth().IfNecessary(ctx, r.authFlow()); err != nil {
+		err := client.Auth().IfNecessary(ctx, r.authFlow())
+		if err != nil {
 			return err
 		}
 
@@ -78,110 +98,120 @@ func (r *Reader) Run(ctx context.Context) error {
 func (r *Reader) ingestMessages(ctx context.Context) error {
 	api := tg.NewClient(r.client)
 
-	for {
+	for { //nolint:wsl
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			channels, err := r.database.GetActiveChannels(ctx)
-			if err != nil {
-				r.logger.Error().Err(err).Msg("failed to get active channels")
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(10 * time.Second):
-				}
-				continue
-			}
+		}
 
-			if len(channels) == 0 {
-				r.logger.Info().Msg("No active channels to track. Waiting...")
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(30 * time.Second):
-				}
-				continue
-			}
-
-			r.logger.Info().Int("channels", len(channels)).Msg("Starting ingestion cycle")
-			start := time.Now()
-
-			// Calculate minimum delay between API calls based on RateLimitRPS
-			minDelay := 1000 * time.Millisecond
-			if r.cfg.RateLimitRPS > 0 {
-				minDelay = time.Duration(1000/r.cfg.RateLimitRPS) * time.Millisecond
-			}
-
-			// Use channels for collecting results
-			type fetchResult struct {
-				channel string
-				count   int
-				err     error
-			}
-			results := make(chan fetchResult, len(channels))
-
-			// Process channels with worker pool
-			for _, ch := range channels {
-				ch := ch // capture for goroutine
-
-				// Acquire worker slot (blocks if all workers busy)
-				select {
-				case r.workerSem <- struct{}{}:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-
-				go func() {
-					defer func() { <-r.workerSem }() // Release worker slot
-
-					// Rate limiting delay with jitter
-					jitter := minDelay + time.Duration(float64(minDelay)*0.5*(float64(time.Now().UnixNano()%1000)/1000.0))
-					select {
-					case <-ctx.Done():
-						results <- fetchResult{channel: ch.Username, err: ctx.Err()}
-						return
-					case <-time.After(jitter):
-					}
-
-					msgs, err := r.fetchChannelMessages(ctx, api, ch)
-					results <- fetchResult{channel: ch.Username, count: msgs, err: err}
-				}()
-			}
-
-			// Collect results
-			cycleMsgs := 0
-			for i := 0; i < len(channels); i++ {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case result := <-results:
-					if result.err != nil {
-						r.logger.Error().Str("channel", result.channel).Err(result.err).Msg("failed to fetch messages for channel")
-					}
-					cycleMsgs += result.count
-				}
-			}
-
-			r.logger.Info().Int("channels", len(channels)).Int("msgs", cycleMsgs).Dur("duration", time.Since(start)).Msg("Finished ingestion cycle")
-
-			// Resolve unknown discoveries (channels with peer ID but no title)
-			go r.resolveUnknownDiscoveries(ctx, api)
-
-			// Resolve invite link discoveries
-			go r.resolveInviteLinkDiscoveries(ctx, api)
-
-			// Adaptive delay: shorter if we found messages, longer if quiet
-			cycleDelay := 30 * time.Second
-			if cycleMsgs > 0 {
-				cycleDelay = 15 * time.Second // Poll more frequently if active
-			}
+		channels, err := r.database.GetActiveChannels(ctx)
+		if err != nil {
+			r.logger.Error().Err(err).Msg("failed to get active channels")
 
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(cycleDelay):
+			case <-time.After(10 * time.Second):
 			}
+
+			continue
+		}
+
+		if len(channels) == 0 {
+			r.logger.Info().Msg("No active channels to track. Waiting...")
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(30 * time.Second):
+			}
+
+			continue
+		}
+
+		r.logger.Info().Int("channels", len(channels)).Msg("Starting ingestion cycle")
+		start := time.Now()
+
+		// Calculate minimum delay between API calls based on RateLimitRPS
+		minDelay := 1000 * time.Millisecond
+		if r.cfg.RateLimitRPS > 0 {
+			minDelay = time.Duration(1000/r.cfg.RateLimitRPS) * time.Millisecond
+		}
+
+		// Use channels for collecting results
+		type fetchResult struct {
+			channel string
+			count   int
+			err     error
+		}
+
+		results := make(chan fetchResult, len(channels))
+
+		// Process channels with worker pool
+		for _, ch := range channels {
+			ch := ch // capture for goroutine
+
+			// Acquire worker slot (blocks if all workers busy)
+			select {
+			case r.workerSem <- struct{}{}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+
+			go func() {
+				defer func() { <-r.workerSem }() // Release worker slot
+
+				// Rate limiting delay with jitter
+				jitter := minDelay + time.Duration(float64(minDelay)*0.5*(float64(time.Now().UnixNano()%1000)/1000.0))
+
+				select {
+				case <-ctx.Done():
+					results <- fetchResult{channel: ch.Username, err: ctx.Err()}
+
+					return
+				case <-time.After(jitter):
+				}
+
+				msgs, err := r.fetchChannelMessages(ctx, api, ch)
+				results <- fetchResult{channel: ch.Username, count: msgs, err: err}
+			}()
+		}
+
+		// Collect results
+		cycleMsgs := 0
+
+		for i := 0; i < len(channels); i++ {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case result := <-results:
+				if result.err != nil {
+					r.logger.Error().Str("channel", result.channel).Err(result.err).Msg("failed to fetch messages for channel")
+				}
+
+				cycleMsgs += result.count
+			}
+		}
+
+		r.logger.Info().Int("channels", len(channels)).Int("msgs", cycleMsgs).Dur("duration", time.Since(start)).Msg("Finished ingestion cycle")
+
+		// Resolve unknown discoveries (channels with peer ID but no title)
+		go r.resolveUnknownDiscoveries(ctx, api)
+
+		// Resolve invite link discoveries
+		go r.resolveInviteLinkDiscoveries(ctx, api)
+
+		// Adaptive delay: shorter if we found messages, longer if quiet
+		cycleDelay := 30 * time.Second
+		if cycleMsgs > 0 {
+			cycleDelay = 15 * time.Second // Poll more frequently if active
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(cycleDelay):
 		}
 	}
 }
@@ -210,16 +240,20 @@ func (r *Reader) resolveUnknownDiscoveries(ctx context.Context, api *tg.Client) 
 		})
 		if err != nil {
 			r.logger.Debug().Err(err).Int64("peer_id", d.TGPeerID).Int64("access_hash", d.AccessHash).Msg("failed to resolve channel (may be private)")
+
 			// Increment attempt counter so we don't keep trying forever
 			if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
 				r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
 			}
+
 			time.Sleep(200 * time.Millisecond)
+
 			continue
 		}
 
 		// Extract channel info from response
 		resolved := false
+
 		if channelsResult, ok := channels.(*tg.MessagesChats); ok {
 			for _, chat := range channelsResult.Chats {
 				if channel, ok := chat.(*tg.Channel); ok && channel.ID == d.TGPeerID {
@@ -232,7 +266,9 @@ func (r *Reader) resolveUnknownDiscoveries(ctx context.Context, api *tg.Client) 
 					if err := r.database.UpdateDiscoveryChannelInfo(ctx, d.ID, channel.Title, channel.Username); err != nil {
 						r.logger.Warn().Err(err).Msg("failed to update discovery info")
 					}
+
 					resolved = true
+
 					break
 				}
 			}
@@ -268,11 +304,14 @@ func (r *Reader) resolveInviteLinkDiscoveries(ctx context.Context, api *tg.Clien
 		// Extract hash from invite link (e.g., https://t.me/+abc123 -> abc123)
 		hash := strings.TrimPrefix(d.InviteLink, "https://t.me/+")
 		hash = strings.TrimPrefix(hash, "https://t.me/joinchat/")
+
 		if hash == d.InviteLink || hash == "" {
 			r.logger.Debug().Str("invite_link", d.InviteLink).Msg("invalid invite link format")
+
 			if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
 				r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
 			}
+
 			continue
 		}
 
@@ -280,10 +319,13 @@ func (r *Reader) resolveInviteLinkDiscoveries(ctx context.Context, api *tg.Clien
 		invite, err := api.MessagesCheckChatInvite(ctx, hash)
 		if err != nil {
 			r.logger.Debug().Err(err).Str("invite_link", d.InviteLink).Msg("failed to check invite link")
+
 			if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
 				r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
 			}
+
 			time.Sleep(500 * time.Millisecond)
+
 			continue
 		}
 
@@ -345,9 +387,11 @@ func (r *Reader) fetchChannelDescription(ctx context.Context, api *tg.Client, ch
 	if err != nil {
 		return "", fmt.Errorf("failed to get full channel: %w", err)
 	}
+
 	if full, ok := fullChannel.FullChat.(*tg.ChannelFull); ok {
 		return full.About, nil
 	}
+
 	return "", nil
 }
 
@@ -453,6 +497,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 			if err != nil {
 				return 0, fmt.Errorf("failed to check chat invite: %w", err)
 			}
+
 			switch i := invite.(type) {
 			case *tg.ChatInviteAlready:
 				if channel, ok := i.Chat.(*tg.Channel); ok {
@@ -468,7 +513,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 					go r.extractDiscoveriesFromChannelFull(context.Background(), api, ch.ID, ch.TGPeerID, ch.AccessHash)
 				}
 			default:
-				return 0, fmt.Errorf("chat invite returned unexpected type: %T", invite)
+				return 0, fmt.Errorf("%w: %T", ErrUnexpectedInviteType, invite)
 			}
 		} else {
 			// Joined successfully, extract channel info from updates
@@ -502,6 +547,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 			ChannelID:  ch.TGPeerID,
 			AccessHash: ch.AccessHash,
 		}
+
 		r.logger.Debug().Str("username", ch.Username).Int64("peer_id", ch.TGPeerID).Msg("Using cached peer info")
 	} else if ch.Username != "" {
 		// Need to resolve username to get peer info
@@ -511,11 +557,11 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 			return 0, fmt.Errorf("failed to resolve username: %w", err)
 		}
 		if len(resolved.Chats) == 0 {
-			return 0, fmt.Errorf("channel not found: %s", ch.Username)
+			return 0, fmt.Errorf("%w: %s", ErrChannelNotFound, ch.Username)
 		}
 		channel, ok := resolved.Chats[0].(*tg.Channel)
 		if !ok {
-			return 0, fmt.Errorf("peer is not a channel: %s", ch.Username)
+			return 0, fmt.Errorf("%w: %s", ErrNotAChannel, ch.Username)
 		}
 		// Update channel info
 		r.logger.Info().Str("username", ch.Username).Int64("peer_id", channel.ID).Str("title", channel.Title).Msg("Caching channel info")
@@ -528,9 +574,9 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 			AccessHash: ch.AccessHash,
 		}
 	} else if ch.TGPeerID != 0 {
-		return 0, fmt.Errorf("missing access_hash for channel %d", ch.TGPeerID)
+		return 0, fmt.Errorf("%w: %d", ErrMissingAccessHash, ch.TGPeerID)
 	} else {
-		return 0, fmt.Errorf("channel %s has no username, ID or invite link", ch.ID)
+		return 0, fmt.Errorf("%w: %s", ErrNoChannelIdentifier, ch.ID)
 	}
 
 	// Update channel info in DB if it was just resolved OR if description is missing
@@ -572,20 +618,25 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 
 	history, err := api.MessagesGetHistory(ctx, req)
 	if err != nil {
-		if floodErr, ok := tgerr.As(err); ok && floodErr.Type == "FLOOD_WAIT" {
+		floodErr, ok := tgerr.As(err)
+		if ok && floodErr.Type == "FLOOD_WAIT" {
 			r.logger.Warn().Int("seconds", floodErr.Argument).Str("channel", ch.Username).Msg("flood wait")
+
 			select {
 			case <-ctx.Done():
 				return 0, ctx.Err()
 			case <-time.After(time.Duration(floodErr.Argument) * time.Second):
 			}
+
 			return 0, nil
 		}
+
 		return 0, fmt.Errorf("failed to get history: %w", err)
 	}
 
 	var messages []tg.MessageClass
 	var chats []tg.ChatClass
+
 	switch h := history.(type) {
 	case *tg.MessagesMessages:
 		messages = h.Messages
@@ -598,12 +649,14 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 		chats = h.Chats
 	case *tg.MessagesMessagesNotModified:
 		r.logger.Debug().Str("channel", ch.Username).Msg("History not modified")
+
 		return 0, nil
 	}
 
 	// Build channel title lookup map from chats in response
 	channelTitles := make(map[int64]string)
 	channelAccessHashes := make(map[int64]int64)
+
 	for _, chat := range chats {
 		if channel, ok := chat.(*tg.Channel); ok {
 			channelTitles[channel.ID] = channel.Title
@@ -626,6 +679,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 					}
 				}
 			}(svcMsg, ch.ID)
+
 			continue
 		}
 
@@ -664,6 +718,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 			r.logger.Error().Err(err).Str("channel", ch.Username).Int("msg_id", msg.ID).Msg("failed to save raw message")
 		} else {
 			count++
+
 			observability.MessagesIngested.WithLabelValues(ch.Username).Inc()
 
 			// Start async download if media exists

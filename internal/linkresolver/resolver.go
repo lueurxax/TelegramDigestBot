@@ -125,7 +125,7 @@ func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, 
 				URL:          link.URL,
 				Domain:       link.Domain,
 				LinkType:     string(link.Type),
-				Status:       "failed",
+				Status:       db.LinkStatusFailed,
 				ErrorMessage: err.Error(),
 				ExpiresAt:    time.Now().Add(1 * time.Hour), // Don't retry for 1h
 			})
@@ -161,7 +161,7 @@ func (r *Resolver) resolveWebLink(ctx context.Context, link *linkextract.Link, t
 	return &db.ResolvedLink{
 		URL:         link.URL,
 		Domain:      link.Domain,
-		LinkType:    "web",
+		LinkType:    string(linkextract.LinkTypeWeb),
 		Title:       content.Title,
 		Content:     content.Content,
 		Author:      content.Author,
@@ -169,7 +169,7 @@ func (r *Resolver) resolveWebLink(ctx context.Context, link *linkextract.Link, t
 		Description: content.Description,
 		ImageURL:    content.ImageURL,
 		WordCount:   content.WordCount,
-		Status:      "success",
+		Status:      db.LinkStatusSuccess,
 		ResolvedAt:  time.Now(),
 		ExpiresAt:   time.Now().Add(ttl),
 	}, nil
@@ -184,7 +184,7 @@ func (r *Resolver) resolveTelegramLink(ctx context.Context, link *linkextract.Li
 	return &db.ResolvedLink{
 		URL:             link.URL,
 		Domain:          "t.me",
-		LinkType:        "telegram",
+		LinkType:        string(linkextract.LinkTypeTelegram),
 		ChannelTitle:    content.ChannelTitle,
 		ChannelUsername: content.ChannelUsername,
 		MessageID:       content.MessageID,
@@ -194,7 +194,7 @@ func (r *Resolver) resolveTelegramLink(ctx context.Context, link *linkextract.Li
 		Forwards:        content.Forwards,
 		HasMedia:        content.HasMedia,
 		MediaType:       content.MediaType,
-		Status:          "success",
+		Status:          db.LinkStatusSuccess,
 		ResolvedAt:      time.Now(),
 		ExpiresAt:       time.Now().Add(ttl),
 	}, nil
