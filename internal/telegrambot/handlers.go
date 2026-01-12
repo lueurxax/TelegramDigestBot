@@ -260,6 +260,8 @@ func (b *Bot) handleAINamespace(msg *tgbotapi.Message) {
 		b.handleModel(&newMsg)
 	case "smart_model", "smartmodel":
 		b.handleSmartModel(&newMsg)
+	case "prompt":
+		b.handlePrompt(&newMsg)
 	case "tone":
 		b.handleTone(&newMsg)
 	case "editor":
@@ -866,6 +868,119 @@ func (b *Bot) handleRatings(msg *tgbotapi.Message) {
 	}
 
 	b.reply(msg, sb.String())
+}
+
+func (b *Bot) handlePrompt(msg *tgbotapi.Message) {
+	args := strings.Fields(msg.CommandArguments())
+	if len(args) == 0 {
+		b.reply(msg, "Usage:\n"+
+			"<code>/prompt list</code>\n"+
+			"<code>/prompt show &lt;summarize|narrative|cluster_summary|cluster_topic&gt; [version]</code>\n"+
+			"<code>/prompt set &lt;base&gt; &lt;version&gt; &lt;text...&gt;</code>\n"+
+			"<code>/prompt activate &lt;base&gt; &lt;version&gt;</code>")
+		return
+	}
+
+	baseList := []string{"summarize", "narrative", "cluster_summary", "cluster_topic"}
+	base := ""
+	isValidBase := func(v string) bool {
+		for _, baseName := range baseList {
+			if baseName == v {
+				return true
+			}
+		}
+		return false
+	}
+
+	command := strings.ToLower(args[0])
+	ctx := context.Background()
+
+	switch command {
+	case "list":
+		var sb strings.Builder
+		sb.WriteString("🧩 <b>Prompt Templates</b>\n\n")
+		for _, baseName := range baseList {
+			activeKey := fmt.Sprintf("prompt:%s:active", baseName)
+			active := "v1"
+			_ = b.database.GetSetting(ctx, activeKey, &active)
+			sb.WriteString(fmt.Sprintf("• <b>%s</b> active: <code>%s</code>\n", html.EscapeString(baseName), html.EscapeString(active)))
+		}
+		b.reply(msg, sb.String())
+		return
+	case "show":
+		if len(args) < 2 {
+			b.reply(msg, "Usage: <code>/prompt show &lt;base&gt; [version]</code>")
+			return
+		}
+		base = strings.ToLower(args[1])
+		if !isValidBase(base) {
+			b.reply(msg, fmt.Sprintf("Unknown base. Use: <code>%s</code>", html.EscapeString(strings.Join(baseList, ", "))))
+			return
+		}
+		version := "v1"
+		if len(args) > 2 {
+			version = args[2]
+		} else {
+			activeKey := fmt.Sprintf("prompt:%s:active", base)
+			_ = b.database.GetSetting(ctx, activeKey, &version)
+			if version == "" {
+				version = "v1"
+			}
+		}
+		promptKey := fmt.Sprintf("prompt:%s:%s", base, version)
+		var prompt string
+		_ = b.database.GetSetting(ctx, promptKey, &prompt)
+		if prompt == "" {
+			b.reply(msg, fmt.Sprintf("No override found for <code>%s</code> (version <code>%s</code>). Using built-in default.", html.EscapeString(base), html.EscapeString(version)))
+			return
+		}
+		escaped := html.EscapeString(prompt)
+		b.reply(msg, fmt.Sprintf("Prompt <b>%s</b> (<code>%s</code>):\n<pre>%s</pre>", html.EscapeString(base), html.EscapeString(version), escaped))
+		return
+	case "set":
+		if len(args) < 4 {
+			b.reply(msg, "Usage: <code>/prompt set &lt;base&gt; &lt;version&gt; &lt;text...&gt;</code>")
+			return
+		}
+		base = strings.ToLower(args[1])
+		if !isValidBase(base) {
+			b.reply(msg, fmt.Sprintf("Unknown base. Use: <code>%s</code>", html.EscapeString(strings.Join(baseList, ", "))))
+			return
+		}
+		version := args[2]
+		text := strings.Join(args[3:], " ")
+		key := fmt.Sprintf("prompt:%s:%s", base, version)
+		if err := b.database.SaveSettingWithHistory(ctx, key, text, msg.From.ID); err != nil {
+			b.reply(msg, fmt.Sprintf("❌ Error saving prompt: %s", html.EscapeString(err.Error())))
+			return
+		}
+		b.reply(msg, fmt.Sprintf("✅ Prompt <b>%s</b> saved as <code>%s</code>.", html.EscapeString(base), html.EscapeString(version)))
+		return
+	case "activate", "active":
+		if len(args) < 3 {
+			b.reply(msg, "Usage: <code>/prompt activate &lt;base&gt; &lt;version&gt;</code>")
+			return
+		}
+		base = strings.ToLower(args[1])
+		if !isValidBase(base) {
+			b.reply(msg, fmt.Sprintf("Unknown base. Use: <code>%s</code>", html.EscapeString(strings.Join(baseList, ", "))))
+			return
+		}
+		version := args[2]
+		key := fmt.Sprintf("prompt:%s:active", base)
+		if err := b.database.SaveSettingWithHistory(ctx, key, version, msg.From.ID); err != nil {
+			b.reply(msg, fmt.Sprintf("❌ Error saving active version: %s", html.EscapeString(err.Error())))
+			return
+		}
+		b.reply(msg, fmt.Sprintf("✅ Active prompt for <b>%s</b> set to <code>%s</code>.", html.EscapeString(base), html.EscapeString(version)))
+		return
+	default:
+		b.reply(msg, "Usage:\n"+
+			"<code>/prompt list</code>\n"+
+			"<code>/prompt show &lt;base&gt; [version]</code>\n"+
+			"<code>/prompt set &lt;base&gt; &lt;version&gt; &lt;text...&gt;</code>\n"+
+			"<code>/prompt activate &lt;base&gt; &lt;version&gt;</code>")
+	}
 }
 
 func (b *Bot) handleChannelWeight(msg *tgbotapi.Message) {
@@ -1630,6 +1745,7 @@ func (b *Bot) handleHelp(msg *tgbotapi.Message) {
 		"🧠 <b>AI &amp; Features</b> (<code>/ai</code>)\n"+
 		"• <code>/ai model &lt;name&gt;</code> - Set primary LLM model\n"+
 		"• <code>/ai tone &lt;professional|casual|brief&gt;</code> - Set digest tone\n"+
+		"• <code>/ai prompt</code> - Manage prompt templates\n"+
 		"• <code>/ai editor &lt;on|off&gt;</code> - Toggle narrative overview\n"+
 		"• <code>/ai vision &lt;on|off&gt;</code> - Toggle image analysis\n"+
 		"• <code>/ai consolidated &lt;on|off&gt;</code> - Merge similar stories\n"+

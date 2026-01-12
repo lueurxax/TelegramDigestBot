@@ -135,6 +135,8 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		b.handleFeedback(msg)
 	case "ratings":
 		b.handleRatings(msg)
+	case "prompt":
+		b.handlePrompt(msg)
 	case "channelcontext":
 		b.handleChannelContext(msg)
 	case "filters":
