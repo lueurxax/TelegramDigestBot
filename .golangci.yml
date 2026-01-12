@@ -195,20 +195,6 @@ linters:
           - dupl
           - mnd
           - revive
-      # Allow magic numbers in handlers
-      - path: handlers\.go
-        linters:
-          - mnd
-          - funlen
-          - gocyclo
-      # Telegram reader has complex message handling
-      - path: internal/telegramreader/
-        linters:
-          - gocyclo
-          - nestif
-          - funlen
-          - contextcheck
-          - wrapcheck
       # Pipeline has complex processing logic
       - path: internal/pipeline/
         linters:

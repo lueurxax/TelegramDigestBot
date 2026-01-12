@@ -10,11 +10,11 @@ test:
 
 # Run linter
 lint:
-	golangci-lint run ./...
+	~/go/bin/golangci-lint run ./...
 
 # Run linter and fix issues
 lint-fix:
-	golangci-lint run --fix ./...
+	~/go/bin/golangci-lint run --fix ./...
 
 # Generate SQLC code
 generate:

@@ -33,6 +33,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	if err := s.database.GetSetting(ctx, "cluster_similarity_threshold", &similarityThreshold); err != nil {
 		logger.Debug().Err(err).Msg("could not get cluster_similarity_threshold from DB")
 	}
+
 	if similarityThreshold <= 0 {
 		similarityThreshold = s.cfg.SimilarityThreshold
 	}
@@ -46,6 +47,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	if err := s.database.GetSetting(ctx, "cross_topic_similarity_threshold", &crossTopicThreshold); err != nil {
 		logger.Debug().Err(err).Msg("could not get cross_topic_similarity_threshold from DB")
 	}
+
 	if crossTopicThreshold <= 0 {
 		crossTopicThreshold = similarityThreshold
 	}
@@ -54,6 +56,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	if err := s.database.GetSetting(ctx, "cluster_coherence_threshold", &coherenceThreshold); err != nil {
 		logger.Debug().Err(err).Msg("could not get cluster_coherence_threshold from DB")
 	}
+
 	if coherenceThreshold <= 0 {
 		coherenceThreshold = 0.7
 	}
@@ -62,6 +65,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	if err := s.database.GetSetting(ctx, "cluster_time_window_hours", &clusterWindowHours); err != nil {
 		logger.Debug().Err(err).Msg("could not get cluster_time_window_hours from DB")
 	}
+
 	var clusterWindow time.Duration
 	if clusterWindowHours > 0 {
 		clusterWindow = time.Duration(clusterWindowHours) * time.Hour
@@ -123,6 +127,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 					if itemB.ID == itemA.ID {
 						continue
 					}
+
 					if assigned[itemB.ID] {
 						continue
 					}
@@ -133,6 +138,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 					}
 
 					topicA := topicIndex[itemA.ID]
+
 					topicB := topicIndex[itemB.ID]
 					if !crossTopicEnabled && topicA != topicB {
 						continue
@@ -249,6 +255,7 @@ func normalizeClusterTopic(topic string) string {
 	if normalized == "" {
 		return DefaultTopic
 	}
+
 	return normalized
 }
 
@@ -256,9 +263,11 @@ func withinClusterWindow(a, b time.Time, window time.Duration) bool {
 	if a.IsZero() || b.IsZero() {
 		return true
 	}
+
 	diff := a.Sub(b)
 	if diff < 0 {
 		diff = -diff
 	}
+
 	return diff <= window
 }

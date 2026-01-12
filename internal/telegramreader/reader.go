@@ -14,12 +14,13 @@ import (
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 
+	"github.com/rs/zerolog"
+
 	"github.com/lueurxax/telegram-digest-bot/internal/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/db"
 	"github.com/lueurxax/telegram-digest-bot/internal/linkextract"
 	"github.com/lueurxax/telegram-digest-bot/internal/linkresolver"
 	"github.com/lueurxax/telegram-digest-bot/internal/observability"
-	"github.com/rs/zerolog"
 )
 
 // ErrChannelNotFound indicates the channel was not found.
@@ -95,6 +96,12 @@ func (r *Reader) Run(ctx context.Context) error {
 	})
 }
 
+type fetchResult struct {
+	channel string
+	count   int
+	err     error
+}
+
 func (r *Reader) ingestMessages(ctx context.Context) error {
 	api := tg.NewClient(r.client)
 
@@ -109,10 +116,8 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		if err != nil {
 			r.logger.Error().Err(err).Msg("failed to get active channels")
 
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(10 * time.Second):
+			if err := r.wait(ctx, 10*time.Second); err != nil {
+				return err
 			}
 
 			continue
@@ -121,10 +126,8 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		if len(channels) == 0 {
 			r.logger.Info().Msg("No active channels to track. Waiting...")
 
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(30 * time.Second):
+			if err := r.wait(ctx, 30*time.Second); err != nil {
+				return err
 			}
 
 			continue
@@ -133,67 +136,7 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		r.logger.Info().Int("channels", len(channels)).Msg("Starting ingestion cycle")
 
 		start := time.Now()
-
-		// Calculate minimum delay between API calls based on RateLimitRPS
-		minDelay := 1000 * time.Millisecond
-		if r.cfg.RateLimitRPS > 0 {
-			minDelay = time.Duration(1000/r.cfg.RateLimitRPS) * time.Millisecond
-		}
-
-		// Use channels for collecting results
-		type fetchResult struct {
-			channel string
-			count   int
-			err     error
-		}
-
-		results := make(chan fetchResult, len(channels))
-
-		// Process channels with worker pool
-		for _, ch := range channels {
-			// capture for goroutine
-
-			// Acquire worker slot (blocks if all workers busy)
-			select {
-			case r.workerSem <- struct{}{}:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-
-			go func() {
-				defer func() { <-r.workerSem }() // Release worker slot
-
-				// Rate limiting delay with jitter
-				jitter := minDelay + time.Duration(float64(minDelay)*0.5*(float64(time.Now().UnixNano()%1000)/1000.0))
-
-				select {
-				case <-ctx.Done():
-					results <- fetchResult{channel: ch.Username, err: ctx.Err()}
-
-					return
-				case <-time.After(jitter):
-				}
-
-				msgs, err := r.fetchChannelMessages(ctx, api, ch)
-				results <- fetchResult{channel: ch.Username, count: msgs, err: err}
-			}()
-		}
-
-		// Collect results
-		cycleMsgs := 0
-
-		for i := 0; i < len(channels); i++ {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case result := <-results:
-				if result.err != nil {
-					r.logger.Error().Str("channel", result.channel).Err(result.err).Msg("failed to fetch messages for channel")
-				}
-
-				cycleMsgs += result.count
-			}
-		}
+		cycleMsgs := r.runIngestionCycle(ctx, api, channels)
 
 		r.logger.Info().Int("channels", len(channels)).Int("msgs", cycleMsgs).Dur("duration", time.Since(start)).Msg("Finished ingestion cycle")
 
@@ -205,17 +148,79 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 
 		// Adaptive delay: shorter if we found messages, longer if quiet
 		cycleDelay := 30 * time.Second
-
 		if cycleMsgs > 0 {
 			cycleDelay = 15 * time.Second // Poll more frequently if active
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(cycleDelay):
+		if err := r.wait(ctx, cycleDelay); err != nil {
+			return err
 		}
 	}
+}
+
+func (r *Reader) wait(ctx context.Context, delay time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(delay):
+		return nil
+	}
+}
+
+func (r *Reader) runIngestionCycle(ctx context.Context, api *tg.Client, channels []db.Channel) int {
+	// Calculate minimum delay between API calls based on RateLimitRPS
+	minDelay := 1000 * time.Millisecond
+	if r.cfg.RateLimitRPS > 0 {
+		minDelay = time.Duration(1000/r.cfg.RateLimitRPS) * time.Millisecond
+	}
+
+	results := make(chan fetchResult, len(channels))
+
+	// Process channels with worker pool
+	for _, ch := range channels {
+		// Acquire worker slot (blocks if all workers busy)
+		select {
+		case r.workerSem <- struct{}{}:
+		case <-ctx.Done():
+			results <- fetchResult{channel: ch.Username, err: ctx.Err()}
+			continue
+		}
+
+		go func(ch db.Channel) {
+			defer func() { <-r.workerSem }() // Release worker slot
+
+			// Rate limiting delay with jitter
+			jitter := minDelay + time.Duration(float64(minDelay)*0.5*(float64(time.Now().UnixNano()%1000)/1000.0))
+
+			select {
+			case <-ctx.Done():
+				results <- fetchResult{channel: ch.Username, err: ctx.Err()}
+				return
+			case <-time.After(jitter):
+			}
+
+			msgs, err := r.fetchChannelMessages(ctx, api, ch)
+			results <- fetchResult{channel: ch.Username, count: msgs, err: err}
+		}(ch)
+	}
+
+	// Collect results
+	cycleMsgs := 0
+
+	for i := 0; i < len(channels); i++ {
+		select {
+		case <-ctx.Done():
+			return cycleMsgs
+		case result := <-results:
+			if result.err != nil {
+				r.logger.Error().Str("channel", result.channel).Err(result.err).Msg("failed to fetch messages for channel")
+			}
+
+			cycleMsgs += result.count
+		}
+	}
+
+	return cycleMsgs
 }
 
 // resolveUnknownDiscoveries attempts to fetch channel info for discoveries with peer IDs but no titles
@@ -293,6 +298,7 @@ func (r *Reader) resolveInviteLinkDiscoveries(ctx context.Context, api *tg.Clien
 	discoveries, err := r.database.GetInviteLinkDiscoveriesNeedingResolution(ctx, 5)
 	if err != nil {
 		r.logger.Warn().Err(err).Msg("failed to get invite link discoveries needing resolution")
+
 		return
 	}
 
@@ -303,82 +309,95 @@ func (r *Reader) resolveInviteLinkDiscoveries(ctx context.Context, api *tg.Clien
 	r.logger.Debug().Int("count", len(discoveries)).Msg("Resolving invite link discoveries")
 
 	for _, d := range discoveries {
-		// Extract hash from invite link (e.g., https://t.me/+abc123 -> abc123)
-		hash := strings.TrimPrefix(d.InviteLink, "https://t.me/+")
-		hash = strings.TrimPrefix(hash, "https://t.me/joinchat/")
-
-		if hash == d.InviteLink || hash == "" {
-			r.logger.Debug().Str("invite_link", d.InviteLink).Msg("invalid invite link format")
-
-			if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
-				r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
-			}
-
-			continue
+		select {
+		case <-ctx.Done():
+			return
+		default:
 		}
 
-		// Try to check the invite without joining
-		invite, err := api.MessagesCheckChatInvite(ctx, hash)
-		if err != nil {
-			r.logger.Debug().Err(err).Str("invite_link", d.InviteLink).Msg("failed to check invite link")
-
-			if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
-				r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
-			}
-
-			time.Sleep(500 * time.Millisecond)
-
-			continue
-		}
-
-		// Extract channel info from invite response
-		var (
-			title, username    string
-			peerID, accessHash int64
-		)
-
-		switch i := invite.(type) { 		case *tg.ChatInviteAlready:
-			// We're already a member
-			if channel, ok := i.Chat.(*tg.Channel); ok {
-				title = channel.Title
-				username = channel.Username
-				peerID = channel.ID
-				accessHash = channel.AccessHash
-			}
-		case *tg.ChatInvite:
-			// We can see the invite info without joining
-			title = i.Title
-			// ChatInvite doesn't give us peer ID or access hash, but we get the title
-		case *tg.ChatInvitePeek:
-			// We can peek at the chat
-			if channel, ok := i.Chat.(*tg.Channel); ok {
-				title = channel.Title
-				username = channel.Username
-				peerID = channel.ID
-				accessHash = channel.AccessHash
-			}
-		}
-
-		if title != "" {
-			r.logger.Info().
-				Str("invite_link", d.InviteLink).
-				Str("title", title).
-				Str("username", username).
-				Int64("peer_id", peerID).
-				Msg("Resolved invite link discovery")
-
-			if err := r.database.UpdateDiscoveryFromInvite(ctx, d.ID, title, username, peerID, accessHash); err != nil {
-				r.logger.Warn().Err(err).Msg("failed to update discovery from invite")
-			}
-		} else {
-			// Couldn't extract info
-			if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
-				r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
-			}
-		}
+		r.resolveSingleInviteLinkDiscovery(ctx, api, d)
 
 		// Rate limit
-		time.Sleep(1 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(1 * time.Second):
+		}
+	}
+}
+
+func (r *Reader) resolveSingleInviteLinkDiscovery(ctx context.Context, api *tg.Client, d db.InviteLinkDiscovery) {
+	// Extract hash from invite link (e.g., https://t.me/+abc123 -> abc123)
+	hash := strings.TrimPrefix(d.InviteLink, "https://t.me/+")
+	hash = strings.TrimPrefix(hash, "https://t.me/joinchat/")
+
+	if hash == d.InviteLink || hash == "" {
+		r.logger.Debug().Str("invite_link", d.InviteLink).Msg("invalid invite link format")
+
+		if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
+			r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
+		}
+
+		return
+	}
+
+	// Try to check the invite without joining
+	invite, err := api.MessagesCheckChatInvite(ctx, hash)
+	if err != nil {
+		r.logger.Debug().Err(err).Str("invite_link", d.InviteLink).Msg("failed to check invite link")
+
+		if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
+			r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
+		}
+
+		return
+	}
+
+	// Extract channel info from invite response
+	var (
+		title, username    string
+		peerID, accessHash int64
+	)
+
+	switch i := invite.(type) {
+	case *tg.ChatInviteAlready:
+		// We're already a member
+		if channel, ok := i.Chat.(*tg.Channel); ok {
+			title = channel.Title
+			username = channel.Username
+			peerID = channel.ID
+			accessHash = channel.AccessHash
+		}
+	case *tg.ChatInvite:
+		// We can see the invite info without joining
+		title = i.Title
+		// ChatInvite doesn't give us peer ID or access hash, but we get the title
+	case *tg.ChatInvitePeek:
+		// We can peek at the chat
+		if channel, ok := i.Chat.(*tg.Channel); ok {
+			title = channel.Title
+			username = channel.Username
+			peerID = channel.ID
+			accessHash = channel.AccessHash
+		}
+	}
+
+	if title != "" {
+		r.logger.Info().
+			Str("invite_link", d.InviteLink).
+			Str("title", title).
+			Str("username", username).
+			Int64("peer_id", peerID).
+			Msg("Resolved invite link discovery")
+
+		if err := r.database.UpdateDiscoveryFromInvite(ctx, d.ID, title, username, peerID, accessHash); err != nil {
+			r.logger.Warn().Err(err).Msg("failed to update discovery from invite")
+		}
+	} else {
+		// Couldn't extract info
+		if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
+			r.logger.Warn().Err(err).Msg("failed to increment resolution attempts")
+		}
 	}
 }
 
@@ -482,32 +501,82 @@ func (r *Reader) extractDiscoveriesFromChannelFull(ctx context.Context, api *tg.
 func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db.Channel) (int, error) {
 	r.logger.Debug().Str("username", ch.Username).Str("title", ch.Title).Msg("Fetching messages for channel")
 
+	if err := r.ensureJoined(ctx, api, &ch); err != nil {
+		return 0, err
+	}
+
+	peer, err := r.resolvePeer(ctx, api, &ch)
+	if err != nil {
+		return 0, err
+	}
+
+	history, err := r.fetchHistory(ctx, api, peer, ch)
+	if err != nil {
+		return 0, err
+	}
+
+	if history == nil {
+		return 0, nil
+	}
+
+	return r.processHistoryMessages(ctx, api, history, ch)
+}
+
+func (r *Reader) ensureJoined(ctx context.Context, api *tg.Client, ch *db.Channel) error {
 	// 1. Join by invite link if needed
-	if ch.InviteLink != "" && ch.TGPeerID == 0 {
-		hash := ch.InviteLink
-		for _, prefix := range []string{"https://t.me/joinchat/", "https://t.me/+", "t.me/joinchat/", "t.me/+"} {
-			if strings.HasPrefix(hash, prefix) {
-				hash = strings.TrimPrefix(hash, prefix)
-				break
-			}
+	if ch.InviteLink == "" || ch.TGPeerID != 0 {
+		return nil
+	}
+
+	hash := ch.InviteLink
+
+	for _, prefix := range []string{"https://t.me/joinchat/", "https://t.me/+", "t.me/joinchat/", "t.me/+"} {
+		if strings.HasPrefix(hash, prefix) {
+			hash = strings.TrimPrefix(hash, prefix)
+
+			break
+		}
+	}
+
+	r.logger.Info().Str("invite_link", ch.InviteLink).Msg("Attempting to join channel by invite link")
+
+	updates, err := api.MessagesImportChatInvite(ctx, hash)
+	if err != nil {
+		if !tgerr.Is(err, "USER_ALREADY_PARTICIPANT") {
+			return fmt.Errorf("failed to join channel by invite link: %w", err)
 		}
 
-		r.logger.Info().Str("invite_link", ch.InviteLink).Msg("Attempting to join channel by invite link")
-
-		updates, err := api.MessagesImportChatInvite(ctx, hash)
+		// If already joined, check invite to get info
+		invite, err := api.MessagesCheckChatInvite(ctx, hash)
 		if err != nil {
-			if !tgerr.Is(err, "USER_ALREADY_PARTICIPANT") {
-				return 0, fmt.Errorf("failed to join channel by invite link: %w", err)
-			}
-			// If already joined, check invite to get info
-			invite, err := api.MessagesCheckChatInvite(ctx, hash)
-			if err != nil {
-				return 0, fmt.Errorf("failed to check chat invite: %w", err)
-			}
+			return fmt.Errorf("failed to check chat invite: %w", err)
+		}
 
-			switch i := invite.(type) {
-			case *tg.ChatInviteAlready:
-				if channel, ok := i.Chat.(*tg.Channel); ok {
+		switch i := invite.(type) {
+		case *tg.ChatInviteAlready:
+			if channel, ok := i.Chat.(*tg.Channel); ok {
+				ch.TGPeerID = channel.ID
+				ch.AccessHash = channel.AccessHash
+				ch.Title = channel.Title
+				ch.Username = channel.Username
+
+				description, _ := r.fetchChannelDescription(ctx, api, ch.TGPeerID, ch.AccessHash)
+				if err := r.database.UpdateChannel(ctx, ch.ID, ch.TGPeerID, ch.Title, ch.AccessHash, ch.Username, description); err != nil {
+					r.logger.Error().Err(err).Msg("failed to update channel info from invite")
+				}
+
+				// Extract discoveries from channel description and linked chat (async)
+				go r.extractDiscoveriesFromChannelFull(ctx, api, ch.ID, ch.TGPeerID, ch.AccessHash)
+			}
+		default:
+			return fmt.Errorf("%w: %T", ErrUnexpectedInviteType, invite)
+		}
+	} else {
+		// Joined successfully, extract channel info from updates
+		switch u := updates.(type) {
+		case *tg.Updates:
+			for _, chat := range u.Chats {
+				if channel, ok := chat.(*tg.Channel); ok {
 					ch.TGPeerID = channel.ID
 					ch.AccessHash = channel.AccessHash
 					ch.Title = channel.Title
@@ -515,41 +584,25 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 
 					description, _ := r.fetchChannelDescription(ctx, api, ch.TGPeerID, ch.AccessHash)
 					if err := r.database.UpdateChannel(ctx, ch.ID, ch.TGPeerID, ch.Title, ch.AccessHash, ch.Username, description); err != nil {
-						r.logger.Error().Err(err).Msg("failed to update channel info from invite")
+						r.logger.Error().Err(err).Msg("failed to update channel info from join updates")
 					}
-					// Extract discoveries from channel description and linked chat (async)
-					go r.extractDiscoveriesFromChannelFull(context.Background(), api, ch.ID, ch.TGPeerID, ch.AccessHash)
-				}
-			default:
-				return 0, fmt.Errorf("%w: %T", ErrUnexpectedInviteType, invite)
-			}
-		} else {
-			// Joined successfully, extract channel info from updates
-			switch u := updates.(type) {
-			case *tg.Updates:
-				for _, chat := range u.Chats {
-					if channel, ok := chat.(*tg.Channel); ok {
-						ch.TGPeerID = channel.ID
-						ch.AccessHash = channel.AccessHash
-						ch.Title = channel.Title
-						ch.Username = channel.Username
 
-						description, _ := r.fetchChannelDescription(ctx, api, ch.TGPeerID, ch.AccessHash)
-						if err := r.database.UpdateChannel(ctx, ch.ID, ch.TGPeerID, ch.Title, ch.AccessHash, ch.Username, description); err != nil {
-							r.logger.Error().Err(err).Msg("failed to update channel info from join updates")
-						}
-						// Extract discoveries from channel description and linked chat (async)
-						go r.extractDiscoveriesFromChannelFull(context.Background(), api, ch.ID, ch.TGPeerID, ch.AccessHash)
-					}
+					// Extract discoveries from channel description and linked chat (async)
+					go r.extractDiscoveriesFromChannelFull(ctx, api, ch.ID, ch.TGPeerID, ch.AccessHash)
 				}
 			}
 		}
 	}
 
-	// Resolve peer - OPTIMIZATION: Skip API call if we already have valid peer info
-	var peer tg.InputPeerClass
+	return nil
+}
 
-	resolvedNow := false
+func (r *Reader) resolvePeer(ctx context.Context, api *tg.Client, ch *db.Channel) (tg.InputPeerClass, error) {
+	// Resolve peer - OPTIMIZATION: Skip API call if we already have valid peer info
+	var (
+		peer        tg.InputPeerClass
+		resolvedNow bool
+	)
 
 	if ch.TGPeerID != 0 && ch.AccessHash != 0 {
 		// We already have valid peer info, use it directly (skip API call)
@@ -565,19 +618,21 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 
 		resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: ch.Username})
 		if err != nil {
-			return 0, fmt.Errorf("failed to resolve username: %w", err)
+			return nil, fmt.Errorf("failed to resolve username: %w", err)
 		}
 
 		if len(resolved.Chats) == 0 {
-			return 0, fmt.Errorf("%w: %s", ErrChannelNotFound, ch.Username)
+			return nil, fmt.Errorf("%w: %s", ErrChannelNotFound, ch.Username)
 		}
 
 		channel, ok := resolved.Chats[0].(*tg.Channel)
 		if !ok {
-			return 0, fmt.Errorf("%w: %s", ErrNotAChannel, ch.Username)
+			return nil, fmt.Errorf("%w: %s", ErrNotAChannel, ch.Username)
 		}
+
 		// Update channel info
 		r.logger.Info().Str("username", ch.Username).Int64("peer_id", channel.ID).Str("title", channel.Title).Msg("Caching channel info")
+
 		ch.TGPeerID = channel.ID
 		ch.AccessHash = channel.AccessHash
 		ch.Title = channel.Title
@@ -587,9 +642,9 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 			AccessHash: ch.AccessHash,
 		}
 	} else if ch.TGPeerID != 0 {
-		return 0, fmt.Errorf("%w: %d", ErrMissingAccessHash, ch.TGPeerID)
+		return nil, fmt.Errorf("%w: %d", ErrMissingAccessHash, ch.TGPeerID)
 	} else {
-		return 0, fmt.Errorf("%w: %s", ErrNoChannelIdentifier, ch.ID)
+		return nil, fmt.Errorf("%w: %s", ErrNoChannelIdentifier, ch.ID)
 	}
 
 	// Update channel info in DB if it was just resolved OR if description is missing
@@ -616,10 +671,14 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 			ch.Description = description
 
 			// Extract discoveries from channel description and linked chat (async)
-			go r.extractDiscoveriesFromChannelFull(context.Background(), api, ch.ID, ch.TGPeerID, ch.AccessHash)
+			go r.extractDiscoveriesFromChannelFull(ctx, api, ch.ID, ch.TGPeerID, ch.AccessHash)
 		}
 	}
 
+	return peer, nil
+}
+
+func (r *Reader) fetchHistory(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, ch db.Channel) (tg.MessagesMessagesClass, error) {
 	r.logger.Debug().Str("username", ch.Username).Int64("peer_id", ch.TGPeerID).Int64("last_id", ch.LastTGMessageID).Msg("Getting history")
 
 	req := &tg.MessagesGetHistoryRequest{
@@ -641,46 +700,168 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 
 			select {
 			case <-ctx.Done():
-				return 0, ctx.Err()
+				return nil, ctx.Err()
 			case <-time.After(time.Duration(floodErr.Argument) * time.Second):
 			}
 
-			return 0, nil
+			// Retry after flood wait
+			return r.fetchHistory(ctx, api, peer, ch)
 		}
 
-		return 0, fmt.Errorf("failed to get history: %w", err)
+		return nil, fmt.Errorf("failed to get history: %w", err)
 	}
 
-	var (
-		messages []tg.MessageClass
-		chats    []tg.ChatClass
-	)
+	return history, nil
+}
 
-	switch h := history.(type) { 	case *tg.MessagesMessages:
-		messages = h.Messages
-		chats = h.Chats
+type historyProcessingContext struct {
+	api                  *tg.Client
+	ch                   db.Channel
+	channelTitles        map[int64]string
+	channelAccessHashes  map[int64]int64
+}
+
+func (r *Reader) extractHistoryData(history tg.MessagesMessagesClass) ([]tg.MessageClass, []tg.ChatClass, bool) {
+	switch h := history.(type) {
+	case *tg.MessagesMessages:
+		return h.Messages, h.Chats, true
 	case *tg.MessagesMessagesSlice:
-		messages = h.Messages
-		chats = h.Chats
+		return h.Messages, h.Chats, true
 	case *tg.MessagesChannelMessages:
-		messages = h.Messages
-		chats = h.Chats
+		return h.Messages, h.Chats, true
 	case *tg.MessagesMessagesNotModified:
+		return nil, nil, false
+	}
+
+	return nil, nil, false
+}
+
+func (r *Reader) buildChannelLookups(chats []tg.ChatClass) (map[int64]string, map[int64]int64) {
+	titles := make(map[int64]string)
+	accessHashes := make(map[int64]int64)
+
+	for _, chat := range chats {
+		if channel, ok := chat.(*tg.Channel); ok {
+			titles[channel.ID] = channel.Title
+			accessHashes[channel.ID] = channel.AccessHash
+		}
+	}
+
+	return titles, accessHashes
+}
+
+func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessingContext, msg *tg.Message) bool {
+	if msg.Message == "" && msg.Media == nil {
+		return false
+	}
+
+	entitiesJSON, _ := json.Marshal(msg.Entities)
+	mediaJSON, _ := json.Marshal(msg.Media)
+	_, isForward := msg.GetFwdFrom()
+
+	rawMsg := &db.RawMessage{
+		ChannelID:     hpc.ch.ID,
+		TGMessageID:   int64(msg.ID),
+		TGDate:        time.Unix(int64(msg.Date), 0),
+		Text:          msg.Message,
+		EntitiesJSON:  entitiesJSON,
+		MediaJSON:     mediaJSON,
+		CanonicalHash: r.canonicalize(msg.Message),
+		IsForward:     isForward,
+	}
+
+	if err := r.database.SaveRawMessage(ctx, rawMsg); err != nil {
+		r.logger.Error().Err(err).Str("channel", hpc.ch.Username).Int("msg_id", msg.ID).Msg("failed to save raw message")
+
+		return false
+	}
+
+	observability.MessagesIngested.WithLabelValues(hpc.ch.Username).Inc()
+	r.startAsyncMediaDownload(ctx, hpc, msg, rawMsg)
+	r.startAsyncLinkResolution(ctx, msg.Message)
+	r.startAsyncDiscoveryExtraction(ctx, hpc, msg)
+
+	return true
+}
+
+func (r *Reader) startAsyncMediaDownload(ctx context.Context, hpc *historyProcessingContext, msg *tg.Message, rawMsg *db.RawMessage) {
+	if msg.Media == nil {
+		return
+	}
+
+	go func(ctx context.Context, api *tg.Client, m tg.MessageMediaClass, rm db.RawMessage) {
+		select {
+		case r.downloadSem <- struct{}{}:
+			defer func() { <-r.downloadSem }()
+		case <-ctx.Done():
+			return
+		}
+
+		data, err := r.downloadMedia(ctx, api, m)
+		if err != nil {
+			r.logger.Warn().Err(err).Int("msg_id", int(rm.TGMessageID)).Msg("async download failed")
+
+			return
+		}
+
+		if data == nil {
+			return
+		}
+
+		rm.MediaData = data
+
+		if err := r.database.SaveRawMessage(ctx, &rm); err != nil {
+			r.logger.Error().Err(err).Int("msg_id", int(rm.TGMessageID)).Msg("failed to update raw message with media data")
+		}
+	}(ctx, hpc.api, msg.Media, *rawMsg)
+}
+
+func (r *Reader) startAsyncLinkResolution(ctx context.Context, text string) {
+	links := linkextract.ExtractLinks(text)
+	if len(links) == 0 || r.resolver == nil {
+		return
+	}
+
+	go func(ctx context.Context, text string) {
+		_, _ = r.resolver.ResolveLinks(ctx, text, r.cfg.MaxLinksPerMessage, r.cfg.LinkCacheTTL, r.cfg.TelegramLinkCacheTTL)
+	}(ctx, text)
+}
+
+func (r *Reader) startAsyncDiscoveryExtraction(ctx context.Context, hpc *historyProcessingContext, msg *tg.Message) {
+	go func(ctx context.Context, m *tg.Message, channelID string, channelPeerID int64, msgID int64, titles map[int64]string, accessHashes map[int64]int64) {
+		isNew, err := r.database.CheckAndMarkDiscoveriesExtracted(ctx, channelID, msgID)
+		if err != nil {
+			r.logger.Warn().Err(err).Msg("failed to check discoveries extracted flag")
+
+			return
+		}
+
+		if !isNew {
+			return
+		}
+
+		discoveries := r.extractDiscoveries(m, channelID, channelPeerID, titles, accessHashes)
+		for _, d := range discoveries {
+			if err := r.database.RecordDiscovery(ctx, d); err != nil {
+				r.logger.Warn().Err(err).Str("discovery", d.Username).Int64("peer_id", d.TGPeerID).Msg("failed to record discovery")
+			}
+		}
+	}(ctx, msg, hpc.ch.ID, hpc.ch.TGPeerID, int64(msg.ID), hpc.channelTitles, hpc.channelAccessHashes)
+}
+
+func (r *Reader) processHistoryMessages(ctx context.Context, api *tg.Client, history tg.MessagesMessagesClass, ch db.Channel) (int, error) {
+	messages, chats, ok := r.extractHistoryData(history)
+	if !ok {
 		r.logger.Debug().Str("channel", ch.Username).Msg("History not modified")
 
 		return 0, nil
 	}
 
-	// Build channel title lookup map from chats in response
-	channelTitles := make(map[int64]string)
-	channelAccessHashes := make(map[int64]int64)
-
-	for _, chat := range chats {
-		if channel, ok := chat.(*tg.Channel); ok {
-			channelTitles[channel.ID] = channel.Title
-			channelAccessHashes[channel.ID] = channel.AccessHash
-		}
+	hpc := &historyProcessingContext{
+		api: api,
+		ch:  ch,
 	}
+	hpc.channelTitles, hpc.channelAccessHashes = r.buildChannelLookups(chats)
 
 	r.logger.Debug().Str("channel", ch.Username).Int("count", len(messages)).Int("chats_in_response", len(chats)).Msg("Processing messages")
 
@@ -688,16 +869,8 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 	maxID := ch.LastTGMessageID
 
 	for _, m := range messages {
-		// Handle service messages for discovery (channel migrations, etc.)
 		if svcMsg, ok := m.(*tg.MessageService); ok {
-			go func(sm *tg.MessageService, channelID string) {
-				discoveries := r.extractDiscoveriesFromService(sm, channelID)
-				for _, d := range discoveries {
-					if err := r.database.RecordDiscovery(context.Background(), d); err != nil {
-						r.logger.Warn().Err(err).Int64("peer_id", d.TGPeerID).Msg("failed to record service message discovery")
-					}
-				}
-			}(svcMsg, ch.ID)
+			r.processServiceMessage(ctx, svcMsg, ch.ID)
 
 			continue
 		}
@@ -711,98 +884,28 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 			maxID = int64(msg.ID)
 		}
 
-		if msg.Message == "" && msg.Media == nil {
-			continue
-		}
-
-		entitiesJSON, _ := json.Marshal(msg.Entities)
-		mediaJSON, _ := json.Marshal(msg.Media)
-		_, isForward := msg.GetFwdFrom()
-
-		rawMsg := &db.RawMessage{
-			ChannelID:     ch.ID,
-			TGMessageID:   int64(msg.ID),
-			TGDate:        time.Unix(int64(msg.Date), 0),
-			Text:          msg.Message,
-			EntitiesJSON:  entitiesJSON,
-			MediaJSON:     mediaJSON,
-			CanonicalHash: r.canonicalize(msg.Message),
-			IsForward:     isForward,
-		}
-
-		// TODO: Consider using object storage (S3/MinIO) for media_data instead of BYTEA in PostgreSQL
-		// for better scalability in high-volume production deployments.
-		if err := r.database.SaveRawMessage(ctx, rawMsg); err != nil {
-			r.logger.Error().Err(err).Str("channel", ch.Username).Int("msg_id", msg.ID).Msg("failed to save raw message")
-		} else {
+		if r.processSingleMessage(ctx, hpc, msg) {
 			count++
-
-			observability.MessagesIngested.WithLabelValues(ch.Username).Inc()
-
-			// Start async download if media exists
-			if msg.Media != nil {
-				go func(m tg.MessageMediaClass, rm db.RawMessage) {
-					// Wait for slot
-					select {
-					case r.downloadSem <- struct{}{}:
-						defer func() { <-r.downloadSem }()
-					case <-ctx.Done():
-						return
-					}
-
-					data, err := r.downloadMedia(ctx, api, m)
-					if err != nil {
-						r.logger.Warn().Err(err).Int("msg_id", int(rm.TGMessageID)).Msg("async download failed")
-						return
-					}
-
-					if data == nil {
-						return
-					}
-
-					rm.MediaData = data
-					// Re-save with media data. The SQL ON CONFLICT will handle updating the media_data column.
-					if err := r.database.SaveRawMessage(ctx, &rm); err != nil {
-						r.logger.Error().Err(err).Int("msg_id", int(rm.TGMessageID)).Msg("failed to update raw message with media data")
-					}
-				}(msg.Media, *rawMsg)
-			}
-
-			// Start async link resolution
-			links := linkextract.ExtractLinks(msg.Message)
-			if len(links) > 0 && r.resolver != nil {
-				go func(text string) {
-					// We use a background context or a timeout context to not block the reader
-					// but since it's a goroutine it's fine.
-					// We don't really care about the results here, just populating the cache.
-					_, _ = r.resolver.ResolveLinks(context.Background(), text, r.cfg.MaxLinksPerMessage, r.cfg.LinkCacheTTL, r.cfg.TelegramLinkCacheTTL)
-				}(msg.Message)
-			}
-
-			// Extract channel discoveries asynchronously (only for new messages)
-			go func(m *tg.Message, channelID string, channelPeerID int64, msgID int64, titles map[int64]string, accessHashes map[int64]int64) {
-				// Check and mark if discoveries were already extracted for this message
-				isNew, err := r.database.CheckAndMarkDiscoveriesExtracted(context.Background(), channelID, msgID)
-				if err != nil {
-					r.logger.Warn().Err(err).Msg("failed to check discoveries extracted flag")
-					return
-				}
-
-				if !isNew {
-					// Already extracted discoveries for this message
-					return
-				}
-
-				discoveries := r.extractDiscoveries(m, channelID, channelPeerID, titles, accessHashes)
-				for _, d := range discoveries {
-					if err := r.database.RecordDiscovery(context.Background(), d); err != nil {
-						r.logger.Warn().Err(err).Str("discovery", d.Username).Int64("peer_id", d.TGPeerID).Msg("failed to record discovery")
-					}
-				}
-			}(msg, ch.ID, ch.TGPeerID, int64(msg.ID), channelTitles, channelAccessHashes)
 		}
 	}
 
+	r.logProcessingResult(ctx, ch, count, maxID)
+
+	return count, nil
+}
+
+func (r *Reader) processServiceMessage(ctx context.Context, svcMsg *tg.MessageService, channelID string) {
+	go func(ctx context.Context, sm *tg.MessageService, chID string) {
+		discoveries := r.extractDiscoveriesFromService(sm, chID)
+		for _, d := range discoveries {
+			if err := r.database.RecordDiscovery(ctx, d); err != nil {
+				r.logger.Warn().Err(err).Int64("peer_id", d.TGPeerID).Msg("failed to record service message discovery")
+			}
+		}
+	}(ctx, svcMsg, channelID)
+}
+
+func (r *Reader) logProcessingResult(ctx context.Context, ch db.Channel, count int, maxID int64) {
 	if count > 0 {
 		r.logger.Info().Str("channel", ch.Username).Int("count", count).Msg("Saved messages for channel")
 	} else {
@@ -814,8 +917,6 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 			r.logger.Error().Err(err).Str("channel", ch.Username).Int64("max_id", maxID).Msg("failed to update last message id")
 		}
 	}
-
-	return count, nil
 }
 
 func (r *Reader) downloadMedia(ctx context.Context, api *tg.Client, media tg.MessageMediaClass) ([]byte, error) {
@@ -823,88 +924,14 @@ func (r *Reader) downloadMedia(ctx context.Context, api *tg.Client, media tg.Mes
 
 	switch m := media.(type) {
 	case *tg.MessageMediaPhoto:
-		photo, ok := m.Photo.(*tg.Photo)
-		if !ok {
-			return nil, nil
-		}
-
-		// Find the largest photo size
-		var largest tg.PhotoSizeClass
-
-		maxSize := 0
-
-		for _, size := range photo.Sizes {
-			switch s := size.(type) {
-			case *tg.PhotoSize:
-				if s.W*s.H > maxSize {
-					maxSize = s.W * s.H
-					largest = size
-				}
-			case *tg.PhotoSizeProgressive:
-				if s.W*s.H > maxSize {
-					maxSize = s.W * s.H
-					largest = size
-				}
-			}
-		}
-
-		if largest == nil {
-			return nil, nil
-		}
-
-		var thumbSize string
-
-		switch s := largest.(type) {
-		case *tg.PhotoSize:
-			thumbSize = s.Type
-		case *tg.PhotoSizeProgressive:
-			thumbSize = s.Type
-		default:
-			return nil, nil
-		}
-
-		fileLocation = &tg.InputPhotoFileLocation{
-			ID:            photo.ID,
-			AccessHash:    photo.AccessHash,
-			FileReference: photo.FileReference,
-			ThumbSize:     thumbSize,
-		}
-
+		fileLocation = r.getPhotoFileLocation(m)
 	case *tg.MessageMediaDocument:
-		doc, ok := m.Document.(*tg.Document)
-		if !ok {
-			return nil, nil
-		}
-
-		// Check if it's an image
-		isImage := strings.HasPrefix(doc.MimeType, "image/")
-
-		if !isImage {
-			// Check attributes for ImageSize
-			for _, attr := range doc.Attributes {
-				if _, ok := attr.(*tg.DocumentAttributeImageSize); ok {
-					isImage = true
-					break
-				}
-			}
-		}
-
-		if !isImage {
-			return nil, nil
-		}
-
-		// Don't download huge files as "images" (limit to 10MB)
-		if doc.Size > 10*1024*1024 {
-			return nil, nil
-		}
-
-		fileLocation = &tg.InputDocumentFileLocation{
-			ID:            doc.ID,
-			AccessHash:    doc.AccessHash,
-			FileReference: doc.FileReference,
-		}
-
+		fileLocation = r.getDocumentFileLocation(m)
 	default:
+		return nil, nil
+	}
+
+	if fileLocation == nil {
 		return nil, nil
 	}
 
@@ -918,22 +945,411 @@ func (r *Reader) downloadMedia(ctx context.Context, api *tg.Client, media tg.Mes
 	return buf.Bytes(), nil
 }
 
-// extractDiscoveries extracts channel discoveries from a message
-// channelTitles is a map of channel IDs to titles from the API response
-// channelAccessHashes is a map of channel IDs to access hashes from the API response
-func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromChannelPeerID int64, channelTitles map[int64]string, channelAccessHashes map[int64]int64) []db.Discovery {
+func (r *Reader) getPhotoFileLocation(m *tg.MessageMediaPhoto) tg.InputFileLocationClass {
+	photo, ok := m.Photo.(*tg.Photo)
+	if !ok {
+		return nil
+	}
+
+	// Find the largest photo size
+	var largest tg.PhotoSizeClass
+
+	maxSize := 0
+
+	for _, size := range photo.Sizes {
+		switch s := size.(type) {
+		case *tg.PhotoSize:
+			if s.W*s.H > maxSize {
+				maxSize = s.W * s.H
+				largest = size
+			}
+		case *tg.PhotoSizeProgressive:
+			if s.W*s.H > maxSize {
+				maxSize = s.W * s.H
+				largest = size
+			}
+		}
+	}
+
+	if largest == nil {
+		return nil
+	}
+
+	var thumbSize string
+
+	switch s := largest.(type) {
+	case *tg.PhotoSize:
+		thumbSize = s.Type
+	case *tg.PhotoSizeProgressive:
+		thumbSize = s.Type
+	default:
+		return nil
+	}
+
+	return &tg.InputPhotoFileLocation{
+		ID:            photo.ID,
+		AccessHash:    photo.AccessHash,
+		FileReference: photo.FileReference,
+		ThumbSize:     thumbSize,
+	}
+}
+
+func (r *Reader) getDocumentFileLocation(m *tg.MessageMediaDocument) tg.InputFileLocationClass {
+	doc, ok := m.Document.(*tg.Document)
+	if !ok {
+		return nil
+	}
+
+	// Check if it's an image
+	isImage := strings.HasPrefix(doc.MimeType, "image/")
+
+	if !isImage {
+		// Check attributes for ImageSize
+		for _, attr := range doc.Attributes {
+			if _, ok := attr.(*tg.DocumentAttributeImageSize); ok {
+				isImage = true
+
+				break
+			}
+		}
+	}
+
+	if !isImage {
+		return nil
+	}
+
+	// Don't download huge files as "images" (limit to 10MB)
+	if doc.Size > 10*1024*1024 {
+		return nil
+	}
+
+	return &tg.InputDocumentFileLocation{
+		ID:            doc.ID,
+		AccessHash:    doc.AccessHash,
+		FileReference: doc.FileReference,
+	}
+}
+
+// discoveryContext holds common parameters for discovery extraction
+type discoveryContext struct {
+	fromChannelID       string
+	fromChannelPeerID   int64
+	channelTitles       map[int64]string
+	channelAccessHashes map[int64]int64
+	views               int
+	forwards            int
+}
+
+// extractTelegramLinkDiscoveries extracts discoveries from telegram links with the given source type
+func (dc *discoveryContext) extractTelegramLinkDiscoveries(url, sourceType string) []db.Discovery {
+	if !strings.Contains(url, "t.me/") {
+		return nil
+	}
+
 	var discoveries []db.Discovery
 
-	// Get engagement metrics for weighting
-	views := msg.Views
-	forwards := msg.Forwards
+	links := linkextract.ExtractLinks(url)
+	for _, link := range links {
+		if link.Type != linkextract.LinkTypeTelegram {
+			continue
+		}
 
-	// 1. Extract from forwards
+		switch link.TelegramType {
+		case "channel", "post":
+			if link.Username != "" {
+				discoveries = append(discoveries, db.Discovery{
+					Username:      link.Username,
+					SourceType:    sourceType,
+					FromChannelID: dc.fromChannelID,
+					Views:         dc.views,
+					Forwards:      dc.forwards,
+				})
+			} else if link.ChannelID != 0 {
+				discoveries = append(discoveries, db.Discovery{
+					TGPeerID:      link.ChannelID,
+					SourceType:    sourceType,
+					FromChannelID: dc.fromChannelID,
+					Views:         dc.views,
+					Forwards:      dc.forwards,
+				})
+			}
+		case "invite":
+			discoveries = append(discoveries, db.Discovery{
+				InviteLink:    link.URL,
+				SourceType:    sourceType,
+				FromChannelID: dc.fromChannelID,
+				Views:         dc.views,
+				Forwards:      dc.forwards,
+			})
+		}
+	}
+
+	return discoveries
+}
+
+// extractMentionDiscoveries extracts discoveries from @mentions in text
+func (dc *discoveryContext) extractMentionDiscoveries(text, sourceType string) []db.Discovery {
+	mentions := linkextract.ExtractMentions(text)
+	if len(mentions) == 0 {
+		return nil
+	}
+
+	discoveries := make([]db.Discovery, 0, len(mentions))
+	for _, username := range mentions {
+		discoveries = append(discoveries, db.Discovery{
+			Username:      username,
+			SourceType:    sourceType,
+			FromChannelID: dc.fromChannelID,
+			Views:         dc.views,
+			Forwards:      dc.forwards,
+		})
+	}
+
+	return discoveries
+}
+
+// newChannelDiscovery creates a discovery for a channel peer ID
+func (dc *discoveryContext) newChannelDiscovery(peerID int64, sourceType string) db.Discovery {
+	return db.Discovery{
+		TGPeerID:      peerID,
+		Title:         dc.channelTitles[peerID],
+		SourceType:    sourceType,
+		FromChannelID: dc.fromChannelID,
+		Views:         dc.views,
+		Forwards:      dc.forwards,
+		AccessHash:    dc.channelAccessHashes[peerID],
+	}
+}
+
+// extractDiscoveries extracts channel discoveries from a message
+func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromChannelPeerID int64, channelTitles map[int64]string, channelAccessHashes map[int64]int64) []db.Discovery {
+	dc := &discoveryContext{
+		fromChannelID:       fromChannelID,
+		fromChannelPeerID:   fromChannelPeerID,
+		channelTitles:       channelTitles,
+		channelAccessHashes: channelAccessHashes,
+		views:               msg.Views,
+		forwards:            msg.Forwards,
+	}
+
+	// Preallocate with reasonable initial capacity for typical message
+	discoveries := make([]db.Discovery, 0, 8)
+
+	// 1-2. Extract from forwards and replies
+	discoveries = append(discoveries, r.extractFromForwards(msg, fromChannelID, channelTitles, channelAccessHashes, dc.views, dc.forwards)...)
+	discoveries = append(discoveries, r.extractFromReplies(msg, fromChannelID, fromChannelPeerID, channelTitles, channelAccessHashes, dc.views, dc.forwards)...)
+
+	// 3. Extract from t.me links in message text
+	discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(msg.Message, "link")...)
+
+	// 4. Extract from message entities (TextURL - hidden links)
+	discoveries = append(discoveries, r.extractFromEntities(msg.Entities, dc)...)
+
+	// 5. Extract @mentions
+	discoveries = append(discoveries, dc.extractMentionDiscoveries(msg.Message, "mention")...)
+
+	// 6. Extract from inline keyboard buttons
+	discoveries = append(discoveries, r.extractFromKeyboard(msg.ReplyMarkup, dc)...)
+
+	// 7-16. Extract from media
+	discoveries = append(discoveries, r.extractFromMedia(msg, dc)...)
+
+	return discoveries
+}
+
+func (r *Reader) extractFromEntities(entities []tg.MessageEntityClass, dc *discoveryContext) []db.Discovery {
+	var discoveries []db.Discovery
+
+	for _, entity := range entities {
+		switch e := entity.(type) {
+		case *tg.MessageEntityTextURL:
+			discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(e.URL, "entity_text_url")...)
+		case *tg.MessageEntityMentionName:
+			discoveries = append(discoveries, db.Discovery{
+				TGPeerID:      e.UserID,
+				SourceType:    "entity_mention_name",
+				FromChannelID: dc.fromChannelID,
+				Views:         dc.views,
+				Forwards:      dc.forwards,
+			})
+		case *tg.MessageEntityCustomEmoji:
+			discoveries = append(discoveries, db.Discovery{
+				TGPeerID:      e.DocumentID,
+				SourceType:    "custom_emoji",
+				FromChannelID: dc.fromChannelID,
+				Views:         dc.views,
+				Forwards:      dc.forwards,
+			})
+		}
+	}
+
+	return discoveries
+}
+
+func (r *Reader) extractFromKeyboard(markup tg.ReplyMarkupClass, dc *discoveryContext) []db.Discovery {
+	if markup == nil {
+		return nil
+	}
+
+	inlineMarkup, ok := markup.(*tg.ReplyInlineMarkup)
+	if !ok {
+		return nil
+	}
+
+	var discoveries []db.Discovery
+
+	for _, row := range inlineMarkup.Rows {
+		for _, btn := range row.Buttons {
+			switch b := btn.(type) {
+			case *tg.KeyboardButtonURL:
+				discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(b.URL, "keyboard_url")...)
+			case *tg.KeyboardButtonWebView:
+				discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(b.URL, "keyboard_url")...)
+			case *tg.KeyboardButtonUserProfile:
+				discoveries = append(discoveries, db.Discovery{
+					TGPeerID:      b.UserID,
+					SourceType:    "user_profile_btn",
+					FromChannelID: dc.fromChannelID,
+					Views:         dc.views,
+					Forwards:      dc.forwards,
+				})
+			case *tg.KeyboardButtonSwitchInline:
+				discoveries = append(discoveries, dc.extractMentionDiscoveries(b.Query, "switch_inline")...)
+			}
+		}
+	}
+
+	return discoveries
+}
+
+func (r *Reader) extractFromMedia(msg *tg.Message, dc *discoveryContext) []db.Discovery {
+	var discoveries []db.Discovery
+
+	if msg.Media == nil {
+		// Extract from reactions even without media
+		discoveries = append(discoveries, r.extractFromReactions(msg, dc)...)
+
+		// Extract from via bot
+		if msg.ViaBotID != 0 {
+			discoveries = append(discoveries, db.Discovery{
+				TGPeerID:      msg.ViaBotID,
+				SourceType:    "via_bot",
+				FromChannelID: dc.fromChannelID,
+				Views:         dc.views,
+				Forwards:      dc.forwards,
+			})
+		}
+
+		return discoveries
+	}
+
+	switch m := msg.Media.(type) {
+	case *tg.MessageMediaWebPage:
+		discoveries = append(discoveries, r.extractFromWebPage(m, dc)...)
+	case *tg.MessageMediaGiveaway:
+		for _, channelID := range m.Channels {
+			discoveries = append(discoveries, dc.newChannelDiscovery(channelID, "giveaway"))
+		}
+	case *tg.MessageMediaStory:
+		if peer, ok := m.Peer.(*tg.PeerChannel); ok && peer.ChannelID != dc.fromChannelPeerID {
+			discoveries = append(discoveries, dc.newChannelDiscovery(peer.ChannelID, "story"))
+		}
+	case *tg.MessageMediaPoll:
+		discoveries = append(discoveries, r.extractFromPoll(m, dc)...)
+	case *tg.MessageMediaContact:
+		if m.UserID != 0 {
+			discoveries = append(discoveries, db.Discovery{
+				TGPeerID:      m.UserID,
+				SourceType:    "contact",
+				FromChannelID: dc.fromChannelID,
+				Views:         dc.views,
+				Forwards:      dc.forwards,
+			})
+		}
+	case *tg.MessageMediaGame:
+		discoveries = append(discoveries, dc.extractMentionDiscoveries(m.Game.ShortName, "game")...)
+		discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(m.Game.Description, "game")...)
+		discoveries = append(discoveries, dc.extractMentionDiscoveries(m.Game.Description, "game")...)
+	case *tg.MessageMediaInvoice:
+		discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(m.Description, "invoice")...)
+		discoveries = append(discoveries, dc.extractMentionDiscoveries(m.Description, "invoice")...)
+	}
+
+	// Extract from reactions
+	discoveries = append(discoveries, r.extractFromReactions(msg, dc)...)
+
+	// Extract from via bot
+	if msg.ViaBotID != 0 {
+		discoveries = append(discoveries, db.Discovery{
+			TGPeerID:      msg.ViaBotID,
+			SourceType:    "via_bot",
+			FromChannelID: dc.fromChannelID,
+			Views:         dc.views,
+			Forwards:      dc.forwards,
+		})
+	}
+
+	return discoveries
+}
+
+func (r *Reader) extractFromWebPage(media *tg.MessageMediaWebPage, dc *discoveryContext) []db.Discovery {
+	webpage, ok := media.Webpage.(*tg.WebPage)
+	if !ok {
+		return nil
+	}
+
+	// Preallocate with reasonable initial capacity for typical webpage
+	discoveries := make([]db.Discovery, 0, 4)
+
+	discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(webpage.URL, "webpage_url")...)
+	discoveries = append(discoveries, dc.extractMentionDiscoveries(webpage.Author, "webpage_author")...)
+	discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(webpage.EmbedURL, "embed_url")...)
+	discoveries = append(discoveries, dc.extractTelegramLinkDiscoveries(webpage.SiteName, "webpage_site")...)
+	discoveries = append(discoveries, dc.extractMentionDiscoveries(webpage.SiteName, "webpage_site")...)
+
+	return discoveries
+}
+
+func (r *Reader) extractFromPoll(media *tg.MessageMediaPoll, dc *discoveryContext) []db.Discovery {
+	if media.Results.RecentVoters == nil {
+		return nil
+	}
+
+	var discoveries []db.Discovery
+
+	for _, voter := range media.Results.RecentVoters {
+		if peer, ok := voter.(*tg.PeerChannel); ok && peer.ChannelID != dc.fromChannelPeerID {
+			discoveries = append(discoveries, dc.newChannelDiscovery(peer.ChannelID, "poll_voter"))
+		}
+	}
+
+	return discoveries
+}
+
+func (r *Reader) extractFromReactions(msg *tg.Message, dc *discoveryContext) []db.Discovery {
+	reactions, ok := msg.GetReactions()
+	if !ok {
+		return nil
+	}
+
+	var discoveries []db.Discovery
+
+	for _, reaction := range reactions.RecentReactions {
+		if peer, ok := reaction.PeerID.(*tg.PeerChannel); ok && peer.ChannelID != dc.fromChannelPeerID {
+			discoveries = append(discoveries, dc.newChannelDiscovery(peer.ChannelID, "reaction"))
+		}
+	}
+
+	return discoveries
+}
+
+func (r *Reader) extractFromForwards(msg *tg.Message, fromChannelID string, channelTitles map[int64]string, channelAccessHashes map[int64]int64, views, forwards int) []db.Discovery {
+	var discoveries []db.Discovery
+
 	if fwd, ok := msg.GetFwdFrom(); ok {
 		if fwd.FromID != nil {
 			switch from := fwd.FromID.(type) {
 			case *tg.PeerChannel:
-				// Try to get title from forward header, then from API response chats
 				title := fwd.FromName
 				if title == "" {
 					title = channelTitles[from.ChannelID]
@@ -958,7 +1374,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 				})
 			}
 		}
-		// 1b. Extract from SavedFromPeer (messages forwarded from saved messages)
+
 		if fwd.SavedFromPeer != nil {
 			switch savedPeer := fwd.SavedFromPeer.(type) {
 			case *tg.PeerChannel:
@@ -975,13 +1391,17 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 		}
 	}
 
-	// 2. Extract from reply-to chains (new strategy)
+	return discoveries
+}
+
+func (r *Reader) extractFromReplies(msg *tg.Message, fromChannelID string, fromChannelPeerID int64, channelTitles map[int64]string, channelAccessHashes map[int64]int64, views, forwards int) []db.Discovery {
+	var discoveries []db.Discovery
+
 	if replyTo, ok := msg.GetReplyTo(); ok {
 		if header, ok := replyTo.(*tg.MessageReplyHeader); ok {
 			if header.ReplyToPeerID != nil {
 				switch peer := header.ReplyToPeerID.(type) {
 				case *tg.PeerChannel:
-					// Only discover if it's a different channel
 					if peer.ChannelID != fromChannelPeerID {
 						discoveries = append(discoveries, db.Discovery{
 							TGPeerID:      peer.ChannelID,
@@ -998,650 +1418,89 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 		}
 	}
 
-	// 3. Extract from t.me links
-	links := linkextract.ExtractLinks(msg.Message)
+	return discoveries
+}
 
-	for _, link := range links {
-		if link.Type != linkextract.LinkTypeTelegram {
-			continue
-		}
-
-		switch link.TelegramType {
-		case "channel", "post":
-			if link.Username != "" {
-				discoveries = append(discoveries, db.Discovery{
-					Username:      link.Username,
-					SourceType:    "link",
-					FromChannelID: fromChannelID,
-					Views:         views,
-					Forwards:      forwards,
-				})
-			} else if link.ChannelID != 0 {
-				discoveries = append(discoveries, db.Discovery{
-					TGPeerID:      link.ChannelID,
-					SourceType:    "link",
-					FromChannelID: fromChannelID,
-					Views:         views,
-					Forwards:      forwards,
-				})
-			}
-		case "invite":
-			discoveries = append(discoveries, db.Discovery{
-				InviteLink:    link.URL,
-				SourceType:    "link",
-				FromChannelID: fromChannelID,
-				Views:         views,
-				Forwards:      forwards,
-			})
-		}
+// extractDiscoveriesFromService extracts channel discoveries from service messages
+func extractServiceMentions(title, sourceType, fromChannelID string) []db.Discovery {
+	if title == "" {
+		return nil
 	}
 
-	// 4. Extract from message entities (TextURL - hidden links)
-	for _, entity := range msg.Entities {
-		if textURL, ok := entity.(*tg.MessageEntityTextURL); ok {
-			if strings.Contains(textURL.URL, "t.me/") {
-				// Parse the hidden t.me link
-				hiddenLinks := linkextract.ExtractLinks(textURL.URL)
-				for _, link := range hiddenLinks {
-					if link.Type != linkextract.LinkTypeTelegram {
-						continue
-					}
+	var discoveries []db.Discovery
 
-					switch link.TelegramType {
-					case "channel", "post":
-						if link.Username != "" {
-							discoveries = append(discoveries, db.Discovery{
-								Username:      link.Username,
-								SourceType:    "entity_text_url",
-								FromChannelID: fromChannelID,
-								Views:         views,
-								Forwards:      forwards,
-							})
-						} else if link.ChannelID != 0 {
-							discoveries = append(discoveries, db.Discovery{
-								TGPeerID:      link.ChannelID,
-								SourceType:    "entity_text_url",
-								FromChannelID: fromChannelID,
-								Views:         views,
-								Forwards:      forwards,
-							})
-						}
-					case "invite":
-						discoveries = append(discoveries, db.Discovery{
-							InviteLink:    link.URL,
-							SourceType:    "entity_text_url",
-							FromChannelID: fromChannelID,
-							Views:         views,
-							Forwards:      forwards,
-						})
-					}
-				}
-			}
-		}
-	}
-
-	// 5. Extract @mentions
-	mentions := linkextract.ExtractMentions(msg.Message)
-
-	for _, username := range mentions {
+	for _, mention := range linkextract.ExtractMentions(title) {
 		discoveries = append(discoveries, db.Discovery{
-			Username:      username,
-			SourceType:    "mention",
+			Username:      mention,
+			SourceType:    sourceType,
 			FromChannelID: fromChannelID,
-			Views:         views,
-			Forwards:      forwards,
 		})
-	}
-
-	// 6. Extract from inline keyboard buttons
-	if msg.ReplyMarkup != nil {
-		if inlineMarkup, ok := msg.ReplyMarkup.(*tg.ReplyInlineMarkup); ok {
-			for _, row := range inlineMarkup.Rows {
-				for _, btn := range row.Buttons {
-					switch b := btn.(type) {
-					case *tg.KeyboardButtonURL:
-						if strings.Contains(b.URL, "t.me/") {
-							btnLinks := linkextract.ExtractLinks(b.URL)
-							for _, link := range btnLinks {
-								if link.Type != linkextract.LinkTypeTelegram {
-									continue
-								}
-
-								switch link.TelegramType {
-								case "channel", "post":
-									if link.Username != "" {
-										discoveries = append(discoveries, db.Discovery{
-											Username:      link.Username,
-											SourceType:    "keyboard_url",
-											FromChannelID: fromChannelID,
-											Views:         views,
-											Forwards:      forwards,
-										})
-									} else if link.ChannelID != 0 {
-										discoveries = append(discoveries, db.Discovery{
-											TGPeerID:      link.ChannelID,
-											SourceType:    "keyboard_url",
-											FromChannelID: fromChannelID,
-											Views:         views,
-											Forwards:      forwards,
-										})
-									}
-								case "invite":
-									discoveries = append(discoveries, db.Discovery{
-										InviteLink:    link.URL,
-										SourceType:    "keyboard_url",
-										FromChannelID: fromChannelID,
-										Views:         views,
-										Forwards:      forwards,
-									})
-								}
-							}
-						}
-					case *tg.KeyboardButtonWebView:
-						if strings.Contains(b.URL, "t.me/") {
-							btnLinks := linkextract.ExtractLinks(b.URL)
-							for _, link := range btnLinks {
-								if link.Type != linkextract.LinkTypeTelegram {
-									continue
-								}
-
-								switch link.TelegramType {
-								case "channel", "post":
-									if link.Username != "" {
-										discoveries = append(discoveries, db.Discovery{
-											Username:      link.Username,
-											SourceType:    "keyboard_url",
-											FromChannelID: fromChannelID,
-											Views:         views,
-											Forwards:      forwards,
-										})
-									}
-								case "invite":
-									discoveries = append(discoveries, db.Discovery{
-										InviteLink:    link.URL,
-										SourceType:    "keyboard_url",
-										FromChannelID: fromChannelID,
-										Views:         views,
-										Forwards:      forwards,
-									})
-								}
-							}
-						}
-					case *tg.KeyboardButtonUserProfile:
-						// User profile buttons reference a user ID (could be channel owner)
-						discoveries = append(discoveries, db.Discovery{
-							TGPeerID:      b.UserID,
-							SourceType:    "user_profile_btn",
-							FromChannelID: fromChannelID,
-							Views:         views,
-							Forwards:      forwards,
-						})
-					case *tg.KeyboardButtonSwitchInline:
-						// Switch inline buttons might contain @mentions in query text
-						if b.Query != "" {
-							queryMentions := linkextract.ExtractMentions(b.Query)
-							for _, mention := range queryMentions {
-								discoveries = append(discoveries, db.Discovery{
-									Username:      mention,
-									SourceType:    "switch_inline",
-									FromChannelID: fromChannelID,
-									Views:         views,
-									Forwards:      forwards,
-								})
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// 7. Extract from web page media
-	if msg.Media != nil {
-		if webPageMedia, ok := msg.Media.(*tg.MessageMediaWebPage); ok {
-			if webpage, ok := webPageMedia.Webpage.(*tg.WebPage); ok {
-				// 7a. Extract from webpage URL
-				if strings.Contains(webpage.URL, "t.me/") {
-					wpLinks := linkextract.ExtractLinks(webpage.URL)
-					for _, link := range wpLinks {
-						if link.Type != linkextract.LinkTypeTelegram {
-							continue
-						}
-
-						switch link.TelegramType {
-						case "channel", "post":
-							if link.Username != "" {
-								discoveries = append(discoveries, db.Discovery{
-									Username:      link.Username,
-									SourceType:    "webpage_url",
-									FromChannelID: fromChannelID,
-									Views:         views,
-									Forwards:      forwards,
-								})
-							} else if link.ChannelID != 0 {
-								discoveries = append(discoveries, db.Discovery{
-									TGPeerID:      link.ChannelID,
-									SourceType:    "webpage_url",
-									FromChannelID: fromChannelID,
-									Views:         views,
-									Forwards:      forwards,
-								})
-							}
-						case "invite":
-							discoveries = append(discoveries, db.Discovery{
-								InviteLink:    link.URL,
-								SourceType:    "webpage_url",
-								FromChannelID: fromChannelID,
-								Views:         views,
-								Forwards:      forwards,
-							})
-						}
-					}
-				}
-				// 7b. Extract from webpage author (might contain @username)
-				if webpage.Author != "" {
-					authorMentions := linkextract.ExtractMentions(webpage.Author)
-					for _, mention := range authorMentions {
-						discoveries = append(discoveries, db.Discovery{
-							Username:      mention,
-							SourceType:    "webpage_author",
-							FromChannelID: fromChannelID,
-							Views:         views,
-							Forwards:      forwards,
-						})
-					}
-				}
-				// 7c. Extract from embed URL (embedded content like YouTube, etc.)
-				if webpage.EmbedURL != "" && strings.Contains(webpage.EmbedURL, "t.me/") {
-					embedLinks := linkextract.ExtractLinks(webpage.EmbedURL)
-					for _, link := range embedLinks {
-						if link.Type != linkextract.LinkTypeTelegram {
-							continue
-						}
-
-						switch link.TelegramType {
-						case "channel", "post":
-							if link.Username != "" {
-								discoveries = append(discoveries, db.Discovery{
-									Username:      link.Username,
-									SourceType:    "embed_url",
-									FromChannelID: fromChannelID,
-									Views:         views,
-									Forwards:      forwards,
-								})
-							}
-						case "invite":
-							discoveries = append(discoveries, db.Discovery{
-								InviteLink:    link.URL,
-								SourceType:    "embed_url",
-								FromChannelID: fromChannelID,
-								Views:         views,
-								Forwards:      forwards,
-							})
-						}
-					}
-				}
-				// 7d. Extract t.me links from webpage site name and description
-				if webpage.SiteName != "" {
-					siteLinks := linkextract.ExtractLinks(webpage.SiteName)
-					for _, link := range siteLinks {
-						if link.Type == linkextract.LinkTypeTelegram && link.Username != "" {
-							discoveries = append(discoveries, db.Discovery{
-								Username:      link.Username,
-								SourceType:    "webpage_site",
-								FromChannelID: fromChannelID,
-								Views:         views,
-								Forwards:      forwards,
-							})
-						}
-					}
-
-					siteMentions := linkextract.ExtractMentions(webpage.SiteName)
-					for _, mention := range siteMentions {
-						discoveries = append(discoveries, db.Discovery{
-							Username:      mention,
-							SourceType:    "webpage_site",
-							FromChannelID: fromChannelID,
-							Views:         views,
-							Forwards:      forwards,
-						})
-					}
-				}
-			}
-		}
-	}
-
-	// 8. Extract from giveaway channels
-	if msg.Media != nil {
-		if giveaway, ok := msg.Media.(*tg.MessageMediaGiveaway); ok {
-			for _, channelID := range giveaway.Channels {
-				discoveries = append(discoveries, db.Discovery{
-					TGPeerID:      channelID,
-					Title:         channelTitles[channelID],
-					SourceType:    "giveaway",
-					FromChannelID: fromChannelID,
-					Views:         views,
-					Forwards:      forwards,
-					AccessHash:    channelAccessHashes[channelID],
-				})
-			}
-		}
-	}
-
-	// 9. Extract from story peer
-	if msg.Media != nil {
-		if storyMedia, ok := msg.Media.(*tg.MessageMediaStory); ok {
-			if peer, ok := storyMedia.Peer.(*tg.PeerChannel); ok {
-				if peer.ChannelID != fromChannelPeerID {
-					discoveries = append(discoveries, db.Discovery{
-						TGPeerID:      peer.ChannelID,
-						Title:         channelTitles[peer.ChannelID],
-						SourceType:    "story",
-						FromChannelID: fromChannelID,
-						Views:         views,
-						Forwards:      forwards,
-						AccessHash:    channelAccessHashes[peer.ChannelID],
-					})
-				}
-			}
-		}
-	}
-
-	// 10. Extract from poll voters
-	if msg.Media != nil {
-		if pollMedia, ok := msg.Media.(*tg.MessageMediaPoll); ok {
-			if pollMedia.Results.RecentVoters != nil {
-				for _, voter := range pollMedia.Results.RecentVoters {
-					if peer, ok := voter.(*tg.PeerChannel); ok {
-						if peer.ChannelID != fromChannelPeerID {
-							discoveries = append(discoveries, db.Discovery{
-								TGPeerID:      peer.ChannelID,
-								Title:         channelTitles[peer.ChannelID],
-								SourceType:    "poll_voter",
-								FromChannelID: fromChannelID,
-								Views:         views,
-								Forwards:      forwards,
-								AccessHash:    channelAccessHashes[peer.ChannelID],
-							})
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// 11. Extract from reactions
-	if reactions, ok := msg.GetReactions(); ok {
-		for _, reaction := range reactions.RecentReactions {
-			if peer, ok := reaction.PeerID.(*tg.PeerChannel); ok {
-				if peer.ChannelID != fromChannelPeerID {
-					discoveries = append(discoveries, db.Discovery{
-						TGPeerID:      peer.ChannelID,
-						Title:         channelTitles[peer.ChannelID],
-						SourceType:    "reaction",
-						FromChannelID: fromChannelID,
-						Views:         views,
-						Forwards:      forwards,
-						AccessHash:    channelAccessHashes[peer.ChannelID],
-					})
-				}
-			}
-		}
-	}
-
-	// 12. Extract from MessageEntityMentionName (direct user ID references)
-	for _, entity := range msg.Entities {
-		switch e := entity.(type) {
-		case *tg.MessageEntityMentionName:
-			// Store as TGPeerID - these are user IDs that could be channel admins
-			discoveries = append(discoveries, db.Discovery{
-				TGPeerID:      e.UserID,
-				SourceType:    "entity_mention_name",
-				FromChannelID: fromChannelID,
-				Views:         views,
-				Forwards:      forwards,
-			})
-		case *tg.MessageEntityCustomEmoji:
-			// Custom emoji document IDs can be traced to sticker pack channels
-			// Store the document ID as a discovery hint (will need resolution)
-			discoveries = append(discoveries, db.Discovery{
-				TGPeerID:      e.DocumentID,
-				SourceType:    "custom_emoji",
-				FromChannelID: fromChannelID,
-				Views:         views,
-				Forwards:      forwards,
-			})
-		}
-	}
-
-	// 13. Extract from contact media
-	if msg.Media != nil {
-		if contact, ok := msg.Media.(*tg.MessageMediaContact); ok {
-			if contact.UserID != 0 {
-				discoveries = append(discoveries, db.Discovery{
-					TGPeerID:      contact.UserID,
-					SourceType:    "contact",
-					FromChannelID: fromChannelID,
-					Views:         views,
-					Forwards:      forwards,
-				})
-			}
-		}
-	}
-
-	// 14. Extract from via bot
-	if msg.ViaBotID != 0 {
-		discoveries = append(discoveries, db.Discovery{
-			TGPeerID:      msg.ViaBotID,
-			SourceType:    "via_bot",
-			FromChannelID: fromChannelID,
-			Views:         views,
-			Forwards:      forwards,
-		})
-	}
-
-	// 15. Extract from game media (games can reference bot developers)
-	if msg.Media != nil {
-		if game, ok := msg.Media.(*tg.MessageMediaGame); ok {
-			// Game short name might contain channel references
-			if game.Game.ShortName != "" {
-				gameMentions := linkextract.ExtractMentions(game.Game.ShortName)
-				for _, mention := range gameMentions {
-					discoveries = append(discoveries, db.Discovery{
-						Username:      mention,
-						SourceType:    "game",
-						FromChannelID: fromChannelID,
-						Views:         views,
-						Forwards:      forwards,
-					})
-				}
-			}
-			// Game description might contain links/mentions
-			if game.Game.Description != "" {
-				gameLinks := linkextract.ExtractLinks(game.Game.Description)
-				for _, link := range gameLinks {
-					if link.Type == linkextract.LinkTypeTelegram && link.Username != "" {
-						discoveries = append(discoveries, db.Discovery{
-							Username:      link.Username,
-							SourceType:    "game",
-							FromChannelID: fromChannelID,
-							Views:         views,
-							Forwards:      forwards,
-						})
-					}
-				}
-
-				gameMentions := linkextract.ExtractMentions(game.Game.Description)
-				for _, mention := range gameMentions {
-					discoveries = append(discoveries, db.Discovery{
-						Username:      mention,
-						SourceType:    "game",
-						FromChannelID: fromChannelID,
-						Views:         views,
-						Forwards:      forwards,
-					})
-				}
-			}
-		}
-	}
-
-	// 16. Extract from invoice media (payments can reference merchants)
-	if msg.Media != nil {
-		if invoice, ok := msg.Media.(*tg.MessageMediaInvoice); ok {
-			// Invoice description might contain channel references
-			if invoice.Description != "" {
-				invoiceLinks := linkextract.ExtractLinks(invoice.Description)
-				for _, link := range invoiceLinks {
-					if link.Type == linkextract.LinkTypeTelegram && link.Username != "" {
-						discoveries = append(discoveries, db.Discovery{
-							Username:      link.Username,
-							SourceType:    "invoice",
-							FromChannelID: fromChannelID,
-							Views:         views,
-							Forwards:      forwards,
-						})
-					}
-				}
-
-				invoiceMentions := linkextract.ExtractMentions(invoice.Description)
-				for _, mention := range invoiceMentions {
-					discoveries = append(discoveries, db.Discovery{
-						Username:      mention,
-						SourceType:    "invoice",
-						FromChannelID: fromChannelID,
-						Views:         views,
-						Forwards:      forwards,
-					})
-				}
-			}
-		}
 	}
 
 	return discoveries
 }
 
-// extractDiscoveriesFromService extracts channel discoveries from service messages
+func extractServiceUserIDs(userIDs []int64, sourceType, fromChannelID string) []db.Discovery {
+	if len(userIDs) == 0 {
+		return nil
+	}
+
+	discoveries := make([]db.Discovery, 0, len(userIDs))
+	for _, userID := range userIDs {
+		discoveries = append(discoveries, db.Discovery{
+			TGPeerID:      userID,
+			SourceType:    sourceType,
+			FromChannelID: fromChannelID,
+		})
+	}
+
+	return discoveries
+}
+
 func (r *Reader) extractDiscoveriesFromService(msg *tg.MessageService, fromChannelID string) []db.Discovery {
 	var discoveries []db.Discovery
 
 	switch action := msg.Action.(type) {
 	case *tg.MessageActionChatMigrateTo:
-		discoveries = append(discoveries, db.Discovery{
-			TGPeerID:      action.ChannelID,
-			SourceType:    "migration",
-			FromChannelID: fromChannelID,
-		})
+		discoveries = append(discoveries, db.Discovery{TGPeerID: action.ChannelID, SourceType: "migration", FromChannelID: fromChannelID})
 	case *tg.MessageActionChannelMigrateFrom:
-		discoveries = append(discoveries, db.Discovery{
-			TGPeerID:      action.ChatID,
-			SourceType:    "migration",
-			FromChannelID: fromChannelID,
-		})
+		discoveries = append(discoveries, db.Discovery{TGPeerID: action.ChatID, SourceType: "migration", FromChannelID: fromChannelID})
 	case *tg.MessageActionChatAddUser:
-		// Users added to chat - could be channel admins
-		for _, userID := range action.Users {
-			discoveries = append(discoveries, db.Discovery{
-				TGPeerID:      userID,
-				SourceType:    "chat_add_user",
-				FromChannelID: fromChannelID,
-			})
-		}
+		discoveries = append(discoveries, extractServiceUserIDs(action.Users, "chat_add_user", fromChannelID)...)
 	case *tg.MessageActionGiftCode:
-		// Gift code might reference a boost peer (channel)
 		if action.BoostPeer != nil {
 			if peer, ok := action.BoostPeer.(*tg.PeerChannel); ok {
-				discoveries = append(discoveries, db.Discovery{
-					TGPeerID:      peer.ChannelID,
-					SourceType:    "gift_code",
-					FromChannelID: fromChannelID,
-				})
+				discoveries = append(discoveries, db.Discovery{TGPeerID: peer.ChannelID, SourceType: "gift_code", FromChannelID: fromChannelID})
 			}
 		}
 	case *tg.MessageActionRequestedPeer:
-		// Requested peer action contains selected peer IDs
-		for _, peer := range action.Peers {
-			switch p := peer.(type) {
-			case *tg.PeerChannel:
-				discoveries = append(discoveries, db.Discovery{
-					TGPeerID:      p.ChannelID,
-					SourceType:    "requested_peer",
-					FromChannelID: fromChannelID,
-				})
-			case *tg.PeerUser:
-				discoveries = append(discoveries, db.Discovery{
-					TGPeerID:      p.UserID,
-					SourceType:    "requested_peer",
-					FromChannelID: fromChannelID,
-				})
-			}
-		}
-	case *tg.MessageActionGiveawayLaunch:
-		// Giveaway launch - no direct channel refs in action, channels are in the media
-	case *tg.MessageActionGiveawayResults:
-		// Giveaway results only contain counts (WinnersCount, UnclaimedCount), not winner IDs
+		discoveries = append(discoveries, r.extractFromRequestedPeers(action.Peers, fromChannelID)...)
 	case *tg.MessageActionTopicCreate:
-		// Forum topic creation - parse title for mentions
-		if action.Title != "" {
-			mentions := linkextract.ExtractMentions(action.Title)
-			for _, mention := range mentions {
-				discoveries = append(discoveries, db.Discovery{
-					Username:      mention,
-					SourceType:    "topic_title",
-					FromChannelID: fromChannelID,
-				})
-			}
-		}
+		discoveries = append(discoveries, extractServiceMentions(action.Title, "topic_title", fromChannelID)...)
 	case *tg.MessageActionTopicEdit:
-		// Forum topic edit - parse new title for mentions
-		if action.Title != "" {
-			mentions := linkextract.ExtractMentions(action.Title)
-			for _, mention := range mentions {
-				discoveries = append(discoveries, db.Discovery{
-					Username:      mention,
-					SourceType:    "topic_title",
-					FromChannelID: fromChannelID,
-				})
-			}
-		}
+		discoveries = append(discoveries, extractServiceMentions(action.Title, "topic_title", fromChannelID)...)
 	case *tg.MessageActionInviteToGroupCall:
-		// Group call invitations contain user IDs
-		for _, userID := range action.Users {
-			discoveries = append(discoveries, db.Discovery{
-				TGPeerID:      userID,
-				SourceType:    "group_call_invite",
-				FromChannelID: fromChannelID,
-			})
-		}
+		discoveries = append(discoveries, extractServiceUserIDs(action.Users, "group_call_invite", fromChannelID)...)
 	case *tg.MessageActionChatJoinedByLink:
-		// User joined via invite link - the inviter ID
-		discoveries = append(discoveries, db.Discovery{
-			TGPeerID:      action.InviterID,
-			SourceType:    "invite_joiner",
-			FromChannelID: fromChannelID,
-		})
+		discoveries = append(discoveries, db.Discovery{TGPeerID: action.InviterID, SourceType: "invite_joiner", FromChannelID: fromChannelID})
 	case *tg.MessageActionChatCreate:
-		// Chat creation - parse title for mentions
-		if action.Title != "" {
-			mentions := linkextract.ExtractMentions(action.Title)
-			for _, mention := range mentions {
-				discoveries = append(discoveries, db.Discovery{
-					Username:      mention,
-					SourceType:    "chat_title",
-					FromChannelID: fromChannelID,
-				})
-			}
-		}
+		discoveries = append(discoveries, extractServiceMentions(action.Title, "chat_title", fromChannelID)...)
 	case *tg.MessageActionChannelCreate:
-		// Channel creation - parse title for mentions
-		if action.Title != "" {
-			mentions := linkextract.ExtractMentions(action.Title)
-			for _, mention := range mentions {
-				discoveries = append(discoveries, db.Discovery{
-					Username:      mention,
-					SourceType:    "channel_title",
-					FromChannelID: fromChannelID,
-				})
-			}
+		discoveries = append(discoveries, extractServiceMentions(action.Title, "channel_title", fromChannelID)...)
+	}
+
+	return discoveries
+}
+
+func (r *Reader) extractFromRequestedPeers(peers []tg.PeerClass, fromChannelID string) []db.Discovery {
+	var discoveries []db.Discovery
+
+	for _, peer := range peers {
+		switch p := peer.(type) {
+		case *tg.PeerChannel:
+			discoveries = append(discoveries, db.Discovery{TGPeerID: p.ChannelID, SourceType: "requested_peer", FromChannelID: fromChannelID})
+		case *tg.PeerUser:
+			discoveries = append(discoveries, db.Discovery{TGPeerID: p.UserID, SourceType: "requested_peer", FromChannelID: fromChannelID})
 		}
 	}
 
