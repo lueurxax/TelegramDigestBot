@@ -41,6 +41,7 @@ const (
 	CmdList          = "list"
 	CmdRemove        = "remove"
 	CmdPrompt        = "prompt"
+	CmdAnnotate      = "annotate"
 	CmdMinLength     = "min_length"
 	CmdMinLengthAlt  = "minlength"
 	CmdSkipForwards  = "skip_forwards"
@@ -134,7 +135,7 @@ func (b *Bot) Run(ctx context.Context) error {
 			return ctx.Err()
 		case update := <-updates:
 			if update.CallbackQuery != nil {
-				b.handleCallback(update.CallbackQuery)
+				b.handleCallback(ctx, update.CallbackQuery)
 				continue
 			}
 
@@ -142,18 +143,18 @@ func (b *Bot) Run(ctx context.Context) error {
 				continue
 			}
 
-			if !b.isAdmin(update.Message.From.ID) {
+			if !b.isAdmin(ctx, update.Message.From.ID) {
 				b.logger.Warn().Int64(LogFieldUserID, update.Message.From.ID).Str(LogFieldUsername, update.Message.From.UserName).Msg("Unauthorized access attempt")
 				continue
 			}
 
-			b.handleMessage(update.Message)
+			b.handleMessage(ctx, update.Message)
 		}
 	}
 }
 
-func (b *Bot) isAdmin(userID int64) bool {
-	admins := b.getAdmins()
+func (b *Bot) isAdmin(ctx context.Context, userID int64) bool {
+	admins := b.getAdmins(ctx)
 
 	for _, id := range admins {
 		if id == userID {
@@ -164,14 +165,12 @@ func (b *Bot) isAdmin(userID int64) bool {
 	return false
 }
 
-func (b *Bot) getAdmins() []int64 {
+func (b *Bot) getAdmins(ctx context.Context) []int64 {
 	admins := make([]int64, 0, len(b.cfg.AdminIDs))
 	admins = append(admins, b.cfg.AdminIDs...)
 
 	// Check database settings for additional admins
 	var extraAdmins []int64
-
-	ctx := context.Background()
 
 	if err := b.database.GetSetting(ctx, "admin_ids", &extraAdmins); err == nil {
 		admins = append(admins, extraAdmins...)
@@ -180,103 +179,21 @@ func (b *Bot) getAdmins() []int64 {
 	return admins
 }
 
-func (b *Bot) handleMessage(msg *tgbotapi.Message) {
+func (b *Bot) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 	if !msg.IsCommand() {
 		return
 	}
 
 	b.logger.Info().Str("command", msg.Command()).Int64(LogFieldUserID, msg.From.ID).Msg("Handling command")
 
-	switch msg.Command() {
-	case "start", "help":
-		b.handleHelp(msg)
-	case "setup":
-		b.handleSetup(msg)
-	case CmdStatus:
-		b.handleStatus(msg)
-	case "preview":
-		b.handlePreview(msg)
-	case CmdChannel:
-		b.handleChannelNamespace(msg)
-	case "filter":
-		b.handleFilterNamespace(msg)
-	case "config":
-		b.handleConfigNamespace(msg)
-	case "ai":
-		b.handleAINamespace(msg)
-	case "system":
-		b.handleSystemNamespace(msg)
-	case CmdSettings:
-		b.handleSettings(msg)
-	case CmdHistory:
-		b.handleHistory(msg)
-	case CmdAdd:
-		b.handleAddChannel(msg)
-	case CmdList:
-		b.handleListChannels(msg)
-	case CmdRemove:
-		b.handleRemoveChannel(msg)
-	case "feedback":
-		b.handleFeedback(msg)
-	case CmdRatings:
-		b.handleRatings(msg)
-	case CmdScores:
-		b.handleScores(msg)
-	case CmdPrompt:
-		b.handlePrompt(msg)
-	case "channelcontext":
-		b.handleChannelContext(msg)
-	case "filters":
-		b.handleFilters(msg)
-	case CmdMinLength, CmdMinLengthAlt:
-		b.handleMinLength(msg)
-	case "ads_keywords", "adskeywords":
-		b.handleAdsKeywords(msg)
-	case CmdSkipForwards, CmdSkipFwdAlt:
-		b.handleToggleSetting(msg, SettingFiltersSkipForwards)
-	case CmdTarget:
-		b.handleTarget(msg)
-	case CmdWindow:
-		b.handleWindow(msg)
-	case CmdTopics:
-		b.handleTopics(msg)
-	case CmdDedup:
-		b.handleDedup(msg)
-	case CmdRelevance:
-		b.handleThreshold(msg, SettingRelevanceThreshold)
-	case CmdImportance:
-		b.handleThreshold(msg, SettingImportanceThreshold)
-	case CmdLanguage:
-		b.handleLanguage(msg)
-	case CmdTone:
-		b.handleTone(msg)
-	case CmdModel:
-		b.handleModel(msg)
-	case CmdSmartModel, CmdSmartModelAlt:
-		b.handleSmartModel(msg)
-	case CmdEditor:
-		b.handleToggleSetting(msg, SettingEditorEnabled)
-	case CmdTiered:
-		b.handleToggleSetting(msg, SettingTieredImportanceEnabled)
-	case CmdVision, "vision_routing", CmdVisionAlt:
-		b.handleToggleSetting(msg, SettingVisionRoutingEnabled)
-	case CmdConsolidated:
-		b.handleToggleSetting(msg, SettingConsolidatedClustersEnabled)
-	case "editor_details", CmdEditorDetail:
-		b.handleToggleSetting(msg, SettingEditorDetailedItems)
-	case CmdErrors:
-		b.handleErrors(msg)
-	case CmdRetry:
-		b.handleRetry(msg)
-	case "discover":
-		b.handleDiscoverNamespace(msg)
-	default:
+	registry := b.newCommandRegistry()
+	if !registry.route(ctx, b, msg) {
 		b.reply(msg, "Unknown command")
 	}
 }
 
-func (b *Bot) handleCallback(query *tgbotapi.CallbackQuery) {
-	if !b.isAdmin(query.From.ID) {
+func (b *Bot) handleCallback(ctx context.Context, query *tgbotapi.CallbackQuery) {
+	if !b.isAdmin(ctx, query.From.ID) {
 		return
 	}
 
@@ -298,7 +215,6 @@ func (b *Bot) handleCallback(query *tgbotapi.CallbackQuery) {
 			}
 
 			if rating != 0 {
-				ctx := context.Background()
 				if err := b.database.SaveRating(ctx, digestID, query.From.ID, rating, ""); err != nil {
 					b.logger.Error().Err(err).Msg("failed to save rating")
 				}
@@ -310,12 +226,12 @@ func (b *Bot) handleCallback(query *tgbotapi.CallbackQuery) {
 			}
 		}
 	} else if strings.HasPrefix(data, CallbackPrefixDiscover) {
-		b.handleDiscoverCallback(query)
+		b.handleDiscoverCallback(ctx, query)
 	}
 }
 
 func (b *Bot) SendNotification(ctx context.Context, text string) error {
-	admins := b.getAdmins()
+	admins := b.getAdmins(ctx)
 
 	for _, adminID := range admins {
 		msg := tgbotapi.NewMessage(adminID, text)

@@ -35,6 +35,8 @@ type Config struct {
 	SchedulerTickInterval         string  `env:"SCHEDULER_TICK_INTERVAL" envDefault:"10m"`
 	SchedulerCatchupWindow        string  `env:"SCHEDULER_CATCHUP_WINDOW" envDefault:"24h"`
 	RelevanceGateEnabled          bool    `env:"RELEVANCE_GATE_ENABLED" envDefault:"false"`
+	RelevanceGateMode             string  `env:"RELEVANCE_GATE_MODE" envDefault:"heuristic"`
+	RelevanceGateModel            string  `env:"RELEVANCE_GATE_MODEL"`
 	TopicDiversityCap             float32 `env:"TOPIC_DIVERSITY_CAP" envDefault:"0.30"`
 	FreshnessDecayHours           int     `env:"FRESHNESS_DECAY_HOURS" envDefault:"36"`
 	FreshnessFloor                float32 `env:"FRESHNESS_FLOOR" envDefault:"0.4"`

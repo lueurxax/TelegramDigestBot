@@ -535,6 +535,49 @@ func (c *openaiClient) GenerateClusterTopic(ctx context.Context, items []db.Item
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
 
+func (c *openaiClient) RelevanceGate(ctx context.Context, text string, model string, prompt string) (RelevanceGateResult, error) {
+	if err := c.checkCircuit(); err != nil {
+		return RelevanceGateResult{}, err
+	}
+
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return RelevanceGateResult{}, fmt.Errorf(errRateLimiter, err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model: model,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: prompt,
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: text,
+			},
+		},
+		ResponseFormat: &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		},
+	})
+	if err != nil {
+		c.recordFailure()
+
+		return RelevanceGateResult{}, fmt.Errorf(errOpenAIChatCompletion, err)
+	}
+
+	c.recordSuccess()
+
+	content := resp.Choices[0].Message.Content
+
+	var result RelevanceGateResult
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return RelevanceGateResult{}, fmt.Errorf("failed to parse relevance gate response: %w", err)
+	}
+
+	return result, nil
+}
+
 func getToneInstruction(tone string) string {
 	switch strings.ToLower(tone) {
 	case ToneProfessional:

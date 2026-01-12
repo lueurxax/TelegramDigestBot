@@ -121,6 +121,14 @@ func (m *mockLLM) ProcessBatch(ctx context.Context, messages []llm.MessageInput,
 	return res, nil
 }
 
+func (m *mockLLM) RelevanceGate(ctx context.Context, text string, model string, prompt string) (llm.RelevanceGateResult, error) {
+	return llm.RelevanceGateResult{
+		Decision:   DecisionRelevant,
+		Confidence: 0.5,
+		Reason:     "mock",
+	}, nil
+}
+
 func TestPipeline_processNextBatch(t *testing.T) {
 	cfg := &config.Config{
 		WorkerBatchSize:    10,

@@ -41,7 +41,8 @@ const (
 
 // Mock client constants
 const (
-	mockEmbeddingDimensions   = 1536
-	mockRelevanceScore        = 0.8
-	mockImportanceScore       = 0.5
+	mockEmbeddingDimensions = 1536
+	mockRelevanceScore      = 0.8
+	mockImportanceScore     = 0.5
+	mockConfidenceScore     = 0.5
 )

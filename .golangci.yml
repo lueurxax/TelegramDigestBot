@@ -195,18 +195,6 @@ linters:
           - dupl
           - mnd
           - revive
-      # Digest generation is inherently complex
-      - path: internal/digest/
-        linters:
-          - gocyclo
-          - funlen
-          - nestif
-      # Link resolution has complex URL handling
-      - path: internal/linkresolver/
-        linters:
-          - gocyclo
-          - nestif
-          - wrapcheck
       # Exclude wrapcheck for internal packages
       - path: internal/
         linters:
@@ -227,13 +215,6 @@ linters:
         linters:
           - gocritic
         text: "exitAfterDefer"
-      # Allow context.Background() in bot package
-      - path: internal/telegrambot/
-        linters:
-          - contextcheck
-          - gocyclo
-          - funlen
-          - errcheck
       # Exclude db package from errcheck for intentional ignores
       - path: internal/db/
         linters:

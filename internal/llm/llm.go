@@ -43,6 +43,13 @@ type Client interface {
 	GenerateNarrative(ctx context.Context, items []db.Item, targetLanguage string, model string, tone string) (string, error)
 	SummarizeCluster(ctx context.Context, items []db.Item, targetLanguage string, model string, tone string) (string, error)
 	GenerateClusterTopic(ctx context.Context, items []db.Item, targetLanguage string, model string) (string, error)
+	RelevanceGate(ctx context.Context, text string, model string, prompt string) (RelevanceGateResult, error)
+}
+
+type RelevanceGateResult struct {
+	Decision   string  `json:"decision"`
+	Confidence float32 `json:"confidence"`
+	Reason     string  `json:"reason"`
 }
 
 type PromptStore interface {
@@ -114,4 +121,12 @@ func (c *mockClient) GenerateClusterTopic(ctx context.Context, items []db.Item, 
 	}
 
 	return DefaultTopic, nil
+}
+
+func (c *mockClient) RelevanceGate(ctx context.Context, text string, model string, prompt string) (RelevanceGateResult, error) {
+	return RelevanceGateResult{
+		Decision:   "relevant",
+		Confidence: mockConfidenceScore,
+		Reason:     "mock",
+	}, nil
 }

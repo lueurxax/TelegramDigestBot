@@ -10,6 +10,8 @@ import (
 
 const (
 	filterModeAllowlist = "allowlist"
+	filterModeMixed     = "mixed"
+	filterModeDenylist  = "denylist"
 )
 
 type Filterer struct {
@@ -31,7 +33,7 @@ func New(filters []db.Filter, adsEnabled bool, minLength int, adsKeywords []stri
 	}
 
 	if mode == "" {
-		mode = "mixed"
+		mode = filterModeMixed
 	}
 
 	return &Filterer{
@@ -67,11 +69,11 @@ func (f *Filterer) IsFiltered(text string) bool {
 	for _, filter := range f.filters {
 		lowerPattern := f.caser.String(filter.Pattern)
 
-		if filter.Type == "deny" && (f.mode == "denylist" || f.mode == "mixed") {
+		if filter.Type == "deny" && (f.mode == filterModeDenylist || f.mode == filterModeMixed) {
 			if strings.Contains(lowerText, lowerPattern) {
 				return true
 			}
-		} else if filter.Type == "allow" && (f.mode == filterModeAllowlist || f.mode == "mixed") {
+		} else if filter.Type == "allow" && (f.mode == filterModeAllowlist || f.mode == filterModeMixed) {
 			hasAllowFilters = true
 
 			if strings.Contains(lowerText, lowerPattern) {
@@ -80,7 +82,7 @@ func (f *Filterer) IsFiltered(text string) bool {
 		}
 	}
 
-	if hasAllowFilters && !matchedAllow && (f.mode == filterModeAllowlist || f.mode == "mixed") {
+	if hasAllowFilters && !matchedAllow && (f.mode == filterModeAllowlist || f.mode == filterModeMixed) {
 		return true
 	}
 

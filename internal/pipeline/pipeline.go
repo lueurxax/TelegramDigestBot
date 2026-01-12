@@ -64,6 +64,8 @@ type pipelineSettings struct {
 	digestTone              string
 	normalizeScores         bool
 	relevanceGateEnabled    bool
+	relevanceGateMode       string
+	relevanceGateModel      string
 	channelStats            map[string]db.ChannelStats
 	linkEnrichmentEnabled   bool
 	maxLinks                int
@@ -167,6 +169,8 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 		batchSize:             p.cfg.WorkerBatchSize,
 		relevanceThreshold:    p.cfg.RelevanceThreshold,
 		relevanceGateEnabled:  p.cfg.RelevanceGateEnabled,
+		relevanceGateMode:     p.cfg.RelevanceGateMode,
+		relevanceGateModel:    p.cfg.RelevanceGateModel,
 		linkEnrichmentEnabled: p.cfg.LinkEnrichmentEnabled,
 		maxLinks:              p.cfg.MaxLinksPerMessage,
 		linkCacheTTL:          p.cfg.LinkCacheTTL,
@@ -202,6 +206,8 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 	p.getSetting(ctx, "digest_tone", &s.digestTone, logger)
 	p.getSetting(ctx, "normalize_scores", &s.normalizeScores, logger)
 	p.getSetting(ctx, "relevance_gate_enabled", &s.relevanceGateEnabled, logger)
+	p.getSetting(ctx, "relevance_gate_mode", &s.relevanceGateMode, logger)
+	p.getSetting(ctx, "relevance_gate_model", &s.relevanceGateModel, logger)
 
 	if s.normalizeScores {
 		var err error
@@ -242,7 +248,18 @@ func (p *Pipeline) markProcessed(ctx context.Context, logger zerolog.Logger, msg
 
 func (p *Pipeline) recordRelevanceGateDecision(ctx context.Context, logger zerolog.Logger, msgID string, decision gateDecision) {
 	confidence := decision.confidence
-	if err := p.database.SaveRelevanceGateLog(ctx, msgID, decision.decision, &confidence, decision.reason, gateModel, gateVersion); err != nil {
+	model := decision.model
+	version := decision.version
+
+	if model == "" {
+		model = gateModelHeuristic
+	}
+
+	if version == "" {
+		version = gateVersionHeuristic
+	}
+
+	if err := p.database.SaveRelevanceGateLog(ctx, msgID, decision.decision, &confidence, decision.reason, model, version); err != nil {
 		logger.Warn().Str(LogFieldMsgID, msgID).Err(err).Msg("failed to save relevance gate log")
 	}
 }
@@ -303,7 +320,7 @@ func (p *Pipeline) skipMessage(ctx context.Context, logger zerolog.Logger, m *db
 	}
 
 	if s.relevanceGateEnabled {
-		decision := evaluateRelevanceGate(m.Text)
+		decision := p.evaluateRelevanceGate(ctx, logger, m.Text, s)
 		p.recordRelevanceGateDecision(ctx, logger, m.ID, decision)
 
 		if decision.decision == DecisionIrrelevant {

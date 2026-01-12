@@ -16,6 +16,21 @@ Fields:
 - `relevance_score` (float): model-assigned relevance score.
 - `importance_score` (float): model-assigned importance score.
 
+## Annotation Workflow
+
+- Queue samples: <code>/annotate enqueue [hours] [limit]</code>
+- Label items: <code>/annotate next</code> then <code>/annotate label &lt;good|bad|irrelevant&gt; [comment]</code>
+- Skip if needed: <code>/annotate skip</code>
+- Check progress: <code>/annotate stats</code>
+
+## Export Labeled Set
+
+```
+go run ./cmd/labels -out docs/eval/golden.jsonl -limit 200
+```
+
+Requires `POSTGRES_DSN` (or pass `-dsn`).
+
 ## Run the Harness
 
 ```
