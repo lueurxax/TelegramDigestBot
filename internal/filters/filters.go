@@ -21,12 +21,15 @@ func New(filters []db.Filter, adsEnabled bool, minLength int, adsKeywords []stri
 	if minLength <= 0 {
 		minLength = 20
 	}
+
 	if len(adsKeywords) == 0 {
 		adsKeywords = []string{"#ad", "sponsored", "promo", "подпишись", "купи", "зарабатывай", "выигрывай"}
 	}
+
 	if mode == "" {
 		mode = "mixed"
 	}
+
 	return &Filterer{
 		filters:     filters,
 		adsEnabled:  adsEnabled,
@@ -59,6 +62,7 @@ func (f *Filterer) IsFiltered(text string) bool {
 
 	for _, filter := range f.filters {
 		lowerPattern := f.caser.String(filter.Pattern)
+
 		if filter.Type == "deny" && (f.mode == "denylist" || f.mode == "mixed") {
 			if strings.Contains(lowerText, lowerPattern) {
 				return true

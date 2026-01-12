@@ -98,7 +98,7 @@ func (r *Reader) Run(ctx context.Context) error {
 func (r *Reader) ingestMessages(ctx context.Context) error {
 	api := tg.NewClient(r.client)
 
-	for { //nolint:wsl
+	for { //nolint:wsl_v5
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -131,6 +131,7 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		}
 
 		r.logger.Info().Int("channels", len(channels)).Msg("Starting ingestion cycle")
+
 		start := time.Now()
 
 		// Calculate minimum delay between API calls based on RateLimitRPS
@@ -149,7 +150,7 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		results := make(chan fetchResult, len(channels))
 
 		// Process channels with worker pool
-		for _, ch := range channels {
+		for _, ch := range channels { //nolint:wsl_v5
 			ch := ch // capture for goroutine
 
 			// Acquire worker slot (blocks if all workers busy)
@@ -181,7 +182,7 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		// Collect results
 		cycleMsgs := 0
 
-		for i := 0; i < len(channels); i++ {
+		for i := 0; i < len(channels); i++ { //nolint:wsl_v5
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -204,6 +205,7 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 
 		// Adaptive delay: shorter if we found messages, longer if quiet
 		cycleDelay := 30 * time.Second
+
 		if cycleMsgs > 0 {
 			cycleDelay = 15 * time.Second // Poll more frequently if active
 		}
@@ -230,7 +232,7 @@ func (r *Reader) resolveUnknownDiscoveries(ctx context.Context, api *tg.Client) 
 
 	r.logger.Debug().Int("count", len(discoveries)).Msg("Resolving unknown discoveries")
 
-	for _, d := range discoveries {
+	for _, d := range discoveries { //nolint:wsl_v5
 		// Try to get channel info using InputChannel with peer ID and access hash
 		channels, err := api.ChannelsGetChannels(ctx, []tg.InputChannelClass{
 			&tg.InputChannel{
@@ -254,7 +256,7 @@ func (r *Reader) resolveUnknownDiscoveries(ctx context.Context, api *tg.Client) 
 		// Extract channel info from response
 		resolved := false
 
-		if channelsResult, ok := channels.(*tg.MessagesChats); ok {
+		if channelsResult, ok := channels.(*tg.MessagesChats); ok { //nolint:wsl_v5
 			for _, chat := range channelsResult.Chats {
 				if channel, ok := chat.(*tg.Channel); ok && channel.ID == d.TGPeerID {
 					r.logger.Info().
@@ -300,7 +302,7 @@ func (r *Reader) resolveInviteLinkDiscoveries(ctx context.Context, api *tg.Clien
 
 	r.logger.Debug().Int("count", len(discoveries)).Msg("Resolving invite link discoveries")
 
-	for _, d := range discoveries {
+	for _, d := range discoveries { //nolint:wsl_v5
 		// Extract hash from invite link (e.g., https://t.me/+abc123 -> abc123)
 		hash := strings.TrimPrefix(d.InviteLink, "https://t.me/+")
 		hash = strings.TrimPrefix(hash, "https://t.me/joinchat/")
@@ -333,7 +335,7 @@ func (r *Reader) resolveInviteLinkDiscoveries(ctx context.Context, api *tg.Clien
 		var title, username string
 		var peerID, accessHash int64
 
-		switch i := invite.(type) {
+		switch i := invite.(type) { //nolint:wsl_v5
 		case *tg.ChatInviteAlready:
 			// We're already a member
 			if channel, ok := i.Chat.(*tg.Channel); ok {
@@ -415,7 +417,7 @@ func (r *Reader) extractDiscoveriesFromChannelFull(ctx context.Context, api *tg.
 	var discoveries []db.Discovery
 
 	// Extract linked discussion group
-	if full.LinkedChatID != 0 {
+	if full.LinkedChatID != 0 { //nolint:wsl_v5
 		discoveries = append(discoveries, db.Discovery{
 			TGPeerID:      full.LinkedChatID,
 			SourceType:    "linked_chat",
@@ -426,10 +428,12 @@ func (r *Reader) extractDiscoveriesFromChannelFull(ctx context.Context, api *tg.
 	// Extract t.me links from channel description
 	if full.About != "" {
 		links := linkextract.ExtractLinks(full.About)
+
 		for _, link := range links {
 			if link.Type != linkextract.LinkTypeTelegram {
 				continue
 			}
+
 			switch link.TelegramType {
 			case "channel", "post":
 				if link.Username != "" {
@@ -456,6 +460,7 @@ func (r *Reader) extractDiscoveriesFromChannelFull(ctx context.Context, api *tg.
 
 		// Extract @mentions from channel description
 		mentions := linkextract.ExtractMentions(full.About)
+
 		for _, username := range mentions {
 			discoveries = append(discoveries, db.Discovery{
 				Username:      username,
@@ -466,7 +471,7 @@ func (r *Reader) extractDiscoveriesFromChannelFull(ctx context.Context, api *tg.
 	}
 
 	// Record all discoveries
-	for _, d := range discoveries {
+	for _, d := range discoveries { //nolint:wsl_v5
 		if err := r.database.RecordDiscovery(ctx, d); err != nil {
 			r.logger.Warn().Err(err).Str("source_type", d.SourceType).Msg("failed to record channel full discovery")
 		}
@@ -539,6 +544,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 
 	// Resolve peer - OPTIMIZATION: Skip API call if we already have valid peer info
 	var peer tg.InputPeerClass
+
 	resolvedNow := false
 
 	if ch.TGPeerID != 0 && ch.AccessHash != 0 {
@@ -582,6 +588,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 	// Update channel info in DB if it was just resolved OR if description is missing
 	if resolvedNow || (ch.Description == "" && ch.TGPeerID != 0 && ch.AccessHash != 0) {
 		description := ch.Description
+
 		if description == "" {
 			r.logger.Info().Int64("peer_id", ch.TGPeerID).Msg("Fetching missing channel description")
 			var err error
@@ -610,7 +617,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 		Limit: r.cfg.ReaderFetchLimit,
 	}
 
-	if ch.LastTGMessageID > 0 {
+	if ch.LastTGMessageID > 0 { //nolint:wsl_v5
 		// Fetch messages newer than last seen
 		req.OffsetID = int(ch.LastTGMessageID)
 		req.AddOffset = -r.cfg.ReaderFetchLimit
@@ -637,7 +644,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 	var messages []tg.MessageClass
 	var chats []tg.ChatClass
 
-	switch h := history.(type) {
+	switch h := history.(type) { //nolint:wsl_v5
 	case *tg.MessagesMessages:
 		messages = h.Messages
 		chats = h.Chats
@@ -657,7 +664,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 	channelTitles := make(map[int64]string)
 	channelAccessHashes := make(map[int64]int64)
 
-	for _, chat := range chats {
+	for _, chat := range chats { //nolint:wsl_v5
 		if channel, ok := chat.(*tg.Channel); ok {
 			channelTitles[channel.ID] = channel.Title
 			channelAccessHashes[channel.ID] = channel.AccessHash
@@ -668,6 +675,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 
 	count := 0
 	maxID := ch.LastTGMessageID
+
 	for _, m := range messages {
 		// Handle service messages for discovery (channel migrations, etc.)
 		if svcMsg, ok := m.(*tg.MessageService); ok {
@@ -698,7 +706,6 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 
 		entitiesJSON, _ := json.Marshal(msg.Entities)
 		mediaJSON, _ := json.Marshal(msg.Media)
-
 		_, isForward := msg.GetFwdFrom()
 
 		rawMsg := &db.RawMessage{
@@ -801,7 +808,7 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 func (r *Reader) downloadMedia(ctx context.Context, api *tg.Client, media tg.MessageMediaClass) ([]byte, error) {
 	var fileLocation tg.InputFileLocationClass
 
-	switch m := media.(type) {
+	switch m := media.(type) { //nolint:wsl_v5
 	case *tg.MessageMediaPhoto:
 		photo, ok := m.Photo.(*tg.Photo)
 		if !ok {
@@ -810,7 +817,9 @@ func (r *Reader) downloadMedia(ctx context.Context, api *tg.Client, media tg.Mes
 
 		// Find the largest photo size
 		var largest tg.PhotoSizeClass
+
 		maxSize := 0
+
 		for _, size := range photo.Sizes {
 			switch s := size.(type) {
 			case *tg.PhotoSize:
@@ -831,6 +840,7 @@ func (r *Reader) downloadMedia(ctx context.Context, api *tg.Client, media tg.Mes
 		}
 
 		var thumbSize string
+
 		switch s := largest.(type) {
 		case *tg.PhotoSize:
 			thumbSize = s.Type
@@ -855,6 +865,7 @@ func (r *Reader) downloadMedia(ctx context.Context, api *tg.Client, media tg.Mes
 
 		// Check if it's an image
 		isImage := strings.HasPrefix(doc.MimeType, "image/")
+
 		if !isImage {
 			// Check attributes for ImageSize
 			for _, attr := range doc.Attributes {
@@ -885,10 +896,12 @@ func (r *Reader) downloadMedia(ctx context.Context, api *tg.Client, media tg.Mes
 	}
 
 	buf := new(bytes.Buffer)
+
 	_, err := downloader.NewDownloader().Download(api, fileLocation).Stream(ctx, buf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download media: %w", err)
 	}
+
 	return buf.Bytes(), nil
 }
 
@@ -903,7 +916,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 	forwards := msg.Forwards
 
 	// 1. Extract from forwards
-	if fwd, ok := msg.GetFwdFrom(); ok {
+	if fwd, ok := msg.GetFwdFrom(); ok { //nolint:wsl_v5
 		if fwd.FromID != nil {
 			switch from := fwd.FromID.(type) {
 			case *tg.PeerChannel:
@@ -972,6 +985,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 
 	// 3. Extract from t.me links
 	links := linkextract.ExtractLinks(msg.Message)
+
 	for _, link := range links {
 		if link.Type != linkextract.LinkTypeTelegram {
 			continue
@@ -1052,6 +1066,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 
 	// 5. Extract @mentions
 	mentions := linkextract.ExtractMentions(msg.Message)
+
 	for _, username := range mentions {
 		discoveries = append(discoveries, db.Discovery{
 			Username:      username,
@@ -1486,7 +1501,7 @@ func (r *Reader) extractDiscoveries(msg *tg.Message, fromChannelID string, fromC
 func (r *Reader) extractDiscoveriesFromService(msg *tg.MessageService, fromChannelID string) []db.Discovery {
 	var discoveries []db.Discovery
 
-	switch action := msg.Action.(type) {
+	switch action := msg.Action.(type) { //nolint:wsl_v5
 	case *tg.MessageActionChatMigrateTo:
 		discoveries = append(discoveries, db.Discovery{
 			TGPeerID:      action.ChannelID,

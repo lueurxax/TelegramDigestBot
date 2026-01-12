@@ -25,6 +25,7 @@ type WebContent struct {
 
 func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent, error) {
 	u, _ := url.Parse(rawURL)
+
 	// Extract using readability (Firefox Reader Mode algorithm)
 	article, err := readability.FromReader(bytes.NewReader(htmlBytes), u)
 	if err != nil {
@@ -61,12 +62,14 @@ type MetaTags struct {
 
 func extractMetaTags(htmlBytes []byte) MetaTags {
 	var meta MetaTags
+
 	doc, err := html.Parse(bytes.NewReader(htmlBytes))
 	if err != nil {
 		return meta
 	}
 
 	var traverse func(*html.Node)
+
 	traverse = func(n *html.Node) {
 		if n.Type == html.ElementNode {
 			switch n.Data {
@@ -96,6 +99,7 @@ func extractMetaTags(htmlBytes []byte) MetaTags {
 			traverse(c)
 		}
 	}
+
 	traverse(doc)
 
 	return meta
@@ -103,6 +107,7 @@ func extractMetaTags(htmlBytes []byte) MetaTags {
 
 func getMetaAttrs(n *html.Node) (string, string) {
 	var name, content string
+
 	for _, attr := range n.Attr {
 		switch strings.ToLower(attr.Key) {
 		case "name", "property":
@@ -111,6 +116,7 @@ func getMetaAttrs(n *html.Node) (string, string) {
 			content = attr.Val
 		}
 	}
+
 	return name, content
 }
 
@@ -127,7 +133,9 @@ func truncate(s string, max int) string {
 	if utf8.RuneCountInString(s) <= max {
 		return s
 	}
+
 	runes := []rune(s)
+
 	return string(runes[:max]) + "..."
 }
 
@@ -135,10 +143,12 @@ func parseDate(s string) time.Time {
 	if s == "" {
 		return time.Time{}
 	}
+
 	t, err := dateparse.ParseAny(s)
 	if err != nil {
 		return time.Time{}
 	}
+
 	return t
 }
 

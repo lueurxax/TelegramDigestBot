@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -62,8 +63,10 @@ func (s *Server) Start(ctx context.Context) error {
 	}()
 
 	s.logger.Info().Int("port", s.port).Msg("Health check server starting")
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+
+	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("http server error: %w", err)
 	}
+
 	return nil
 }

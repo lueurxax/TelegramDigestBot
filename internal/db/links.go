@@ -36,38 +36,103 @@ type ResolvedLink struct {
 	ExpiresAt       time.Time
 }
 
+// linkCacheRow is an interface for sqlc-generated link cache result types
+type linkCacheRow interface {
+	getID() pgtype.UUID
+	getUrl() string
+	getDomain() string
+	getLinkType() string
+	getTitle() pgtype.Text
+	getContent() pgtype.Text
+	getAuthor() pgtype.Text
+	getPublishedAt() pgtype.Timestamptz
+	getDescription() pgtype.Text
+	getImageUrl() pgtype.Text
+	getWordCount() pgtype.Int4
+	getChannelUsername() pgtype.Text
+	getChannelTitle() pgtype.Text
+	getChannelID() pgtype.Int8
+	getMessageID() pgtype.Int8
+	getViews() pgtype.Int4
+	getForwards() pgtype.Int4
+	getHasMedia() pgtype.Bool
+	getMediaType() pgtype.Text
+	getStatus() string
+	getErrorMessage() pgtype.Text
+	getLanguage() pgtype.Text
+	getResolvedAt() pgtype.Timestamptz
+	getCreatedAt() pgtype.Timestamptz
+	getExpiresAt() pgtype.Timestamptz
+}
+
+func resolvedLinkFromRow(
+	id pgtype.UUID,
+	url, domain, linkType string,
+	title, content, author pgtype.Text,
+	publishedAt pgtype.Timestamptz,
+	description, imageUrl pgtype.Text,
+	wordCount pgtype.Int4,
+	channelUsername, channelTitle pgtype.Text,
+	channelID, messageID pgtype.Int8,
+	views, forwards pgtype.Int4,
+	hasMedia pgtype.Bool,
+	mediaType pgtype.Text,
+	status string,
+	errorMessage, language pgtype.Text,
+	resolvedAt, createdAt, expiresAt pgtype.Timestamptz,
+) ResolvedLink {
+	return ResolvedLink{
+		ID:              fromUUID(id),
+		URL:             url,
+		Domain:          domain,
+		LinkType:        linkType,
+		Title:           title.String,
+		Content:         content.String,
+		Author:          author.String,
+		PublishedAt:     publishedAt.Time,
+		Description:     description.String,
+		ImageURL:        imageUrl.String,
+		WordCount:       int(wordCount.Int32),
+		ChannelUsername: channelUsername.String,
+		ChannelTitle:    channelTitle.String,
+		ChannelID:       channelID.Int64,
+		MessageID:       messageID.Int64,
+		Views:           int(views.Int32),
+		Forwards:        int(forwards.Int32),
+		HasMedia:        hasMedia.Bool,
+		MediaType:       mediaType.String,
+		Status:          status,
+		ErrorMessage:    errorMessage.String,
+		Language:        language.String,
+		ResolvedAt:      resolvedAt.Time,
+		CreatedAt:       createdAt.Time,
+		ExpiresAt:       expiresAt.Time,
+	}
+}
+
 func (db *DB) GetLinkCache(ctx context.Context, url string) (*ResolvedLink, error) {
 	c, err := db.Queries.GetLinkCache(ctx, url)
 	if err != nil {
 		return nil, err
 	}
-	return &ResolvedLink{
-		ID:              fromUUID(c.ID),
-		URL:             c.Url,
-		Domain:          c.Domain,
-		LinkType:        c.LinkType,
-		Title:           c.Title.String,
-		Content:         c.Content.String,
-		Author:          c.Author.String,
-		PublishedAt:     c.PublishedAt.Time,
-		Description:     c.Description.String,
-		ImageURL:        c.ImageUrl.String,
-		WordCount:       int(c.WordCount.Int32),
-		ChannelUsername: c.ChannelUsername.String,
-		ChannelTitle:    c.ChannelTitle.String,
-		ChannelID:       c.ChannelID.Int64,
-		MessageID:       c.MessageID.Int64,
-		Views:           int(c.Views.Int32),
-		Forwards:        int(c.Forwards.Int32),
-		HasMedia:        c.HasMedia.Bool,
-		MediaType:       c.MediaType.String,
-		Status:          c.Status,
-		ErrorMessage:    c.ErrorMessage.String,
-		Language:        c.Language.String,
-		ResolvedAt:      c.ResolvedAt.Time,
-		CreatedAt:       c.CreatedAt.Time,
-		ExpiresAt:       c.ExpiresAt.Time,
-	}, nil
+
+	link := resolvedLinkFromRow(
+		c.ID, c.Url, c.Domain, c.LinkType,
+		c.Title, c.Content, c.Author,
+		c.PublishedAt,
+		c.Description, c.ImageUrl,
+		c.WordCount,
+		c.ChannelUsername, c.ChannelTitle,
+		c.ChannelID, c.MessageID,
+		c.Views, c.Forwards,
+		c.HasMedia,
+		c.MediaType,
+		c.Status,
+		c.ErrorMessage, c.Language,
+		c.ResolvedAt, c.CreatedAt, c.ExpiresAt,
+	)
+
+	return &link, nil
 }
 
 func (db *DB) SaveLinkCache(ctx context.Context, link *ResolvedLink) (string, error) {
@@ -99,6 +164,7 @@ func (db *DB) SaveLinkCache(ctx context.Context, link *ResolvedLink) (string, er
 	if err != nil {
 		return "", err
 	}
+
 	return fromUUID(id), nil
 }
 
@@ -117,34 +183,24 @@ func (db *DB) GetLinksForMessage(ctx context.Context, rawMsgID string) ([]Resolv
 	}
 
 	links := make([]ResolvedLink, len(sqlcLinks))
+
 	for i, c := range sqlcLinks {
-		links[i] = ResolvedLink{
-			ID:              fromUUID(c.ID),
-			URL:             c.Url,
-			Domain:          c.Domain,
-			LinkType:        c.LinkType,
-			Title:           c.Title.String,
-			Content:         c.Content.String,
-			Author:          c.Author.String,
-			PublishedAt:     c.PublishedAt.Time,
-			Description:     c.Description.String,
-			ImageURL:        c.ImageUrl.String,
-			WordCount:       int(c.WordCount.Int32),
-			ChannelUsername: c.ChannelUsername.String,
-			ChannelTitle:    c.ChannelTitle.String,
-			ChannelID:       c.ChannelID.Int64,
-			MessageID:       c.MessageID.Int64,
-			Views:           int(c.Views.Int32),
-			Forwards:        int(c.Forwards.Int32),
-			HasMedia:        c.HasMedia.Bool,
-			MediaType:       c.MediaType.String,
-			Status:          c.Status,
-			ErrorMessage:    c.ErrorMessage.String,
-			Language:        c.Language.String,
-			ResolvedAt:      c.ResolvedAt.Time,
-			CreatedAt:       c.CreatedAt.Time,
-			ExpiresAt:       c.ExpiresAt.Time,
-		}
+		links[i] = resolvedLinkFromRow(
+			c.ID, c.Url, c.Domain, c.LinkType,
+			c.Title, c.Content, c.Author,
+			c.PublishedAt,
+			c.Description, c.ImageUrl,
+			c.WordCount,
+			c.ChannelUsername, c.ChannelTitle,
+			c.ChannelID, c.MessageID,
+			c.Views, c.Forwards,
+			c.HasMedia,
+			c.MediaType,
+			c.Status,
+			c.ErrorMessage, c.Language,
+			c.ResolvedAt, c.CreatedAt, c.ExpiresAt,
+		)
 	}
+
 	return links, nil
 }

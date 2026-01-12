@@ -14,10 +14,12 @@ import (
 // Item boundary markers are stripped from the output before returning.
 func SplitHTML(text string, limit int) []string {
 	parts := htmlutils.SplitHTML(text, limit)
+
 	// Strip item boundary markers from each part
 	for i, part := range parts {
 		parts[i] = htmlutils.StripItemMarkers(part)
 	}
+
 	return parts
 }
 

@@ -28,32 +28,38 @@ type Resolver struct {
 func New(cfg *config.Config, database *db.DB, tgClient *telegram.Client, logger *zerolog.Logger) *Resolver {
 	// Set default RPS if not provided
 	rps := cfg.WebFetchRPS
+
 	if rps <= 0 {
 		rps = 2
 	}
 
 	timeout := cfg.WebFetchTimeout
+
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
 
 	// Set default cache TTL if not provided
 	webTTL := cfg.LinkCacheTTL
+
 	if webTTL <= 0 {
 		webTTL = 24 * time.Hour
 	}
 
 	tgTTL := cfg.TelegramLinkCacheTTL
+
 	if tgTTL <= 0 {
 		tgTTL = 1 * time.Hour
 	}
 
 	maxLinks := cfg.MaxLinksPerMessage
+
 	if maxLinks <= 0 {
 		maxLinks = 3
 	}
 
 	maxLen := cfg.MaxContentLength
+
 	if maxLen <= 0 {
 		maxLen = 5000
 	}
@@ -72,6 +78,7 @@ func New(cfg *config.Config, database *db.DB, tgClient *telegram.Client, logger 
 
 func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, webTTL, tgTTL time.Duration) ([]db.ResolvedLink, error) {
 	links := linkextract.ExtractLinks(text)
+
 	if len(links) == 0 {
 		return nil, nil
 	}
@@ -79,9 +86,11 @@ func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, 
 	if maxLinks <= 0 {
 		maxLinks = r.maxLinks
 	}
+
 	if webTTL <= 0 {
 		webTTL = r.webCacheTTL
 	}
+
 	if tgTTL <= 0 {
 		tgTTL = r.tgCacheTTL
 	}
@@ -103,6 +112,7 @@ func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, 
 
 		// Resolve based on type
 		var resolved *db.ResolvedLink
+
 		switch link.Type {
 		case linkextract.LinkTypeWeb:
 			resolved, err = r.resolveWebLink(ctx, &link, webTTL)
@@ -140,6 +150,7 @@ func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, 
 			} else {
 				resolved.ID = id
 			}
+
 			results = append(results, *resolved)
 		}
 	}

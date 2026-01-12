@@ -68,6 +68,7 @@ func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) 
 	if r.client == nil {
 		return nil, ErrClientNotInitialized
 	}
+
 	if link.TelegramType != "post" {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedTelegramLinkType, link.TelegramType)
 	}
@@ -80,6 +81,7 @@ func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) 
 
 	// Resolve channel
 	var inputChannel *tg.InputChannel
+
 	var err error
 
 	if link.Username != "" {
@@ -115,6 +117,7 @@ func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) 
 
 	// Get channel info
 	var channelTitle, channelUsername string
+
 	for _, chat := range channelMessages.Chats {
 		if ch, ok := chat.(*tg.Channel); ok {
 			channelTitle = ch.Title
@@ -135,6 +138,7 @@ func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) 
 
 	if msg.Media != nil {
 		result.HasMedia = true
+
 		switch msg.Media.(type) {
 		case *tg.MessageMediaPhoto:
 			result.MediaType = "photo"

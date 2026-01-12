@@ -28,6 +28,7 @@ func TestIsNumericWeight(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			got := isNumericWeight(tt.input)
+
 			if got != tt.expected {
 				t.Errorf("isNumericWeight(%q) = %v, want %v", tt.input, got, tt.expected)
 			}
@@ -83,6 +84,7 @@ func TestFormatChannelDisplay(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := formatChannelDisplay(tt.username, tt.title, tt.identifier)
+
 			if got != tt.want {
 				t.Errorf("formatChannelDisplay(%q, %q, %q) = %q, want %q",
 					tt.username, tt.title, tt.identifier, got, tt.want)
@@ -135,9 +137,11 @@ func TestSplitHTML(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			parts := SplitHTML(tt.text, tt.limit)
+
 			if len(parts) != tt.wantLen {
 				t.Errorf("SplitHTML() got %d parts, want %d. Parts: %v", len(parts), tt.wantLen, parts)
 			}
+
 			for i, p := range parts {
 				// Note: blockquote tags might add a few chars over limit, which is acceptable
 				if strings.Contains(p, "<blockquote>") && !strings.Contains(p, "</blockquote>") {
