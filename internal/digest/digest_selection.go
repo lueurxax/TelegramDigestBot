@@ -120,7 +120,11 @@ func (s *Scheduler) checkEmptyWindow(ctx context.Context, items []db.Item, start
 		}
 	}
 
-	backlog, _ := s.database.GetBacklogCount(ctx)
+	backlog, err := s.database.GetBacklogCount(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to get backlog count")
+	}
+
 	if backlog > BacklogThreshold {
 		logger.Warn().Int("backlog", backlog).Msg("Large backlog - pipeline is catching up, messages not yet processed for this digest window")
 

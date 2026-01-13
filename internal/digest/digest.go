@@ -263,7 +263,11 @@ func (s *Scheduler) RunOnce(ctx context.Context) error {
 		return nil
 	}
 
-	defer s.database.ReleaseAdvisoryLock(ctx, lockID)
+	defer func() {
+		if err := s.database.ReleaseAdvisoryLock(ctx, lockID); err != nil {
+			logger.Warn().Err(err).Msg("failed to release advisory lock")
+		}
+	}()
 
 	return s.processDigest(ctx, &logger)
 }
@@ -514,8 +518,15 @@ func (s *Scheduler) updateStatsAfterDigest(ctx context.Context, start, end time.
 
 // BuildDigest builds a digest for the given window.
 func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, importanceThreshold float32, logger *zerolog.Logger) (string, []db.Item, []db.ClusterWithItems, *anomalyInfo, error) {
-	totalItems, _ := s.database.CountItemsInWindow(ctx, start, end)
-	readyItems, _ := s.database.CountReadyItemsInWindow(ctx, start, end)
+	totalItems, err := s.database.CountItemsInWindow(ctx, start, end)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to count items in window")
+	}
+
+	readyItems, err := s.database.CountReadyItemsInWindow(ctx, start, end)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to count ready items in window")
+	}
 
 	items, err := s.database.GetItemsForWindow(ctx, start, end, importanceThreshold, s.cfg.DigestTopN*DigestPoolMultiplier)
 	if err != nil {
@@ -640,7 +651,11 @@ func (s *Scheduler) sendConsolidatedAnomalyNotification(ctx context.Context, ano
 		sb.WriteString("Pipeline is catching up - messages pending LLM processing.\n")
 	}
 
-	_ = s.bot.SendNotification(ctx, sb.String())
+	if err := s.bot.SendNotification(ctx, sb.String()); err != nil {
+		logger.Warn().Err(err).Msg("failed to send anomaly notification")
+
+		return
+	}
 
 	logger.Info().Int("anomaly_count", len(anomalies)).Msg("Sent consolidated anomaly notification")
 }

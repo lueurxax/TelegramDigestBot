@@ -171,7 +171,7 @@ func (r *Resolver) handleResolutionError(ctx context.Context, link linkextract.L
 	}
 
 	r.logger.Warn().Err(err).Str(logKeyURL, link.URL).Msg("failed to resolve link")
-	_, _ = r.database.SaveLinkCache(ctx, &db.ResolvedLink{
+	_, _ = r.database.SaveLinkCache(ctx, &db.ResolvedLink{ //nolint:errcheck // cache save is best-effort
 		URL:          link.URL,
 		Domain:       link.Domain,
 		LinkType:     string(link.Type),

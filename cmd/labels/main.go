@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -16,8 +17,19 @@ const (
 	defaultExportPath  = "docs/eval/golden.jsonl"
 	defaultExportLimit = 500
 	outputDirPerm      = 0o700
-	errWriteOutput     = "failed to write output: %v\n"
+	errFmt             = "%v\n"
 )
+
+var (
+	errDSNRequired     = errors.New("POSTGRES_DSN is required (or provide -dsn)")
+	errLimitMustBePos  = errors.New("limit must be positive")
+)
+
+type exportConfig struct {
+	outPath string
+	limit   int
+	dsn     string
+}
 
 type exportRecord struct {
 	ID              string  `json:"id"`
@@ -27,47 +39,76 @@ type exportRecord struct {
 }
 
 func main() {
-	outPath := flag.String("out", defaultExportPath, "Output JSONL path")
-	limit := flag.Int("limit", defaultExportLimit, "Max labeled items to export")
-	dsn := flag.String("dsn", os.Getenv("POSTGRES_DSN"), "Postgres DSN")
+	cfg := parseFlags()
+
+	if err := validateConfig(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, errFmt, err)
+		os.Exit(1)
+	}
+
+	if err := runExport(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, errFmt, err)
+		os.Exit(1)
+	}
+}
+
+func parseFlags() exportConfig {
+	cfg := exportConfig{}
+
+	flag.StringVar(&cfg.outPath, "out", defaultExportPath, "Output JSONL path")
+	flag.IntVar(&cfg.limit, "limit", defaultExportLimit, "Max labeled items to export")
+	flag.StringVar(&cfg.dsn, "dsn", os.Getenv("POSTGRES_DSN"), "Postgres DSN")
 
 	flag.Parse()
 
-	if *dsn == "" {
-		fmt.Fprintln(os.Stderr, "POSTGRES_DSN is required (or provide -dsn).")
-		os.Exit(1)
+	return cfg
+}
+
+func validateConfig(cfg exportConfig) error {
+	if cfg.dsn == "" {
+		return errDSNRequired
 	}
 
-	if *limit <= 0 {
-		fmt.Fprintln(os.Stderr, "limit must be positive")
-		os.Exit(1)
+	if cfg.limit <= 0 {
+		return errLimitMustBePos
 	}
 
+	return nil
+}
+
+func runExport(cfg exportConfig) error {
 	ctx := context.Background()
 
-	database, err := db.New(ctx, *dsn)
+	database, err := db.New(ctx, cfg.dsn)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to connect to database: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer database.Close()
 
-	records, err := database.GetLabeledAnnotations(ctx, *limit)
+	records, err := database.GetLabeledAnnotations(ctx, cfg.limit)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load labeled annotations: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to load labeled annotations: %w", err)
 	}
 
-	cleanPath := filepath.Clean(*outPath)
+	if err := writeRecords(records, cfg.outPath); err != nil {
+		return err
+	}
+
+	fmt.Printf("Exported %d labeled items to %s\n", len(records), cfg.outPath)
+
+	return nil
+}
+
+func writeRecords(records []db.AnnotationExport, outPath string) error {
+	cleanPath := filepath.Clean(outPath)
+
 	if err := os.MkdirAll(filepath.Dir(cleanPath), outputDirPerm); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create output directory: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
 	f, err := os.Create(cleanPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create output file: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to create output file: %w", err)
 	}
 
 	defer func() {
@@ -77,34 +118,38 @@ func main() {
 	writer := bufio.NewWriter(f)
 
 	for _, rec := range records {
-		out := exportRecord{
-			ID:              rec.ID,
-			Label:           rec.Label,
-			RelevanceScore:  rec.RelevanceScore,
-			ImportanceScore: rec.ImportanceScore,
-		}
-
-		line, err := json.Marshal(out)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to encode record: %v\n", err)
-			os.Exit(1)
-		}
-
-		if _, err := writer.Write(line); err != nil {
-			fmt.Fprintf(os.Stderr, errWriteOutput, err)
-			os.Exit(1)
-		}
-
-		if err := writer.WriteByte('\n'); err != nil {
-			fmt.Fprintf(os.Stderr, errWriteOutput, err)
-			os.Exit(1)
+		if err := writeRecord(writer, rec); err != nil {
+			return err
 		}
 	}
 
 	if err := writer.Flush(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to flush output: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to flush output: %w", err)
 	}
 
-	fmt.Printf("Exported %d labeled items to %s\n", len(records), cleanPath)
+	return nil
+}
+
+func writeRecord(writer *bufio.Writer, rec db.AnnotationExport) error {
+	out := exportRecord{
+		ID:              rec.ID,
+		Label:           rec.Label,
+		RelevanceScore:  rec.RelevanceScore,
+		ImportanceScore: rec.ImportanceScore,
+	}
+
+	line, err := json.Marshal(out)
+	if err != nil {
+		return fmt.Errorf("failed to encode record: %w", err)
+	}
+
+	if _, err := writer.Write(line); err != nil {
+		return fmt.Errorf("failed to write output: %w", err)
+	}
+
+	if err := writer.WriteByte('\n'); err != nil {
+		return fmt.Errorf("failed to write newline: %w", err)
+	}
+
+	return nil
 }

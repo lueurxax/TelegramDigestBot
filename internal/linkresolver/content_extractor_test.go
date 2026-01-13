@@ -39,11 +39,11 @@ func TestExtractMetaTags(t *testing.T) {
 }
 
 func TestCoalesce(t *testing.T) {
-	if got := coalesce("", "first", "second"); got != "first" {
+	if got := coalesce("", "first", "second"); got != "first" { //nolint:goconst // test literal
 		t.Errorf("coalesce() = %s, want first", got)
 	}
 
-	if got := coalesce("zero", "first"); got != "zero" {
+	if got := coalesce("zero", "first"); got != "zero" { //nolint:goconst // test literal
 		t.Errorf("coalesce() = %s, want zero", got)
 	}
 

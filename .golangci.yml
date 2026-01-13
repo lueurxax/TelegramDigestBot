@@ -185,16 +185,6 @@ linters:
         linters:
           - contextcheck
           - wrapcheck
-      # Reduce noise in test files
-      - path: _test\.go
-        linters:
-          - errcheck
-          - goconst
-          - funlen
-          - gocyclo
-          - dupl
-          - mnd
-          - revive
       # Exclude wrapcheck for internal packages
       - path: internal/
         linters:
@@ -215,39 +205,15 @@ linters:
         linters:
           - gocritic
         text: "exitAfterDefer"
-      # Exclude db package from errcheck for intentional ignores
-      - path: internal/db/
-        linters:
-          - errcheck
-      # Exclude config from errcheck for godotenv
-      - path: internal/config/
-        linters:
-          - errcheck
-      # Exclude observability from errcheck for http writes
-      - path: internal/observability/
-        linters:
-          - errcheck
-      # Exclude link packages from errcheck
-      - path: internal/link
-        linters:
-          - errcheck
       # Auth implements interface - ctx is required
       - path: internal/telegramreader/auth\.go
         linters:
           - revive
         text: "unused-parameter"
-      # Allow gosec G115 integer overflow - common in type conversions
-      - linters:
-          - gosec
-        text: "G115"
       # Allow unused ctx parameter - often required by interfaces
       - linters:
           - revive
         text: "unused-parameter.*ctx"
-      # Exclude digest package from errcheck
-      - path: internal/digest/
-        linters:
-          - errcheck
       # Exclude bot package from revive unused-parameter
       - path: internal/telegrambot/
         linters:
@@ -275,18 +241,6 @@ linters:
         linters:
           - revive
         text: "unused-parameter"
-      # Exclude errchkjson - JSON marshaling errors are handled
-      - path: \.go$
-        linters:
-          - errchkjson
-      # Exclude gocyclo for complex but necessary functions
-      - path: internal/
-        linters:
-          - gocyclo
-      # Exclude nestif - some nested conditions are unavoidable
-      - path: internal/
-        linters:
-          - nestif
       # Exclude promlinter - prometheus naming is intentional
       - path: \.go$
         linters:
@@ -299,21 +253,6 @@ linters:
       - linters:
           - predeclared
         text: "min|max"
-      # Exclude funlen for complex files
-      - path: internal/htmlutils/
-        linters:
-          - funlen
-      - path: internal/llm/
-        linters:
-          - funlen
-      # Exclude errcheck for pipeline intentional ignores
-      - path: internal/pipeline/
-        linters:
-          - errcheck
-      # Exclude gosec G104 and G112 - handled elsewhere
-      - linters:
-          - gosec
-        text: "G104|G112"
       # Exclude revive var-declaration - explicit zero values are clearer
       - linters:
           - revive
@@ -348,15 +287,6 @@ linters:
       - path: internal/observability/
         linters:
           - contextcheck
-      # Exclude gocyclo for cmd
-      - path: cmd/
-        linters:
-          - gocyclo
-          - funlen
-      # Exclude errcheck for telegramreader - intentional ignores
-      - path: internal/telegramreader/
-        linters:
-          - errcheck
   settings:
     # Check for pass []any as any in variadic func(...any).
     asasalint:

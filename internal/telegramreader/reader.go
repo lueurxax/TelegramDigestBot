@@ -719,7 +719,7 @@ func (r *Reader) applyChannelInfo(ch *db.Channel, channel *tg.Channel) {
 }
 
 func (r *Reader) persistChannelInfo(ctx context.Context, api *tg.Client, ch *db.Channel, source string) {
-	description, _ := r.fetchChannelDescription(ctx, api, ch.TGPeerID, ch.AccessHash)
+	description, _ := r.fetchChannelDescription(ctx, api, ch.TGPeerID, ch.AccessHash) //nolint:errcheck // description fetch is best-effort
 	if err := r.database.UpdateChannel(ctx, ch.ID, ch.TGPeerID, ch.Title, ch.AccessHash, ch.Username, description); err != nil {
 		r.logger.Error().Err(err).Msgf("failed to update channel info %s", source)
 	}
@@ -892,8 +892,8 @@ func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessin
 		return false
 	}
 
-	entitiesJSON, _ := json.Marshal(msg.Entities)
-	mediaJSON, _ := json.Marshal(msg.Media)
+	entitiesJSON, _ := json.Marshal(msg.Entities) //nolint:errchkjson // marshaling TG types for debug logging
+	mediaJSON, _ := json.Marshal(msg.Media)       //nolint:errchkjson // marshaling TG types for debug logging
 	_, isForward := msg.GetFwdFrom()
 
 	rawMsg := &db.RawMessage{
@@ -960,6 +960,7 @@ func (r *Reader) startAsyncLinkResolution(ctx context.Context, text string) {
 	}
 
 	go func(ctx context.Context, text string) {
+		//nolint:errcheck // link resolution is best-effort background task
 		_, _ = r.resolver.ResolveLinks(ctx, text, r.cfg.MaxLinksPerMessage, r.cfg.LinkCacheTTL, r.cfg.TelegramLinkCacheTTL)
 	}(ctx, text)
 }

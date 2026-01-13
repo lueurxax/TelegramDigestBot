@@ -96,12 +96,12 @@ func parseTelegramLink(link *Link) {
 	if matches := tgPostRegex.FindStringSubmatch(link.URL); matches != nil {
 		link.TelegramType = "post"
 		if matches[1] != "" {
-			link.ChannelID, _ = strconv.ParseInt(matches[1], 10, 64)
+			link.ChannelID, _ = strconv.ParseInt(matches[1], 10, 64) //nolint:errcheck // regex guarantees numeric input
 		} else {
 			link.Username = matches[2]
 		}
 
-		link.MessageID, _ = strconv.ParseInt(matches[3], 10, 64)
+		link.MessageID, _ = strconv.ParseInt(matches[3], 10, 64) //nolint:errcheck // regex guarantees numeric input
 	} else if tgInviteRegex.MatchString(link.URL) {
 		link.TelegramType = "invite"
 	} else {

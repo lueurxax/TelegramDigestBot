@@ -11,9 +11,9 @@ import (
 func TestApplyFreshnessDecayFloor(t *testing.T) {
 	now := time.Now()
 
-	score := applyFreshnessDecay(1.0, now.Add(-36*time.Hour), 36, 0.4)
-	if math.Abs(float64(score-0.4)) > 0.01 {
-		t.Fatalf("applyFreshnessDecay floor = %v, want ~0.4", score)
+	score := applyFreshnessDecay(1.0, now.Add(-36*time.Hour), 36, AutoWeightInclusionFactor)
+	if math.Abs(float64(score-AutoWeightInclusionFactor)) > 0.01 {
+		t.Fatalf("applyFreshnessDecay floor = %v, want ~%v", score, AutoWeightInclusionFactor)
 	}
 }
 

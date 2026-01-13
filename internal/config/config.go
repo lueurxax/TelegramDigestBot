@@ -66,7 +66,7 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
-	_ = godotenv.Load()
+	_ = godotenv.Load() //nolint:errcheck // .env file is optional, error is expected when not present
 
 	cfg := &Config{}
 	if err := env.Parse(cfg); err != nil {

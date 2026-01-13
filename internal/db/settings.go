@@ -39,6 +39,7 @@ func (db *DB) SaveSettingWithHistory(ctx context.Context, key string, value inte
 
 	// Only add history if changedBy is provided
 	if changedBy != 0 {
+		//nolint:errcheck // history logging is best-effort, should not fail the main operation
 		_ = db.Queries.AddSettingHistory(ctx, sqlc.AddSettingHistoryParams{
 			Key:       key,
 			OldValue:  pgtype.Text{String: string(oldVal), Valid: len(oldVal) > 0},
@@ -86,6 +87,7 @@ func (db *DB) DeleteSettingWithHistory(ctx context.Context, key string, changedB
 
 	// Only add history if changedBy is provided
 	if changedBy != 0 {
+		//nolint:errcheck // history logging is best-effort, should not fail the main operation
 		_ = db.Queries.AddSettingHistory(ctx, sqlc.AddSettingHistoryParams{
 			Key:       key,
 			OldValue:  pgtype.Text{String: string(oldVal), Valid: len(oldVal) > 0},

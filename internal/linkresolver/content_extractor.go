@@ -24,7 +24,7 @@ type WebContent struct {
 }
 
 func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent, error) {
-	u, _ := url.Parse(rawURL)
+	u, _ := url.Parse(rawURL) //nolint:errcheck // URL was already validated
 
 	// Extract using readability (Firefox Reader Mode algorithm)
 	article, err := readability.FromReader(bytes.NewReader(htmlBytes), u)

@@ -232,14 +232,8 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 
 	p.getSetting(ctx, "link_enrichment_enabled", &s.linkEnrichmentEnabled, logger)
 	p.getSetting(ctx, "max_links_per_message", &s.maxLinks, logger)
-
-	linkCacheTTLStr := p.cfg.LinkCacheTTL.String()
-	p.getSetting(ctx, "link_cache_ttl", &linkCacheTTLStr, logger)
-	s.linkCacheTTL, _ = time.ParseDuration(linkCacheTTLStr)
-
-	tgLinkCacheTTLStr := p.cfg.TelegramLinkCacheTTL.String()
-	p.getSetting(ctx, "tg_link_cache_ttl", &tgLinkCacheTTLStr, logger)
-	s.tgLinkCacheTTL, _ = time.ParseDuration(tgLinkCacheTTLStr)
+	s.linkCacheTTL = p.getDurationSetting(ctx, "link_cache_ttl", p.cfg.LinkCacheTTL, logger)
+	s.tgLinkCacheTTL = p.getDurationSetting(ctx, "tg_link_cache_ttl", p.cfg.TelegramLinkCacheTTL, logger)
 
 	return s, nil
 }
@@ -250,9 +244,28 @@ func (p *Pipeline) getSetting(ctx context.Context, key string, target interface{
 	}
 }
 
+func (p *Pipeline) getDurationSetting(ctx context.Context, key string, defaultVal time.Duration, logger zerolog.Logger) time.Duration {
+	durationStr := defaultVal.String()
+	p.getSetting(ctx, key, &durationStr, logger)
+
+	if parsed, err := time.ParseDuration(durationStr); err == nil {
+		return parsed
+	}
+
+	return defaultVal
+}
+
 func (p *Pipeline) markProcessed(ctx context.Context, logger zerolog.Logger, msgID string) {
 	if err := p.database.MarkAsProcessed(ctx, msgID); err != nil {
 		logger.Error().Str(LogFieldMsgID, msgID).Err(err).Msg(LogMsgFailedToMarkProcessed)
+	}
+}
+
+func (p *Pipeline) saveItemError(ctx context.Context, logger zerolog.Logger, msgID string, errMsg string) {
+	errJSON, _ := json.Marshal(map[string]string{"error": errMsg})
+
+	if err := p.database.SaveItemError(ctx, msgID, errJSON); err != nil {
+		logger.Warn().Str(LogFieldMsgID, msgID).Err(err).Msg("failed to save item error")
 	}
 }
 
@@ -359,51 +372,80 @@ func (p *Pipeline) skipMessage(ctx context.Context, logger zerolog.Logger, m *db
 }
 
 func (p *Pipeline) handleDeduplication(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, candidates []llm.MessageInput, embeddings map[string][]float32, deduplicator dedup.Deduplicator) ([]float32, bool) {
-	var emb []float32
-
-	if s.dedupMode == DedupModeSemantic || s.topicsEnabled {
-		var err error
-
-		emb, err = p.llmClient.GetEmbedding(ctx, m.Text)
-		if err != nil {
-			logger.Error().Str(LogFieldMsgID, m.ID).Err(err).Msg("failed to get embedding")
-
-			return nil, true
-		}
-
-		embeddings[m.ID] = emb
-	}
-
-	if s.dedupMode == DedupModeSemantic {
-		for _, cand := range candidates {
-			if dedup.CosineSimilarity(embeddings[cand.ID], emb) > p.cfg.SimilarityThreshold {
-				logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, cand.ID).Msg("skipping semantic duplicate in batch")
-				p.recordDrop(ctx, logger, m.ID, dropReasonDedupSemanticBatch, cand.ID)
-				p.markProcessed(ctx, logger, m.ID)
-
-				return nil, true
-			}
-		}
-	}
-
-	isDup, dupID, dErr := deduplicator.IsDuplicate(ctx, *m, emb)
-	if dErr == nil && isDup {
-		logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, dupID).Msg("skipping duplicate message")
-
-		reason := dropReasonDedupStrictGlobal
-		if s.dedupMode == DedupModeSemantic {
-			reason = dropReasonDedupSemanticGlobal
-		}
-
-		p.recordDrop(ctx, logger, m.ID, reason, dupID)
-		p.markProcessed(ctx, logger, m.ID)
-
+	emb, skip := p.generateEmbeddingIfNeeded(ctx, logger, m, s, embeddings)
+	if skip {
 		return nil, true
-	} else if dErr != nil {
-		logger.Error().Str(LogFieldMsgID, m.ID).Err(dErr).Msg("failed to check for duplicates")
+	}
+
+	if p.checkBatchDuplicate(ctx, logger, m, s, candidates, embeddings, emb) {
+		return nil, true
+	}
+
+	if p.checkGlobalDuplicate(ctx, logger, m, s, emb, deduplicator) {
+		return nil, true
 	}
 
 	return emb, false
+}
+
+func (p *Pipeline) generateEmbeddingIfNeeded(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, embeddings map[string][]float32) ([]float32, bool) {
+	if s.dedupMode != DedupModeSemantic && !s.topicsEnabled {
+		return nil, false
+	}
+
+	emb, err := p.llmClient.GetEmbedding(ctx, m.Text)
+	if err != nil {
+		logger.Error().Str(LogFieldMsgID, m.ID).Err(err).Msg("failed to get embedding")
+
+		return nil, true
+	}
+
+	embeddings[m.ID] = emb
+
+	return emb, false
+}
+
+func (p *Pipeline) checkBatchDuplicate(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, candidates []llm.MessageInput, embeddings map[string][]float32, emb []float32) bool {
+	if s.dedupMode != DedupModeSemantic {
+		return false
+	}
+
+	for _, cand := range candidates {
+		if dedup.CosineSimilarity(embeddings[cand.ID], emb) > p.cfg.SimilarityThreshold {
+			logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, cand.ID).Msg("skipping semantic duplicate in batch")
+			p.recordDrop(ctx, logger, m.ID, dropReasonDedupSemanticBatch, cand.ID)
+			p.markProcessed(ctx, logger, m.ID)
+
+			return true
+		}
+	}
+
+	return false
+}
+
+func (p *Pipeline) checkGlobalDuplicate(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, emb []float32, deduplicator dedup.Deduplicator) bool {
+	isDup, dupID, dErr := deduplicator.IsDuplicate(ctx, *m, emb)
+	if dErr != nil {
+		logger.Error().Str(LogFieldMsgID, m.ID).Err(dErr).Msg("failed to check for duplicates")
+
+		return false
+	}
+
+	if !isDup {
+		return false
+	}
+
+	logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, dupID).Msg("skipping duplicate message")
+
+	reason := dropReasonDedupStrictGlobal
+	if s.dedupMode == DedupModeSemantic {
+		reason = dropReasonDedupSemanticGlobal
+	}
+
+	p.recordDrop(ctx, logger, m.ID, reason, dupID)
+	p.markProcessed(ctx, logger, m.ID)
+
+	return true
 }
 
 func (p *Pipeline) enrichMessage(ctx context.Context, logger zerolog.Logger, m db.RawMessage, s *pipelineSettings) llm.MessageInput {
@@ -486,9 +528,8 @@ func (p *Pipeline) processModelBatch(ctx context.Context, logger zerolog.Logger,
 		observability.PipelineProcessed.WithLabelValues(StatusError).Add(float64(len(indices)))
 
 		for _, idx := range indices {
-			errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
-			_ = p.database.SaveItemError(ctx, candidates[idx].ID, errJSON)
-			_ = p.database.MarkAsProcessed(ctx, candidates[idx].ID)
+			p.saveItemError(ctx, logger, candidates[idx].ID, err.Error())
+			p.markProcessed(ctx, logger, candidates[idx].ID)
 		}
 
 		return err
@@ -616,8 +657,7 @@ func (p *Pipeline) handleEmptySummary(ctx context.Context, logger zerolog.Logger
 	logger.Warn().Str(LogFieldMsgID, msgID).Int("index", index).Msg("LLM summary empty for item, marking as error")
 	observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
 
-	errJSON, _ := json.Marshal(map[string]string{"error": "empty summary from LLM"})
-	_ = p.database.SaveItemError(ctx, msgID, errJSON)
+	p.saveItemError(ctx, logger, msgID, "empty summary from LLM")
 	p.markProcessed(ctx, logger, msgID)
 }
 
@@ -689,9 +729,8 @@ func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logg
 		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg("failed to save item")
 		observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
 
-		errJSON, _ := json.Marshal(map[string]string{"error": fmt.Sprintf("failed to save item: %v", err)})
-		_ = p.database.SaveItemError(ctx, c.ID, errJSON)
-		_ = p.database.MarkAsProcessed(ctx, c.ID)
+		p.saveItemError(ctx, logger, c.ID, fmt.Sprintf("failed to save item: %v", err))
+		p.markProcessed(ctx, logger, c.ID)
 
 		return false
 	}

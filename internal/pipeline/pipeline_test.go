@@ -27,7 +27,7 @@ func (m *mockRepo) GetSetting(ctx context.Context, key string, target interface{
 		return nil
 	}
 	// For simplicity in tests, assume types match
-	data, _ := json.Marshal(val)
+	data, _ := json.Marshal(val) //nolint:errchkjson // test helper, marshaling test data
 
 	return json.Unmarshal(data, target)
 }
@@ -53,7 +53,7 @@ func (m *mockRepo) MarkAsProcessed(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *mockRepo) GetRecentMessagesForChannel(ctx context.Context, channelID string, before time.Time, limit int) ([]string, error) {
+func (m *mockRepo) GetRecentMessagesForChannel(_ context.Context, _ string, _ time.Time, _ int) ([]string, error) {
 	return nil, nil
 }
 
@@ -68,31 +68,31 @@ func (m *mockRepo) SaveItem(ctx context.Context, item *db.Item) error {
 	return nil
 }
 
-func (m *mockRepo) SaveItemError(ctx context.Context, rawMsgID string, errJSON []byte) error {
+func (m *mockRepo) SaveItemError(_ context.Context, _ string, _ []byte) error {
 	return nil
 }
 
-func (m *mockRepo) SaveRelevanceGateLog(ctx context.Context, rawMsgID string, decision string, confidence *float32, reason, model, gateVersion string) error {
+func (m *mockRepo) SaveRelevanceGateLog(_ context.Context, _, _ string, _ *float32, _, _, _ string) error {
 	return nil
 }
 
-func (m *mockRepo) SaveRawMessageDropLog(ctx context.Context, rawMsgID, reason, detail string) error {
+func (m *mockRepo) SaveRawMessageDropLog(_ context.Context, _, _, _ string) error {
 	return nil
 }
 
-func (m *mockRepo) SaveEmbedding(ctx context.Context, itemID string, embedding []float32) error {
+func (m *mockRepo) SaveEmbedding(_ context.Context, _ string, _ []float32) error {
 	return nil
 }
 
-func (m *mockRepo) CheckStrictDuplicate(ctx context.Context, hash string, id string) (bool, error) {
+func (m *mockRepo) CheckStrictDuplicate(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }
 
-func (m *mockRepo) FindSimilarItem(ctx context.Context, embedding []float32, threshold float32) (string, error) {
+func (m *mockRepo) FindSimilarItem(_ context.Context, _ []float32, _ float32) (string, error) {
 	return "", nil
 }
 
-func (m *mockRepo) LinkMessageToLink(ctx context.Context, rawMsgID, linkCacheID string, position int) error {
+func (m *mockRepo) LinkMessageToLink(_ context.Context, _, _ string, _ int) error {
 	return nil
 }
 
@@ -108,7 +108,7 @@ func (m *mockLLM) GetEmbedding(ctx context.Context, text string) ([]float32, err
 	return []float32{0.0, 1.0}, nil
 }
 
-func (m *mockLLM) ProcessBatch(ctx context.Context, messages []llm.MessageInput, targetLanguage string, model string, tone string) ([]llm.BatchResult, error) {
+func (m *mockLLM) ProcessBatch(_ context.Context, messages []llm.MessageInput, _, _, _ string) ([]llm.BatchResult, error) {
 	res := make([]llm.BatchResult, len(messages))
 	for i := range messages {
 		res[i] = llm.BatchResult{
@@ -125,7 +125,7 @@ func (m *mockLLM) ProcessBatch(ctx context.Context, messages []llm.MessageInput,
 	return res, nil
 }
 
-func (m *mockLLM) RelevanceGate(ctx context.Context, text string, model string, prompt string) (llm.RelevanceGateResult, error) {
+func (m *mockLLM) RelevanceGate(_ context.Context, _, _, _ string) (llm.RelevanceGateResult, error) {
 	return llm.RelevanceGateResult{
 		Decision:   DecisionRelevant,
 		Confidence: 0.5,
@@ -150,9 +150,9 @@ func TestPipeline_processNextBatch(t *testing.T) {
 
 	p := New(cfg, repo, llmClient, nil, &logger)
 
-	err := p.processNextBatch(context.Background(), "test-corr-id")
+	err := p.processNextBatch(context.Background(), "test-corr-id") //nolint:goconst // test literal
 	if err != nil {
-		t.Fatalf("processNextBatch failed: %v", err)
+		t.Fatalf("processNextBatch failed: %v", err) //nolint:goconst // test literal
 	}
 
 	if len(repo.savedItems) != 2 {
@@ -268,11 +268,11 @@ type mockLLMWithImportance struct {
 	importance float32
 }
 
-func (m *mockLLMWithImportance) GetEmbedding(ctx context.Context, text string) ([]float32, error) {
+func (m *mockLLMWithImportance) GetEmbedding(_ context.Context, _ string) ([]float32, error) {
 	return []float32{1.0, 0.0}, nil
 }
 
-func (m *mockLLMWithImportance) ProcessBatch(ctx context.Context, messages []llm.MessageInput, targetLanguage string, model string, tone string) ([]llm.BatchResult, error) {
+func (m *mockLLMWithImportance) ProcessBatch(_ context.Context, messages []llm.MessageInput, _, _, _ string) ([]llm.BatchResult, error) {
 	res := make([]llm.BatchResult, len(messages))
 	for i := range messages {
 		res[i] = llm.BatchResult{

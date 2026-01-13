@@ -126,7 +126,7 @@ func (db *DB) LabelAssignedAnnotation(ctx context.Context, userID int64, label, 
 	}
 
 	defer func() {
-		_ = tx.Rollback(ctx)
+		_ = tx.Rollback(ctx) //nolint:errcheck // rollback after commit returns error, this is best-effort cleanup
 	}()
 
 	var itemID pgtype.UUID

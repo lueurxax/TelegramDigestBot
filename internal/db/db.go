@@ -64,6 +64,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 	}
 
 	defer func() {
+		//nolint:errcheck // advisory unlock in defer is best-effort, lock released on connection close anyway
 		_, _ = conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", migrationLockID)
 	}()
 

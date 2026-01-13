@@ -144,6 +144,7 @@ func TestSplitHTML(t *testing.T) {
 
 			for i, p := range parts {
 				// Note: blockquote tags might add a few chars over limit, which is acceptable
+				//nolint:goconst // test literal
 				if strings.Contains(p, "<blockquote>") && !strings.Contains(p, "</blockquote>") {
 					t.Errorf("Part %d has open blockquote: %s", i, p)
 				}

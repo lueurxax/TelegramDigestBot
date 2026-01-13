@@ -181,6 +181,7 @@ func TestSanitizeHTML(t *testing.T) {
 	}
 }
 
+//nolint:gocyclo // test function with multiple test cases
 func TestSplitHTML(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -371,7 +372,7 @@ func TestSplitHTMLItemBoundaryFlush(t *testing.T) {
 		t.Fatalf("SplitHTML() got %d parts, want 2. Parts: %v", len(parts), parts)
 	}
 
-	if strings.Contains(parts[0], "BBBB") {
+	if strings.Contains(parts[0], "BBBB") { //nolint:goconst // test literal
 		t.Errorf("First part should not include second item: %q", parts[0])
 	}
 

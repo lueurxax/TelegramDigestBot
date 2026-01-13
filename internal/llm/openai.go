@@ -327,7 +327,7 @@ func (c *openaiClient) tryFindArrayInJSON(content string) []BatchResult {
 			continue
 		}
 
-		arrBytes, _ := json.Marshal(v)
+		arrBytes, _ := json.Marshal(v) //nolint:errchkjson // marshaling interface{} from parsed JSON, cannot fail
 
 		var results []BatchResult
 		if err := json.Unmarshal(arrBytes, &results); err == nil && len(results) > 0 {

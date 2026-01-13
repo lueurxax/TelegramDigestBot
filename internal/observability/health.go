@@ -65,7 +65,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 		defer cancel()
 
-		_ = srv.Shutdown(shutdownCtx)
+		_ = srv.Shutdown(shutdownCtx) //nolint:errcheck // shutdown in signal handler is best-effort
 	}()
 
 	s.logger.Info().Int("port", s.port).Msg("Health check server starting")
