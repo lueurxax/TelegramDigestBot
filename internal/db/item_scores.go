@@ -30,6 +30,15 @@ type ItemScore struct {
 	Relevance  float64
 }
 
+// ItemStatusStats represents item counts by status in a time window.
+type ItemStatusStats struct {
+	Total         int
+	ReadyPending  int
+	ReadyDigested int
+	Rejected      int
+	Error         int
+}
+
 func (db *DB) GetImportanceStats(ctx context.Context, since time.Time, threshold float32) (ImportanceStats, error) {
 	var (
 		stats      ImportanceStats
@@ -126,4 +135,38 @@ func (db *DB) GetTopItemScores(ctx context.Context, since time.Time, limit int) 
 	}
 
 	return res, nil
+}
+
+func (db *DB) GetItemStatusStats(ctx context.Context, since time.Time) (ItemStatusStats, error) {
+	var (
+		stats         ItemStatusStats
+		total         int64
+		readyPending  int64
+		readyDigested int64
+		rejected      int64
+		errCount      int64
+	)
+
+	err := db.Pool.QueryRow(ctx, `
+		SELECT
+			COUNT(*)::bigint AS total_count,
+			COUNT(*) FILTER (WHERE i.status = 'ready' AND i.digested_at IS NULL)::bigint AS ready_pending,
+			COUNT(*) FILTER (WHERE i.status = 'ready' AND i.digested_at IS NOT NULL)::bigint AS ready_digested,
+			COUNT(*) FILTER (WHERE i.status = 'rejected')::bigint AS rejected,
+			COUNT(*) FILTER (WHERE i.status = 'error')::bigint AS error_count
+		FROM items i
+		JOIN raw_messages rm ON i.raw_message_id = rm.id
+		WHERE rm.tg_date >= $1
+	`, since).Scan(&total, &readyPending, &readyDigested, &rejected, &errCount)
+	if err != nil {
+		return stats, err
+	}
+
+	stats.Total = int(total)
+	stats.ReadyPending = int(readyPending)
+	stats.ReadyDigested = int(readyDigested)
+	stats.Rejected = int(rejected)
+	stats.Error = int(errCount)
+
+	return stats, nil
 }
