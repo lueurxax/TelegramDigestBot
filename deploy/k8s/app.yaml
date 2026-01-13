@@ -58,7 +58,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: bot
-        image: ghcr.io/lueurxax/telegramdigestbot:9a66abd
+        image: ghcr.io/lueurxax/telegramdigestbot:8e2ff0e
         command: ["./telegram-digest-bot"]
         args: ["--mode=bot"]
         envFrom:
@@ -95,6 +95,8 @@ metadata:
   namespace: digest
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: digest-reader
@@ -106,7 +108,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: reader
-        image: ghcr.io/lueurxax/telegramdigestbot:9a66abd
+        image: ghcr.io/lueurxax/telegramdigestbot:8e2ff0e
         command: ["./telegram-digest-bot"]
         args: ["--mode=reader"]
         envFrom:
@@ -161,7 +163,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: worker
-        image: ghcr.io/lueurxax/telegramdigestbot:9a66abd
+        image: ghcr.io/lueurxax/telegramdigestbot:8e2ff0e
         command: ["./telegram-digest-bot"]
         args: ["--mode=worker"]
         envFrom:
@@ -209,7 +211,7 @@ spec:
       serviceAccountName: digest-bot
       containers:
       - name: scheduler
-        image: ghcr.io/lueurxax/telegramdigestbot:9a66abd
+        image: ghcr.io/lueurxax/telegramdigestbot:8e2ff0e
         command: ["./telegram-digest-bot"]
         args: ["--mode=digest"]
         envFrom:
