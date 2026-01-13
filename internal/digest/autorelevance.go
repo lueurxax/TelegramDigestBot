@@ -138,52 +138,70 @@ func (s *Scheduler) processChannelsAutoRelevance(ctx context.Context, channels [
 	skipped := 0
 
 	for _, ch := range channels {
-		if !ch.AutoRelevanceEnabled {
+		result := s.processSingleChannelAutoRelevance(ctx, ch, stats[ch.ID], logger)
+		if result {
+			updated++
+		} else {
 			skipped++
-			continue
 		}
-
-		st := stats[ch.ID]
-		if st == nil || st.count < s.cfg.RatingMinSampleChannel || st.weightedTotal <= 0 {
-			if ch.RelevanceThresholdDelta != 0 {
-				if err := s.database.UpdateChannelRelevanceDelta(ctx, ch.ID, 0, ch.AutoRelevanceEnabled); err != nil {
-					logger.Warn().Err(err).Str(LogFieldChannelID, ch.ID).Msg("failed to reset relevance delta")
-					continue
-				}
-
-				updated++
-			} else {
-				skipped++
-			}
-
-			continue
-		}
-
-		reliability := st.weightedGood / st.weightedTotal
-		if reliability < 0 {
-			reliability = 0
-		} else if reliability > 1 {
-			reliability = 1
-		}
-
-		delta := computeRelevanceDelta(reliability)
-
-		if math.Abs(float64(delta-ch.RelevanceThresholdDelta)) < autoRelevanceDeltaEpsilon {
-			skipped++
-			continue
-		}
-
-		if err := s.database.UpdateChannelRelevanceDelta(ctx, ch.ID, delta, ch.AutoRelevanceEnabled); err != nil {
-			logger.Warn().Err(err).Str(LogFieldChannelID, ch.ID).Msg("failed to update relevance delta")
-			continue
-		}
-
-		s.logAutoRelevanceUpdate(ch, delta, st, reliability, logger)
-
-		updated++
 	}
 
 	return updated, skipped
+}
+
+// processSingleChannelAutoRelevance processes auto-relevance for a single channel.
+// Returns true if updated, false if skipped.
+func (s *Scheduler) processSingleChannelAutoRelevance(ctx context.Context, ch db.Channel, st *ratingStats, logger *zerolog.Logger) bool {
+	if !ch.AutoRelevanceEnabled {
+		return false
+	}
+
+	if st == nil || st.count < s.cfg.RatingMinSampleChannel || st.weightedTotal <= 0 {
+		return s.resetChannelRelevanceDelta(ctx, ch, logger)
+	}
+
+	reliability := clampFloat64(st.weightedGood/st.weightedTotal, 0, 1)
+	delta := computeRelevanceDelta(reliability)
+
+	if math.Abs(float64(delta-ch.RelevanceThresholdDelta)) < autoRelevanceDeltaEpsilon {
+		return false
+	}
+
+	if err := s.database.UpdateChannelRelevanceDelta(ctx, ch.ID, delta, ch.AutoRelevanceEnabled); err != nil {
+		logger.Warn().Err(err).Str(LogFieldChannelID, ch.ID).Msg("failed to update relevance delta")
+
+		return false
+	}
+
+	s.logAutoRelevanceUpdate(ch, delta, st, reliability, logger)
+
+	return true
+}
+
+func (s *Scheduler) resetChannelRelevanceDelta(ctx context.Context, ch db.Channel, logger *zerolog.Logger) bool {
+	if ch.RelevanceThresholdDelta == 0 {
+		return false
+	}
+
+	if err := s.database.UpdateChannelRelevanceDelta(ctx, ch.ID, 0, ch.AutoRelevanceEnabled); err != nil {
+		logger.Warn().Err(err).Str(LogFieldChannelID, ch.ID).Msg("failed to reset relevance delta")
+
+		return false
+	}
+
+	return true
+}
+
+func clampFloat64(value, minVal, maxVal float64) float64 {
+	if value < minVal {
+		return minVal
+	}
+
+	if value > maxVal {
+		return maxVal
+	}
+
+	return value
 }
 
 func (s *Scheduler) logAutoRelevanceUpdate(ch db.Channel, delta float32, st *ratingStats, reliability float64, logger *zerolog.Logger) {

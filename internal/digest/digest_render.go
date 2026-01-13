@@ -39,51 +39,29 @@ func (s *Scheduler) getDigestSettings(ctx context.Context, logger *zerolog.Logge
 		editorDetailedItems: true,
 	}
 
-	if err := s.database.GetSetting(ctx, "topics_enabled", &ds.topicsEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get topics_enabled from DB")
-	}
-
-	if err := s.database.GetSetting(ctx, "freshness_decay_hours", &ds.freshnessDecayHours); err != nil {
-		logger.Debug().Err(err).Msg("could not get freshness_decay_hours from DB")
-	}
-
-	if err := s.database.GetSetting(ctx, "freshness_floor", &ds.freshnessFloor); err != nil {
-		logger.Debug().Err(err).Msg("could not get freshness_floor from DB")
-	}
-
-	if err := s.database.GetSetting(ctx, "topic_diversity_cap", &ds.topicDiversityCap); err != nil {
-		logger.Debug().Err(err).Msg("could not get topic_diversity_cap from DB")
-	}
-
-	if err := s.database.GetSetting(ctx, "min_topic_count", &ds.minTopicCount); err != nil {
-		logger.Debug().Err(err).Msg("could not get min_topic_count from DB")
-	}
-
-	if err := s.database.GetSetting(ctx, "editor_enabled", &ds.editorEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get editor_enabled from DB")
-	}
-
-	if err := s.database.GetSetting(ctx, SettingSmartLLMModel, &ds.smartLLMModel); err != nil {
-		logger.Debug().Err(err).Msg(MsgCouldNotGetSmartLLMModel)
-	}
-
-	if err := s.database.GetSetting(ctx, "consolidated_clusters_enabled", &ds.consolidatedClustersEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get consolidated_clusters_enabled from DB")
-	}
-
-	if err := s.database.GetSetting(ctx, "editor_detailed_items", &ds.editorDetailedItems); err != nil {
-		logger.Debug().Err(err).Msg("could not get editor_detailed_items from DB")
-	}
-
-	if err := s.database.GetSetting(ctx, SettingDigestLanguage, &ds.digestLanguage); err != nil {
-		logger.Debug().Err(err).Msg(MsgCouldNotGetDigestLanguage)
-	}
-
-	if err := s.database.GetSetting(ctx, "digest_tone", &ds.digestTone); err != nil {
-		logger.Debug().Err(err).Msg("could not get digest_tone from DB")
-	}
+	s.loadDigestSettingsFromDB(ctx, logger, &ds)
 
 	return ds
+}
+
+func (s *Scheduler) loadDigestSettingsFromDB(ctx context.Context, logger *zerolog.Logger, ds *digestSettings) {
+	loadSetting := func(key string, target interface{}, logMsg string) {
+		if err := s.database.GetSetting(ctx, key, target); err != nil {
+			logger.Debug().Err(err).Msg(logMsg)
+		}
+	}
+
+	loadSetting("topics_enabled", &ds.topicsEnabled, "could not get topics_enabled from DB")
+	loadSetting("freshness_decay_hours", &ds.freshnessDecayHours, "could not get freshness_decay_hours from DB")
+	loadSetting("freshness_floor", &ds.freshnessFloor, "could not get freshness_floor from DB")
+	loadSetting("topic_diversity_cap", &ds.topicDiversityCap, "could not get topic_diversity_cap from DB")
+	loadSetting("min_topic_count", &ds.minTopicCount, "could not get min_topic_count from DB")
+	loadSetting("editor_enabled", &ds.editorEnabled, "could not get editor_enabled from DB")
+	loadSetting(SettingSmartLLMModel, &ds.smartLLMModel, MsgCouldNotGetSmartLLMModel)
+	loadSetting("consolidated_clusters_enabled", &ds.consolidatedClustersEnabled, "could not get consolidated_clusters_enabled from DB")
+	loadSetting("editor_detailed_items", &ds.editorDetailedItems, "could not get editor_detailed_items from DB")
+	loadSetting(SettingDigestLanguage, &ds.digestLanguage, MsgCouldNotGetDigestLanguage)
+	loadSetting("digest_tone", &ds.digestTone, "could not get digest_tone from DB")
 }
 
 // clusterGroup groups clusters or items by importance level
@@ -224,32 +202,48 @@ func (rc *digestRenderContext) generateNarrative(ctx context.Context, sb *string
 
 func (rc *digestRenderContext) categorizeByImportance() (breaking, notable, also clusterGroup) {
 	if rc.settings.topicsEnabled && len(rc.clusters) > 0 {
-		for _, c := range rc.clusters {
-			maxImp := float32(0)
+		return categorizeClusters(rc.clusters)
+	}
 
-			for _, it := range c.Items {
-				if it.ImportanceScore > maxImp {
-					maxImp = it.ImportanceScore
-				}
-			}
+	return categorizeItems(rc.items)
+}
 
-			if maxImp >= ImportanceScoreBreaking {
-				breaking.clusters = append(breaking.clusters, c)
-			} else if maxImp >= ImportanceScoreNotable {
-				notable.clusters = append(notable.clusters, c)
-			} else {
-				also.clusters = append(also.clusters, c)
-			}
+func categorizeClusters(clusters []db.ClusterWithItems) (breaking, notable, also clusterGroup) {
+	for _, c := range clusters {
+		maxImp := clusterMaxImportance(c)
+
+		if maxImp >= ImportanceScoreBreaking {
+			breaking.clusters = append(breaking.clusters, c)
+		} else if maxImp >= ImportanceScoreNotable {
+			notable.clusters = append(notable.clusters, c)
+		} else {
+			also.clusters = append(also.clusters, c)
 		}
-	} else {
-		for _, it := range rc.items {
-			if it.ImportanceScore >= ImportanceScoreBreaking {
-				breaking.items = append(breaking.items, it)
-			} else if it.ImportanceScore >= ImportanceScoreNotable {
-				notable.items = append(notable.items, it)
-			} else {
-				also.items = append(also.items, it)
-			}
+	}
+
+	return breaking, notable, also
+}
+
+func clusterMaxImportance(c db.ClusterWithItems) float32 {
+	maxImp := float32(0)
+
+	for _, it := range c.Items {
+		if it.ImportanceScore > maxImp {
+			maxImp = it.ImportanceScore
+		}
+	}
+
+	return maxImp
+}
+
+func categorizeItems(items []db.Item) (breaking, notable, also clusterGroup) {
+	for _, it := range items {
+		if it.ImportanceScore >= ImportanceScoreBreaking {
+			breaking.items = append(breaking.items, it)
+		} else if it.ImportanceScore >= ImportanceScoreNotable {
+			notable.items = append(notable.items, it)
+		} else {
+			also.items = append(also.items, it)
 		}
 	}
 

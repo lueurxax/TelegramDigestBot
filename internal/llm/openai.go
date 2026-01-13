@@ -277,42 +277,81 @@ func (c *openaiClient) buildResolvedLinksText(links []db.ResolvedLink) string {
 }
 
 func (c *openaiClient) parseResponseJSON(content string) ([]BatchResult, error) {
-	var (
-		results []BatchResult
-		wrapper struct {
-			Results []BatchResult `json:"results"`
-		}
-	)
-
-	if err := json.Unmarshal([]byte(content), &wrapper); err == nil && len(wrapper.Results) > 0 {
-		return wrapper.Results, nil
-	}
-
-	// Fallback 1: try unmarshaling as an array directly
-	if err := json.Unmarshal([]byte(content), &results); err == nil && len(results) > 0 {
+	if results := c.tryParseWrapper(content); len(results) > 0 {
 		return results, nil
 	}
 
-	// Fallback 2: try to find any array in the JSON
-	var raw map[string]interface{}
+	if results := c.tryParseArray(content); len(results) > 0 {
+		return results, nil
+	}
 
-	if err := json.Unmarshal([]byte(content), &raw); err == nil {
-		for _, v := range raw {
-			if arr, ok := v.([]interface{}); ok && len(arr) > 0 {
-				arrBytes, _ := json.Marshal(v)
-
-				if err := json.Unmarshal(arrBytes, &results); err == nil && len(results) > 0 {
-					return results, nil
-				}
-			}
-		}
+	if results := c.tryFindArrayInJSON(content); len(results) > 0 {
+		return results, nil
 	}
 
 	return nil, fmt.Errorf("%w: %s", ErrNoResultsExtracted, content)
 }
 
+func (c *openaiClient) tryParseWrapper(content string) []BatchResult {
+	var wrapper struct {
+		Results []BatchResult `json:"results"`
+	}
+
+	if err := json.Unmarshal([]byte(content), &wrapper); err == nil {
+		return wrapper.Results
+	}
+
+	return nil
+}
+
+func (c *openaiClient) tryParseArray(content string) []BatchResult {
+	var results []BatchResult
+
+	if err := json.Unmarshal([]byte(content), &results); err == nil {
+		return results
+	}
+
+	return nil
+}
+
+func (c *openaiClient) tryFindArrayInJSON(content string) []BatchResult {
+	var raw map[string]interface{}
+
+	if err := json.Unmarshal([]byte(content), &raw); err != nil {
+		return nil
+	}
+
+	for _, v := range raw {
+		arr, ok := v.([]interface{})
+		if !ok || len(arr) == 0 {
+			continue
+		}
+
+		arrBytes, _ := json.Marshal(v)
+
+		var results []BatchResult
+		if err := json.Unmarshal(arrBytes, &results); err == nil && len(results) > 0 {
+			return results
+		}
+	}
+
+	return nil
+}
+
 func (c *openaiClient) alignBatchResults(results []BatchResult, messages []MessageInput) ([]BatchResult, error) {
-	finalResults := make([]BatchResult, len(messages))
+	finalResults, foundIndices, allZeroIndex := c.populateResultsByIndex(results, len(messages))
+
+	if allZeroIndex && len(results) == len(messages) {
+		return c.alignBySourceChannel(results, messages)
+	}
+
+	c.logMissingIndices(foundIndices, len(messages))
+
+	return finalResults, nil
+}
+
+func (c *openaiClient) populateResultsByIndex(results []BatchResult, messageCount int) ([]BatchResult, map[int]bool, bool) {
+	finalResults := make([]BatchResult, messageCount)
 	foundIndices := make(map[int]bool)
 	allZeroIndex := true
 
@@ -321,29 +360,27 @@ func (c *openaiClient) alignBatchResults(results []BatchResult, messages []Messa
 			allZeroIndex = false
 		}
 
-		if res.Index >= 0 && res.Index < len(messages) {
-			if !foundIndices[res.Index] {
-				finalResults[res.Index] = res
-				foundIndices[res.Index] = true
-			} else if res.Index != 0 || !allZeroIndex {
-				c.logger.Warn().Int(logKeyIndex, res.Index).Msg("LLM returned duplicate index, ignoring")
-			}
+		if res.Index < 0 || res.Index >= messageCount {
+			continue
+		}
+
+		if !foundIndices[res.Index] {
+			finalResults[res.Index] = res
+			foundIndices[res.Index] = true
+		} else if res.Index != 0 || !allZeroIndex {
+			c.logger.Warn().Int(logKeyIndex, res.Index).Msg("LLM returned duplicate index, ignoring")
 		}
 	}
 
-	// Fallback: if all indices were 0, try to align by source_channel
-	if allZeroIndex && len(results) == len(messages) {
-		return c.alignBySourceChannel(results, messages)
-	}
+	return finalResults, foundIndices, allZeroIndex
+}
 
-	// For missing indices, log warnings
-	for i := 0; i < len(messages); i++ {
+func (c *openaiClient) logMissingIndices(foundIndices map[int]bool, messageCount int) {
+	for i := 0; i < messageCount; i++ {
 		if !foundIndices[i] {
 			c.logger.Warn().Int(logKeyIndex, i).Msg("LLM result missing for message index")
 		}
 	}
-
-	return finalResults, nil
 }
 
 func (c *openaiClient) alignBySourceChannel(results []BatchResult, messages []MessageInput) ([]BatchResult, error) {

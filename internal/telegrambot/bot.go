@@ -199,34 +199,45 @@ func (b *Bot) handleCallback(ctx context.Context, query *tgbotapi.CallbackQuery)
 
 	data := query.Data
 
-	if strings.HasPrefix(data, CallbackPrefixRate) {
-		parts := strings.Split(data, ":")
-		if len(parts) == 3 {
-			digestID := parts[1]
-			ratingVal := parts[2]
-
-			var rating int16
-
-			switch ratingVal {
-			case "up":
-				rating = 1
-			case "down":
-				rating = -1
-			}
-
-			if rating != 0 {
-				if err := b.database.SaveRating(ctx, digestID, query.From.ID, rating, ""); err != nil {
-					b.logger.Error().Err(err).Msg("failed to save rating")
-				}
-
-				callback := tgbotapi.NewCallback(query.ID, "Feedback recorded. Thanks!")
-				if _, err := b.api.Request(callback); err != nil {
-					b.logger.Error().Err(err).Msg(ErrSendCallbackResp)
-				}
-			}
-		}
-	} else if strings.HasPrefix(data, CallbackPrefixDiscover) {
+	switch {
+	case strings.HasPrefix(data, CallbackPrefixRate):
+		b.handleRateCallback(ctx, query, data)
+	case strings.HasPrefix(data, CallbackPrefixDiscover):
 		b.handleDiscoverCallback(ctx, query)
+	}
+}
+
+func (b *Bot) handleRateCallback(ctx context.Context, query *tgbotapi.CallbackQuery, data string) {
+	parts := strings.Split(data, ":")
+	if len(parts) != 3 {
+		return
+	}
+
+	digestID := parts[1]
+	rating := parseRatingValue(parts[2])
+
+	if rating == 0 {
+		return
+	}
+
+	if err := b.database.SaveRating(ctx, digestID, query.From.ID, rating, ""); err != nil {
+		b.logger.Error().Err(err).Msg("failed to save rating")
+	}
+
+	callback := tgbotapi.NewCallback(query.ID, "Feedback recorded. Thanks!")
+	if _, err := b.api.Request(callback); err != nil {
+		b.logger.Error().Err(err).Msg(ErrSendCallbackResp)
+	}
+}
+
+func parseRatingValue(val string) int16 {
+	switch val {
+	case "up":
+		return 1
+	case "down":
+		return -1
+	default:
+		return 0
 	}
 }
 

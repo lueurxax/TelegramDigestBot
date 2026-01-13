@@ -106,7 +106,7 @@ type SettingHistory struct {
 }
 
 func (db *DB) GetRecentSettingHistory(ctx context.Context, limit int) ([]SettingHistory, error) {
-	rows, err := db.Queries.GetRecentSettingHistory(ctx, int32(limit))
+	rows, err := db.Queries.GetRecentSettingHistory(ctx, safeIntToInt32(limit))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get setting history: %w", err)
 	}

@@ -47,44 +47,68 @@ func New(filters []db.Filter, adsEnabled bool, minLength int, adsKeywords []stri
 }
 
 func (f *Filterer) IsFiltered(text string) bool {
-	// Basic length filter
 	if len(text) < f.minLength {
 		return true
 	}
 
 	lowerText := f.caser.String(text)
 
-	// Ads filter (heuristic)
-	if f.adsEnabled {
-		for _, kw := range f.adsKeywords {
-			if strings.Contains(lowerText, f.caser.String(kw)) {
-				return true
-			}
+	if f.containsAds(lowerText) {
+		return true
+	}
+
+	if f.matchesDenyFilter(lowerText) {
+		return true
+	}
+
+	return f.failsAllowFilter(lowerText)
+}
+
+func (f *Filterer) containsAds(lowerText string) bool {
+	if !f.adsEnabled {
+		return false
+	}
+
+	for _, kw := range f.adsKeywords {
+		if strings.Contains(lowerText, f.caser.String(kw)) {
+			return true
 		}
+	}
+
+	return false
+}
+
+func (f *Filterer) matchesDenyFilter(lowerText string) bool {
+	if f.mode != filterModeDenylist && f.mode != filterModeMixed {
+		return false
+	}
+
+	for _, filter := range f.filters {
+		if filter.Type == "deny" && strings.Contains(lowerText, f.caser.String(filter.Pattern)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (f *Filterer) failsAllowFilter(lowerText string) bool {
+	if f.mode != filterModeAllowlist && f.mode != filterModeMixed {
+		return false
 	}
 
 	hasAllowFilters := false
 	matchedAllow := false
 
 	for _, filter := range f.filters {
-		lowerPattern := f.caser.String(filter.Pattern)
-
-		if filter.Type == "deny" && (f.mode == filterModeDenylist || f.mode == filterModeMixed) {
-			if strings.Contains(lowerText, lowerPattern) {
-				return true
-			}
-		} else if filter.Type == "allow" && (f.mode == filterModeAllowlist || f.mode == filterModeMixed) {
+		if filter.Type == "allow" {
 			hasAllowFilters = true
 
-			if strings.Contains(lowerText, lowerPattern) {
+			if strings.Contains(lowerText, f.caser.String(filter.Pattern)) {
 				matchedAllow = true
 			}
 		}
 	}
 
-	if hasAllowFilters && !matchedAllow && (f.mode == filterModeAllowlist || f.mode == filterModeMixed) {
-		return true
-	}
-
-	return false
+	return hasAllowFilters && !matchedAllow
 }

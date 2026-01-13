@@ -118,7 +118,7 @@ func (db *DB) RecordDiscovery(ctx context.Context, d Discovery) error {
 
 // GetPendingDiscoveries returns pending discoveries sorted by count
 func (db *DB) GetPendingDiscoveries(ctx context.Context, limit int) ([]DiscoveredChannel, error) {
-	rows, err := db.Queries.GetPendingDiscoveries(ctx, int32(limit))
+	rows, err := db.Queries.GetPendingDiscoveries(ctx, safeIntToInt32(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +205,7 @@ type UnresolvedDiscovery struct {
 
 // GetDiscoveriesNeedingResolution returns discoveries with peer IDs but no title/username
 func (db *DB) GetDiscoveriesNeedingResolution(ctx context.Context, limit int) ([]UnresolvedDiscovery, error) {
-	rows, err := db.Queries.GetDiscoveriesNeedingResolution(ctx, int32(limit))
+	rows, err := db.Queries.GetDiscoveriesNeedingResolution(ctx, safeIntToInt32(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +244,7 @@ type InviteLinkDiscovery struct {
 
 // GetInviteLinkDiscoveriesNeedingResolution returns discoveries with invite links but no title
 func (db *DB) GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, limit int) ([]InviteLinkDiscovery, error) {
-	rows, err := db.Queries.GetInviteLinkDiscoveriesNeedingResolution(ctx, int32(limit))
+	rows, err := db.Queries.GetInviteLinkDiscoveriesNeedingResolution(ctx, safeIntToInt32(limit))
 	if err != nil {
 		return nil, err
 	}

@@ -279,59 +279,72 @@ type anomalyInfo struct {
 	backlogSize int
 }
 
-func (s *Scheduler) processDigest(ctx context.Context, logger *zerolog.Logger) error {
+type digestProcessConfig struct {
+	window                      time.Duration
+	targetChatID                int64
+	importanceThreshold         float32
+	catchupWindow               time.Duration
+	anomalyNotificationsEnabled bool
+}
+
+func (s *Scheduler) loadDigestProcessConfig(ctx context.Context, logger *zerolog.Logger) digestProcessConfig {
+	cfg := digestProcessConfig{
+		window:                      time.Hour,
+		targetChatID:                s.cfg.TargetChatID,
+		importanceThreshold:         s.cfg.ImportanceThreshold,
+		catchupWindow:               DefaultCatchupWindowHours * time.Hour,
+		anomalyNotificationsEnabled: true,
+	}
+
 	windowStr := s.cfg.DigestWindow
 	if err := s.database.GetSetting(ctx, "digest_window", &windowStr); err != nil {
 		logger.Debug().Err(err).Msg("could not get digest_window from DB, using default")
 	}
 
-	window, err := time.ParseDuration(windowStr)
-	if err != nil {
+	if w, err := time.ParseDuration(windowStr); err == nil {
+		cfg.window = w
+	} else {
 		logger.Error().Err(err).Str(LogFieldWindow, windowStr).Msg("invalid digest window duration, using 1h")
-
-		window = time.Hour
 	}
 
-	targetChatID := s.cfg.TargetChatID
-	if err := s.database.GetSetting(ctx, SettingTargetChatID, &targetChatID); err != nil {
+	if err := s.database.GetSetting(ctx, SettingTargetChatID, &cfg.targetChatID); err != nil {
 		logger.Debug().Err(err).Msg("could not get target_chat_id from DB, using default")
 	}
 
-	importanceThreshold := s.cfg.ImportanceThreshold
-	if err := s.database.GetSetting(ctx, SettingImportanceThreshold, &importanceThreshold); err != nil {
+	if err := s.database.GetSetting(ctx, SettingImportanceThreshold, &cfg.importanceThreshold); err != nil {
 		logger.Debug().Err(err).Msg("could not get importance_threshold from DB, using default")
 	}
 
-	catchupWindow, err := time.ParseDuration(s.cfg.SchedulerCatchupWindow)
-	if err != nil {
+	if cw, err := time.ParseDuration(s.cfg.SchedulerCatchupWindow); err == nil {
+		cfg.catchupWindow = cw
+	} else {
 		logger.Error().Err(err).Str(LogFieldWindow, s.cfg.SchedulerCatchupWindow).Msg("invalid scheduler catchup window, using 24h")
-
-		catchupWindow = DefaultCatchupWindowHours * time.Hour
 	}
 
-	// Check if anomaly notifications are enabled
-	var anomalyNotificationsEnabled = true
-	if err := s.database.GetSetting(ctx, "anomaly_notifications", &anomalyNotificationsEnabled); err != nil {
+	if err := s.database.GetSetting(ctx, "anomaly_notifications", &cfg.anomalyNotificationsEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get anomaly_notifications from DB, defaulting to enabled")
 	}
 
-	// Collect anomalies instead of notifying immediately
+	return cfg
+}
+
+func (s *Scheduler) processDigest(ctx context.Context, logger *zerolog.Logger) error {
+	cfg := s.loadDigestProcessConfig(ctx, logger)
+
 	var anomalies []anomalyInfo
 
-	now := time.Now().Truncate(window)
+	now := time.Now().Truncate(cfg.window)
 
-	// Check windows from now-catchupWindow to now
-	// This allows catching up on missed digests if the bot was down.
-	for t := now.Add(-catchupWindow); !t.After(now.Add(-window)); t = t.Add(window) {
+	for t := now.Add(-cfg.catchupWindow); !t.After(now.Add(-cfg.window)); t = t.Add(cfg.window) {
 		start := t
-		end := t.Add(window)
+		end := t.Add(cfg.window)
 
-		anomaly, err := s.processWindow(ctx, start, end, targetChatID, importanceThreshold, logger)
+		anomaly, err := s.processWindow(ctx, start, end, cfg.targetChatID, cfg.importanceThreshold, logger)
 		if err != nil {
 			logger.Error().Err(err).
 				Time(LogFieldStart, start).
 				Time(LogFieldEnd, end).
-				Int64("target_chat_id", targetChatID).
+				Int64("target_chat_id", cfg.targetChatID).
 				Msg("failed to process window")
 		}
 
@@ -340,9 +353,8 @@ func (s *Scheduler) processDigest(ctx context.Context, logger *zerolog.Logger) e
 		}
 	}
 
-	// Send consolidated anomaly notification (if any and enabled)
-	if anomalyNotificationsEnabled && len(anomalies) > 0 {
-		s.sendConsolidatedAnomalyNotification(ctx, anomalies, importanceThreshold, logger)
+	if cfg.anomalyNotificationsEnabled && len(anomalies) > 0 {
+		s.sendConsolidatedAnomalyNotification(ctx, anomalies, cfg.importanceThreshold, logger)
 	}
 
 	return nil
@@ -633,18 +645,31 @@ func (s *Scheduler) sendConsolidatedAnomalyNotification(ctx context.Context, ano
 	logger.Info().Int("anomaly_count", len(anomalies)).Msg("Sent consolidated anomaly notification")
 }
 
+// summaryGroup groups items with the same summary.
+type summaryGroup struct {
+	summary         string
+	items           []db.Item
+	importanceScore float32
+}
+
 func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummaries map[string]bool) string {
 	if len(items) == 0 {
 		return ""
 	}
 
-	// Group items by summary to avoid duplicates
-	type summaryGroup struct {
-		summary         string
-		items           []db.Item
-		importanceScore float32
+	groups := groupItemsBySummary(items, seenSummaries)
+
+	var sb strings.Builder
+
+	for _, g := range groups {
+		seenSummaries[g.summary] = true
+		s.formatSummaryGroup(&sb, g, includeTopic)
 	}
 
+	return sb.String()
+}
+
+func groupItemsBySummary(items []db.Item, seenSummaries map[string]bool) []summaryGroup {
 	var groups []summaryGroup
 
 	summaryToIdx := make(map[string]int)
@@ -670,57 +695,56 @@ func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummarie
 		}
 	}
 
-	var sb strings.Builder
+	return groups
+}
 
-	for _, g := range groups {
-		seenSummaries[g.summary] = true
-		sanitizedSummary := htmlutils.SanitizeHTML(g.summary)
-		prefix := getImportancePrefix(g.importanceScore)
+func (s *Scheduler) formatSummaryGroup(sb *strings.Builder, g summaryGroup, includeTopic bool) {
+	sanitizedSummary := htmlutils.SanitizeHTML(g.summary)
+	prefix := getImportancePrefix(g.importanceScore)
 
-		// Item boundary marker for intelligent splitting
-		sb.WriteString(htmlutils.ItemStart)
+	sb.WriteString(htmlutils.ItemStart)
+	sb.WriteString(formatSummaryLine(g, includeTopic, prefix, sanitizedSummary))
+	fmt.Fprintf(sb, DigestSourceVia, strings.Join(s.formatItemLinks(g.items), DigestSourceSeparator))
+	sb.WriteString(htmlutils.ItemEnd)
+	sb.WriteString("\n")
+}
 
-		if includeTopic && g.items[0].Topic != "" {
-			emoji := topicEmojis[g.items[0].Topic]
-			if emoji == "" {
-				emoji = EmojiBullet
-			} else {
-				emoji += " " + EmojiBullet
-			}
-
-			sb.WriteString(fmt.Sprintf("%s %s <b>%s</b>: %s", prefix, emoji, html.EscapeString(g.items[0].Topic), sanitizedSummary))
-		} else {
-			sb.WriteString(fmt.Sprintf(FormatPrefixSummary, prefix, sanitizedSummary))
-		}
-
-		var links []string
-
-		for _, item := range g.items {
-			label := item.SourceChannel
-			if label != "" {
-				label = "@" + label
-			}
-
-			if label == "" {
-				label = item.SourceChannelTitle
-			}
-
-			if label == "" {
-				label = DefaultSourceLabel
-			}
-
-			links = append(links, s.formatLink(item, label))
-		}
-
-		if len(links) > 0 {
-			sb.WriteString(fmt.Sprintf(DigestSourceVia, strings.Join(links, DigestSourceSeparator)))
-		}
-
-		sb.WriteString(htmlutils.ItemEnd)
-		sb.WriteString("\n")
+func formatSummaryLine(g summaryGroup, includeTopic bool, prefix, sanitizedSummary string) string {
+	if !includeTopic || g.items[0].Topic == "" {
+		return fmt.Sprintf(FormatPrefixSummary, prefix, sanitizedSummary)
 	}
 
-	return sb.String()
+	emoji := topicEmojis[g.items[0].Topic]
+	if emoji == "" {
+		emoji = EmojiBullet
+	} else {
+		emoji += " " + EmojiBullet
+	}
+
+	return fmt.Sprintf("%s %s <b>%s</b>: %s", prefix, emoji, html.EscapeString(g.items[0].Topic), sanitizedSummary)
+}
+
+func (s *Scheduler) formatItemLinks(items []db.Item) []string {
+	links := make([]string, 0, len(items))
+
+	for _, item := range items {
+		label := formatItemLabel(item)
+		links = append(links, s.formatLink(item, label))
+	}
+
+	return links
+}
+
+func formatItemLabel(item db.Item) string {
+	if item.SourceChannel != "" {
+		return "@" + item.SourceChannel
+	}
+
+	if item.SourceChannelTitle != "" {
+		return item.SourceChannelTitle
+	}
+
+	return DefaultSourceLabel
 }
 
 func getImportancePrefix(score float32) string {

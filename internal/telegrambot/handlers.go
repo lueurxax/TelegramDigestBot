@@ -188,26 +188,7 @@ func (b *Bot) handleChannelNamespace(ctx context.Context, msg *tgbotapi.Message)
 	}
 
 	subcommand := args[0]
-	// Rewrite msg to look like the subcommand was the command for easier reuse of existing handlers
-	// This is a bit hacky but avoids duplicating logic
-	newMsg := *msg
-	newMsg.Text = "/" + subcommand
-
-	if len(args) > 1 {
-		newMsg.Text += " " + strings.Join(args[1:], " ")
-	}
-
-	// Update entities to match new text - the command entity length must match the new command
-	newEntities := make([]tgbotapi.MessageEntity, len(msg.Entities))
-	copy(newEntities, msg.Entities)
-
-	for i := range newEntities {
-		if newEntities[i].Type == EntityTypeBotCommand && newEntities[i].Offset == 0 {
-			newEntities[i].Length = len(subcommand) + 1 // +1 for the leading /
-		}
-	}
-
-	newMsg.Entities = newEntities
+	newMsg := prepareSubcommandMessage(msg, subcommand, args)
 
 	switch subcommand {
 	case CmdAdd:
@@ -241,30 +222,13 @@ func (b *Bot) handleFilterNamespace(ctx context.Context, msg *tgbotapi.Message) 
 	}
 
 	subcommand := args[0]
-	newMsg := *msg
-	newMsg.Text = "/" + subcommand
-
-	if len(args) > 1 {
-		newMsg.Text += " " + strings.Join(args[1:], " ")
-	}
-
-	// Update entities to match new text - the command entity length must match the new command
-	newEntities := make([]tgbotapi.MessageEntity, len(msg.Entities))
-	copy(newEntities, msg.Entities)
-
-	for i := range newEntities {
-		if newEntities[i].Type == EntityTypeBotCommand && newEntities[i].Offset == 0 {
-			newEntities[i].Length = len(subcommand) + 1 // +1 for the leading /
-		}
-	}
-
-	newMsg.Entities = newEntities
+	newMsg := prepareSubcommandMessage(msg, subcommand, args)
 
 	switch subcommand {
 	case CmdList:
 		b.handleFiltersList(ctx, &newMsg)
 	case CmdAdd, CmdRemove, SubCmdAds, SubCmdMode:
-		b.handleFilters(ctx, msg) // handleFilters already handles these subcommands
+		b.handleFilters(ctx, msg)
 	case "keywords":
 		b.handleAdsKeywords(ctx, &newMsg)
 	case "min_length", "minlength":
@@ -286,49 +250,36 @@ func (b *Bot) handleConfigNamespace(ctx context.Context, msg *tgbotapi.Message) 
 	}
 
 	subcommand := args[0]
-	newMsg := *msg
-	newMsg.Text = "/" + subcommand
+	newMsg := prepareSubcommandMessage(msg, subcommand, args)
 
-	if len(args) > 1 {
-		newMsg.Text += " " + strings.Join(args[1:], " ")
-	}
-
-	// Update entities to match new text - the command entity length must match the new command
-	newEntities := make([]tgbotapi.MessageEntity, len(msg.Entities))
-	copy(newEntities, msg.Entities)
-
-	for i := range newEntities {
-		if newEntities[i].Type == EntityTypeBotCommand && newEntities[i].Offset == 0 {
-			newEntities[i].Length = len(subcommand) + 1 // +1 for the leading /
-		}
-	}
-
-	newMsg.Entities = newEntities
-
-	switch subcommand {
-	case "links":
-		b.handleToggleSetting(ctx, &newMsg, "link_enrichment_enabled")
-	case "max_links", "maxlinks":
-		b.handleMaxLinks(ctx, &newMsg)
-	case "link_cache", "linkcache":
-		b.handleLinkCache(ctx, &newMsg)
-	case "target":
-		b.handleTarget(ctx, &newMsg)
-	case "window":
-		b.handleWindow(ctx, &newMsg)
-	case "language":
-		b.handleLanguage(ctx, &newMsg)
-	case CmdTone:
-		b.handleTone(ctx, &newMsg)
-	case "relevance":
-		b.handleThreshold(ctx, &newMsg, SettingRelevanceThreshold)
-	case "importance":
-		b.handleThreshold(ctx, &newMsg, SettingImportanceThreshold)
-	case "reset":
-		b.handleSettings(ctx, &newMsg)
-	default:
+	if !b.routeConfigSubcommand(ctx, &newMsg, subcommand) {
 		b.reply(msg, fmt.Sprintf("❓ Unknown config subcommand: <code>%s</code>", html.EscapeString(subcommand)))
 	}
+}
+
+func (b *Bot) routeConfigSubcommand(ctx context.Context, msg *tgbotapi.Message, subcommand string) bool {
+	handlers := map[string]func(){
+		"links":      func() { b.handleToggleSetting(ctx, msg, "link_enrichment_enabled") },
+		"max_links":  func() { b.handleMaxLinks(ctx, msg) },
+		"maxlinks":   func() { b.handleMaxLinks(ctx, msg) },
+		"link_cache": func() { b.handleLinkCache(ctx, msg) },
+		"linkcache":  func() { b.handleLinkCache(ctx, msg) },
+		"target":     func() { b.handleTarget(ctx, msg) },
+		"window":     func() { b.handleWindow(ctx, msg) },
+		"language":   func() { b.handleLanguage(ctx, msg) },
+		CmdTone:      func() { b.handleTone(ctx, msg) },
+		"relevance":  func() { b.handleThreshold(ctx, msg, SettingRelevanceThreshold) },
+		"importance": func() { b.handleThreshold(ctx, msg, SettingImportanceThreshold) },
+		"reset":      func() { b.handleSettings(ctx, msg) },
+	}
+
+	if handler, ok := handlers[subcommand]; ok {
+		handler()
+
+		return true
+	}
+
+	return false
 }
 
 func (b *Bot) handleAINamespace(ctx context.Context, msg *tgbotapi.Message) {
@@ -395,24 +346,7 @@ func (b *Bot) handleSystemNamespace(ctx context.Context, msg *tgbotapi.Message) 
 	}
 
 	subcommand := args[0]
-	newMsg := *msg
-	newMsg.Text = "/" + subcommand
-
-	if len(args) > 1 {
-		newMsg.Text += " " + strings.Join(args[1:], " ")
-	}
-
-	// Update entities to match new text - the command entity length must match the new command
-	newEntities := make([]tgbotapi.MessageEntity, len(msg.Entities))
-	copy(newEntities, msg.Entities)
-
-	for i := range newEntities {
-		if newEntities[i].Type == EntityTypeBotCommand && newEntities[i].Offset == 0 {
-			newEntities[i].Length = len(subcommand) + 1 // +1 for the leading /
-		}
-	}
-
-	newMsg.Entities = newEntities
+	newMsg := prepareSubcommandMessage(msg, subcommand, args)
 
 	switch subcommand {
 	case "status":
@@ -441,64 +375,15 @@ func (b *Bot) handleTarget(ctx context.Context, msg *tgbotapi.Message) {
 		return
 	}
 
-	var chatID int64
+	chatID, chat, errMsg := b.resolveTargetChat(args)
+	if errMsg != "" {
+		b.reply(msg, errMsg)
 
-	var chat tgbotapi.Chat
-
-	var err error
-
-	if strings.HasPrefix(args, "@") {
-		chat, err = b.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{SuperGroupUsername: args}})
-		if err != nil {
-			// Try without @ if it's a username
-			username := strings.TrimPrefix(args, "@")
-
-			chat, err = b.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{SuperGroupUsername: username}})
-			if err != nil {
-				b.reply(msg, fmt.Sprintf("❌ Could not find chat %s: %s. Make sure the bot is an administrator in the channel.", html.EscapeString(args), html.EscapeString(err.Error())))
-
-				return
-			}
-		}
-
-		chatID = chat.ID
-	} else {
-		chatID, err = strconv.ParseInt(args, 10, 64)
-		if err != nil {
-			b.reply(msg, "❌ Invalid channel ID. It should be a number (don't forget the <code>-100</code> prefix for channels) or a <code>@username</code>.")
-
-			return
-		}
-
-		// Verify bot has access to the chat
-		chat, err = b.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}})
-		if err != nil {
-			// If it's a positive number, try adding -100 prefix (common for channels)
-			if chatID > 0 {
-				altID, _ := strconv.ParseInt("-100"+strconv.FormatInt(chatID, 10), 10, 64) //nolint:errcheck // best-effort read
-
-				var errAlt error
-
-				chat, errAlt = b.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: altID}})
-				if errAlt == nil {
-					chatID = altID
-				} else {
-					b.reply(msg, fmt.Sprintf("❌ Could not find chat %d (nor %d): %s. Make sure the bot is added to the chat.", chatID, altID, html.EscapeString(errAlt.Error())))
-
-					return
-				}
-			} else {
-				b.reply(msg, fmt.Sprintf("❌ Could not find chat %d: %s. Make sure the bot is added to the chat.", chatID, html.EscapeString(err.Error())))
-
-				return
-			}
-		}
+		return
 	}
 
-	// Try to send a test message to verify permissions
-	testMsg := tgbotapi.NewMessage(chatID, "✅ This channel has been set as the target for digest posts.")
-	if _, err := b.api.Send(testMsg); err != nil {
-		b.reply(msg, fmt.Sprintf("❌ Found chat <b>%s</b> but could not send a message to it: %s. Make sure the bot is an administrator with permission to post messages.", html.EscapeString(chat.Title), html.EscapeString(err.Error())))
+	if errMsg := b.verifyTargetChatPermissions(chatID, chat); errMsg != "" {
+		b.reply(msg, errMsg)
 
 		return
 	}
@@ -515,6 +400,63 @@ func (b *Bot) handleTarget(ctx context.Context, msg *tgbotapi.Message) {
 	}
 
 	b.reply(msg, fmt.Sprintf("✅ Target chat updated to <code>%d</code> (<b>%s</b>). A confirmation message has been sent to that channel.", chatID, html.EscapeString(chat.Title)))
+}
+
+func (b *Bot) resolveTargetChat(args string) (int64, tgbotapi.Chat, string) {
+	if strings.HasPrefix(args, "@") {
+		return b.resolveTargetChatByUsername(args)
+	}
+
+	return b.resolveTargetChatByID(args)
+}
+
+func (b *Bot) resolveTargetChatByUsername(args string) (int64, tgbotapi.Chat, string) {
+	chat, err := b.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{SuperGroupUsername: args}})
+	if err != nil {
+		username := strings.TrimPrefix(args, "@")
+
+		chat, err = b.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{SuperGroupUsername: username}})
+		if err != nil {
+			return 0, tgbotapi.Chat{}, fmt.Sprintf("❌ Could not find chat %s: %s. Make sure the bot is an administrator in the channel.", html.EscapeString(args), html.EscapeString(err.Error()))
+		}
+	}
+
+	return chat.ID, chat, ""
+}
+
+func (b *Bot) resolveTargetChatByID(args string) (int64, tgbotapi.Chat, string) {
+	chatID, err := strconv.ParseInt(args, 10, 64)
+	if err != nil {
+		return 0, tgbotapi.Chat{}, "❌ Invalid channel ID. It should be a number (don't forget the <code>-100</code> prefix for channels) or a <code>@username</code>."
+	}
+
+	chat, err := b.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}})
+	if err == nil {
+		return chatID, chat, ""
+	}
+
+	if chatID <= 0 {
+		return 0, tgbotapi.Chat{}, fmt.Sprintf("❌ Could not find chat %d: %s. Make sure the bot is added to the chat.", chatID, html.EscapeString(err.Error()))
+	}
+
+	altID, _ := strconv.ParseInt("-100"+strconv.FormatInt(chatID, 10), 10, 64) //nolint:errcheck // concatenation always valid
+
+	chat, errAlt := b.api.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: altID}})
+	if errAlt != nil {
+		return 0, tgbotapi.Chat{}, fmt.Sprintf("❌ Could not find chat %d (nor %d): %s. Make sure the bot is added to the chat.", chatID, altID, html.EscapeString(errAlt.Error()))
+	}
+
+	return altID, chat, ""
+}
+
+func (b *Bot) verifyTargetChatPermissions(chatID int64, chat tgbotapi.Chat) string {
+	testMsg := tgbotapi.NewMessage(chatID, "✅ This channel has been set as the target for digest posts.")
+
+	if _, err := b.api.Send(testMsg); err != nil {
+		return fmt.Sprintf("❌ Found chat <b>%s</b> but could not send a message to it: %s. Make sure the bot is an administrator with permission to post messages.", html.EscapeString(chat.Title), html.EscapeString(err.Error()))
+	}
+
+	return ""
 }
 
 func (b *Bot) handleWindow(ctx context.Context, msg *tgbotapi.Message) {
@@ -924,21 +866,7 @@ func (b *Bot) handleRatings(ctx context.Context, msg *tgbotapi.Message) {
 }
 
 func (b *Bot) handleRatingsSummary(ctx context.Context, msg *tgbotapi.Message, args []string) {
-	days := DefaultRatingsDays
-	limit := DefaultRatingsLimit
-
-	if len(args) > 0 {
-		if v, err := strconv.Atoi(args[0]); err == nil && v > 0 {
-			days = v
-		}
-	}
-
-	if len(args) > 1 {
-		if v, err := strconv.Atoi(args[1]); err == nil && v > 0 {
-			limit = v
-		}
-	}
-
+	days, limit := parseRatingsDaysLimit(args)
 	since := time.Now().AddDate(0, 0, -days)
 
 	summaries, err := b.database.GetItemRatingSummary(ctx, since)
@@ -954,36 +882,24 @@ func (b *Bot) handleRatingsSummary(ctx context.Context, msg *tgbotapi.Message, a
 		return
 	}
 
-	totalGood := 0
-	totalBad := 0
-	totalIrrelevant := 0
-	totalAll := 0
-
-	for _, s := range summaries {
-		totalGood += s.GoodCount
-		totalBad += s.BadCount
-		totalIrrelevant += s.IrrelevantCount
-		totalAll += s.TotalCount
-	}
+	totalGood, totalBad, totalIrrelevant, totalAll := computeRatingTotals(summaries)
 
 	if limit > len(summaries) {
 		limit = len(summaries)
 	}
 
+	b.reply(msg, formatRatingsSummaryOutput(days, limit, summaries, totalGood, totalBad, totalIrrelevant, totalAll))
+}
+
+func formatRatingsSummaryOutput(days, limit int, summaries []db.RatingSummary, good, bad, irrelevant, total int) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("⭐ <b>Item Ratings (last %d days)</b>\n\n", days))
-	sb.WriteString(fmt.Sprintf("Total: <code>%d</code> (good %d | bad %d | irrelevant %d)\n\n", totalAll, totalGood, totalBad, totalIrrelevant))
+	sb.WriteString(fmt.Sprintf("Total: <code>%d</code> (good %d | bad %d | irrelevant %d)\n\n", total, good, bad, irrelevant))
 
 	for i := 0; i < limit; i++ {
 		s := summaries[i]
-
-		name := s.ChannelID
-		if s.Username != "" {
-			name = "@" + s.Username
-		} else if s.Title != "" {
-			name = s.Title
-		}
+		name := formatRatingsChannelName(s.ChannelID, s.Username, s.Title)
 
 		reliability := DefaultReliabilityZero
 		if s.TotalCount > 0 {
@@ -994,7 +910,7 @@ func (b *Bot) handleRatingsSummary(ctx context.Context, msg *tgbotapi.Message, a
 			html.EscapeString(name), s.TotalCount, s.GoodCount, s.BadCount, s.IrrelevantCount, reliability))
 	}
 
-	b.reply(msg, sb.String())
+	return sb.String()
 }
 
 func (b *Bot) handleRatingsStats(ctx context.Context, msg *tgbotapi.Message, args []string) {
@@ -1005,6 +921,7 @@ func (b *Bot) handleRatingsStats(ctx context.Context, msg *tgbotapi.Message, arg
 			limit = v
 		} else {
 			b.reply(msg, "Usage: <code>/ratings stats [limit]</code>")
+
 			return
 		}
 	}
@@ -1012,20 +929,27 @@ func (b *Bot) handleRatingsStats(ctx context.Context, msg *tgbotapi.Message, arg
 	entries, err := b.database.GetLatestChannelRatingStats(ctx, limit)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching rating stats: %s", html.EscapeString(err.Error())))
+
 		return
 	}
 
 	if len(entries) == 0 {
 		b.reply(msg, "No aggregated rating stats yet. The weekly job updates these automatically.")
+
 		return
 	}
 
 	global, err := b.database.GetLatestGlobalRatingStats(ctx)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching global rating stats: %s", html.EscapeString(err.Error())))
+
 		return
 	}
 
+	b.reply(msg, formatRatingsStatsOutput(entries, global))
+}
+
+func formatRatingsStatsOutput(entries []db.RatingStatsSummary, global *db.GlobalRatingStats) string {
 	periodStart := entries[0].PeriodStart
 	periodEnd := entries[0].PeriodEnd
 
@@ -1042,28 +966,10 @@ func (b *Bot) handleRatingsStats(ctx context.Context, msg *tgbotapi.Message, arg
 		periodEnd.Format(DateFormatYMD),
 	))
 
-	if global != nil {
-		reliability := DefaultReliabilityZero
-		if global.WeightedTotal > 0 {
-			reliability = global.WeightedGood / global.WeightedTotal
-		}
-
-		sb.WriteString(fmt.Sprintf("Global: <code>%.2f</code> (w %.1f | n %d)\n\n",
-			reliability,
-			global.WeightedTotal,
-			global.RatingCount,
-		))
-	} else {
-		sb.WriteString("Global: <code>n/a</code>\n\n")
-	}
+	formatGlobalStats(&sb, global)
 
 	for _, entry := range entries {
-		name := entry.ChannelID
-		if entry.Username != "" {
-			name = "@" + entry.Username
-		} else if entry.Title != "" {
-			name = entry.Title
-		}
+		name := formatRatingsChannelName(entry.ChannelID, entry.Username, entry.Title)
 
 		reliability := DefaultReliabilityZero
 		if entry.WeightedTotal > 0 {
@@ -1078,7 +984,26 @@ func (b *Bot) handleRatingsStats(ctx context.Context, msg *tgbotapi.Message, arg
 		))
 	}
 
-	b.reply(msg, sb.String())
+	return sb.String()
+}
+
+func formatGlobalStats(sb *strings.Builder, global *db.GlobalRatingStats) {
+	if global == nil {
+		sb.WriteString("Global: <code>n/a</code>\n\n")
+
+		return
+	}
+
+	reliability := DefaultReliabilityZero
+	if global.WeightedTotal > 0 {
+		reliability = global.WeightedGood / global.WeightedTotal
+	}
+
+	fmt.Fprintf(sb, "Global: <code>%.2f</code> (w %.1f | n %d)\n\n",
+		reliability,
+		global.WeightedTotal,
+		global.RatingCount,
+	)
 }
 
 func (b *Bot) handleScores(ctx context.Context, msg *tgbotapi.Message) {
@@ -1127,45 +1052,83 @@ func (b *Bot) handleScores(ctx context.Context, msg *tgbotapi.Message) {
 }
 
 func (b *Bot) handleScoresDebug(ctx context.Context, msg *tgbotapi.Message, args []string) {
-	hours := DefaultScoresHours
+	hours, valid := parseScoresDebugArgs(args)
+	if !valid {
+		b.reply(msg, MsgScoresDebugUsage)
 
-	if len(args) > 0 {
-		if len(args) > 1 {
-			b.reply(msg, MsgScoresDebugUsage)
-			return
-		}
-
-		if v, err := strconv.Atoi(args[0]); err == nil && v > 0 {
-			hours = v
-		} else {
-			b.reply(msg, MsgScoresDebugUsage)
-			return
-		}
+		return
 	}
 
 	since := time.Now().Add(-time.Duration(hours) * time.Hour)
 
-	stats, err := b.database.GetItemStatusStats(ctx, since)
+	debugStats, err := b.database.GetScoreDebugStats(ctx, since)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching score stats: %s", html.EscapeString(err.Error())))
+
 		return
 	}
 
-	if stats.Total == 0 {
-		b.reply(msg, fmt.Sprintf("No items in the last %d hours.", hours))
+	itemStats, err := b.database.GetItemStatusStats(ctx, since)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error fetching item stats: %s", html.EscapeString(err.Error())))
+
 		return
 	}
+
+	if debugStats.RawTotal == 0 && itemStats.Total == 0 {
+		b.reply(msg, fmt.Sprintf("No messages in the last %d hours.", hours))
+
+		return
+	}
+
+	b.reply(msg, formatScoresDebugOutput(hours, debugStats, itemStats))
+}
+
+func parseScoresDebugArgs(args []string) (int, bool) {
+	if len(args) == 0 {
+		return DefaultScoresHours, true
+	}
+
+	if len(args) > 1 {
+		return 0, false
+	}
+
+	v, err := strconv.Atoi(args[0])
+	if err != nil || v <= 0 {
+		return 0, false
+	}
+
+	return v, true
+}
+
+func formatScoresDebugOutput(hours int, debugStats db.ScoreDebugStats, itemStats db.ItemStatusStats) string {
+	rawUnprocessed := debugStats.RawTotal - debugStats.RawProcessed
+	if rawUnprocessed < 0 {
+		rawUnprocessed = 0
+	}
+
+	droppedBeforeItem := debugStats.RawProcessed - debugStats.ItemsTotal
+	if droppedBeforeItem < 0 {
+		droppedBeforeItem = 0
+	}
+
+	gateTotal := debugStats.GateRelevant + debugStats.GateIrrelevant
 
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("📊 <b>Item Status (last %d hours)</b>\n\n", hours))
-	sb.WriteString(fmt.Sprintf("Total items: <code>%d</code>\n", stats.Total))
-	sb.WriteString(fmt.Sprintf("Ready (pending): <code>%d</code>\n", stats.ReadyPending))
-	sb.WriteString(fmt.Sprintf("Ready (digested): <code>%d</code>\n", stats.ReadyDigested))
-	sb.WriteString(fmt.Sprintf("Rejected: <code>%d</code>\n", stats.Rejected))
-	sb.WriteString(fmt.Sprintf("Error: <code>%d</code>\n", stats.Error))
+	sb.WriteString(fmt.Sprintf("Raw messages: <code>%d</code>\n", debugStats.RawTotal))
+	sb.WriteString(fmt.Sprintf("Processed: <code>%d</code>\n", debugStats.RawProcessed))
+	sb.WriteString(fmt.Sprintf("Unprocessed: <code>%d</code>\n", rawUnprocessed))
+	sb.WriteString(fmt.Sprintf("Dropped before item: <code>%d</code>\n", droppedBeforeItem))
+	sb.WriteString(fmt.Sprintf("Items created: <code>%d</code>\n\n", itemStats.Total))
+	sb.WriteString(fmt.Sprintf("Ready (pending): <code>%d</code>\n", itemStats.ReadyPending))
+	sb.WriteString(fmt.Sprintf("Ready (digested): <code>%d</code>\n", itemStats.ReadyDigested))
+	sb.WriteString(fmt.Sprintf("Rejected: <code>%d</code>\n", itemStats.Rejected))
+	sb.WriteString(fmt.Sprintf("Error: <code>%d</code>\n", itemStats.Error))
+	sb.WriteString(fmt.Sprintf("\nRelevance gate decisions: <code>%d</code> (rel %d | irrel %d)\n", gateTotal, debugStats.GateRelevant, debugStats.GateIrrelevant))
 
-	b.reply(msg, sb.String())
+	return sb.String()
 }
 
 func parseScoresArgs(args []string) (hours, limit int) {
@@ -1242,6 +1205,51 @@ func formatScoreItem(sb *strings.Builder, item db.ItemScore, threshold float32) 
 		html.EscapeString(name),
 		summary,
 	)
+}
+
+// parseRatingsDaysLimit parses days and limit from args for ratings commands.
+func parseRatingsDaysLimit(args []string) (days, limit int) {
+	days = DefaultRatingsDays
+	limit = DefaultRatingsLimit
+
+	if len(args) > 0 {
+		if v, err := strconv.Atoi(args[0]); err == nil && v > 0 {
+			days = v
+		}
+	}
+
+	if len(args) > 1 {
+		if v, err := strconv.Atoi(args[1]); err == nil && v > 0 {
+			limit = v
+		}
+	}
+
+	return days, limit
+}
+
+// computeRatingTotals calculates aggregate totals from rating summaries.
+func computeRatingTotals(summaries []db.RatingSummary) (good, bad, irrelevant, total int) {
+	for _, s := range summaries {
+		good += s.GoodCount
+		bad += s.BadCount
+		irrelevant += s.IrrelevantCount
+		total += s.TotalCount
+	}
+
+	return good, bad, irrelevant, total
+}
+
+// formatRatingsChannelName formats a channel name for display in ratings.
+func formatRatingsChannelName(channelID, username, title string) string {
+	if username != "" {
+		return "@" + username
+	}
+
+	if title != "" {
+		return title
+	}
+
+	return channelID
 }
 
 func (b *Bot) handlePrompt(ctx context.Context, msg *tgbotapi.Message) {
@@ -1544,22 +1552,15 @@ func (b *Bot) handleChannelRelevance(ctx context.Context, msg *tgbotapi.Message)
 
 	identifier := strings.TrimPrefix(args[0], "@")
 
-	if len(args) == 1 && (identifier == SubCmdAuto || identifier == WeightOverrideManual || identifier == ToggleOff || identifier == "on") {
+	if isRelevanceKeyword(identifier) && len(args) == 1 {
 		b.reply(msg, "Missing channel identifier.\nUsage: <code>/channel relevance @username</code>")
 
 		return
 	}
 
-	channels, err := b.database.GetActiveChannels(ctx)
-	if err != nil {
-		b.reply(msg, fmt.Sprintf("❌ Error fetching channels: %s", html.EscapeString(err.Error())))
-
-		return
-	}
-
-	channel := findChannelByIdentifier(channels, identifier)
-	if channel == nil {
-		b.reply(msg, fmt.Sprintf(ErrChannelNotFoundFmt, html.EscapeString(identifier)))
+	channel, errMsg := b.lookupChannel(ctx, identifier)
+	if errMsg != "" {
+		b.reply(msg, errMsg)
 
 		return
 	}
@@ -1570,9 +1571,29 @@ func (b *Bot) handleChannelRelevance(ctx context.Context, msg *tgbotapi.Message)
 		return
 	}
 
-	action := strings.ToLower(args[1])
+	b.dispatchRelevanceAction(ctx, msg, channel, identifier, args[1])
+}
 
-	switch action {
+func isRelevanceKeyword(s string) bool {
+	return s == SubCmdAuto || s == WeightOverrideManual || s == ToggleOff || s == "on"
+}
+
+func (b *Bot) lookupChannel(ctx context.Context, identifier string) (*db.Channel, string) {
+	channels, err := b.database.GetActiveChannels(ctx)
+	if err != nil {
+		return nil, fmt.Sprintf("❌ Error fetching channels: %s", html.EscapeString(err.Error()))
+	}
+
+	channel := findChannelByIdentifier(channels, identifier)
+	if channel == nil {
+		return nil, fmt.Sprintf(ErrChannelNotFoundFmt, html.EscapeString(identifier))
+	}
+
+	return channel, ""
+}
+
+func (b *Bot) dispatchRelevanceAction(ctx context.Context, msg *tgbotapi.Message, channel *db.Channel, identifier, action string) {
+	switch strings.ToLower(action) {
 	case "auto", "on", "enable":
 		b.setChannelAutoRelevance(ctx, msg, channel, identifier, true)
 	case WeightOverrideManual, ToggleOff, "disable":
@@ -2195,21 +2216,7 @@ func (b *Bot) handleSettings(ctx context.Context, msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 
 	if len(args) > 0 && args[0] == SubCmdReset {
-		if len(args) < 2 {
-			b.reply(msg, "Usage: <code>/settings reset &lt;key&gt;</code>")
-
-			return
-		}
-
-		key := args[1]
-
-		if err := b.database.DeleteSettingWithHistory(ctx, key, msg.From.ID); err != nil {
-			b.reply(msg, fmt.Sprintf("❌ Error resetting setting: %s", html.EscapeString(err.Error())))
-
-			return
-		}
-
-		b.reply(msg, fmt.Sprintf("✅ Setting <code>%s</code> has been reset to default (env var value).", html.EscapeString(key)))
+		b.handleSettingsReset(ctx, msg, args)
 
 		return
 	}
@@ -2277,6 +2284,24 @@ func (b *Bot) handleSettings(ctx context.Context, msg *tgbotapi.Message) {
 	sb.WriteString(TipSettingsReset)
 
 	b.reply(msg, sb.String())
+}
+
+func (b *Bot) handleSettingsReset(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) < 2 {
+		b.reply(msg, "Usage: <code>/settings reset &lt;key&gt;</code>")
+
+		return
+	}
+
+	key := args[1]
+
+	if err := b.database.DeleteSettingWithHistory(ctx, key, msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error resetting setting: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	b.reply(msg, fmt.Sprintf("✅ Setting <code>%s</code> has been reset to default (env var value).", html.EscapeString(key)))
 }
 
 func (b *Bot) handleHelp(_ context.Context, msg *tgbotapi.Message) {
@@ -2515,40 +2540,75 @@ func (b *Bot) handleDiscoverList(ctx context.Context, msg *tgbotapi.Message) {
 		return
 	}
 
+	text := formatDiscoveryList(discoveries)
+	rows := buildDiscoveryKeyboard(discoveries)
+
+	reply := tgbotapi.NewMessage(msg.Chat.ID, text)
+	reply.ParseMode = tgbotapi.ModeHTML
+
+	if len(rows) > 0 {
+		reply.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
+	}
+
+	if _, err := b.api.Send(reply); err != nil {
+		b.logger.Error().Err(err).Msg("failed to send discover list")
+	}
+}
+
+func formatDiscoveryList(discoveries []db.DiscoveredChannel) string {
 	var sb strings.Builder
 
 	sb.WriteString("🔍 <b>Pending Channel Discoveries</b>\n\n")
 
 	for _, d := range discoveries {
-		identifier := ""
-		if d.Username != "" {
-			identifier = "@" + d.Username
-		} else if d.TGPeerID != 0 {
-			identifier = fmt.Sprintf("ID:%d", d.TGPeerID)
-		} else if d.InviteLink != "" {
-			identifier = "[invite link]"
-		}
-
-		title := d.Title
-		if title == "" {
-			title = "Unknown"
-		}
-
-		sb.WriteString(fmt.Sprintf("• <b>%s</b> (%s)\n", html.EscapeString(title), html.EscapeString(identifier)))
-
-		// Build info line with engagement if available
-		infoLine := fmt.Sprintf("  Source: %s | Seen: %dx", d.SourceType, d.DiscoveryCount)
-		if d.MaxViews > 0 || d.MaxForwards > 0 {
-			infoLine += fmt.Sprintf(" | Engagement: %dv/%df", d.MaxViews, d.MaxForwards)
-		}
-
-		infoLine += fmt.Sprintf(" | Last: %s\n\n", d.LastSeenAt.Format("Jan 02"))
-		sb.WriteString(infoLine)
+		sb.WriteString(formatDiscoveryItem(d))
 	}
 
 	sb.WriteString("\n💡 <i>Use <code>/discover approve @username</code> or <code>/discover reject @username</code></i>")
 
-	// Build inline keyboard with approve/reject buttons for username-based discoveries
+	return sb.String()
+}
+
+func formatDiscoveryItem(d db.DiscoveredChannel) string {
+	identifier := formatDiscoveryIdentifier(d)
+
+	title := d.Title
+	if title == "" {
+		title = "Unknown"
+	}
+
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("• <b>%s</b> (%s)\n", html.EscapeString(title), html.EscapeString(identifier)))
+
+	infoLine := fmt.Sprintf("  Source: %s | Seen: %dx", d.SourceType, d.DiscoveryCount)
+	if d.MaxViews > 0 || d.MaxForwards > 0 {
+		infoLine += fmt.Sprintf(" | Engagement: %dv/%df", d.MaxViews, d.MaxForwards)
+	}
+
+	infoLine += fmt.Sprintf(" | Last: %s\n\n", d.LastSeenAt.Format("Jan 02"))
+	sb.WriteString(infoLine)
+
+	return sb.String()
+}
+
+func formatDiscoveryIdentifier(d db.DiscoveredChannel) string {
+	if d.Username != "" {
+		return "@" + d.Username
+	}
+
+	if d.TGPeerID != 0 {
+		return fmt.Sprintf("ID:%d", d.TGPeerID)
+	}
+
+	if d.InviteLink != "" {
+		return "[invite link]"
+	}
+
+	return ""
+}
+
+func buildDiscoveryKeyboard(discoveries []db.DiscoveredChannel) [][]tgbotapi.InlineKeyboardButton {
 	var rows [][]tgbotapi.InlineKeyboardButton
 
 	for _, d := range discoveries {
@@ -2561,16 +2621,7 @@ func (b *Bot) handleDiscoverList(ctx context.Context, msg *tgbotapi.Message) {
 		}
 	}
 
-	reply := tgbotapi.NewMessage(msg.Chat.ID, sb.String())
-	reply.ParseMode = tgbotapi.ModeHTML
-
-	if len(rows) > 0 {
-		reply.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(rows...)
-	}
-
-	if _, err := b.api.Send(reply); err != nil {
-		b.logger.Error().Err(err).Msg("failed to send discover list")
-	}
+	return rows
 }
 
 func (b *Bot) handleDiscoverApprove(ctx context.Context, msg *tgbotapi.Message, username string) {

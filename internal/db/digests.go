@@ -32,7 +32,7 @@ func (db *DB) GetItemsForWindow(ctx context.Context, start, end time.Time, impor
 		TgDate:          toTimestamptz(start),
 		TgDate_2:        toTimestamptz(end),
 		ImportanceScore: importanceThreshold,
-		Limit:           int32(limit),
+		Limit:           safeIntToInt32(limit),
 	})
 	if err != nil {
 		return nil, err

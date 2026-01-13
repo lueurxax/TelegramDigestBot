@@ -77,11 +77,9 @@ func CalculateAutoWeight(stats *db.RollingStats, cfg AutoWeightConfig, days int)
 	return weight
 }
 
-// UpdateAutoWeights recalculates weights for all eligible channels
-func (s *Scheduler) UpdateAutoWeights(ctx context.Context, logger *zerolog.Logger) error {
+func (s *Scheduler) loadAutoWeightConfig(ctx context.Context, logger *zerolog.Logger) AutoWeightConfig {
 	cfg := DefaultAutoWeightConfig()
 
-	// Load config overrides from settings
 	if err := s.database.GetSetting(ctx, "auto_weight_min_messages", &cfg.MinMessages); err != nil {
 		logger.Debug().Err(err).Msg("using default min_messages for auto-weight")
 	}
@@ -102,7 +100,13 @@ func (s *Scheduler) UpdateAutoWeights(ctx context.Context, logger *zerolog.Logge
 		logger.Debug().Err(err).Msg("using default rolling_days for auto-weight")
 	}
 
-	// Get channels eligible for auto-weight
+	return cfg
+}
+
+// UpdateAutoWeights recalculates weights for all eligible channels
+func (s *Scheduler) UpdateAutoWeights(ctx context.Context, logger *zerolog.Logger) error {
+	cfg := s.loadAutoWeightConfig(ctx, logger)
+
 	channels, err := s.database.GetChannelsForAutoWeight(ctx)
 	if err != nil {
 		return err

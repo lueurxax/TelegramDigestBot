@@ -18,11 +18,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 		return nil
 	}
 
-	// Safety cap to avoid O(n²) explosion if TopN is misconfigured
-	if len(items) > ClusterMaxItemsLimit {
-		logger.Warn().Int(LogFieldCount, len(items)).Msg("Too many items to cluster, limiting to first 500")
-		items = items[:ClusterMaxItemsLimit]
-	}
+	items = s.limitClusterItems(items, logger)
 
 	// Clean up old clusters for this window to prevent duplicates on retries
 	if err := s.database.DeleteClustersForWindow(ctx, start, end); err != nil {
@@ -30,58 +26,99 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	}
 
 	cfg := s.getClusteringConfig(ctx, logger)
-	topicIndex := s.getTopicIndex(items)
-	topicGroups := s.getTopicGroups(items)
-	embeddings := s.getEmbeddings(ctx, items, logger)
-	assigned := make(map[string]bool)
+	clusterCtx := &clusterBuildContext{
+		topicIndex: s.getTopicIndex(items),
+		topicGroups: s.getTopicGroups(items),
+		embeddings: s.getEmbeddings(ctx, items, logger),
+		assigned:   make(map[string]bool),
+		allItems:   items,
+		cfg:        cfg,
+	}
 
-	for topic, groupItems := range topicGroups {
-		for _, itemA := range groupItems {
-			if assigned[itemA.ID] {
-				continue
-			}
+	for topic, groupItems := range clusterCtx.topicGroups {
+		if err := s.processTopicGroup(ctx, topic, groupItems, clusterCtx, start, end, logger); err != nil {
+			return err
+		}
+	}
 
-			clusterItemsList := s.findClusterItems(itemA, groupItems, items, assigned, embeddings, topicIndex, cfg)
+	return nil
+}
 
-			assigned[itemA.ID] = true
+type clusterBuildContext struct {
+	topicIndex  map[string]string
+	topicGroups map[string][]db.Item
+	embeddings  map[string][]float32
+	assigned    map[string]bool
+	allItems    []db.Item
+	cfg         clusteringConfig
+}
 
-			// Reject clusters with coherence < 0.7 if they have more than 2 items
-			coherence := s.calculateCoherence(clusterItemsList, embeddings)
+func (s *Scheduler) limitClusterItems(items []db.Item, logger *zerolog.Logger) []db.Item {
+	if len(items) > ClusterMaxItemsLimit {
+		logger.Warn().Int(LogFieldCount, len(items)).Msg("Too many items to cluster, limiting to first 500")
+		return items[:ClusterMaxItemsLimit]
+	}
 
-			if len(clusterItemsList) > 2 && coherence < cfg.coherenceThreshold {
-				logger.Debug().Float32("coherence", coherence).Int("size", len(clusterItemsList)).Msg("Rejecting cluster due to low coherence")
-				// Only keep the first item, mark others as unassigned for later
-				for k := 1; k < len(clusterItemsList); k++ {
-					assigned[clusterItemsList[k].ID] = false
-				}
+	return items
+}
 
-				clusterItemsList = clusterItemsList[:1]
-			}
+func (s *Scheduler) processTopicGroup(ctx context.Context, topic string, groupItems []db.Item, bc *clusterBuildContext, start, end time.Time, logger *zerolog.Logger) error {
+	for _, itemA := range groupItems {
+		if bc.assigned[itemA.ID] {
+			continue
+		}
 
-			if len(clusterItemsList) <= 1 {
-				continue
-			}
+		clusterItemsList := s.findClusterItems(itemA, groupItems, bc.allItems, bc.assigned, bc.embeddings, bc.topicIndex, bc.cfg)
+		bc.assigned[itemA.ID] = true
 
-			s.sortClusterItems(clusterItemsList)
+		clusterItemsList = s.validateClusterCoherence(clusterItemsList, bc, logger)
+		if len(clusterItemsList) <= 1 {
+			continue
+		}
 
-			logger.Debug().
-				Int("cluster_size", len(clusterItemsList)).
-				Str("representative", clusterItemsList[0].ID).
-				Float32("rep_importance", clusterItemsList[0].ImportanceScore).
-				Msg("Cluster representative selected")
+		if err := s.persistCluster(ctx, clusterItemsList, topic, bc.cfg, start, end, logger); err != nil {
+			return err
+		}
+	}
 
-			clusterTopic := s.generateClusterTopic(ctx, clusterItemsList, topic, cfg.digestLanguage, cfg.smartLLMModel)
+	return nil
+}
 
-			clusterID, err := s.database.CreateCluster(ctx, start, end, clusterTopic)
-			if err != nil {
-				return err
-			}
+func (s *Scheduler) validateClusterCoherence(clusterItemsList []db.Item, bc *clusterBuildContext, logger *zerolog.Logger) []db.Item {
+	coherence := s.calculateCoherence(clusterItemsList, bc.embeddings)
 
-			for _, it := range clusterItemsList {
-				if err := s.database.AddToCluster(ctx, clusterID, it.ID); err != nil {
-					logger.Error().Err(err).Msg("failed to add item to cluster")
-				}
-			}
+	if len(clusterItemsList) > 2 && coherence < bc.cfg.coherenceThreshold {
+		logger.Debug().Float32("coherence", coherence).Int("size", len(clusterItemsList)).Msg("Rejecting cluster due to low coherence")
+
+		for k := 1; k < len(clusterItemsList); k++ {
+			bc.assigned[clusterItemsList[k].ID] = false
+		}
+
+		return clusterItemsList[:1]
+	}
+
+	return clusterItemsList
+}
+
+func (s *Scheduler) persistCluster(ctx context.Context, clusterItemsList []db.Item, topic string, cfg clusteringConfig, start, end time.Time, logger *zerolog.Logger) error {
+	s.sortClusterItems(clusterItemsList)
+
+	logger.Debug().
+		Int("cluster_size", len(clusterItemsList)).
+		Str("representative", clusterItemsList[0].ID).
+		Float32("rep_importance", clusterItemsList[0].ImportanceScore).
+		Msg("Cluster representative selected")
+
+	clusterTopic := s.generateClusterTopic(ctx, clusterItemsList, topic, cfg.digestLanguage, cfg.smartLLMModel)
+
+	clusterID, err := s.database.CreateCluster(ctx, start, end, clusterTopic)
+	if err != nil {
+		return err
+	}
+
+	for _, it := range clusterItemsList {
+		if err := s.database.AddToCluster(ctx, clusterID, it.ID); err != nil {
+			logger.Error().Err(err).Msg("failed to add item to cluster")
 		}
 	}
 
@@ -106,53 +143,55 @@ func (s *Scheduler) getClusteringConfig(ctx context.Context, logger *zerolog.Log
 		coherenceThreshold:  float32(s.cfg.ClusterCoherenceThreshold),
 	}
 
-	if err := s.database.GetSetting(ctx, "cluster_similarity_threshold", &cfg.similarityThreshold); err != nil {
-		logger.Debug().Err(err).Msg("could not get cluster_similarity_threshold from DB")
+	s.loadClusteringConfigFromDB(ctx, logger, &cfg)
+	s.applyClusteringDefaults(&cfg)
+
+	return cfg
+}
+
+func (s *Scheduler) loadClusteringConfigFromDB(ctx context.Context, logger *zerolog.Logger, cfg *clusteringConfig) {
+	loadSetting := func(key string, target interface{}, logMsg string) {
+		if err := s.database.GetSetting(ctx, key, target); err != nil {
+			logger.Debug().Err(err).Msg(logMsg)
+		}
 	}
 
+	loadSetting("cluster_similarity_threshold", &cfg.similarityThreshold, "could not get cluster_similarity_threshold from DB")
+	loadSetting("cross_topic_clustering_enabled", &cfg.crossTopicEnabled, "could not get cross_topic_clustering_enabled from DB")
+	loadSetting("cross_topic_similarity_threshold", &cfg.crossTopicThreshold, "could not get cross_topic_similarity_threshold from DB")
+
+	var coherence float64
+
+	loadSetting("cluster_coherence_threshold", &coherence, "could not get cluster_coherence_threshold from DB")
+
+	if coherence > 0 {
+		cfg.coherenceThreshold = float32(coherence)
+	}
+
+	var clusterWindowHours float64
+
+	loadSetting("cluster_time_window_hours", &clusterWindowHours, "could not get cluster_time_window_hours from DB")
+
+	if clusterWindowHours > 0 {
+		cfg.clusterWindow = time.Duration(clusterWindowHours) * time.Hour
+	}
+
+	loadSetting(SettingDigestLanguage, &cfg.digestLanguage, MsgCouldNotGetDigestLanguage)
+	loadSetting(SettingSmartLLMModel, &cfg.smartLLMModel, MsgCouldNotGetSmartLLMModel)
+}
+
+func (s *Scheduler) applyClusteringDefaults(cfg *clusteringConfig) {
 	if cfg.similarityThreshold <= 0 {
 		cfg.similarityThreshold = float64(s.cfg.SimilarityThreshold)
-	}
-
-	if err := s.database.GetSetting(ctx, "cross_topic_clustering_enabled", &cfg.crossTopicEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get cross_topic_clustering_enabled from DB")
-	}
-
-	if err := s.database.GetSetting(ctx, "cross_topic_similarity_threshold", &cfg.crossTopicThreshold); err != nil {
-		logger.Debug().Err(err).Msg("could not get cross_topic_similarity_threshold from DB")
 	}
 
 	if cfg.crossTopicThreshold <= 0 {
 		cfg.crossTopicThreshold = cfg.similarityThreshold
 	}
 
-	var coherence float64
-	if err := s.database.GetSetting(ctx, "cluster_coherence_threshold", &coherence); err != nil {
-		logger.Debug().Err(err).Msg("could not get cluster_coherence_threshold from DB")
-	} else if coherence > 0 {
-		cfg.coherenceThreshold = float32(coherence)
-	}
-
 	if cfg.coherenceThreshold <= 0 {
 		cfg.coherenceThreshold = float32(ClusterDefaultCoherenceThreshold)
 	}
-
-	var clusterWindowHours float64
-	if err := s.database.GetSetting(ctx, "cluster_time_window_hours", &clusterWindowHours); err != nil {
-		logger.Debug().Err(err).Msg("could not get cluster_time_window_hours from DB")
-	} else if clusterWindowHours > 0 {
-		cfg.clusterWindow = time.Duration(clusterWindowHours) * time.Hour
-	}
-
-	if err := s.database.GetSetting(ctx, SettingDigestLanguage, &cfg.digestLanguage); err != nil {
-		logger.Debug().Err(err).Msg(MsgCouldNotGetDigestLanguage)
-	}
-
-	if err := s.database.GetSetting(ctx, SettingSmartLLMModel, &cfg.smartLLMModel); err != nil {
-		logger.Debug().Err(err).Msg(MsgCouldNotGetSmartLLMModel)
-	}
-
-	return cfg
 }
 
 func (s *Scheduler) getTopicIndex(items []db.Item) map[string]string {
@@ -204,39 +243,44 @@ func (s *Scheduler) findClusterItems(itemA db.Item, groupItems, allItems []db.It
 		candidateItems = allItems
 	}
 
+	topicA := topicIndex[itemA.ID]
+
 	for _, itemB := range candidateItems {
-		if itemB.ID == itemA.ID || assigned[itemB.ID] {
-			continue
-		}
-
-		embB, okB := embeddings[itemB.ID]
-		if !okB {
-			continue
-		}
-
-		topicA := topicIndex[itemA.ID]
-		topicB := topicIndex[itemB.ID]
-
-		if !cfg.crossTopicEnabled && topicA != topicB {
-			continue
-		}
-
-		if cfg.clusterWindow > 0 && !withinClusterWindow(itemA.TGDate, itemB.TGDate, cfg.clusterWindow) {
-			continue
-		}
-
-		threshold := cfg.similarityThreshold
-		if topicA != topicB {
-			threshold = cfg.crossTopicThreshold
-		}
-
-		if dedup.CosineSimilarity(embA, embB) > float32(threshold) {
+		if s.shouldAddToCluster(itemA, itemB, topicA, assigned, embeddings, topicIndex, cfg, embA) {
 			clusterItemsList = append(clusterItemsList, itemB)
 			assigned[itemB.ID] = true
 		}
 	}
 
 	return clusterItemsList
+}
+
+func (s *Scheduler) shouldAddToCluster(itemA, itemB db.Item, topicA string, assigned map[string]bool, embeddings map[string][]float32, topicIndex map[string]string, cfg clusteringConfig, embA []float32) bool {
+	if itemB.ID == itemA.ID || assigned[itemB.ID] {
+		return false
+	}
+
+	embB, okB := embeddings[itemB.ID]
+	if !okB {
+		return false
+	}
+
+	topicB := topicIndex[itemB.ID]
+
+	if !cfg.crossTopicEnabled && topicA != topicB {
+		return false
+	}
+
+	if cfg.clusterWindow > 0 && !withinClusterWindow(itemA.TGDate, itemB.TGDate, cfg.clusterWindow) {
+		return false
+	}
+
+	threshold := cfg.similarityThreshold
+	if topicA != topicB {
+		threshold = cfg.crossTopicThreshold
+	}
+
+	return dedup.CosineSimilarity(embA, embB) > float32(threshold)
 }
 
 func (s *Scheduler) sortClusterItems(clusterItemsList []db.Item) {

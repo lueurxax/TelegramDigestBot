@@ -89,7 +89,7 @@ func (db *DB) MarkItemsAsDigested(ctx context.Context, ids []string) error {
 }
 
 func (db *DB) GetRecentErrors(ctx context.Context, limit int) ([]Item, error) {
-	rows, err := db.Queries.GetRecentErrors(ctx, int32(limit))
+	rows, err := db.Queries.GetRecentErrors(ctx, safeIntToInt32(limit))
 	if err != nil {
 		return nil, err
 	}

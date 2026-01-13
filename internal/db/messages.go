@@ -46,7 +46,7 @@ func (db *DB) SaveRawMessage(ctx context.Context, msg *RawMessage) error {
 }
 
 func (db *DB) GetUnprocessedMessages(ctx context.Context, limit int) ([]RawMessage, error) {
-	sqlcMessages, err := db.Queries.GetUnprocessedMessages(ctx, int32(limit))
+	sqlcMessages, err := db.Queries.GetUnprocessedMessages(ctx, safeIntToInt32(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (db *DB) GetRecentMessagesForChannel(ctx context.Context, channelID string,
 	rows, err := db.Queries.GetRecentMessagesForChannel(ctx, sqlc.GetRecentMessagesForChannelParams{
 		ChannelID: toUUID(channelID),
 		TgDate:    toTimestamptz(before),
-		Limit:     int32(limit),
+		Limit:     safeIntToInt32(limit),
 	})
 	if err != nil {
 		return nil, err

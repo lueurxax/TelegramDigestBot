@@ -42,9 +42,9 @@ func (db *DB) UpsertChannelStats(ctx context.Context, stats *ChannelStatsEntry) 
 		ChannelID:        toUUID(stats.ChannelID),
 		PeriodStart:      pgtype.Date{Time: stats.PeriodStart, Valid: true},
 		PeriodEnd:        pgtype.Date{Time: stats.PeriodEnd, Valid: true},
-		MessagesReceived: pgtype.Int4{Int32: int32(stats.MessagesReceived), Valid: true},
-		ItemsCreated:     pgtype.Int4{Int32: int32(stats.ItemsCreated), Valid: true},
-		ItemsDigested:    pgtype.Int4{Int32: int32(stats.ItemsDigested), Valid: true},
+		MessagesReceived: pgtype.Int4{Int32: safeIntToInt32(stats.MessagesReceived), Valid: true},
+		ItemsCreated:     pgtype.Int4{Int32: safeIntToInt32(stats.ItemsCreated), Valid: true},
+		ItemsDigested:    pgtype.Int4{Int32: safeIntToInt32(stats.ItemsDigested), Valid: true},
 		AvgImportance:    pgtype.Float8{Float64: stats.AvgImportance, Valid: stats.AvgImportance > 0},
 		AvgRelevance:     pgtype.Float8{Float64: stats.AvgRelevance, Valid: stats.AvgRelevance > 0},
 	})

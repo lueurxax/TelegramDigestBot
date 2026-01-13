@@ -72,12 +72,8 @@ func NewTelegramResolver(client *telegram.Client, database *db.DB) *TelegramReso
 }
 
 func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) (*TelegramContent, error) {
-	if r.client == nil {
-		return nil, ErrClientNotInitialized
-	}
-
-	if link.TelegramType != "post" {
-		return nil, fmt.Errorf(errFmtString, ErrUnsupportedTelegramLinkType, link.TelegramType)
+	if err := r.validateResolveRequest(link); err != nil {
+		return nil, err
 	}
 
 	if err := r.rateLimiter.Wait(ctx); err != nil {
@@ -86,58 +82,72 @@ func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) 
 
 	api := tg.NewClient(r.client)
 
-	// Resolve channel
-	var inputChannel *tg.InputChannel
-
-	var err error
-
-	if link.Username != "" {
-		inputChannel, err = r.resolveByUsername(ctx, api, link.Username)
-	} else if link.ChannelID != 0 {
-		inputChannel, err = r.resolveByID(ctx, link.ChannelID)
-	} else {
-		return nil, ErrNoUsernameOrChannelID
-	}
-
+	inputChannel, err := r.resolveChannel(ctx, api, link)
 	if err != nil {
 		return nil, err
 	}
 
-	// Fetch message
+	msg, channelMessages, err := r.fetchMessage(ctx, api, inputChannel, link.MessageID)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.buildTelegramContent(link.MessageID, msg, channelMessages), nil
+}
+
+func (r *TelegramResolver) validateResolveRequest(link *linkextract.Link) error {
+	if r.client == nil {
+		return ErrClientNotInitialized
+	}
+
+	if link.TelegramType != "post" {
+		return fmt.Errorf(errFmtString, ErrUnsupportedTelegramLinkType, link.TelegramType)
+	}
+
+	return nil
+}
+
+func (r *TelegramResolver) resolveChannel(ctx context.Context, api *tg.Client, link *linkextract.Link) (*tg.InputChannel, error) {
+	if link.Username != "" {
+		return r.resolveByUsername(ctx, api, link.Username)
+	}
+
+	if link.ChannelID != 0 {
+		return r.resolveByID(ctx, link.ChannelID)
+	}
+
+	return nil, ErrNoUsernameOrChannelID
+}
+
+func (r *TelegramResolver) fetchMessage(ctx context.Context, api *tg.Client, inputChannel *tg.InputChannel, messageID int64) (*tg.Message, *tg.MessagesChannelMessages, error) {
 	messages, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
 		Channel: inputChannel,
-		ID:      []tg.InputMessageClass{&tg.InputMessageID{ID: int(link.MessageID)}},
+		ID:      []tg.InputMessageClass{&tg.InputMessageID{ID: int(messageID)}},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get message: %w", err)
+		return nil, nil, fmt.Errorf("failed to get message: %w", err)
 	}
 
 	channelMessages, ok := messages.(*tg.MessagesChannelMessages)
 	if !ok || len(channelMessages.Messages) == 0 {
-		return nil, ErrMessageNotFound
+		return nil, nil, ErrMessageNotFound
 	}
 
 	msg, ok := channelMessages.Messages[0].(*tg.Message)
 	if !ok {
-		return nil, ErrUnexpectedMessageType
+		return nil, nil, ErrUnexpectedMessageType
 	}
 
-	// Get channel info
-	var channelTitle, channelUsername string
+	return msg, channelMessages, nil
+}
 
-	for _, chat := range channelMessages.Chats {
-		if ch, ok := chat.(*tg.Channel); ok {
-			channelTitle = ch.Title
-			channelUsername = ch.Username
-
-			break
-		}
-	}
+func (r *TelegramResolver) buildTelegramContent(messageID int64, msg *tg.Message, channelMessages *tg.MessagesChannelMessages) *TelegramContent {
+	channelTitle, channelUsername := extractChannelInfo(channelMessages.Chats)
 
 	result := &TelegramContent{
 		ChannelTitle:    channelTitle,
 		ChannelUsername: channelUsername,
-		MessageID:       link.MessageID,
+		MessageID:       messageID,
 		Text:            msg.Message,
 		Date:            time.Unix(int64(msg.Date), 0),
 		Views:           msg.Views,
@@ -146,18 +156,31 @@ func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) 
 
 	if msg.Media != nil {
 		result.HasMedia = true
+		result.MediaType = getMediaType(msg.Media)
+	}
 
-		switch msg.Media.(type) {
-		case *tg.MessageMediaPhoto:
-			result.MediaType = "photo"
-		case *tg.MessageMediaDocument:
-			result.MediaType = "document"
-		default:
-			result.MediaType = "other"
+	return result
+}
+
+func extractChannelInfo(chats []tg.ChatClass) (title, username string) {
+	for _, chat := range chats {
+		if ch, ok := chat.(*tg.Channel); ok {
+			return ch.Title, ch.Username
 		}
 	}
 
-	return result, nil
+	return "", ""
+}
+
+func getMediaType(media tg.MessageMediaClass) string {
+	switch media.(type) {
+	case *tg.MessageMediaPhoto:
+		return "photo"
+	case *tg.MessageMediaDocument:
+		return "document"
+	default:
+		return "other"
+	}
 }
 
 func (r *TelegramResolver) resolveByUsername(ctx context.Context, api *tg.Client, username string) (*tg.InputChannel, error) {

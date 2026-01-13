@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -117,5 +118,18 @@ func toInt8(i int64) pgtype.Int8 {
 }
 
 func toInt4(i int) pgtype.Int4 {
-	return pgtype.Int4{Int32: int32(i), Valid: true}
+	return pgtype.Int4{Int32: safeIntToInt32(i), Valid: true}
+}
+
+// safeIntToInt32 safely converts int to int32, clamping to valid range.
+func safeIntToInt32(i int) int32 {
+	if i > math.MaxInt32 {
+		return math.MaxInt32
+	}
+
+	if i < math.MinInt32 {
+		return math.MinInt32
+	}
+
+	return int32(i)
 }

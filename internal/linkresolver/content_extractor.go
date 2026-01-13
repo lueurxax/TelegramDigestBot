@@ -73,28 +73,7 @@ func extractMetaTags(htmlBytes []byte) MetaTags {
 
 	traverse = func(n *html.Node) {
 		if n.Type == html.ElementNode {
-			switch n.Data {
-			case "title":
-				if n.FirstChild != nil && n.FirstChild.Type == html.TextNode {
-					meta.Title = strings.TrimSpace(n.FirstChild.Data)
-				}
-			case "meta":
-				name, content := getMetaAttrs(n)
-				switch strings.ToLower(name) {
-				case "description":
-					meta.Description = content
-				case "author":
-					meta.Author = content
-				case "og:title":
-					meta.OGTitle = content
-				case "og:description":
-					meta.OGDescription = content
-				case "og:image":
-					meta.OGImage = content
-				case "article:published_time":
-					meta.PublishedTime = content
-				}
-			}
+			processMetaElement(n, &meta)
 		}
 
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -105,6 +84,36 @@ func extractMetaTags(htmlBytes []byte) MetaTags {
 	traverse(doc)
 
 	return meta
+}
+
+func processMetaElement(n *html.Node, meta *MetaTags) {
+	switch n.Data {
+	case "title":
+		if n.FirstChild != nil && n.FirstChild.Type == html.TextNode {
+			meta.Title = strings.TrimSpace(n.FirstChild.Data)
+		}
+	case "meta":
+		applyMetaTag(n, meta)
+	}
+}
+
+func applyMetaTag(n *html.Node, meta *MetaTags) {
+	name, content := getMetaAttrs(n)
+
+	switch strings.ToLower(name) {
+	case "description":
+		meta.Description = content
+	case "author":
+		meta.Author = content
+	case "og:title":
+		meta.OGTitle = content
+	case "og:description":
+		meta.OGDescription = content
+	case "og:image":
+		meta.OGImage = content
+	case "article:published_time":
+		meta.PublishedTime = content
+	}
 }
 
 func getMetaAttrs(n *html.Node) (string, string) {

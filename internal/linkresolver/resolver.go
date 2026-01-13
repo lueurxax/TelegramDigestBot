@@ -19,6 +19,9 @@ const (
 	defaultWebCacheTTLHours  = 24
 )
 
+// ErrUnsupportedLinkType indicates a link type that cannot be resolved.
+var ErrUnsupportedLinkType = errors.New("unsupported link type")
+
 type Resolver struct {
 	webFetcher *WebFetcher
 	tgResolver *TelegramResolver
@@ -84,11 +87,33 @@ func New(cfg *config.Config, database *db.DB, tgClient *telegram.Client, logger 
 
 func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, webTTL, tgTTL time.Duration) ([]db.ResolvedLink, error) {
 	links := linkextract.ExtractLinks(text)
-
 	if len(links) == 0 {
 		return nil, nil
 	}
 
+	params := r.normalizeResolveParams(maxLinks, webTTL, tgTTL)
+	if len(links) > params.maxLinks {
+		links = links[:params.maxLinks]
+	}
+
+	var results []db.ResolvedLink
+
+	for _, link := range links {
+		if resolved := r.resolveSingleLink(ctx, link, params); resolved != nil {
+			results = append(results, *resolved)
+		}
+	}
+
+	return results, nil
+}
+
+type resolveParams struct {
+	maxLinks int
+	webTTL   time.Duration
+	tgTTL    time.Duration
+}
+
+func (r *Resolver) normalizeResolveParams(maxLinks int, webTTL, tgTTL time.Duration) resolveParams {
 	if maxLinks <= 0 {
 		maxLinks = r.maxLinks
 	}
@@ -101,69 +126,68 @@ func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, 
 		tgTTL = r.tgCacheTTL
 	}
 
-	// Limit number of links
-	if len(links) > maxLinks {
-		links = links[:maxLinks]
+	return resolveParams{maxLinks: maxLinks, webTTL: webTTL, tgTTL: tgTTL}
+}
+
+func (r *Resolver) resolveSingleLink(ctx context.Context, link linkextract.Link, params resolveParams) *db.ResolvedLink {
+	// Check cache first
+	cached, err := r.database.GetLinkCache(ctx, link.URL)
+	if err == nil && cached != nil && time.Now().Before(cached.ExpiresAt) {
+		return cached
 	}
 
-	var results []db.ResolvedLink
-
-	for _, link := range links {
-		// Check cache first
-		cached, err := r.database.GetLinkCache(ctx, link.URL)
-		if err == nil && cached != nil && time.Now().Before(cached.ExpiresAt) {
-			results = append(results, *cached)
-			continue
-		}
-
-		// Resolve based on type
-		var resolved *db.ResolvedLink
-
-		switch link.Type {
-		case linkextract.LinkTypeWeb:
-			resolved, err = r.resolveWebLink(ctx, &link, webTTL)
-		case linkextract.LinkTypeTelegram:
-			resolved, err = r.resolveTelegramLink(ctx, &link, tgTTL)
-		case linkextract.LinkTypeBlocked:
-			continue
-		default:
-			continue
-		}
-
-		if err != nil {
-			if errors.Is(err, ErrClientNotInitialized) {
-				r.logger.Debug().Str(logKeyURL, link.URL).Msg("skipping telegram link resolution: client not initialized")
-				continue
-			}
-
-			r.logger.Warn().Err(err).Str(logKeyURL, link.URL).Msg("failed to resolve link")
-			// Save error to cache to avoid retrying immediately
-			_, _ = r.database.SaveLinkCache(ctx, &db.ResolvedLink{
-				URL:          link.URL,
-				Domain:       link.Domain,
-				LinkType:     string(link.Type),
-				Status:       db.LinkStatusFailed,
-				ErrorMessage: err.Error(),
-				ExpiresAt:    time.Now().Add(1 * time.Hour), // Don't retry for 1h
-			})
-
-			continue
-		}
-
-		if resolved != nil {
-			// Save to cache
-			id, err := r.database.SaveLinkCache(ctx, resolved)
-			if err != nil {
-				r.logger.Error().Err(err).Str(logKeyURL, link.URL).Msg("failed to save link to cache")
-			} else {
-				resolved.ID = id
-			}
-
-			results = append(results, *resolved)
-		}
+	resolved, err := r.dispatchLinkResolution(ctx, &link, params)
+	if err != nil {
+		r.handleResolutionError(ctx, link, err)
+		return nil
 	}
 
-	return results, nil
+	if resolved != nil {
+		r.cacheResolvedLink(ctx, resolved, link.URL)
+	}
+
+	return resolved
+}
+
+func (r *Resolver) dispatchLinkResolution(ctx context.Context, link *linkextract.Link, params resolveParams) (*db.ResolvedLink, error) {
+	switch link.Type {
+	case linkextract.LinkTypeWeb:
+		return r.resolveWebLink(ctx, link, params.webTTL)
+	case linkextract.LinkTypeTelegram:
+		return r.resolveTelegramLink(ctx, link, params.tgTTL)
+	default:
+		return nil, ErrUnsupportedLinkType
+	}
+}
+
+func (r *Resolver) handleResolutionError(ctx context.Context, link linkextract.Link, err error) {
+	if errors.Is(err, ErrClientNotInitialized) {
+		r.logger.Debug().Str(logKeyURL, link.URL).Msg("skipping telegram link resolution: client not initialized")
+		return
+	}
+
+	if errors.Is(err, ErrUnsupportedLinkType) {
+		return
+	}
+
+	r.logger.Warn().Err(err).Str(logKeyURL, link.URL).Msg("failed to resolve link")
+	_, _ = r.database.SaveLinkCache(ctx, &db.ResolvedLink{
+		URL:          link.URL,
+		Domain:       link.Domain,
+		LinkType:     string(link.Type),
+		Status:       db.LinkStatusFailed,
+		ErrorMessage: err.Error(),
+		ExpiresAt:    time.Now().Add(1 * time.Hour),
+	})
+}
+
+func (r *Resolver) cacheResolvedLink(ctx context.Context, resolved *db.ResolvedLink, url string) {
+	id, err := r.database.SaveLinkCache(ctx, resolved)
+	if err != nil {
+		r.logger.Error().Err(err).Str(logKeyURL, url).Msg("failed to save link to cache")
+	} else {
+		resolved.ID = id
+	}
 }
 
 func (r *Resolver) resolveWebLink(ctx context.Context, link *linkextract.Link, ttl time.Duration) (*db.ResolvedLink, error) {

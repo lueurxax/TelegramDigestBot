@@ -166,78 +166,93 @@ var splitBefore = []string{
 // It tries to split at semantic boundaries (sections, paragraphs) before falling back to lines.
 // The limit is in UTF-16 code units, matching Telegram's message length counting.
 func SplitHTML(text string, limit int) []string {
-	var (
-		parts    []string
-		current  strings.Builder
-		openTags []string
-	)
+	tokens := tokenizeHTML(text)
 
-	currentLen := 0 // UTF-16 code units
-
-	type token struct {
-		val      string
-		isTag    bool
-		isMarker bool // Special marker tokens (not counted, used for split priority)
+	if calculateTotalTextLen(tokens) <= limit {
+		return []string{text}
 	}
 
-	var tokens []token
+	splitter := newHTMLSplitter(limit)
+	splitter.processTokens(tokens)
 
-	// Tokenize: find all HTML tags and item markers
-	// Item markers are treated like tags (not counted toward limit)
+	return splitter.parts
+}
+
+type htmlToken struct {
+	val      string
+	isTag    bool
+	isMarker bool
+}
+
+type htmlSplitter struct {
+	parts      []string
+	current    strings.Builder
+	openTags   []string
+	currentLen int
+	limit      int
+}
+
+func newHTMLSplitter(limit int) *htmlSplitter {
+	return &htmlSplitter{limit: limit}
+}
+
+func tokenizeHTML(text string) []htmlToken {
+	var tokens []htmlToken
+
 	remaining := text
 	for len(remaining) > 0 {
-		// Check for item markers first
-		if strings.HasPrefix(remaining, ItemStart) {
-			tokens = append(tokens, token{val: ItemStart, isTag: true, isMarker: true})
-			remaining = remaining[len(ItemStart):]
+		tok, consumed := parseNextToken(remaining)
+		tokens = append(tokens, tok)
+		remaining = remaining[consumed:]
 
-			continue
-		}
-
-		if strings.HasPrefix(remaining, ItemEnd) {
-			tokens = append(tokens, token{val: ItemEnd, isTag: true, isMarker: true})
-			remaining = remaining[len(ItemEnd):]
-
-			continue
-		}
-
-		// Check for HTML tags
-		tagMatch := tagRegex.FindStringIndex(remaining)
-		if tagMatch != nil && tagMatch[0] == 0 {
-			tokens = append(tokens, token{val: remaining[:tagMatch[1]], isTag: true})
-			remaining = remaining[tagMatch[1]:]
-
-			continue
-		}
-
-		// Find next tag or marker
-		nextTag := len(remaining)
-		if tagMatch != nil {
-			nextTag = tagMatch[0]
-		}
-
-		nextStart := strings.Index(remaining, ItemStart)
-		if nextStart >= 0 && nextStart < nextTag {
-			nextTag = nextStart
-		}
-
-		nextEnd := strings.Index(remaining, ItemEnd)
-		if nextEnd >= 0 && nextEnd < nextTag {
-			nextTag = nextEnd
-		}
-
-		// Add text content up to next tag/marker
-		if nextTag > 0 {
-			tokens = append(tokens, token{val: remaining[:nextTag], isTag: false})
-			remaining = remaining[nextTag:]
-		} else {
-			// Shouldn't happen, but handle gracefully
-			tokens = append(tokens, token{val: remaining, isTag: false})
+		if consumed == 0 {
 			break
 		}
 	}
 
-	// Count total UTF-16 code units in text content
+	return tokens
+}
+
+func parseNextToken(remaining string) (htmlToken, int) {
+	if strings.HasPrefix(remaining, ItemStart) {
+		return htmlToken{val: ItemStart, isTag: true, isMarker: true}, len(ItemStart)
+	}
+
+	if strings.HasPrefix(remaining, ItemEnd) {
+		return htmlToken{val: ItemEnd, isTag: true, isMarker: true}, len(ItemEnd)
+	}
+
+	if tagMatch := tagRegex.FindStringIndex(remaining); tagMatch != nil && tagMatch[0] == 0 {
+		return htmlToken{val: remaining[:tagMatch[1]], isTag: true}, tagMatch[1]
+	}
+
+	nextBoundary := findNextBoundary(remaining)
+	if nextBoundary > 0 {
+		return htmlToken{val: remaining[:nextBoundary], isTag: false}, nextBoundary
+	}
+
+	return htmlToken{val: remaining, isTag: false}, len(remaining)
+}
+
+func findNextBoundary(remaining string) int {
+	nextTag := len(remaining)
+
+	if tagMatch := tagRegex.FindStringIndex(remaining); tagMatch != nil {
+		nextTag = tagMatch[0]
+	}
+
+	if idx := strings.Index(remaining, ItemStart); idx >= 0 && idx < nextTag {
+		nextTag = idx
+	}
+
+	if idx := strings.Index(remaining, ItemEnd); idx >= 0 && idx < nextTag {
+		nextTag = idx
+	}
+
+	return nextTag
+}
+
+func calculateTotalTextLen(tokens []htmlToken) int {
 	totalLen := 0
 
 	for _, t := range tokens {
@@ -246,185 +261,192 @@ func SplitHTML(text string, limit int) []string {
 		}
 	}
 
-	if totalLen <= limit {
-		return []string{text}
-	}
+	return totalLen
+}
 
-	flush := func() {
-		if current.Len() == 0 {
-			return
-		}
-
-		tagsLen := 0
-
-		for _, tag := range openTags {
-			tagsLen += len(tag)
-		}
-
-		if current.Len() <= tagsLen {
-			return
-		}
-
-		content := current.String()
-		// Trim trailing whitespace before closing tags
-		content = strings.TrimRight(content, " \t")
-
-		// Close all open tags in reverse order
-		for i := len(openTags) - 1; i >= 0; i-- {
-			content += "</" + GetTagName(openTags[i]) + ">"
-		}
-
-		parts = append(parts, content)
-
-		current.Reset()
-
-		currentLen = 0
-
-		// Filter openTags: remove noReopenTags (they were closed and won't be reopened)
-		// This prevents closing them again in subsequent parts
-		var newOpenTags []string
-
-		for _, tag := range openTags {
-			tagName := strings.ToLower(GetTagName(tag))
-			if !noReopenTags[tagName] {
-				newOpenTags = append(newOpenTags, tag)
-				current.WriteString(tag)
-			}
-		}
-
-		openTags = newOpenTags
-	}
-
-	// findBestSplit finds the best position to split within the given text chunk.
-	// maxUnits is in UTF-16 code units. Returns the string to write and the remainder.
-	findBestSplit := func(text string, maxUnits int) (toWrite, remainder string) {
-		textLen := utf16Len(text)
-		if textLen <= maxUnits {
-			return text, ""
-		}
-
-		// Get the searchable portion by UTF-16 length
-		searchText := utf16Slice(text, maxUnits)
-
-		// Try "split after" markers first (marker stays in current part)
-		for _, sep := range splitAfter {
-			pos := strings.LastIndex(searchText, sep)
-			if pos > 0 {
-				splitAt := pos + len(sep)
-				return searchText[:splitAt], text[splitAt:]
-			}
-		}
-
-		// Try "split before" markers (only newline stays, rest goes to next part)
-		for _, sep := range splitBefore {
-			pos := strings.LastIndex(searchText, sep)
-			if pos > 0 {
-				// Split after the newline only, marker content goes to next part
-				splitAt := pos + 1 // Just the \n
-				return searchText[:splitAt], text[splitAt:]
-			}
-		}
-
-		// Try to split at a newline
-		pos := strings.LastIndex(searchText, "\n")
-		if pos > 0 {
-			return searchText[:pos+1], text[pos+1:]
-		}
-
-		// Try to split at a space (word boundary) - always use if found
-		pos = strings.LastIndex(searchText, " ")
-		if pos > 0 {
-			return searchText[:pos+1], text[pos+1:]
-		}
-
-		// Last resort: split at maxUnits (utf16Slice ensures we don't split mid-character)
-		return searchText, text[len(searchText):]
-	}
-
+func (s *htmlSplitter) processTokens(tokens []htmlToken) {
 	for i, t := range tokens {
 		if t.isTag {
-			if !t.isMarker {
-				// Check if this is a closing tag for a noReopenTag that was already closed
-				matches := tagRegex.FindStringSubmatch(t.val)
-				if len(matches) >= 3 && matches[1] == "/" {
-					tagName := strings.ToLower(matches[2])
-					if noReopenTags[tagName] {
-						// Check if this tag is currently open
-						found := false
-
-						for _, ot := range openTags {
-							if strings.ToLower(GetTagName(ot)) == tagName {
-								found = true
-								break
-							}
-						}
-
-						if !found {
-							// This closing tag was already emitted in a previous flush, skip it
-							continue
-						}
-					}
-				}
-
-				openTags = updateOpenTags(t.val, openTags)
-			}
-
-			current.WriteString(t.val)
-			// Prefer splitting at ItemEnd boundaries when approaching limit
-			if t.val == ItemEnd {
-				// Check if next token is a newline, and if we're past 50% of limit
-				// If so, flush now to split at item boundary
-				if currentLen > limit/2 && i+1 < len(tokens) {
-					nextToken := tokens[i+1]
-					if !nextToken.isTag && strings.HasPrefix(nextToken.val, "\n") {
-						// Write the newline to current, then flush
-						current.WriteString("\n")
-						flush()
-						// Skip the newline from next token
-						tokens[i+1] = token{val: strings.TrimPrefix(nextToken.val, "\n"), isTag: false}
-
-						continue
-					}
-				}
-			}
+			s.processTagToken(t, tokens, i)
 		} else {
-			remaining := t.val
-
-			for len(remaining) > 0 {
-				canTake := limit - currentLen
-				if canTake <= 0 {
-					flush()
-
-					canTake = limit
-				}
-
-				remainingLen := utf16Len(remaining)
-				if remainingLen <= canTake {
-					current.WriteString(remaining)
-
-					currentLen += remainingLen
-					remaining = ""
-				} else {
-					// Find the best split point
-					toWrite, newRemaining := findBestSplit(remaining, canTake)
-
-					if len(toWrite) > 0 {
-						current.WriteString(toWrite)
-						currentLen += utf16Len(toWrite)
-						remaining = strings.TrimLeft(newRemaining, " \t\n\r")
-					}
-
-					if len(remaining) > 0 {
-						flush()
-					}
-				}
-			}
+			s.processTextToken(t.val)
 		}
 	}
 
-	flush()
+	s.flush()
+}
 
-	return parts
+func (s *htmlSplitter) processTagToken(t htmlToken, tokens []htmlToken, idx int) {
+	if !t.isMarker {
+		if s.shouldSkipClosingTag(t.val) {
+			return
+		}
+
+		s.openTags = updateOpenTags(t.val, s.openTags)
+	}
+
+	s.current.WriteString(t.val)
+
+	if t.val == ItemEnd {
+		s.maybeFlushAtItemEnd(tokens, idx)
+	}
+}
+
+func (s *htmlSplitter) shouldSkipClosingTag(tagVal string) bool {
+	matches := tagRegex.FindStringSubmatch(tagVal)
+	if len(matches) < 3 || matches[1] != "/" {
+		return false
+	}
+
+	tagName := strings.ToLower(matches[2])
+	if !noReopenTags[tagName] {
+		return false
+	}
+
+	for _, ot := range s.openTags {
+		if strings.ToLower(GetTagName(ot)) == tagName {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (s *htmlSplitter) maybeFlushAtItemEnd(tokens []htmlToken, idx int) {
+	if s.currentLen <= s.limit/2 || idx+1 >= len(tokens) {
+		return
+	}
+
+	nextToken := tokens[idx+1]
+	if nextToken.isTag || !strings.HasPrefix(nextToken.val, "\n") {
+		return
+	}
+
+	s.current.WriteString("\n")
+	s.flush()
+
+	tokens[idx+1] = htmlToken{val: strings.TrimPrefix(nextToken.val, "\n"), isTag: false}
+}
+
+func (s *htmlSplitter) processTextToken(text string) {
+	remaining := text
+
+	for len(remaining) > 0 {
+		canTake := s.limit - s.currentLen
+		if canTake <= 0 {
+			s.flush()
+			canTake = s.limit
+		}
+
+		remainingLen := utf16Len(remaining)
+		if remainingLen <= canTake {
+			s.current.WriteString(remaining)
+			s.currentLen += remainingLen
+
+			return
+		}
+
+		toWrite, newRemaining := findBestSplit(remaining, canTake)
+		if len(toWrite) > 0 {
+			s.current.WriteString(toWrite)
+			s.currentLen += utf16Len(toWrite)
+			remaining = strings.TrimLeft(newRemaining, " \t\n\r")
+		}
+
+		if len(remaining) > 0 {
+			s.flush()
+		}
+	}
+}
+
+func (s *htmlSplitter) flush() {
+	if s.current.Len() == 0 {
+		return
+	}
+
+	tagsLen := 0
+	for _, tag := range s.openTags {
+		tagsLen += len(tag)
+	}
+
+	if s.current.Len() <= tagsLen {
+		return
+	}
+
+	content := strings.TrimRight(s.current.String(), " \t")
+
+	for i := len(s.openTags) - 1; i >= 0; i-- {
+		content += "</" + GetTagName(s.openTags[i]) + ">"
+	}
+
+	s.parts = append(s.parts, content)
+	s.current.Reset()
+	s.currentLen = 0
+
+	s.reopenTags()
+}
+
+func (s *htmlSplitter) reopenTags() {
+	var newOpenTags []string
+
+	for _, tag := range s.openTags {
+		tagName := strings.ToLower(GetTagName(tag))
+		if !noReopenTags[tagName] {
+			newOpenTags = append(newOpenTags, tag)
+			s.current.WriteString(tag)
+		}
+	}
+
+	s.openTags = newOpenTags
+}
+
+func findBestSplit(text string, maxUnits int) (toWrite, remainder string) {
+	textLen := utf16Len(text)
+	if textLen <= maxUnits {
+		return text, ""
+	}
+
+	searchText := utf16Slice(text, maxUnits)
+
+	if toWrite, remainder := trySplitAfter(searchText, text); toWrite != "" {
+		return toWrite, remainder
+	}
+
+	if toWrite, remainder := trySplitBefore(searchText, text); toWrite != "" {
+		return toWrite, remainder
+	}
+
+	if pos := strings.LastIndex(searchText, "\n"); pos > 0 {
+		return searchText[:pos+1], text[pos+1:]
+	}
+
+	if pos := strings.LastIndex(searchText, " "); pos > 0 {
+		return searchText[:pos+1], text[pos+1:]
+	}
+
+	return searchText, text[len(searchText):]
+}
+
+func trySplitAfter(searchText, fullText string) (string, string) {
+	for _, sep := range splitAfter {
+		if pos := strings.LastIndex(searchText, sep); pos > 0 {
+			splitAt := pos + len(sep)
+			return searchText[:splitAt], fullText[splitAt:]
+		}
+	}
+
+	return "", ""
+}
+
+func trySplitBefore(searchText, fullText string) (string, string) {
+	for _, sep := range splitBefore {
+		if pos := strings.LastIndex(searchText, sep); pos > 0 {
+			splitAt := pos + 1
+			return searchText[:splitAt], fullText[splitAt:]
+		}
+	}
+
+	return "", ""
 }
 
 func GetTagName(fullTag string) string {

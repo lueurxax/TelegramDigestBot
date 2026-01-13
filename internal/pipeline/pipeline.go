@@ -483,33 +483,48 @@ func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger z
 		return
 	}
 
-	var (
-		tieredIndices    []int
-		tieredCandidates []llm.MessageInput
-	)
+	tieredIndices, tieredCandidates := selectTieredCandidates(candidates, results, modelUsed, s.smartLLMModel)
+	if len(tieredCandidates) == 0 {
+		return
+	}
+
+	logger.Info().Int(LogFieldCount, len(tieredCandidates)).Msg("Performing tiered importance analysis with smart model")
+
+	llmStart := time.Now()
+
+	tieredResults, err := p.llmClient.ProcessBatch(ctx, tieredCandidates, s.digestLanguage, s.smartLLMModel, s.digestTone)
+	if err != nil {
+		logger.Warn().Err(err).Msg("Tiered importance analysis failed, keeping original results")
+
+		return
+	}
+
+	if len(tieredResults) != len(tieredCandidates) {
+		return
+	}
+
+	observability.LLMRequestDuration.WithLabelValues(s.smartLLMModel).Observe(time.Since(llmStart).Seconds())
+	applyTieredResults(results, tieredResults, tieredIndices)
+}
+
+func selectTieredCandidates(candidates []llm.MessageInput, results []llm.BatchResult, modelUsed []string, smartModel string) ([]int, []llm.MessageInput) {
+	var tieredIndices []int
+
+	var tieredCandidates []llm.MessageInput
 
 	for i, res := range results {
-		if res.ImportanceScore > TieredImportanceThreshold && modelUsed[i] != s.smartLLMModel {
+		if res.ImportanceScore > TieredImportanceThreshold && modelUsed[i] != smartModel {
 			tieredIndices = append(tieredIndices, i)
 			tieredCandidates = append(tieredCandidates, candidates[i])
 		}
 	}
 
-	if len(tieredCandidates) > 0 {
-		logger.Info().Int(LogFieldCount, len(tieredCandidates)).Msg("Performing tiered importance analysis with smart model")
+	return tieredIndices, tieredCandidates
+}
 
-		llmStart := time.Now()
-
-		tieredResults, err := p.llmClient.ProcessBatch(ctx, tieredCandidates, s.digestLanguage, s.smartLLMModel, s.digestTone)
-		if err == nil && len(tieredResults) == len(tieredCandidates) {
-			observability.LLMRequestDuration.WithLabelValues(s.smartLLMModel).Observe(time.Since(llmStart).Seconds())
-
-			for j, idx := range tieredIndices {
-				results[idx] = tieredResults[j]
-			}
-		} else if err != nil {
-			logger.Warn().Err(err).Msg("Tiered importance analysis failed, keeping original results")
-		}
+func applyTieredResults(results []llm.BatchResult, tieredResults []llm.BatchResult, tieredIndices []int) {
+	for j, idx := range tieredIndices {
+		results[idx] = tieredResults[j]
 	}
 }
 

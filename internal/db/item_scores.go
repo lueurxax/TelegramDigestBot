@@ -39,6 +39,15 @@ type ItemStatusStats struct {
 	Error         int
 }
 
+// ScoreDebugStats represents high-level pipeline counts for diagnostics.
+type ScoreDebugStats struct {
+	RawTotal       int
+	RawProcessed   int
+	ItemsTotal     int
+	GateRelevant   int
+	GateIrrelevant int
+}
+
 func (db *DB) GetImportanceStats(ctx context.Context, since time.Time, threshold float32) (ImportanceStats, error) {
 	var (
 		stats      ImportanceStats
@@ -167,6 +176,39 @@ func (db *DB) GetItemStatusStats(ctx context.Context, since time.Time) (ItemStat
 	stats.ReadyDigested = int(readyDigested)
 	stats.Rejected = int(rejected)
 	stats.Error = int(errCount)
+
+	return stats, nil
+}
+
+func (db *DB) GetScoreDebugStats(ctx context.Context, since time.Time) (ScoreDebugStats, error) {
+	var (
+		stats          ScoreDebugStats
+		rawTotal       int64
+		rawProcessed   int64
+		itemsTotal     int64
+		gateRelevant   int64
+		gateIrrelevant int64
+	)
+
+	err := db.Pool.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM raw_messages rm WHERE rm.tg_date >= $1)::bigint AS raw_total,
+			(SELECT COUNT(*) FROM raw_messages rm WHERE rm.tg_date >= $1 AND rm.processed_at IS NOT NULL)::bigint AS raw_processed,
+			(SELECT COUNT(*) FROM items i JOIN raw_messages rm ON i.raw_message_id = rm.id WHERE rm.tg_date >= $1)::bigint AS items_total,
+			(SELECT COUNT(*) FROM relevance_gate_log rgl JOIN raw_messages rm ON rgl.raw_message_id = rm.id
+				WHERE rm.tg_date >= $1 AND rgl.decision = 'relevant')::bigint AS gate_relevant,
+			(SELECT COUNT(*) FROM relevance_gate_log rgl JOIN raw_messages rm ON rgl.raw_message_id = rm.id
+				WHERE rm.tg_date >= $1 AND rgl.decision = 'irrelevant')::bigint AS gate_irrelevant
+	`, since).Scan(&rawTotal, &rawProcessed, &itemsTotal, &gateRelevant, &gateIrrelevant)
+	if err != nil {
+		return stats, err
+	}
+
+	stats.RawTotal = int(rawTotal)
+	stats.RawProcessed = int(rawProcessed)
+	stats.ItemsTotal = int(itemsTotal)
+	stats.GateRelevant = int(gateRelevant)
+	stats.GateIrrelevant = int(gateIrrelevant)
 
 	return stats, nil
 }
