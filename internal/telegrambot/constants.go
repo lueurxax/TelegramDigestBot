@@ -6,3 +6,8 @@ const (
 	RatingBad        = "bad"
 	RatingIrrelevant = "irrelevant"
 )
+
+// Formatting constants for stats display
+const (
+	statsItemFormat = "• %s: <code>%d</code>\n"
+)

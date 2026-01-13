@@ -12,6 +12,11 @@ const (
 	filterModeAllowlist = "allowlist"
 	filterModeMixed     = "mixed"
 	filterModeDenylist  = "denylist"
+
+	ReasonMinLength = "filter_min_length"
+	ReasonAds       = "filter_ads"
+	ReasonDeny      = "filter_deny"
+	ReasonAllowMiss = "filter_allow_miss"
 )
 
 type Filterer struct {
@@ -47,21 +52,30 @@ func New(filters []db.Filter, adsEnabled bool, minLength int, adsKeywords []stri
 }
 
 func (f *Filterer) IsFiltered(text string) bool {
+	filtered, _ := f.FilterReason(text)
+	return filtered
+}
+
+func (f *Filterer) FilterReason(text string) (bool, string) {
 	if len(text) < f.minLength {
-		return true
+		return true, ReasonMinLength
 	}
 
 	lowerText := f.caser.String(text)
 
 	if f.containsAds(lowerText) {
-		return true
+		return true, ReasonAds
 	}
 
 	if f.matchesDenyFilter(lowerText) {
-		return true
+		return true, ReasonDeny
 	}
 
-	return f.failsAllowFilter(lowerText)
+	if f.failsAllowFilter(lowerText) {
+		return true, ReasonAllowMiss
+	}
+
+	return false, ""
 }
 
 func (f *Filterer) containsAds(lowerText string) bool {

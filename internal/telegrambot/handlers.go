@@ -101,6 +101,7 @@ const (
 	ErrNoRows                         = "no rows"
 	MsgCouldNotGetImportanceThreshold = "could not get importance threshold from DB"
 	MsgScoresDebugUsage               = "Usage: <code>/scores debug [hours]</code>"
+	MsgScoresDebugReasonsUsage        = "Usage: <code>/scores debug reasons [hours]</code>"
 )
 
 // Status strings.
@@ -1052,6 +1053,11 @@ func (b *Bot) handleScores(ctx context.Context, msg *tgbotapi.Message) {
 }
 
 func (b *Bot) handleScoresDebug(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) > 0 && strings.EqualFold(args[0], "reasons") {
+		b.handleScoresDebugReasons(ctx, msg, args[1:])
+		return
+	}
+
 	hours, valid := parseScoresDebugArgs(args)
 	if !valid {
 		b.reply(msg, MsgScoresDebugUsage)
@@ -1082,6 +1088,45 @@ func (b *Bot) handleScoresDebug(ctx context.Context, msg *tgbotapi.Message, args
 	}
 
 	b.reply(msg, formatScoresDebugOutput(hours, debugStats, itemStats))
+}
+
+func (b *Bot) handleScoresDebugReasons(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	hours, valid := parseScoresDebugArgs(args)
+	if !valid {
+		b.reply(msg, MsgScoresDebugReasonsUsage)
+
+		return
+	}
+
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+
+	reasons, err := b.database.GetDropReasonStats(ctx, since, DefaultScoresLimit)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error fetching drop reasons: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	if len(reasons) == 0 {
+		b.reply(msg, fmt.Sprintf("No drop reasons logged in the last %d hours.", hours))
+
+		return
+	}
+
+	var sb strings.Builder
+
+	total := 0
+
+	sb.WriteString(fmt.Sprintf("📊 <b>Drop Reasons (last %d hours)</b>\n\n", hours))
+
+	for _, entry := range reasons {
+		sb.WriteString(fmt.Sprintf(statsItemFormat, html.EscapeString(entry.Reason), entry.Count))
+		total += entry.Count
+	}
+
+	sb.WriteString(fmt.Sprintf("\nTotal logged: <code>%d</code>\n", total))
+
+	b.reply(msg, sb.String())
 }
 
 func parseScoresDebugArgs(args []string) (int, bool) {
@@ -2351,6 +2396,7 @@ func (b *Bot) handleHelp(_ context.Context, msg *tgbotapi.Message) {
 		"• <code>/ratings stats [limit]</code> - Decayed rating summary\n"+
 		"• <code>/scores [hours] [limit]</code> - Importance score snapshot\n"+
 		"• <code>/scores debug [hours]</code> - Item status counts\n"+
+		"• <code>/scores debug reasons [hours]</code> - Drop reason counts\n"+
 		"• <code>/annotate</code> - Annotation queue (enqueue/next/label/skip/stats)\n"+
 		"• <code>/system status</code> - Detailed system health\n"+
 		"• <code>/system settings</code> - View all configuration overrides\n"+

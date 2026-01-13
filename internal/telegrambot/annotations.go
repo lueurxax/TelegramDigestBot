@@ -168,7 +168,7 @@ func (b *Bot) handleAnnotateStats(ctx context.Context, msg *tgbotapi.Message) {
 	} {
 		count := stats[status]
 		total += count
-		sb.WriteString(fmt.Sprintf("• %s: <code>%d</code>\n", status, count))
+		sb.WriteString(fmt.Sprintf(statsItemFormat, status, count))
 	}
 
 	sb.WriteString(fmt.Sprintf("\nTotal: <code>%d</code>\n", total))

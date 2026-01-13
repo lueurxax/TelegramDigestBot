@@ -36,7 +36,7 @@ func decayWeight(now time.Time, createdAt time.Time) float64 {
 }
 
 func computeRelevanceDelta(reliability float64) float32 {
-	penalty := (1.0 - reliability) * autoRelevancePenaltyFactor
+	penalty := (MaxNormalizedScore - reliability) * autoRelevancePenaltyFactor
 	if penalty < 0 {
 		penalty = 0
 	} else if penalty > autoRelevancePenaltyFactor {

@@ -31,6 +31,7 @@ type Repository interface {
 	SaveItem(ctx context.Context, item *db.Item) error
 	SaveItemError(ctx context.Context, rawMsgID string, errJSON []byte) error
 	SaveRelevanceGateLog(ctx context.Context, rawMsgID string, decision string, confidence *float32, reason, model, gateVersion string) error
+	SaveRawMessageDropLog(ctx context.Context, rawMsgID, reason, detail string) error
 	SaveEmbedding(ctx context.Context, itemID string, embedding []float32) error
 	CheckStrictDuplicate(ctx context.Context, hash string, id string) (bool, error)
 	FindSimilarItem(ctx context.Context, embedding []float32, threshold float32) (string, error)
@@ -72,6 +73,15 @@ type pipelineSettings struct {
 	linkCacheTTL            time.Duration
 	tgLinkCacheTTL          time.Duration
 }
+
+const (
+	dropReasonDuplicateBatch      = "duplicate_batch"
+	dropReasonForwarded           = "forwarded"
+	dropReasonRelevanceGate       = "relevance_gate"
+	dropReasonDedupSemanticBatch  = "dedup_semantic_batch"
+	dropReasonDedupSemanticGlobal = "dedup_semantic_global"
+	dropReasonDedupStrictGlobal   = "dedup_strict_global"
+)
 
 func New(cfg *config.Config, database Repository, llmClient llm.Client, linkResolver *linkresolver.Resolver, logger *zerolog.Logger) *Pipeline {
 	return &Pipeline{
@@ -246,6 +256,16 @@ func (p *Pipeline) markProcessed(ctx context.Context, logger zerolog.Logger, msg
 	}
 }
 
+func (p *Pipeline) recordDrop(ctx context.Context, logger zerolog.Logger, msgID, reason, detail string) {
+	if reason == "" {
+		return
+	}
+
+	if err := p.database.SaveRawMessageDropLog(ctx, msgID, reason, detail); err != nil {
+		logger.Warn().Str(LogFieldMsgID, msgID).Err(err).Msg("failed to save drop log")
+	}
+}
+
 func (p *Pipeline) recordRelevanceGateDecision(ctx context.Context, logger zerolog.Logger, msgID string, decision gateDecision) {
 	confidence := decision.confidence
 	model := decision.model
@@ -301,6 +321,7 @@ func (p *Pipeline) prepareCandidates(ctx context.Context, logger zerolog.Logger,
 func (p *Pipeline) skipMessage(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, seenHashes map[string]string, f *filters.Filterer) bool {
 	if dupID, seen := seenHashes[m.CanonicalHash]; seen {
 		logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, dupID).Msg("skipping strict duplicate in batch")
+		p.recordDrop(ctx, logger, m.ID, dropReasonDuplicateBatch, dupID)
 		p.markProcessed(ctx, logger, m.ID)
 
 		return true
@@ -308,12 +329,14 @@ func (p *Pipeline) skipMessage(ctx context.Context, logger zerolog.Logger, m *db
 
 	if s.skipForwards && m.IsForward {
 		logger.Info().Str(LogFieldMsgID, m.ID).Msg("skipping forwarded message")
+		p.recordDrop(ctx, logger, m.ID, dropReasonForwarded, "")
 		p.markProcessed(ctx, logger, m.ID)
 
 		return true
 	}
 
-	if f.IsFiltered(m.Text) {
+	if filtered, reason := f.FilterReason(m.Text); filtered {
+		p.recordDrop(ctx, logger, m.ID, reason, "")
 		p.markProcessed(ctx, logger, m.ID)
 
 		return true
@@ -325,6 +348,7 @@ func (p *Pipeline) skipMessage(ctx context.Context, logger zerolog.Logger, m *db
 
 		if decision.decision == DecisionIrrelevant {
 			logger.Info().Str(LogFieldMsgID, m.ID).Str("reason", decision.reason).Msg("skipping message by relevance gate")
+			p.recordDrop(ctx, logger, m.ID, dropReasonRelevanceGate, decision.reason)
 			p.markProcessed(ctx, logger, m.ID)
 
 			return true
@@ -354,6 +378,7 @@ func (p *Pipeline) handleDeduplication(ctx context.Context, logger zerolog.Logge
 		for _, cand := range candidates {
 			if dedup.CosineSimilarity(embeddings[cand.ID], emb) > p.cfg.SimilarityThreshold {
 				logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, cand.ID).Msg("skipping semantic duplicate in batch")
+				p.recordDrop(ctx, logger, m.ID, dropReasonDedupSemanticBatch, cand.ID)
 				p.markProcessed(ctx, logger, m.ID)
 
 				return nil, true
@@ -364,6 +389,13 @@ func (p *Pipeline) handleDeduplication(ctx context.Context, logger zerolog.Logge
 	isDup, dupID, dErr := deduplicator.IsDuplicate(ctx, *m, emb)
 	if dErr == nil && isDup {
 		logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, dupID).Msg("skipping duplicate message")
+
+		reason := dropReasonDedupStrictGlobal
+		if s.dedupMode == DedupModeSemantic {
+			reason = dropReasonDedupSemanticGlobal
+		}
+
+		p.recordDrop(ctx, logger, m.ID, reason, dupID)
 		p.markProcessed(ctx, logger, m.ID)
 
 		return nil, true

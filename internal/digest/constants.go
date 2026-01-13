@@ -122,6 +122,12 @@ const (
 	ClusterDefaultCoherenceThreshold = 0.7
 )
 
+// Normalized score constants (0-1 range)
+const (
+	MaxNormalizedScore     = 1.0
+	PerfectSimilarityScore = 1.0
+)
+
 // Smart selection constants
 const (
 	SourceDiversityBonus = 0.1

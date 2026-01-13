@@ -10,6 +10,9 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/db"
 )
 
+// neutralWeight is the default weight returned when there's insufficient data
+const neutralWeight = db.DefaultImportanceWeight
+
 // AutoWeightConfig holds configuration for auto-weight calculation
 type AutoWeightConfig struct {
 	MinMessages       int     // Minimum messages before auto-weight applies
@@ -34,7 +37,7 @@ func DefaultAutoWeightConfig() AutoWeightConfig {
 func CalculateAutoWeight(stats *db.RollingStats, cfg AutoWeightConfig, days int) float32 {
 	// Guard: insufficient data - return neutral weight
 	if stats.TotalMessages < cfg.MinMessages {
-		return 1.0
+		return neutralWeight
 	}
 
 	// Calculate derived metrics with null/zero guards
@@ -55,7 +58,7 @@ func CalculateAutoWeight(stats *db.RollingStats, cfg AutoWeightConfig, days int)
 	}
 
 	messagesPerDay := float32(stats.TotalMessages) / float32(days)
-	consistencyScore := float32(math.Min(1.0, float64(messagesPerDay/cfg.ExpectedFrequency)))
+	consistencyScore := float32(math.Min(MaxNormalizedScore, float64(messagesPerDay/cfg.ExpectedFrequency)))
 
 	// Signal-to-noise with divide-by-zero guard
 	var signalScore float32 = 0.0

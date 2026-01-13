@@ -305,7 +305,7 @@ func (s *Scheduler) generateClusterTopic(ctx context.Context, clusterItemsList [
 
 func (s *Scheduler) calculateCoherence(items []db.Item, embeddings map[string][]float32) float32 {
 	if len(items) < 2 {
-		return 1.0
+		return PerfectSimilarityScore
 	}
 
 	var sum float32
