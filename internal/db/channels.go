@@ -2,10 +2,16 @@ package db
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lueurxax/telegram-digest-bot/internal/db/sqlc"
 )
+
+// normalizeUsername converts username to lowercase for consistent storage
+func normalizeUsername(username string) string {
+	return strings.ToLower(strings.TrimPrefix(username, "@"))
+}
 
 type Channel struct {
 	ID                      string
@@ -75,13 +81,13 @@ func (db *DB) GetActiveChannels(ctx context.Context) ([]Channel, error) {
 func (db *DB) AddChannel(ctx context.Context, peerID int64, username, title string) error {
 	return db.Queries.AddChannel(ctx, sqlc.AddChannelParams{
 		TgPeerID: peerID,
-		Username: toText(username),
+		Username: toText(normalizeUsername(username)),
 		Title:    toText(title),
 	})
 }
 
 func (db *DB) AddChannelByUsername(ctx context.Context, username string) error {
-	return db.Queries.AddChannelByUsername(ctx, toText(username))
+	return db.Queries.AddChannelByUsername(ctx, toText(normalizeUsername(username)))
 }
 
 func (db *DB) AddChannelByID(ctx context.Context, peerID int64) error {
@@ -98,7 +104,7 @@ func (db *DB) UpdateChannel(ctx context.Context, id string, peerID int64, title 
 		TgPeerID:    peerID,
 		Title:       toText(title),
 		AccessHash:  toInt8(accessHash),
-		Username:    toText(username),
+		Username:    toText(normalizeUsername(username)),
 		Description: toText(description),
 	})
 }

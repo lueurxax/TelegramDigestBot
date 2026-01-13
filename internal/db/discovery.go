@@ -49,9 +49,11 @@ type Discovery struct {
 
 // RecordDiscovery records a discovered channel, incrementing count if already known
 func (db *DB) RecordDiscovery(ctx context.Context, d Discovery) error {
+	normalizedUsername := normalizeUsername(d.Username)
+
 	// First check if channel is already tracked
 	tracked, err := db.Queries.IsChannelTracked(ctx, sqlc.IsChannelTrackedParams{
-		Username:   toText(d.Username),
+		Username:   toText(normalizedUsername),
 		TgPeerID:   d.TGPeerID,
 		InviteLink: toText(d.InviteLink),
 	})
@@ -65,7 +67,7 @@ func (db *DB) RecordDiscovery(ctx context.Context, d Discovery) error {
 
 	// Check if already rejected
 	rejected, err := db.Queries.IsChannelDiscoveredRejected(ctx, sqlc.IsChannelDiscoveredRejectedParams{
-		Username:   toText(d.Username),
+		Username:   toText(normalizedUsername),
 		TgPeerID:   toInt8(d.TGPeerID),
 		InviteLink: toText(d.InviteLink),
 	})
@@ -92,9 +94,9 @@ func (db *DB) RecordDiscovery(ctx context.Context, d Discovery) error {
 		})
 	}
 
-	if d.Username != "" {
+	if normalizedUsername != "" {
 		return db.Queries.UpsertDiscoveredChannelByUsername(ctx, sqlc.UpsertDiscoveredChannelByUsernameParams{
-			Username:                toText(d.Username),
+			Username:                toText(normalizedUsername),
 			Title:                   toText(d.Title),
 			SourceType:              d.SourceType,
 			DiscoveredFromChannelID: fromChannelUUID,
@@ -146,14 +148,16 @@ func (db *DB) GetPendingDiscoveries(ctx context.Context, limit int) ([]Discovere
 
 // ApproveDiscovery approves a discovery and adds it to active channels
 func (db *DB) ApproveDiscovery(ctx context.Context, username string, adminID int64) error {
+	normalizedUsername := normalizeUsername(username)
+
 	// Add to channels first
-	if err := db.Queries.AddChannelByUsername(ctx, toText(username)); err != nil {
+	if err := db.Queries.AddChannelByUsername(ctx, toText(normalizedUsername)); err != nil {
 		return err
 	}
 
 	// Update status to added (not just approved)
 	return db.Queries.UpdateDiscoveryStatusByUsername(ctx, sqlc.UpdateDiscoveryStatusByUsernameParams{
-		Username:        toText(username),
+		Username:        toText(normalizedUsername),
 		Status:          DiscoveryStatusAdded,
 		StatusChangedBy: toInt8(adminID),
 	})
@@ -162,7 +166,7 @@ func (db *DB) ApproveDiscovery(ctx context.Context, username string, adminID int
 // RejectDiscovery marks a discovery as rejected
 func (db *DB) RejectDiscovery(ctx context.Context, username string, adminID int64) error {
 	return db.Queries.UpdateDiscoveryStatusByUsername(ctx, sqlc.UpdateDiscoveryStatusByUsernameParams{
-		Username:        toText(username),
+		Username:        toText(normalizeUsername(username)),
 		Status:          DiscoveryStatusRejected,
 		StatusChangedBy: toInt8(adminID),
 	})
@@ -227,7 +231,7 @@ func (db *DB) UpdateDiscoveryChannelInfo(ctx context.Context, id string, title s
 	return db.Queries.UpdateDiscoveryChannelInfo(ctx, sqlc.UpdateDiscoveryChannelInfoParams{
 		ID:       toUUID(id),
 		Title:    title,
-		Username: username,
+		Username: normalizeUsername(username),
 	})
 }
 
@@ -265,7 +269,7 @@ func (db *DB) UpdateDiscoveryFromInvite(ctx context.Context, id string, title st
 	return db.Queries.UpdateDiscoveryFromInvite(ctx, sqlc.UpdateDiscoveryFromInviteParams{
 		ID:         toUUID(id),
 		Title:      title,
-		Username:   username,
+		Username:   normalizeUsername(username),
 		TgPeerID:   peerID,
 		AccessHash: accessHash,
 	})
