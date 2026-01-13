@@ -111,100 +111,12 @@ func (c *openaiClient) GetEmbedding(ctx context.Context, text string) ([]float32
 }
 
 func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage string, model string, tone string) ([]BatchResult, error) {
-	langInstruction := ""
-
-	if targetLanguage != "" {
-		langInstruction = fmt.Sprintf(" IMPORTANT: Return all topics and summaries in %s language.", targetLanguage)
-	}
-
-	if tone != "" {
-		langInstruction += fmt.Sprintf(toneFormatString, getToneInstruction(tone))
-	}
-
-	if model == "" {
-		model = c.cfg.LLMModel
-	}
-
-	if model == "" {
-		model = openai.GPT4oMini
-	}
+	langInstruction := c.buildLangInstruction(targetLanguage, tone)
+	model = c.resolveModel(model)
 
 	promptTemplate, _ := c.loadPrompt(ctx, promptKeySummarize, defaultSummarizePrompt)
 	promptText := applyPromptTokens(promptTemplate, langInstruction, len(messages))
-
-	parts := []openai.ChatMessagePart{
-		{
-			Type: openai.ChatMessagePartTypeText,
-			Text: promptText,
-		},
-	}
-
-	for i, m := range messages {
-		textPart := fmt.Sprintf("[%d] ", i)
-		if m.ChannelTitle != "" {
-			textPart += fmt.Sprintf("(Source Channel: %s) ", m.ChannelTitle)
-		}
-
-		if m.ChannelContext != "" {
-			textPart += fmt.Sprintf("(Channel Context: %s) ", m.ChannelContext)
-		}
-
-		if m.ChannelDescription != "" {
-			textPart += fmt.Sprintf("(Channel Description: %s) ", m.ChannelDescription)
-		}
-
-		if m.ChannelCategory != "" {
-			textPart += fmt.Sprintf("(Channel Category: %s) ", m.ChannelCategory)
-		}
-
-		if m.ChannelTone != "" {
-			textPart += fmt.Sprintf("(Channel Tone: %s) ", m.ChannelTone)
-		}
-
-		if m.ChannelUpdateFreq != "" {
-			textPart += fmt.Sprintf("(Channel Frequency: %s) ", m.ChannelUpdateFreq)
-		}
-
-		if len(m.Context) > 0 {
-			textPart += fmt.Sprintf("[BACKGROUND CONTEXT - DO NOT SUMMARIZE: %s] ", truncate(strings.Join(m.Context, " | "), truncateLengthShort))
-		}
-
-		if len(m.ResolvedLinks) > 0 {
-			textPart += "[Referenced Content: "
-
-			for _, link := range m.ResolvedLinks {
-				if link.LinkType == LinkTypeTelegram {
-					textPart += fmt.Sprintf("[Telegram] From %s: \"%s\" ", link.ChannelTitle, truncate(link.Content, truncateLengthShort))
-					if link.Views > 0 {
-						textPart += fmt.Sprintf("[%d views] ", link.Views)
-					}
-				} else {
-					textPart += fmt.Sprintf("[Web] %s Title: %s Content: %s ", link.Domain, link.Title, truncate(link.Content, truncateLengthLong))
-				}
-			}
-
-			textPart += "] "
-		}
-
-		textPart += ">>> MESSAGE TO SUMMARIZE <<< " + m.Text + "\n"
-
-		parts = append(parts, openai.ChatMessagePart{
-			Type: openai.ChatMessagePartTypeText,
-			Text: textPart,
-		})
-
-		if len(m.MediaData) > 0 {
-			mimeType := http.DetectContentType(m.MediaData)
-			encoded := base64.StdEncoding.EncodeToString(m.MediaData)
-			parts = append(parts, openai.ChatMessagePart{
-				Type: openai.ChatMessagePartTypeImageURL,
-				ImageURL: &openai.ChatMessageImageURL{
-					URL:    fmt.Sprintf("data:%s;base64,%s", mimeType, encoded),
-					Detail: openai.ImageURLDetailLow,
-				},
-			})
-		}
-	}
+	parts := c.buildMessageParts(messages, promptText)
 
 	if err := c.checkCircuit(); err != nil {
 		return nil, err
@@ -228,6 +140,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	})
 	if err != nil {
 		c.recordFailure()
+
 		return nil, fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
@@ -236,6 +149,134 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	content := resp.Choices[0].Message.Content
 	c.logger.Debug().Str("content", content).Msg("LLM response")
 
+	results, err := c.parseResponseJSON(content)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.alignBatchResults(results, messages)
+}
+
+func (c *openaiClient) buildLangInstruction(targetLanguage, tone string) string {
+	langInstruction := ""
+
+	if targetLanguage != "" {
+		langInstruction = fmt.Sprintf(" IMPORTANT: Return all topics and summaries in %s language.", targetLanguage)
+	}
+
+	if tone != "" {
+		langInstruction += fmt.Sprintf(toneFormatString, getToneInstruction(tone))
+	}
+
+	return langInstruction
+}
+
+func (c *openaiClient) resolveModel(model string) string {
+	if model == "" {
+		model = c.cfg.LLMModel
+	}
+
+	if model == "" {
+		model = openai.GPT4oMini
+	}
+
+	return model
+}
+
+func (c *openaiClient) buildMessageParts(messages []MessageInput, promptText string) []openai.ChatMessagePart {
+	parts := []openai.ChatMessagePart{
+		{
+			Type: openai.ChatMessagePartTypeText,
+			Text: promptText,
+		},
+	}
+
+	for i, m := range messages {
+		textPart := c.buildMessageTextPart(i, m)
+
+		parts = append(parts, openai.ChatMessagePart{
+			Type: openai.ChatMessagePartTypeText,
+			Text: textPart,
+		})
+
+		if len(m.MediaData) > 0 {
+			mimeType := http.DetectContentType(m.MediaData)
+			encoded := base64.StdEncoding.EncodeToString(m.MediaData)
+
+			parts = append(parts, openai.ChatMessagePart{
+				Type: openai.ChatMessagePartTypeImageURL,
+				ImageURL: &openai.ChatMessageImageURL{
+					URL:    fmt.Sprintf("data:%s;base64,%s", mimeType, encoded),
+					Detail: openai.ImageURLDetailLow,
+				},
+			})
+		}
+	}
+
+	return parts
+}
+
+func (c *openaiClient) buildMessageTextPart(index int, m MessageInput) string {
+	textPart := fmt.Sprintf("[%d] ", index)
+
+	if m.ChannelTitle != "" {
+		textPart += fmt.Sprintf("(Source Channel: %s) ", m.ChannelTitle)
+	}
+
+	if m.ChannelContext != "" {
+		textPart += fmt.Sprintf("(Channel Context: %s) ", m.ChannelContext)
+	}
+
+	if m.ChannelDescription != "" {
+		textPart += fmt.Sprintf("(Channel Description: %s) ", m.ChannelDescription)
+	}
+
+	if m.ChannelCategory != "" {
+		textPart += fmt.Sprintf("(Channel Category: %s) ", m.ChannelCategory)
+	}
+
+	if m.ChannelTone != "" {
+		textPart += fmt.Sprintf("(Channel Tone: %s) ", m.ChannelTone)
+	}
+
+	if m.ChannelUpdateFreq != "" {
+		textPart += fmt.Sprintf("(Channel Frequency: %s) ", m.ChannelUpdateFreq)
+	}
+
+	if len(m.Context) > 0 {
+		textPart += fmt.Sprintf("[BACKGROUND CONTEXT - DO NOT SUMMARIZE: %s] ", truncate(strings.Join(m.Context, " | "), truncateLengthShort))
+	}
+
+	if len(m.ResolvedLinks) > 0 {
+		textPart += c.buildResolvedLinksText(m.ResolvedLinks)
+	}
+
+	textPart += ">>> MESSAGE TO SUMMARIZE <<< " + m.Text + "\n"
+
+	return textPart
+}
+
+func (c *openaiClient) buildResolvedLinksText(links []db.ResolvedLink) string {
+	text := "[Referenced Content: "
+
+	for _, link := range links {
+		if link.LinkType == LinkTypeTelegram {
+			text += fmt.Sprintf("[Telegram] From %s: \"%s\" ", link.ChannelTitle, truncate(link.Content, truncateLengthShort))
+
+			if link.Views > 0 {
+				text += fmt.Sprintf("[%d views] ", link.Views)
+			}
+		} else {
+			text += fmt.Sprintf("[Web] %s Title: %s Content: %s ", link.Domain, link.Title, truncate(link.Content, truncateLengthLong))
+		}
+	}
+
+	text += "] "
+
+	return text
+}
+
+func (c *openaiClient) parseResponseJSON(content string) ([]BatchResult, error) {
 	var (
 		results []BatchResult
 		wrapper struct {
@@ -244,30 +285,33 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	)
 
 	if err := json.Unmarshal([]byte(content), &wrapper); err == nil && len(wrapper.Results) > 0 {
-		results = wrapper.Results
-	} else {
-		// Fallback 1: try unmarshaling as an array directly
-		if err2 := json.Unmarshal([]byte(content), &results); err2 != nil || len(results) == 0 {
-			// Fallback 2: try to find any array in the JSON
-			var raw map[string]interface{}
-			if err := json.Unmarshal([]byte(content), &raw); err == nil {
-				for _, v := range raw {
-					if arr, ok := v.([]interface{}); ok && len(arr) > 0 {
-						arrBytes, _ := json.Marshal(v)
-						if err := json.Unmarshal(arrBytes, &results); err == nil && len(results) > 0 {
-							break
-						}
-					}
+		return wrapper.Results, nil
+	}
+
+	// Fallback 1: try unmarshaling as an array directly
+	if err := json.Unmarshal([]byte(content), &results); err == nil && len(results) > 0 {
+		return results, nil
+	}
+
+	// Fallback 2: try to find any array in the JSON
+	var raw map[string]interface{}
+
+	if err := json.Unmarshal([]byte(content), &raw); err == nil {
+		for _, v := range raw {
+			if arr, ok := v.([]interface{}); ok && len(arr) > 0 {
+				arrBytes, _ := json.Marshal(v)
+
+				if err := json.Unmarshal(arrBytes, &results); err == nil && len(results) > 0 {
+					return results, nil
 				}
 			}
 		}
 	}
 
-	if len(results) == 0 {
-		return nil, fmt.Errorf("%w: %s", ErrNoResultsExtracted, content)
-	}
+	return nil, fmt.Errorf("%w: %s", ErrNoResultsExtracted, content)
+}
 
-	// Align results by index and ensure same length as input
+func (c *openaiClient) alignBatchResults(results []BatchResult, messages []MessageInput) ([]BatchResult, error) {
 	finalResults := make([]BatchResult, len(messages))
 	foundIndices := make(map[int]bool)
 	allZeroIndex := true
@@ -289,76 +333,7 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 
 	// Fallback: if all indices were 0, try to align by source_channel
 	if allZeroIndex && len(results) == len(messages) {
-		c.logger.Debug().Msg("All LLM results had index 0, attempting source_channel alignment")
-
-		// Build a map of channel title to message indices (there may be multiple messages from same channel)
-		channelToIndices := make(map[string][]int)
-
-		for i, m := range messages {
-			if m.ChannelTitle != "" {
-				channelToIndices[m.ChannelTitle] = append(channelToIndices[m.ChannelTitle], i)
-			}
-		}
-
-		// Try to match results by source_channel
-		aligned := make([]BatchResult, len(messages))
-		usedResults := make(map[int]bool)
-		matchedByChannel := 0
-
-		for i, m := range messages {
-			// Find a result with matching source_channel
-			for j, res := range results {
-				if usedResults[j] {
-					continue
-				}
-
-				if res.SourceChannel != "" && res.SourceChannel == m.ChannelTitle {
-					aligned[i] = res
-					aligned[i].Index = i
-					usedResults[j] = true
-					matchedByChannel++
-
-					break
-				}
-			}
-		}
-
-		// If we matched most by channel, use the aligned results
-		if matchedByChannel > len(messages)/2 {
-			// Fill any remaining unmatched slots with unmatched results in order
-			unmatchedResultIdx := 0
-
-			for i := range aligned {
-				if aligned[i].Summary == "" {
-					for unmatchedResultIdx < len(results) {
-						if !usedResults[unmatchedResultIdx] {
-							c.logger.Warn().
-								Int("message_idx", i).
-								Str("expected_channel", messages[i].ChannelTitle).
-								Str("result_channel", results[unmatchedResultIdx].SourceChannel).
-								Msg("Fallback: using unmatched result (potential misalignment)")
-							aligned[i] = results[unmatchedResultIdx]
-							aligned[i].Index = i
-							usedResults[unmatchedResultIdx] = true
-							unmatchedResultIdx++
-
-							break
-						}
-
-						unmatchedResultIdx++
-					}
-				}
-			}
-
-			c.logger.Info().Int("matched_by_channel", matchedByChannel).Int(logKeyTotal, len(messages)).Msg("Aligned results by source_channel")
-
-			return aligned, nil
-		}
-
-		// Source channel matching didn't work well, fall back to order
-		c.logger.Warn().Int("matched", matchedByChannel).Int(logKeyTotal, len(messages)).Msg("Source channel matching insufficient, assuming results are in order (potential misalignment)")
-
-		return results, nil
+		return c.alignBySourceChannel(results, messages)
 	}
 
 	// For missing indices, log warnings
@@ -369,6 +344,68 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	}
 
 	return finalResults, nil
+}
+
+func (c *openaiClient) alignBySourceChannel(results []BatchResult, messages []MessageInput) ([]BatchResult, error) {
+	c.logger.Debug().Msg("All LLM results had index 0, attempting source_channel alignment")
+
+	aligned := make([]BatchResult, len(messages))
+	usedResults := make(map[int]bool)
+	matchedByChannel := 0
+
+	for i, m := range messages {
+		for j, res := range results {
+			if usedResults[j] {
+				continue
+			}
+
+			if res.SourceChannel != "" && res.SourceChannel == m.ChannelTitle {
+				aligned[i] = res
+				aligned[i].Index = i
+				usedResults[j] = true
+				matchedByChannel++
+
+				break
+			}
+		}
+	}
+
+	if matchedByChannel > len(messages)/2 {
+		c.fillUnmatchedResults(aligned, results, messages, usedResults)
+		c.logger.Info().Int("matched_by_channel", matchedByChannel).Int(logKeyTotal, len(messages)).Msg("Aligned results by source_channel")
+
+		return aligned, nil
+	}
+
+	c.logger.Warn().Int("matched", matchedByChannel).Int(logKeyTotal, len(messages)).Msg("Source channel matching insufficient, assuming results are in order (potential misalignment)")
+
+	return results, nil
+}
+
+func (c *openaiClient) fillUnmatchedResults(aligned, results []BatchResult, messages []MessageInput, usedResults map[int]bool) {
+	unmatchedResultIdx := 0
+
+	for i := range aligned {
+		if aligned[i].Summary == "" {
+			for unmatchedResultIdx < len(results) {
+				if !usedResults[unmatchedResultIdx] {
+					c.logger.Warn().
+						Int("message_idx", i).
+						Str("expected_channel", messages[i].ChannelTitle).
+						Str("result_channel", results[unmatchedResultIdx].SourceChannel).
+						Msg("Fallback: using unmatched result (potential misalignment)")
+					aligned[i] = results[unmatchedResultIdx]
+					aligned[i].Index = i
+					usedResults[unmatchedResultIdx] = true
+					unmatchedResultIdx++
+
+					break
+				}
+
+				unmatchedResultIdx++
+			}
+		}
+	}
 }
 
 func (c *openaiClient) GenerateNarrative(ctx context.Context, items []db.Item, targetLanguage string, model string, tone string) (string, error) {

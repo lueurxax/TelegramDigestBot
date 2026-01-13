@@ -100,6 +100,7 @@ const (
 	ErrGenericFmt                     = "Error: %s"
 	ErrNoRows                         = "no rows"
 	MsgCouldNotGetImportanceThreshold = "could not get importance threshold from DB"
+	MsgScoresDebugUsage               = "Usage: <code>/scores debug [hours]</code>"
 )
 
 // Status strings.
@@ -260,6 +261,8 @@ func (b *Bot) handleFilterNamespace(ctx context.Context, msg *tgbotapi.Message) 
 	newMsg.Entities = newEntities
 
 	switch subcommand {
+	case CmdList:
+		b.handleFiltersList(ctx, &newMsg)
 	case CmdAdd, CmdRemove, SubCmdAds, SubCmdMode:
 		b.handleFilters(ctx, msg) // handleFilters already handles these subcommands
 	case "keywords":
@@ -815,8 +818,8 @@ func formatChannelEntry(sb *strings.Builder, ch db.Channel) {
 	fmt.Fprintf(sb, "  Weight: <code>%s</code>\n", weightStr)
 
 	relevanceStr := WeightOverrideManual
-	
-if ch.AutoRelevanceEnabled {
+
+	if ch.AutoRelevanceEnabled {
 		if ch.RelevanceThresholdDelta != 0 {
 			relevanceStr = fmt.Sprintf("%s (%+.2f)", SubCmdAuto, ch.RelevanceThresholdDelta)
 		} else {
@@ -1080,6 +1083,11 @@ func (b *Bot) handleRatingsStats(ctx context.Context, msg *tgbotapi.Message, arg
 
 func (b *Bot) handleScores(ctx context.Context, msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
+	if len(args) > 0 && strings.EqualFold(args[0], "debug") {
+		b.handleScoresDebug(ctx, msg, args[1:])
+		return
+	}
+
 	hours, limit := parseScoresArgs(args)
 
 	if hours <= 0 || limit <= 0 {
@@ -1116,6 +1124,48 @@ func (b *Bot) handleScores(ctx context.Context, msg *tgbotapi.Message) {
 	}
 
 	b.reply(msg, formatScoresOutput(hours, importanceThreshold, &stats, items))
+}
+
+func (b *Bot) handleScoresDebug(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	hours := DefaultScoresHours
+
+	if len(args) > 0 {
+		if len(args) > 1 {
+			b.reply(msg, MsgScoresDebugUsage)
+			return
+		}
+
+		if v, err := strconv.Atoi(args[0]); err == nil && v > 0 {
+			hours = v
+		} else {
+			b.reply(msg, MsgScoresDebugUsage)
+			return
+		}
+	}
+
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+
+	stats, err := b.database.GetItemStatusStats(ctx, since)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error fetching score stats: %s", html.EscapeString(err.Error())))
+		return
+	}
+
+	if stats.Total == 0 {
+		b.reply(msg, fmt.Sprintf("No items in the last %d hours.", hours))
+		return
+	}
+
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("📊 <b>Item Status (last %d hours)</b>\n\n", hours))
+	sb.WriteString(fmt.Sprintf("Total items: <code>%d</code>\n", stats.Total))
+	sb.WriteString(fmt.Sprintf("Ready (pending): <code>%d</code>\n", stats.ReadyPending))
+	sb.WriteString(fmt.Sprintf("Ready (digested): <code>%d</code>\n", stats.ReadyDigested))
+	sb.WriteString(fmt.Sprintf("Rejected: <code>%d</code>\n", stats.Rejected))
+	sb.WriteString(fmt.Sprintf("Error: <code>%d</code>\n", stats.Error))
+
+	b.reply(msg, sb.String())
 }
 
 func parseScoresArgs(args []string) (hours, limit int) {
@@ -2275,6 +2325,7 @@ func (b *Bot) handleHelp(_ context.Context, msg *tgbotapi.Message) {
 		"• <code>/ratings [days] [limit]</code> - Item rating summary\n"+
 		"• <code>/ratings stats [limit]</code> - Decayed rating summary\n"+
 		"• <code>/scores [hours] [limit]</code> - Importance score snapshot\n"+
+		"• <code>/scores debug [hours]</code> - Item status counts\n"+
 		"• <code>/annotate</code> - Annotation queue (enqueue/next/label/skip/stats)\n"+
 		"• <code>/system status</code> - Detailed system health\n"+
 		"• <code>/system settings</code> - View all configuration overrides\n"+

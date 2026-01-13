@@ -138,7 +138,7 @@ func (r *Resolver) ResolveLinks(ctx context.Context, text string, maxLinks int, 
 
 			r.logger.Warn().Err(err).Str(logKeyURL, link.URL).Msg("failed to resolve link")
 			// Save error to cache to avoid retrying immediately
-			r.database.SaveLinkCache(ctx, &db.ResolvedLink{
+			_, _ = r.database.SaveLinkCache(ctx, &db.ResolvedLink{
 				URL:          link.URL,
 				Domain:       link.Domain,
 				LinkType:     string(link.Type),

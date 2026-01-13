@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	shutdownTimeout = 5 * time.Second
+	shutdownTimeout   = 5 * time.Second
+	readHeaderTimeout = 10 * time.Second
 )
 
 type Server struct {
@@ -52,8 +53,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.Handle("/metrics", promhttp.Handler())
 
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.port),
-		Handler: mux,
+		Addr:              fmt.Sprintf(":%d", s.port),
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
 	go func() {
