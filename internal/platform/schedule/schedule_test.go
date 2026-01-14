@@ -71,7 +71,7 @@ func TestTimesBetweenMergeAndDedup(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsBadTime(t *testing.T) {
+func TestValidateAcceptsSingleDigitHour(t *testing.T) {
 	s := Schedule{
 		Timezone: "UTC",
 		Weekdays: DaySchedule{
@@ -79,8 +79,21 @@ func TestValidateRejectsBadTime(t *testing.T) {
 		},
 	}
 
+	if err := s.Validate(); err != nil {
+		t.Fatalf("expected validation to pass, got %v", err)
+	}
+}
+
+func TestValidateRejectsBadMinuteFormat(t *testing.T) {
+	s := Schedule{
+		Timezone: "UTC",
+		Weekdays: DaySchedule{
+			Times: []string{"09:0"},
+		},
+	}
+
 	if err := s.Validate(); err == nil {
-		t.Fatal("expected validation error for bad time format")
+		t.Fatal("expected validation error for bad minute format")
 	}
 }
 

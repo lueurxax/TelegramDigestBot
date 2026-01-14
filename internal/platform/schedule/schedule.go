@@ -3,7 +3,6 @@ package schedule
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -299,28 +298,60 @@ func sortedMinutes(set map[int]struct{}) []int {
 	return minutes
 }
 
-var timePattern = regexp.MustCompile(`^[0-2][0-9]:[0-5][0-9]$`)
-
 func parseTimeHM(value string) (int, error) {
-	if !timePattern.MatchString(value) {
-		return 0, ErrTimeFormat
+	normalized, err := NormalizeTimeHM(value)
+	if err != nil {
+		return 0, err
 	}
 
-	hour, err := strconv.Atoi(value[:2])
+	hour, err := strconv.Atoi(normalized[:2])
 	if err != nil {
 		return 0, ErrInvalidHour
 	}
 
-	minute, err := strconv.Atoi(value[3:])
+	minute, err := strconv.Atoi(normalized[3:])
 	if err != nil {
 		return 0, ErrInvalidMinute
 	}
 
-	if hour > maxHour {
-		return 0, ErrHourOutOfRange
+	return hour*minutesPerHour + minute, nil
+}
+
+// NormalizeTimeHM accepts H:MM or HH:MM and returns HH:MM.
+func NormalizeTimeHM(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", ErrTimeFormat
 	}
 
-	return hour*minutesPerHour + minute, nil
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return "", ErrTimeFormat
+	}
+
+	if len(parts[1]) != 2 {
+		return "", ErrTimeFormat
+	}
+
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return "", ErrInvalidHour
+	}
+
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return "", ErrInvalidMinute
+	}
+
+	if hour > maxHour || hour < 0 {
+		return "", ErrHourOutOfRange
+	}
+
+	if minute < 0 || minute >= minutesPerHour {
+		return "", ErrInvalidMinute
+	}
+
+	return fmt.Sprintf("%02d:%02d", hour, minute), nil
 }
 
 func dateOnly(t time.Time) time.Time {

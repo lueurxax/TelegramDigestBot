@@ -564,9 +564,14 @@ func (b *Bot) handleScheduleTimes(ctx context.Context, msg *tgbotapi.Message, da
 		return
 	}
 
-	times := parseScheduleTimes(value)
+	times, err := parseScheduleTimes(value)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Invalid time: %s", html.EscapeString(err.Error())))
+		return
+	}
+
 	if len(times) == 0 {
-		b.reply(msg, "❌ Provide a comma-separated list of times, e.g. <code>09:00,13:00,18:00</code>.")
+		b.reply(msg, "❌ Provide a list of times, e.g. <code>09:00,13:00,18:00</code>.")
 
 		return
 	}
@@ -585,9 +590,9 @@ func (b *Bot) handleScheduleHourly(ctx context.Context, msg *tgbotapi.Message, d
 		return
 	}
 
-	start, end, ok := parseHourlyRange(value)
-	if !ok {
-		b.reply(msg, "❌ Provide an hourly range like <code>06:30-22:00</code>.")
+	start, end, err := parseHourlyRange(value)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Invalid hourly range: %s", html.EscapeString(err.Error())))
 
 		return
 	}
@@ -665,7 +670,7 @@ func formatScheduleDay(day schedule.DaySchedule) string {
 	return strings.Join(parts, "; ")
 }
 
-func parseScheduleTimes(value string) []string {
+func parseScheduleTimes(value string) ([]string, error) {
 	var parts []string
 
 	if strings.Contains(value, ",") {
@@ -680,25 +685,48 @@ func parseScheduleTimes(value string) []string {
 		parts = strings.Fields(value)
 	}
 
-	return parts
+	if len(parts) == 0 {
+		return nil, nil
+	}
+
+	normalized := make([]string, 0, len(parts))
+	for _, part := range parts {
+		normalizedTime, err := schedule.NormalizeTimeHM(part)
+		if err != nil {
+			return nil, err
+		}
+
+		normalized = append(normalized, normalizedTime)
+	}
+
+	return normalized, nil
 }
 
-func parseHourlyRange(value string) (string, string, bool) {
+func parseHourlyRange(value string) (string, string, error) {
 	const expectedParts = 2
 
 	rangeParts := strings.SplitN(value, "-", expectedParts)
 	if len(rangeParts) != expectedParts {
-		return "", "", false
+		return "", "", schedule.ErrTimeFormat
 	}
 
 	start := strings.TrimSpace(rangeParts[0])
-
 	end := strings.TrimSpace(rangeParts[1])
 	if start == "" || end == "" {
-		return "", "", false
+		return "", "", schedule.ErrTimeFormat
 	}
 
-	return start, end, true
+	startNormalized, err := schedule.NormalizeTimeHM(start)
+	if err != nil {
+		return "", "", err
+	}
+
+	endNormalized, err := schedule.NormalizeTimeHM(end)
+	if err != nil {
+		return "", "", err
+	}
+
+	return startNormalized, endNormalized, nil
 }
 
 func (b *Bot) handleLanguage(ctx context.Context, msg *tgbotapi.Message) {
