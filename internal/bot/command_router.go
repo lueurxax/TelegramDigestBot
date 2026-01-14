@@ -62,6 +62,7 @@ func (b *Bot) registerSettingCommands(r *commandRegistry) {
 	r.handlers["filters"] = b.handleFilters
 	r.handlers[CmdTarget] = b.handleTarget
 	r.handlers[CmdWindow] = b.handleWindow
+	r.handlers[CmdSchedule] = b.handleSchedule
 	r.handlers[CmdTopics] = b.handleTopics
 	r.handlers[CmdDedup] = b.handleDedup
 	r.handlers[CmdLanguage] = b.handleLanguage

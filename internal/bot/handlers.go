@@ -10,8 +10,9 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/schedule"
+	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -244,7 +245,7 @@ func (b *Bot) handleConfigNamespace(ctx context.Context, msg *tgbotapi.Message) 
 	args := strings.Fields(msg.CommandArguments())
 
 	if len(args) == 0 {
-		b.reply(msg, "Usage: <code>/config &lt;links|max_links|link_cache|target|window|language|tone|relevance|importance|reset&gt;</code>")
+		b.reply(msg, "Usage: <code>/config &lt;links|max_links|link_cache|target|window|schedule|language|tone|relevance|importance|reset&gt;</code>")
 
 		return
 	}
@@ -266,6 +267,7 @@ func (b *Bot) routeConfigSubcommand(ctx context.Context, msg *tgbotapi.Message, 
 		"linkcache":  func() { b.handleLinkCache(ctx, msg) },
 		"target":     func() { b.handleTarget(ctx, msg) },
 		"window":     func() { b.handleWindow(ctx, msg) },
+		"schedule":   func() { b.handleSchedule(ctx, msg) },
 		"language":   func() { b.handleLanguage(ctx, msg) },
 		CmdTone:      func() { b.handleTone(ctx, msg) },
 		"relevance":  func() { b.handleThreshold(ctx, msg, SettingRelevanceThreshold) },
@@ -482,6 +484,187 @@ func (b *Bot) handleWindow(ctx context.Context, msg *tgbotapi.Message) {
 	}
 
 	b.reply(msg, fmt.Sprintf("✅ Digest window updated to <code>%s</code>.", html.EscapeString(args)))
+}
+
+func (b *Bot) handleSchedule(ctx context.Context, msg *tgbotapi.Message) {
+	args := strings.Fields(msg.CommandArguments())
+	if len(args) == 0 {
+		b.reply(msg, "Usage: <code>/schedule timezone &lt;IANA&gt;</code> | <code>/schedule weekdays times &lt;HH:MM,...&gt;</code> | <code>/schedule weekdays hourly &lt;HH:MM-HH:MM&gt;</code> | <code>/schedule weekends hourly &lt;HH:MM-HH:MM&gt;</code> | <code>/schedule show</code>")
+
+		return
+	}
+
+	subcommand := strings.ToLower(args[0])
+	switch subcommand {
+	case "show":
+		b.reply(msg, b.formatDigestSchedule(ctx))
+		return
+	case "timezone":
+		if len(args) < 2 {
+			b.reply(msg, "Usage: <code>/schedule timezone &lt;IANA&gt;</code> (e.g. <code>Europe/Kyiv</code>)")
+			return
+		}
+
+		sched := b.loadDigestSchedule(ctx)
+		sched.Timezone = args[1]
+
+		b.saveDigestSchedule(ctx, msg, sched)
+		return
+	case "weekdays", "weekends":
+		if len(args) < 3 {
+			b.reply(msg, "Usage: <code>/schedule weekdays times &lt;HH:MM,...&gt;</code> | <code>/schedule weekdays hourly &lt;HH:MM-HH:MM&gt;</code>")
+			return
+		}
+
+		dayTarget := subcommand
+		mode := strings.ToLower(args[1])
+		value := strings.Join(args[2:], " ")
+
+		sched := b.loadDigestSchedule(ctx)
+		var day *schedule.DaySchedule
+		if dayTarget == "weekdays" {
+			day = &sched.Weekdays
+		} else {
+			day = &sched.Weekends
+		}
+
+		switch mode {
+		case "times":
+			if strings.EqualFold(value, "clear") || strings.EqualFold(value, "off") {
+				day.Times = nil
+				b.saveDigestSchedule(ctx, msg, sched)
+				return
+			}
+
+			times := parseScheduleTimes(value)
+			if len(times) == 0 {
+				b.reply(msg, "❌ Provide a comma-separated list of times, e.g. <code>09:00,13:00,18:00</code>.")
+				return
+			}
+
+			day.Times = times
+			b.saveDigestSchedule(ctx, msg, sched)
+		case "hourly":
+			if strings.EqualFold(value, "clear") || strings.EqualFold(value, "off") {
+				day.Hourly = nil
+				b.saveDigestSchedule(ctx, msg, sched)
+				return
+			}
+
+			start, end, ok := parseHourlyRange(value)
+			if !ok {
+				b.reply(msg, "❌ Provide an hourly range like <code>06:30-22:00</code>.")
+				return
+			}
+
+			day.Hourly = &schedule.HourlyRange{Start: start, End: end}
+			b.saveDigestSchedule(ctx, msg, sched)
+		default:
+			b.reply(msg, "❌ Unknown schedule mode. Use <code>times</code> or <code>hourly</code>.")
+		}
+
+		return
+	default:
+		b.reply(msg, fmt.Sprintf("❓ Unknown schedule subcommand: <code>%s</code>", html.EscapeString(subcommand)))
+	}
+}
+
+func (b *Bot) loadDigestSchedule(ctx context.Context) schedule.Schedule {
+	var sched schedule.Schedule
+	if err := b.database.GetSetting(ctx, schedule.SettingDigestSchedule, &sched); err != nil {
+		b.logger.Debug().Err(err).Msg("could not get digest_schedule from DB")
+	}
+
+	return sched
+}
+
+func (b *Bot) saveDigestSchedule(ctx context.Context, msg *tgbotapi.Message, sched schedule.Schedule) {
+	if err := sched.Validate(); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Invalid schedule: %s", html.EscapeString(err.Error())))
+		return
+	}
+
+	if err := b.database.SaveSettingWithHistory(ctx, schedule.SettingDigestSchedule, sched, msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error saving schedule: %s", html.EscapeString(err.Error())))
+		return
+	}
+
+	if err := b.database.SaveSettingWithHistory(ctx, schedule.SettingDigestScheduleAnchor, time.Now().UTC(), msg.From.ID); err != nil {
+		b.logger.Debug().Err(err).Msg("failed to save digest_schedule_anchor")
+	}
+
+	b.reply(msg, "✅ Digest schedule updated.")
+}
+
+func (b *Bot) formatDigestSchedule(ctx context.Context) string {
+	sched := b.loadDigestSchedule(ctx)
+	timezone := sched.Timezone
+	if strings.TrimSpace(timezone) == "" {
+		timezone = "UTC"
+	}
+
+	if sched.IsEmpty() {
+		return fmt.Sprintf("ℹ️ No digest schedule configured. Scheduler uses <code>digest_window</code>. (Timezone: <code>%s</code>)", html.EscapeString(timezone))
+	}
+
+	var sb strings.Builder
+	sb.WriteString("🗓️ <b>Digest Schedule</b>\n")
+	sb.WriteString(fmt.Sprintf("• Timezone: <code>%s</code>\n", html.EscapeString(timezone)))
+	sb.WriteString(fmt.Sprintf("• Weekdays: %s\n", html.EscapeString(formatScheduleDay(sched.Weekdays))))
+	sb.WriteString(fmt.Sprintf("• Weekends: %s", html.EscapeString(formatScheduleDay(sched.Weekends))))
+
+	return sb.String()
+}
+
+func formatScheduleDay(day schedule.DaySchedule) string {
+	parts := make([]string, 0, 2)
+
+	if len(day.Times) > 0 {
+		parts = append(parts, "times "+strings.Join(day.Times, ", "))
+	}
+
+	if day.Hourly != nil {
+		parts = append(parts, fmt.Sprintf("hourly %s-%s", day.Hourly.Start, day.Hourly.End))
+	}
+
+	if len(parts) == 0 {
+		return "none"
+	}
+
+	return strings.Join(parts, "; ")
+}
+
+func parseScheduleTimes(value string) []string {
+	var parts []string
+
+	if strings.Contains(value, ",") {
+		rawParts := strings.Split(value, ",")
+		for _, part := range rawParts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				parts = append(parts, part)
+			}
+		}
+	} else {
+		parts = strings.Fields(value)
+	}
+
+	return parts
+}
+
+func parseHourlyRange(value string) (string, string, bool) {
+	rangeParts := strings.SplitN(value, "-", 2)
+	if len(rangeParts) != 2 {
+		return "", "", false
+	}
+
+	start := strings.TrimSpace(rangeParts[0])
+	end := strings.TrimSpace(rangeParts[1])
+	if start == "" || end == "" {
+		return "", "", false
+	}
+
+	return start, end, true
 }
 
 func (b *Bot) handleLanguage(ctx context.Context, msg *tgbotapi.Message) {
@@ -2152,7 +2335,8 @@ func (b *Bot) handleSetup(ctx context.Context, msg *tgbotapi.Message) {
 	}
 
 	sb.WriteString("3️⃣ <b>Basic Configuration</b>\n")
-	sb.WriteString("• <code>/window 60m</code> - Set digest interval\n")
+	sb.WriteString("• <code>/window 60m</code> - Set fallback digest interval\n")
+	sb.WriteString("• <code>/schedule show</code> - View digest schedule\n")
 	sb.WriteString("• <code>/language ru</code> - Set digest language\n\n")
 
 	sb.WriteString("💡 <i>Tip: Use /settings to see all current values.</i>")
@@ -2379,7 +2563,8 @@ func (b *Bot) handleHelp(_ context.Context, msg *tgbotapi.Message) {
 		"• <code>/filter min_length &lt;n&gt;</code> - Min message length\n\n"+
 		"⚙️ <b>Configuration</b> (<code>/config</code>)\n"+
 		"• <code>/config target &lt;id|@user&gt;</code> - Set digest destination\n"+
-		"• <code>/config window &lt;duration&gt;</code> - Set digest interval (e.g., 60m)\n"+
+		"• <code>/config window &lt;duration&gt;</code> - Set fallback digest interval (e.g., 60m)\n"+
+		"• <code>/schedule show</code> - View/update digest schedule\n"+
 		"• <code>/config language &lt;code&gt;</code> - Set digest language (e.g., ru)\n"+
 		"• <code>/config tone &lt;professional|casual|brief&gt;</code> - Set digest tone\n"+
 		"• <code>/config relevance &lt;0-1&gt;</code> - Set relevance threshold\n"+
