@@ -42,6 +42,7 @@ var ErrNoResultsExtracted = errors.New("failed to extract any results from LLM r
 const (
 	circuitBreakerThreshold = 5
 	circuitBreakerTimeout   = 1 * time.Minute
+	translatePromptTemplate = "Translate the following text to %s. Preserve HTML tags and return only the translated text."
 )
 
 func NewOpenAI(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
@@ -161,7 +162,7 @@ func (c *openaiClient) buildLangInstruction(targetLanguage, tone string) string 
 	langInstruction := ""
 
 	if targetLanguage != "" {
-		langInstruction = fmt.Sprintf(" IMPORTANT: Return all topics and summaries in %s language.", targetLanguage)
+		langInstruction = fmt.Sprintf(" IMPORTANT: Write all outputs in %s. Translate content if needed and do not mix languages.", targetLanguage)
 	}
 
 	if tone != "" {

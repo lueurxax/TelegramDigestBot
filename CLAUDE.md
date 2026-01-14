@@ -21,7 +21,16 @@ Linters keep code clean, readable, and maintainable. They catch:
 
 ## Project Structure & Module Organization
 - `cmd/digest-bot/` holds the main entrypoint; run modes are selected via `--mode`.
-- `internal/` contains the core Go packages (pipeline, filters, htmlutils, telegram bot, etc.).
+- `cmd/tools/` contains utility binaries (eval, labels).
+- `internal/` contains domain-organized packages:
+  - `internal/app/` - runtime wiring and service startup
+  - `internal/bot/` - admin bot and operator commands
+  - `internal/core/` - shared services (llm, links, domain types)
+  - `internal/ingest/reader/` - Telegram MTProto reader
+  - `internal/output/digest/` - clustering, selection, rendering
+  - `internal/process/` - pipeline, filters, dedup
+  - `internal/platform/` - config, observability, htmlutils
+  - `internal/storage/` - DB, repositories, sqlc, migrations
 - `internal/**/**/*_test.go` contains unit tests colocated with the packages they cover.
 - `deploy/compose/` and `deploy/k8s/` contain Docker Compose and Kubernetes manifests.
 - `migrations/` and `sqlc.yaml` define database schema changes and SQL codegen.
