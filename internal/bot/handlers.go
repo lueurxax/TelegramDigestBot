@@ -693,7 +693,7 @@ func parseScheduleTimes(value string) ([]string, error) {
 	for _, part := range parts {
 		normalizedTime, err := schedule.NormalizeTimeHM(part)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("invalid time %q: %w", part, err)
 		}
 
 		normalized = append(normalized, normalizedTime)
@@ -711,6 +711,7 @@ func parseHourlyRange(value string) (string, string, error) {
 	}
 
 	start := strings.TrimSpace(rangeParts[0])
+
 	end := strings.TrimSpace(rangeParts[1])
 	if start == "" || end == "" {
 		return "", "", schedule.ErrTimeFormat
@@ -718,12 +719,12 @@ func parseHourlyRange(value string) (string, string, error) {
 
 	startNormalized, err := schedule.NormalizeTimeHM(start)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("invalid start time: %w", err)
 	}
 
 	endNormalized, err := schedule.NormalizeTimeHM(end)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("invalid end time: %w", err)
 	}
 
 	return startNormalized, endNormalized, nil
