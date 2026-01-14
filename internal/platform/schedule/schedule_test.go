@@ -546,8 +546,8 @@ func TestTimesBetweenMultipleDays(t *testing.T) {
 	}
 
 	// Friday to Monday
-	start := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)  // Friday
-	end := time.Date(2026, 1, 5, 23, 59, 0, 0, time.UTC)  // Monday
+	start := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC) // Friday
+	end := time.Date(2026, 1, 5, 23, 59, 0, 0, time.UTC) // Monday
 
 	times, err := s.TimesBetween(start, end)
 	if err != nil {

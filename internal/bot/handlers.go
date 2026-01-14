@@ -703,18 +703,21 @@ func parseScheduleTimes(value string) ([]string, error) {
 }
 
 func parseHourlyRange(value string) (string, string, error) {
-	const expectedParts = 2
+	const (
+		expectedParts         = 2
+		errInvalidHourlyRange = "invalid hourly range: %w"
+	)
 
 	rangeParts := strings.SplitN(value, "-", expectedParts)
 	if len(rangeParts) != expectedParts {
-		return "", "", schedule.ErrTimeFormat
+		return "", "", fmt.Errorf(errInvalidHourlyRange, schedule.ErrTimeFormat)
 	}
 
 	start := strings.TrimSpace(rangeParts[0])
 
 	end := strings.TrimSpace(rangeParts[1])
 	if start == "" || end == "" {
-		return "", "", schedule.ErrTimeFormat
+		return "", "", fmt.Errorf(errInvalidHourlyRange, schedule.ErrTimeFormat)
 	}
 
 	startNormalized, err := schedule.NormalizeTimeHM(start)

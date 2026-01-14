@@ -9,10 +9,12 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
-	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 )
+
+const testTieredModel = "gpt-4o"
 
 type mockRepo struct {
 	settings            map[string]interface{}
@@ -300,4 +302,429 @@ func (m *mockLLMWithImportance) ProcessBatch(_ context.Context, messages []llm.M
 
 func (m *mockLLMWithImportance) TranslateText(_ context.Context, text string, _ string, _ string) (string, error) {
 	return text, nil
+}
+
+func TestHasUniqueInfo(t *testing.T) {
+	tests := []struct {
+		name    string
+		summary string
+		want    bool
+	}{
+		{
+			name:    "contains proper name",
+			summary: "John announced new features",
+			want:    true,
+		},
+		{
+			name:    "contains number",
+			summary: "Revenue grew by 25 percent",
+			want:    true,
+		},
+		{
+			name:    "contains date reference",
+			summary: "Event scheduled for Monday",
+			want:    true,
+		},
+		{
+			name:    "contains month",
+			summary: "Launch planned for January",
+			want:    true,
+		},
+		{
+			name:    "generic statement no unique info",
+			summary: "something happened somewhere",
+			want:    false,
+		},
+		{
+			name:    "empty string",
+			summary: "",
+			want:    false,
+		},
+		{
+			name:    "with HTML tags",
+			summary: "<b>John</b> announced something",
+			want:    true,
+		},
+		{
+			name:    "today reference",
+			summary: "happening today in the market",
+			want:    true,
+		},
+	}
+
+	cfg := &config.Config{}
+	p := New(cfg, nil, nil, nil, nil)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := p.hasUniqueInfo(tt.summary); got != tt.want {
+				t.Errorf("hasUniqueInfo() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeLanguage(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "lowercase",
+			input: "en",
+			want:  "en",
+		},
+		{
+			name:  "uppercase",
+			input: "EN",
+			want:  "en",
+		},
+		{
+			name:  "mixed case",
+			input: "RuSsIaN",
+			want:  "russian",
+		},
+		{
+			name:  "with leading space",
+			input: " ru",
+			want:  "ru",
+		},
+		{
+			name:  "with trailing space",
+			input: "uk ",
+			want:  "uk",
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeLanguage(tt.input); got != tt.want {
+				t.Errorf("normalizeLanguage() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestContainsUkrainianLetters(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{
+			name: "pure English",
+			text: "Hello world",
+			want: false,
+		},
+		{
+			name: "Russian text without Ukrainian letters",
+			text: "Привет мир",
+			want: false,
+		},
+		{
+			name: "contains Ukrainian Є",
+			text: "Європа",
+			want: true,
+		},
+		{
+			name: "contains Ukrainian І",
+			text: "Київ",
+			want: true,
+		},
+		{
+			name: "contains Ukrainian Ї",
+			text: "Україна",
+			want: true,
+		},
+		{
+			name: "contains Ukrainian Ґ",
+			text: "Ґанок",
+			want: true,
+		},
+		{
+			name: "empty string",
+			text: "",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := containsUkrainianLetters(tt.text); got != tt.want {
+				t.Errorf("containsUkrainianLetters() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSummaryNeedsTranslation(t *testing.T) {
+	tests := []struct {
+		name         string
+		summary      string
+		detectedLang string
+		targetLang   string
+		want         bool
+	}{
+		{
+			name:         "empty summary",
+			summary:      "",
+			detectedLang: "en",
+			targetLang:   "ru",
+			want:         false,
+		},
+		{
+			name:         "empty target",
+			summary:      "Hello world",
+			detectedLang: "en",
+			targetLang:   "",
+			want:         false,
+		},
+		{
+			name:         "same language",
+			summary:      "Hello world",
+			detectedLang: "en",
+			targetLang:   "en",
+			want:         false,
+		},
+		{
+			name:         "different languages",
+			summary:      "Hello world",
+			detectedLang: "en",
+			targetLang:   "ru",
+			want:         true,
+		},
+		{
+			name:         "Ukrainian to Russian",
+			summary:      "Київ столиця",
+			detectedLang: "",
+			targetLang:   "ru",
+			want:         true,
+		},
+		{
+			name:         "whitespace only summary",
+			summary:      "   ",
+			detectedLang: "en",
+			targetLang:   "ru",
+			want:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := summaryNeedsTranslation(tt.summary, tt.detectedLang, tt.targetLang); got != tt.want {
+				t.Errorf("summaryNeedsTranslation() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSelectTieredCandidates(t *testing.T) {
+	t.Run("selects high importance non-smart candidates", func(t *testing.T) {
+		candidates := []llm.MessageInput{
+			{RawMessage: db.RawMessage{ID: "1"}},
+			{RawMessage: db.RawMessage{ID: "2"}},
+			{RawMessage: db.RawMessage{ID: "3"}},
+		}
+		results := []llm.BatchResult{
+			{ImportanceScore: 0.5},  // below threshold
+			{ImportanceScore: 0.85}, // above threshold
+			{ImportanceScore: 0.9},  // above threshold, already smart model
+		}
+		modelUsed := []string{"gpt-4o-mini", "gpt-4o-mini", testTieredModel}
+
+		indices, selected := selectTieredCandidates(candidates, results, modelUsed, testTieredModel)
+
+		if len(indices) != 1 {
+			t.Fatalf("expected 1 selected, got %d", len(indices))
+		}
+
+		if indices[0] != 1 {
+			t.Errorf("expected index 1, got %d", indices[0])
+		}
+
+		if len(selected) != 1 || selected[0].ID != "2" {
+			t.Errorf("expected candidate ID '2', got %v", selected)
+		}
+	})
+
+	t.Run("returns empty when all below threshold", func(t *testing.T) {
+		candidates := []llm.MessageInput{{RawMessage: db.RawMessage{ID: "1"}}}
+		results := []llm.BatchResult{{ImportanceScore: 0.5}}
+		modelUsed := []string{"gpt-4o-mini"}
+
+		indices, selected := selectTieredCandidates(candidates, results, modelUsed, testTieredModel)
+
+		if len(indices) != 0 || len(selected) != 0 {
+			t.Errorf("expected empty results, got %d indices", len(indices))
+		}
+	})
+}
+
+func TestApplyTieredResults(t *testing.T) {
+	results := []llm.BatchResult{
+		{ImportanceScore: 0.5, Summary: "Original 1"},
+		{ImportanceScore: 0.85, Summary: "Original 2"},
+		{ImportanceScore: 0.9, Summary: "Original 3"},
+	}
+
+	tieredResults := []llm.BatchResult{
+		{ImportanceScore: 0.95, Summary: "Tiered 2"},
+	}
+
+	tieredIndices := []int{1}
+
+	applyTieredResults(results, tieredResults, tieredIndices)
+
+	if results[0].Summary != "Original 1" {
+		t.Errorf("result[0] should be unchanged, got %q", results[0].Summary)
+	}
+
+	if results[1].Summary != "Tiered 2" {
+		t.Errorf("result[1] should be updated, got %q", results[1].Summary)
+	}
+
+	if results[2].Summary != "Original 3" {
+		t.Errorf("result[2] should be unchanged, got %q", results[2].Summary)
+	}
+}
+
+func TestEvaluateRelevanceGateHeuristic(t *testing.T) {
+	tests := []struct {
+		name           string
+		text           string
+		wantDecision   string
+		wantConfidence float32
+		wantReason     string
+	}{
+		{
+			name:           "empty text",
+			text:           "",
+			wantDecision:   DecisionIrrelevant,
+			wantConfidence: ConfidenceEmpty,
+			wantReason:     ReasonEmpty,
+		},
+		{
+			name:           "whitespace only",
+			text:           "   \t\n  ",
+			wantDecision:   DecisionIrrelevant,
+			wantConfidence: ConfidenceEmpty,
+			wantReason:     ReasonEmpty,
+		},
+		{
+			name:           "link only",
+			text:           "https://example.com/news",
+			wantDecision:   DecisionIrrelevant,
+			wantConfidence: ConfidenceLinkOnly,
+			wantReason:     ReasonLinkOnly,
+		},
+		{
+			name:           "telegram link only",
+			text:           "t.me/channel/123",
+			wantDecision:   DecisionIrrelevant,
+			wantConfidence: ConfidenceLinkOnly,
+			wantReason:     ReasonLinkOnly,
+		},
+		{
+			name:           "only symbols no alphanumeric",
+			text:           "!!! ??? ---",
+			wantDecision:   DecisionIrrelevant,
+			wantConfidence: ConfidenceNoText,
+			wantReason:     ReasonNoText,
+		},
+		{
+			name:           "valid text",
+			text:           "Breaking news about technology",
+			wantDecision:   DecisionRelevant,
+			wantConfidence: ConfidencePassed,
+			wantReason:     ReasonPassed,
+		},
+		{
+			name:           "text with link",
+			text:           "Check out this news https://example.com",
+			wantDecision:   DecisionRelevant,
+			wantConfidence: ConfidencePassed,
+			wantReason:     ReasonPassed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := evaluateRelevanceGateHeuristic(tt.text)
+
+			if got.decision != tt.wantDecision {
+				t.Errorf("decision = %q, want %q", got.decision, tt.wantDecision)
+			}
+
+			if got.confidence != tt.wantConfidence {
+				t.Errorf("confidence = %v, want %v", got.confidence, tt.wantConfidence)
+			}
+
+			if got.reason != tt.wantReason {
+				t.Errorf("reason = %q, want %q", got.reason, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestHasAlphaNum(t *testing.T) {
+	tests := []struct {
+		name string
+		s    string
+		want bool
+	}{
+		{
+			name: "has letters",
+			s:    "abc",
+			want: true,
+		},
+		{
+			name: "has numbers",
+			s:    "123",
+			want: true,
+		},
+		{
+			name: "mixed alphanumeric",
+			s:    "abc123",
+			want: true,
+		},
+		{
+			name: "only symbols",
+			s:    "!@#$%",
+			want: false,
+		},
+		{
+			name: "empty string",
+			s:    "",
+			want: false,
+		},
+		{
+			name: "only spaces",
+			s:    "   ",
+			want: false,
+		},
+		{
+			name: "cyrillic letters",
+			s:    "привет",
+			want: true,
+		},
+		{
+			name: "unicode numbers",
+			s:    "٤٥٦", // Arabic-Indic digits
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasAlphaNum(tt.s); got != tt.want {
+				t.Errorf("hasAlphaNum() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

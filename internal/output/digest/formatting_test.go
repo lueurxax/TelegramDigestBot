@@ -175,3 +175,155 @@ func TestTopicEmojis(t *testing.T) {
 		}
 	}
 }
+
+func TestClusterMaxImportance(t *testing.T) {
+	tests := []struct {
+		name string
+		c    db.ClusterWithItems
+		want float32
+	}{
+		{
+			name: "single item",
+			c:    db.ClusterWithItems{Items: []db.Item{{ImportanceScore: 0.5}}},
+			want: 0.5,
+		},
+		{
+			name: "multiple items returns max",
+			c: db.ClusterWithItems{Items: []db.Item{
+				{ImportanceScore: 0.5},
+				{ImportanceScore: 0.9},
+				{ImportanceScore: 0.6},
+			}},
+			want: 0.9,
+		},
+		{
+			name: "empty cluster returns 0",
+			c:    db.ClusterWithItems{Items: []db.Item{}},
+			want: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clusterMaxImportance(tt.c); got != tt.want {
+				t.Errorf("clusterMaxImportance() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCategorizeItems(t *testing.T) {
+	items := []db.Item{
+		{ID: "1", ImportanceScore: 0.9}, // breaking >= 0.8
+		{ID: "2", ImportanceScore: 0.7}, // notable >= 0.6
+		{ID: "3", ImportanceScore: 0.5}, // also < 0.6
+		{ID: "4", ImportanceScore: 0.8}, // breaking exactly
+		{ID: "5", ImportanceScore: 0.6}, // notable exactly
+	}
+
+	breaking, notable, also := categorizeItems(items)
+
+	if len(breaking.items) != 2 {
+		t.Errorf("breaking items count = %d, want 2", len(breaking.items))
+	}
+
+	if len(notable.items) != 2 {
+		t.Errorf("notable items count = %d, want 2", len(notable.items))
+	}
+
+	if len(also.items) != 1 {
+		t.Errorf("also items count = %d, want 1", len(also.items))
+	}
+
+	// Verify correct items in each category
+	if breaking.items[0].ID != "1" && breaking.items[1].ID != "1" {
+		t.Error("expected item 1 in breaking")
+	}
+
+	if also.items[0].ID != "3" {
+		t.Errorf("expected item 3 in also, got %s", also.items[0].ID)
+	}
+}
+
+func TestCategorizeClusters(t *testing.T) {
+	clusters := []db.ClusterWithItems{
+		{Topic: "A", Items: []db.Item{{ImportanceScore: 0.9}}},  // breaking
+		{Topic: "B", Items: []db.Item{{ImportanceScore: 0.65}}}, // notable
+		{Topic: "C", Items: []db.Item{{ImportanceScore: 0.4}}},  // also
+	}
+
+	breaking, notable, also := categorizeClusters(clusters)
+
+	if len(breaking.clusters) != 1 {
+		t.Errorf("breaking clusters = %d, want 1", len(breaking.clusters))
+	}
+
+	if len(notable.clusters) != 1 {
+		t.Errorf("notable clusters = %d, want 1", len(notable.clusters))
+	}
+
+	if len(also.clusters) != 1 {
+		t.Errorf("also clusters = %d, want 1", len(also.clusters))
+	}
+
+	if breaking.clusters[0].Topic != "A" {
+		t.Errorf("breaking cluster topic = %s, want A", breaking.clusters[0].Topic)
+	}
+}
+
+func TestCountDistinctTopics(t *testing.T) {
+	tests := []struct {
+		name  string
+		items []db.Item
+		want  int
+	}{
+		{
+			name:  "empty items",
+			items: nil,
+			want:  0,
+		},
+		{
+			name: "all same topic",
+			items: []db.Item{
+				{Topic: "Technology"},
+				{Topic: "Technology"},
+			},
+			want: 1,
+		},
+		{
+			name: "distinct topics",
+			items: []db.Item{
+				{Topic: "Technology"},
+				{Topic: "Finance"},
+				{Topic: "Politics"},
+			},
+			want: 3,
+		},
+		{
+			name: "mix of same and different",
+			items: []db.Item{
+				{Topic: "Technology"},
+				{Topic: "Finance"},
+				{Topic: "Technology"},
+				{Topic: "Finance"},
+			},
+			want: 2,
+		},
+		{
+			name: "empty topic strings not counted",
+			items: []db.Item{
+				{Topic: ""},
+				{Topic: ""},
+			},
+			want: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := countDistinctTopics(tt.items); got != tt.want {
+				t.Errorf("countDistinctTopics() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

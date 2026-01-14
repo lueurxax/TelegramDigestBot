@@ -14,21 +14,21 @@ const (
 	testEnvTGAPIHash    = "TG_API_HASH"
 	//nolint:gosec // Test env key name, not a credential.
 	testEnvLLMAPIKey = "LLM_API_KEY"
-	testEnvAdminIDs     = "ADMIN_IDS"
+	testEnvAdminIDs  = "ADMIN_IDS"
 )
 
 // Test values.
 const (
-	testPostgresDSN  = "postgres://localhost/test"
-	testBotToken     = "123456:ABC-DEF"
-	testTargetChatID = "-1001234567890"
-	testTGAPIID      = "12345"
-	testTGAPIHash    = "abcdef123456"
-	testLLMAPIKey    = "sk-test-key"
-	testErrLoad      = "Load() error = %v"
-	testDefaultEnv   = "local"
-	testDefaultModel = "gpt-4o-mini"
-	testDefaultWindow = "60m"
+	testPostgresDSN        = "postgres://localhost/test"
+	testBotToken           = "123456:ABC-DEF"
+	testTargetChatID       = "-1001234567890"
+	testTGAPIID            = "12345"
+	testTGAPIHash          = "abcdef123456"
+	testLLMAPIKey          = "sk-test-key"
+	testErrLoad            = "Load() error = %v"
+	testDefaultEnv         = "local"
+	testDefaultModel       = "gpt-4o-mini"
+	testDefaultWindow      = "60m"
 	testDefaultSessionPath = "./tg.session"
 )
 

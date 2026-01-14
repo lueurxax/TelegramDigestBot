@@ -3,6 +3,8 @@ package bot
 import (
 	"strings"
 	"testing"
+
+	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 func TestIsNumericWeight(t *testing.T) {
@@ -152,6 +154,371 @@ func TestSplitHTML(t *testing.T) {
 				if !strings.Contains(p, "<blockquote>") && strings.Contains(p, "</blockquote>") {
 					t.Errorf("Part %d has closed blockquote without opening: %s", i, p)
 				}
+			}
+		})
+	}
+}
+
+func TestFormatLink(t *testing.T) {
+	tests := []struct {
+		name     string
+		username string
+		peerID   int64
+		msgID    int64
+		label    string
+		want     string
+	}{
+		{
+			name:     "public channel with username",
+			username: "testchannel",
+			peerID:   123456,
+			msgID:    42,
+			label:    "Link",
+			want:     `<a href="https://t.me/testchannel/42">Link</a>`,
+		},
+		{
+			name:     "private channel without username",
+			username: "",
+			peerID:   123456789,
+			msgID:    99,
+			label:    "Private Link",
+			want:     `<a href="https://t.me/c/123456789/99">Private Link</a>`,
+		},
+		{
+			name:     "escapes username and label",
+			username: "test<channel>",
+			peerID:   123,
+			msgID:    1,
+			label:    "Click <here>",
+			want:     `<a href="https://t.me/test&lt;channel&gt;/1">Click &lt;here&gt;</a>`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatLink(tt.username, tt.peerID, tt.msgID, tt.label)
+
+			if got != tt.want {
+				t.Errorf("FormatLink() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseRatingsDaysLimit(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantDays  int
+		wantLimit int
+	}{
+		{
+			name:      "no args uses defaults",
+			args:      []string{},
+			wantDays:  DefaultRatingsDays,
+			wantLimit: DefaultRatingsLimit,
+		},
+		{
+			name:      "first arg sets days",
+			args:      []string{"7"},
+			wantDays:  7,
+			wantLimit: DefaultRatingsLimit,
+		},
+		{
+			name:      "both args set days and limit",
+			args:      []string{"14", "50"},
+			wantDays:  14,
+			wantLimit: 50,
+		},
+		{
+			name:      "invalid first arg uses default days",
+			args:      []string{"abc"},
+			wantDays:  DefaultRatingsDays,
+			wantLimit: DefaultRatingsLimit,
+		},
+		{
+			name:      "negative days uses default",
+			args:      []string{"-5"},
+			wantDays:  DefaultRatingsDays,
+			wantLimit: DefaultRatingsLimit,
+		},
+		{
+			name:      "zero days uses default",
+			args:      []string{"0"},
+			wantDays:  DefaultRatingsDays,
+			wantLimit: DefaultRatingsLimit,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			days, limit := parseRatingsDaysLimit(tt.args)
+
+			if days != tt.wantDays {
+				t.Errorf("parseRatingsDaysLimit() days = %d, want %d", days, tt.wantDays)
+			}
+
+			if limit != tt.wantLimit {
+				t.Errorf("parseRatingsDaysLimit() limit = %d, want %d", limit, tt.wantLimit)
+			}
+		})
+	}
+}
+
+func TestComputeRatingTotals(t *testing.T) {
+	tests := []struct {
+		name           string
+		summaries      []db.RatingSummary
+		wantGood       int
+		wantBad        int
+		wantIrrelevant int
+		wantTotal      int
+	}{
+		{
+			name:           "empty summaries",
+			summaries:      nil,
+			wantGood:       0,
+			wantBad:        0,
+			wantIrrelevant: 0,
+			wantTotal:      0,
+		},
+		{
+			name: "single summary",
+			summaries: []db.RatingSummary{
+				{GoodCount: 10, BadCount: 5, IrrelevantCount: 2, TotalCount: 17},
+			},
+			wantGood:       10,
+			wantBad:        5,
+			wantIrrelevant: 2,
+			wantTotal:      17,
+		},
+		{
+			name: "multiple summaries",
+			summaries: []db.RatingSummary{
+				{GoodCount: 10, BadCount: 5, IrrelevantCount: 2, TotalCount: 17},
+				{GoodCount: 20, BadCount: 3, IrrelevantCount: 1, TotalCount: 24},
+			},
+			wantGood:       30,
+			wantBad:        8,
+			wantIrrelevant: 3,
+			wantTotal:      41,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			good, bad, irrelevant, total := computeRatingTotals(tt.summaries)
+
+			if good != tt.wantGood {
+				t.Errorf("good = %d, want %d", good, tt.wantGood)
+			}
+
+			if bad != tt.wantBad {
+				t.Errorf("bad = %d, want %d", bad, tt.wantBad)
+			}
+
+			if irrelevant != tt.wantIrrelevant {
+				t.Errorf("irrelevant = %d, want %d", irrelevant, tt.wantIrrelevant)
+			}
+
+			if total != tt.wantTotal {
+				t.Errorf("total = %d, want %d", total, tt.wantTotal)
+			}
+		})
+	}
+}
+
+func TestFormatRatingsChannelName(t *testing.T) {
+	tests := []struct {
+		name      string
+		channelID string
+		username  string
+		title     string
+		want      string
+	}{
+		{
+			name:      "prefer username",
+			channelID: "123",
+			username:  "testchannel",
+			title:     "Test Channel",
+			want:      "@testchannel",
+		},
+		{
+			name:      "fallback to title",
+			channelID: "123",
+			username:  "",
+			title:     "Test Channel",
+			want:      "Test Channel",
+		},
+		{
+			name:      "fallback to channelID",
+			channelID: "123456789",
+			username:  "",
+			title:     "",
+			want:      "123456789",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatRatingsChannelName(tt.channelID, tt.username, tt.title)
+
+			if got != tt.want {
+				t.Errorf("formatRatingsChannelName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsRelevanceKeyword(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"auto", true},
+		{"manual", true},
+		{"off", true},
+		{"on", true},
+		{"enable", false},
+		{"disable", false},
+		{"", false},
+		{"AUTO", false}, // case-sensitive
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := isRelevanceKeyword(tt.input)
+
+			if got != tt.want {
+				t.Errorf("isRelevanceKeyword(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindChannelByIdentifier(t *testing.T) {
+	channels := []db.Channel{
+		{ID: "1", Username: "testchannel", TGPeerID: 123456},
+		{ID: "2", Username: "otherchannel", TGPeerID: 789012},
+		{ID: "3", Username: "", TGPeerID: 555555},
+	}
+
+	tests := []struct {
+		name       string
+		identifier string
+		wantID     string
+		wantNil    bool
+	}{
+		{
+			name:       "find by username",
+			identifier: "testchannel",
+			wantID:     "1",
+		},
+		{
+			name:       "find by @username",
+			identifier: "@otherchannel",
+			wantID:     "2",
+		},
+		{
+			name:       "find by peer ID",
+			identifier: "123456",
+			wantID:     "1",
+		},
+		{
+			name:       "find private channel by peer ID",
+			identifier: "555555",
+			wantID:     "3",
+		},
+		{
+			name:       "not found",
+			identifier: "nonexistent",
+			wantNil:    true,
+		},
+		{
+			name:       "empty identifier",
+			identifier: "",
+			wantNil:    true,
+		},
+		{
+			name:       "@ only",
+			identifier: "@",
+			wantNil:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findChannelByIdentifier(channels, tt.identifier)
+
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("findChannelByIdentifier() = %v, want nil", got)
+				}
+
+				return
+			}
+
+			if got == nil {
+				t.Fatal("findChannelByIdentifier() = nil, want non-nil")
+			}
+
+			if got.ID != tt.wantID {
+				t.Errorf("findChannelByIdentifier().ID = %q, want %q", got.ID, tt.wantID)
+			}
+		})
+	}
+}
+
+func TestFormatDiscoveryIdentifier(t *testing.T) {
+	tests := []struct {
+		name      string
+		discovery db.DiscoveredChannel
+		want      string
+	}{
+		{
+			name: "prefer username",
+			discovery: db.DiscoveredChannel{
+				Username:   "testchannel",
+				TGPeerID:   123456,
+				InviteLink: "https://t.me/+abc",
+			},
+			want: "@testchannel",
+		},
+		{
+			name: "fallback to peer ID",
+			discovery: db.DiscoveredChannel{
+				Username:   "",
+				TGPeerID:   123456,
+				InviteLink: "https://t.me/+abc",
+			},
+			want: "ID:123456",
+		},
+		{
+			name: "fallback to invite link indicator",
+			discovery: db.DiscoveredChannel{
+				Username:   "",
+				TGPeerID:   0,
+				InviteLink: "https://t.me/+abc",
+			},
+			want: "[invite link]",
+		},
+		{
+			name: "empty when nothing available",
+			discovery: db.DiscoveredChannel{
+				Username:   "",
+				TGPeerID:   0,
+				InviteLink: "",
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatDiscoveryIdentifier(tt.discovery)
+
+			if got != tt.want {
+				t.Errorf("formatDiscoveryIdentifier() = %q, want %q", got, tt.want)
 			}
 		})
 	}
