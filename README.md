@@ -1,5 +1,7 @@
 # Telegram Noise-Reduction Digest Bot
 
+[![codecov](https://codecov.io/github/lueurxax/TelegramDigestBot/graph/badge.svg?token=ZL3DVDXYB6)](https://codecov.io/github/lueurxax/TelegramDigestBot)
+
 A modular Telegram automation system written in Go that ingests messages from tracked channels using an MTProto client (user account), filters them, and generates a summarized digest in a target channel using an LLM (OpenAI).
 
 ## Features
