@@ -84,6 +84,12 @@ func TestValidateRejectsBadTime(t *testing.T) {
 	}
 }
 
+func TestNormalizeTimezoneAlias(t *testing.T) {
+	if NormalizeTimezone("Asia/Nicosia") != "Europe/Nicosia" {
+		t.Fatal("expected Asia/Nicosia to normalize to Europe/Nicosia")
+	}
+}
+
 func TestTimesBetweenDSTBoundary(t *testing.T) {
 	loc, err := time.LoadLocation("Europe/Berlin")
 	if err != nil {

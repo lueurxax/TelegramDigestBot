@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata"
 )
 
 // Setting keys for schedule configuration.
@@ -35,6 +36,10 @@ var (
 	ErrInvalidMinute    = errors.New("invalid minute")
 	ErrHourOutOfRange   = errors.New("hour out of range")
 )
+
+var timezoneAliases = map[string]string{
+	"Asia/Nicosia": "Europe/Nicosia",
+}
 
 // Schedule defines digest send times for weekdays/weekends in a timezone.
 type Schedule struct {
@@ -71,7 +76,7 @@ func (s Schedule) Location() (*time.Location, error) {
 		return time.UTC, nil
 	}
 
-	loc, err := time.LoadLocation(s.Timezone)
+	loc, err := time.LoadLocation(NormalizeTimezone(s.Timezone))
 	if err != nil {
 		return nil, fmt.Errorf(errFmtInvalidTimezone, err)
 	}
@@ -82,7 +87,7 @@ func (s Schedule) Location() (*time.Location, error) {
 // Validate checks schedule fields for correctness.
 func (s Schedule) Validate() error {
 	if strings.TrimSpace(s.Timezone) != "" {
-		if _, err := time.LoadLocation(s.Timezone); err != nil {
+		if _, err := time.LoadLocation(NormalizeTimezone(s.Timezone)); err != nil {
 			return fmt.Errorf(errFmtInvalidTimezone, err)
 		}
 	}
@@ -96,6 +101,20 @@ func (s Schedule) Validate() error {
 	}
 
 	return nil
+}
+
+// NormalizeTimezone maps known aliases to canonical IANA names.
+func NormalizeTimezone(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	if canonical, ok := timezoneAliases[value]; ok {
+		return canonical
+	}
+
+	return value
 }
 
 // TimesBetween returns scheduled times within [start, end] in the schedule timezone.

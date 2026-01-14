@@ -607,6 +607,8 @@ func (b *Bot) loadDigestSchedule(ctx context.Context) schedule.Schedule {
 }
 
 func (b *Bot) saveDigestSchedule(ctx context.Context, msg *tgbotapi.Message, sched schedule.Schedule) {
+	sched.Timezone = schedule.NormalizeTimezone(sched.Timezone)
+
 	if err := sched.Validate(); err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Invalid schedule: %s", html.EscapeString(err.Error())))
 		return
