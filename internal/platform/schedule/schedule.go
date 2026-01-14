@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	// Embed tzdata for environments without zoneinfo.
 	_ "time/tzdata"
 )
 
