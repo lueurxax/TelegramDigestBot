@@ -387,7 +387,12 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 			return nil, nil //nolint:nilnil // nil,nil indicates no items but no anomaly
 		}
 
-		return anomalyAny.(*anomalyInfo), nil
+		anomaly, ok := anomalyAny.(*anomalyInfo)
+		if !ok {
+			return nil, nil //nolint:nilnil // unexpected type, treat as no anomaly
+		}
+
+		return anomaly, nil
 	}
 
 	// Generate digest ID early to use in rating buttons

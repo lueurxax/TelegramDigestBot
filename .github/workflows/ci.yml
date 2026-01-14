@@ -44,7 +44,7 @@ jobs:
 
       - name: Run evaluation harness
         run: |
-          go run ./cmd/eval \
+          go run ./cmd/tools/eval \
             -input docs/eval/sample.jsonl \
             -relevance-threshold 0.5 \
             -importance-threshold 0.3 \

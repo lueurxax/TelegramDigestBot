@@ -130,6 +130,10 @@ func (m *mockLLM) ProcessBatch(_ context.Context, messages []llm.MessageInput, _
 	return res, nil
 }
 
+func (m *mockLLM) TranslateText(_ context.Context, text string, _ string, _ string) (string, error) {
+	return text, nil
+}
+
 func (m *mockLLM) RelevanceGate(_ context.Context, _, _, _ string) (llm.RelevanceGateResult, error) {
 	return llm.RelevanceGateResult{
 		Decision:   DecisionRelevant,
@@ -292,4 +296,8 @@ func (m *mockLLMWithImportance) ProcessBatch(_ context.Context, messages []llm.M
 	}
 
 	return res, nil
+}
+
+func (m *mockLLMWithImportance) TranslateText(_ context.Context, text string, _ string, _ string) (string, error) {
+	return text, nil
 }

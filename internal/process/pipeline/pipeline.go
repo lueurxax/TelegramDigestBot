@@ -609,6 +609,9 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 		}
 
 		item := p.createItem(logger, candidates[i], res, s)
+		if item.Status == StatusReady {
+			item.Summary = p.translateSummaryIfNeeded(ctx, logger, candidates[i].ID, item.Summary, item.Language, s)
+		}
 
 		if p.saveAndMarkProcessed(ctx, logger, candidates[i], item, embeddings) {
 			if item.Status == StatusReady {
@@ -645,6 +648,53 @@ func (p *Pipeline) normalizeResults(candidates []llm.MessageInput, results []llm
 			}
 		}
 	}
+}
+
+func (p *Pipeline) translateSummaryIfNeeded(ctx context.Context, logger zerolog.Logger, msgID string, summary string, detectedLang string, s *pipelineSettings) string {
+	targetLang := normalizeLanguage(s.digestLanguage)
+	if !summaryNeedsTranslation(summary, detectedLang, targetLang) {
+		return summary
+	}
+
+	translated, err := p.llmClient.TranslateText(ctx, summary, targetLang, s.llmModel)
+	if err != nil {
+		logger.Warn().Err(err).Str(LogFieldMsgID, msgID).Msg("failed to translate summary")
+		return summary
+	}
+
+	if strings.TrimSpace(translated) == "" {
+		return summary
+	}
+
+	return translated
+}
+
+func summaryNeedsTranslation(summary string, detectedLang string, targetLang string) bool {
+	if strings.TrimSpace(summary) == "" || targetLang == "" {
+		return false
+	}
+
+	normalizedDetected := normalizeLanguage(detectedLang)
+	if normalizedDetected != "" && normalizedDetected != targetLang {
+		return true
+	}
+
+	return targetLang == "ru" && containsUkrainianLetters(summary)
+}
+
+func normalizeLanguage(lang string) string {
+	return strings.ToLower(strings.TrimSpace(lang))
+}
+
+func containsUkrainianLetters(text string) bool {
+	for _, r := range text {
+		switch r {
+		case '\u0404', '\u0454', '\u0406', '\u0456', '\u0407', '\u0457', '\u0490', '\u0491':
+			return true
+		}
+	}
+
+	return false
 }
 
 func (p *Pipeline) handleEmptySummary(ctx context.Context, logger zerolog.Logger, msgID string, index int) {

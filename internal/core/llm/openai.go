@@ -158,6 +158,42 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	return c.alignBatchResults(results, messages)
 }
 
+func (c *openaiClient) TranslateText(ctx context.Context, text string, targetLanguage string, model string) (string, error) {
+	if strings.TrimSpace(text) == "" || strings.TrimSpace(targetLanguage) == "" {
+		return text, nil
+	}
+
+	if err := c.checkCircuit(); err != nil {
+		return "", err
+	}
+
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return "", fmt.Errorf(errRateLimiter, err)
+	}
+
+	model = c.resolveModel(model)
+	prompt := fmt.Sprintf(translatePromptTemplate, targetLanguage)
+
+	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model: model,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: prompt + "\n\nText:\n" + text,
+			},
+		},
+	})
+	if err != nil {
+		c.recordFailure()
+
+		return "", fmt.Errorf(errOpenAIChatCompletion, err)
+	}
+
+	c.recordSuccess()
+
+	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
+}
+
 func (c *openaiClient) buildLangInstruction(targetLanguage, tone string) string {
 	langInstruction := ""
 
