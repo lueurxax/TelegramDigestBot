@@ -547,19 +547,19 @@ func (b *Bot) handleScheduleDayGroup(ctx context.Context, msg *tgbotapi.Message,
 
 	switch mode {
 	case SubCmdTimes:
-		b.handleScheduleTimes(ctx, msg, day, value, sched)
+		b.handleScheduleTimes(ctx, msg, day, value, &sched)
 	case SubCmdHourly:
-		b.handleScheduleHourly(ctx, msg, day, value, sched)
+		b.handleScheduleHourly(ctx, msg, day, value, &sched)
 	default:
 		b.reply(msg, "❌ Unknown schedule mode. Use <code>times</code> or <code>hourly</code>.")
 	}
 }
 
-func (b *Bot) handleScheduleTimes(ctx context.Context, msg *tgbotapi.Message, day *schedule.DaySchedule, value string, sched schedule.Schedule) {
+func (b *Bot) handleScheduleTimes(ctx context.Context, msg *tgbotapi.Message, day *schedule.DaySchedule, value string, sched *schedule.Schedule) {
 	if strings.EqualFold(value, SubCmdClear) || strings.EqualFold(value, ToggleOff) {
 		day.Times = nil
 
-		b.saveDigestSchedule(ctx, msg, sched)
+		b.saveDigestSchedule(ctx, msg, *sched)
 
 		return
 	}
@@ -578,14 +578,14 @@ func (b *Bot) handleScheduleTimes(ctx context.Context, msg *tgbotapi.Message, da
 
 	day.Times = times
 
-	b.saveDigestSchedule(ctx, msg, sched)
+	b.saveDigestSchedule(ctx, msg, *sched)
 }
 
-func (b *Bot) handleScheduleHourly(ctx context.Context, msg *tgbotapi.Message, day *schedule.DaySchedule, value string, sched schedule.Schedule) {
+func (b *Bot) handleScheduleHourly(ctx context.Context, msg *tgbotapi.Message, day *schedule.DaySchedule, value string, sched *schedule.Schedule) {
 	if strings.EqualFold(value, SubCmdClear) || strings.EqualFold(value, ToggleOff) {
 		day.Hourly = nil
 
-		b.saveDigestSchedule(ctx, msg, sched)
+		b.saveDigestSchedule(ctx, msg, *sched)
 
 		return
 	}
@@ -599,7 +599,7 @@ func (b *Bot) handleScheduleHourly(ctx context.Context, msg *tgbotapi.Message, d
 
 	day.Hourly = &schedule.HourlyRange{Start: start, End: end}
 
-	b.saveDigestSchedule(ctx, msg, sched)
+	b.saveDigestSchedule(ctx, msg, *sched)
 }
 
 func (b *Bot) loadDigestSchedule(ctx context.Context) schedule.Schedule {
