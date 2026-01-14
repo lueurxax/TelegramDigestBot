@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+const (
+	testTimeFormat       = "15:04"
+	testErrTimesBetween  = "TimesBetween returned error: %v"
+	testErrExpectedTimes = "expected %d times, got %d"
+)
+
 func TestTimesBetweenHourlySemantics(t *testing.T) {
 	s := Schedule{
 		Timezone: "UTC",
@@ -18,19 +24,20 @@ func TestTimesBetweenHourlySemantics(t *testing.T) {
 
 	times, err := s.TimesBetween(start, end)
 	if err != nil {
-		t.Fatalf("TimesBetween returned error: %v", err)
+		t.Fatalf(testErrTimesBetween, err)
 	}
 
-	if len(times) != 2 {
-		t.Fatalf("expected 2 times, got %d", len(times))
+	expectedCount := 2
+	if len(times) != expectedCount {
+		t.Fatalf(testErrExpectedTimes, expectedCount, len(times))
 	}
 
 	if times[0].Hour() != 7 || times[0].Minute() != 0 {
-		t.Fatalf("expected first time 07:00, got %s", times[0].Format("15:04"))
+		t.Fatalf("expected first time 07:00, got %s", times[0].Format(testTimeFormat))
 	}
 
 	if times[1].Hour() != 8 || times[1].Minute() != 0 {
-		t.Fatalf("expected second time 08:00, got %s", times[1].Format("15:04"))
+		t.Fatalf("expected second time 08:00, got %s", times[1].Format(testTimeFormat))
 	}
 }
 
@@ -48,17 +55,18 @@ func TestTimesBetweenMergeAndDedup(t *testing.T) {
 
 	times, err := s.TimesBetween(start, end)
 	if err != nil {
-		t.Fatalf("TimesBetween returned error: %v", err)
+		t.Fatalf(testErrTimesBetween, err)
 	}
 
-	if len(times) != 4 {
-		t.Fatalf("expected 4 times, got %d", len(times))
+	expectedCount := 4
+	if len(times) != expectedCount {
+		t.Fatalf(testErrExpectedTimes, expectedCount, len(times))
 	}
 
 	expected := []string{"18:00", "19:00", "19:30", "20:00"}
 	for i, exp := range expected {
-		if times[i].Format("15:04") != exp {
-			t.Fatalf("expected %s at index %d, got %s", exp, i, times[i].Format("15:04"))
+		if times[i].Format(testTimeFormat) != exp {
+			t.Fatalf("expected %s at index %d, got %s", exp, i, times[i].Format(testTimeFormat))
 		}
 	}
 }
@@ -94,11 +102,12 @@ func TestTimesBetweenDSTBoundary(t *testing.T) {
 
 	times, err := s.TimesBetween(start, end)
 	if err != nil {
-		t.Fatalf("TimesBetween returned error: %v", err)
+		t.Fatalf(testErrTimesBetween, err)
 	}
 
-	if len(times) != 2 {
-		t.Fatalf("expected 2 times, got %d", len(times))
+	expectedCount := 2
+	if len(times) != expectedCount {
+		t.Fatalf(testErrExpectedTimes, expectedCount, len(times))
 	}
 
 	for _, tm := range times {

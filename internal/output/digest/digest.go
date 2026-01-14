@@ -303,6 +303,14 @@ func (s *Scheduler) loadDigestProcessConfig(ctx context.Context, logger *zerolog
 		anomalyNotificationsEnabled: true,
 	}
 
+	s.loadWindowConfig(ctx, &cfg, logger)
+	s.loadThresholdConfig(ctx, &cfg, logger)
+	s.loadScheduleConfig(ctx, &cfg, logger)
+
+	return cfg
+}
+
+func (s *Scheduler) loadWindowConfig(ctx context.Context, cfg *digestProcessConfig, logger *zerolog.Logger) {
 	windowStr := s.cfg.DigestWindow
 	if err := s.database.GetSetting(ctx, "digest_window", &windowStr); err != nil {
 		logger.Debug().Err(err).Msg("could not get digest_window from DB, using default")
@@ -314,6 +322,14 @@ func (s *Scheduler) loadDigestProcessConfig(ctx context.Context, logger *zerolog
 		logger.Error().Err(err).Str(LogFieldWindow, windowStr).Msg("invalid digest window duration, using 1h")
 	}
 
+	if cw, err := time.ParseDuration(s.cfg.SchedulerCatchupWindow); err == nil {
+		cfg.catchupWindow = cw
+	} else {
+		logger.Error().Err(err).Str(LogFieldWindow, s.cfg.SchedulerCatchupWindow).Msg("invalid scheduler catchup window, using 24h")
+	}
+}
+
+func (s *Scheduler) loadThresholdConfig(ctx context.Context, cfg *digestProcessConfig, logger *zerolog.Logger) {
 	if err := s.database.GetSetting(ctx, SettingTargetChatID, &cfg.targetChatID); err != nil {
 		logger.Debug().Err(err).Msg("could not get target_chat_id from DB, using default")
 	}
@@ -322,82 +338,52 @@ func (s *Scheduler) loadDigestProcessConfig(ctx context.Context, logger *zerolog
 		logger.Debug().Err(err).Msg("could not get importance_threshold from DB, using default")
 	}
 
-	if cw, err := time.ParseDuration(s.cfg.SchedulerCatchupWindow); err == nil {
-		cfg.catchupWindow = cw
-	} else {
-		logger.Error().Err(err).Str(LogFieldWindow, s.cfg.SchedulerCatchupWindow).Msg("invalid scheduler catchup window, using 24h")
-	}
-
 	if err := s.database.GetSetting(ctx, "anomaly_notifications", &cfg.anomalyNotificationsEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get anomaly_notifications from DB, defaulting to enabled")
 	}
+}
 
+func (s *Scheduler) loadScheduleConfig(ctx context.Context, cfg *digestProcessConfig, logger *zerolog.Logger) {
 	var sched schedule.Schedule
 	if err := s.database.GetSetting(ctx, schedule.SettingDigestSchedule, &sched); err != nil {
 		logger.Debug().Err(err).Msg("could not get digest_schedule from DB")
+
+		return
 	}
 
-	if !sched.IsEmpty() {
-		if err := sched.Validate(); err != nil {
-			logger.Warn().Err(err).Msg("invalid digest schedule, falling back to digest_window")
-		} else {
-			cfg.schedule = &sched
-			if err := s.database.GetSetting(ctx, schedule.SettingDigestScheduleAnchor, &cfg.scheduleAnchor); err != nil {
-				logger.Debug().Err(err).Msg("could not get digest_schedule_anchor from DB")
-			}
-		}
+	if sched.IsEmpty() {
+		return
 	}
 
-	return cfg
+	if err := sched.Validate(); err != nil {
+		logger.Warn().Err(err).Msg("invalid digest schedule, falling back to digest_window")
+
+		return
+	}
+
+	cfg.schedule = &sched
+
+	if err := s.database.GetSetting(ctx, schedule.SettingDigestScheduleAnchor, &cfg.scheduleAnchor); err != nil {
+		logger.Debug().Err(err).Msg("could not get digest_schedule_anchor from DB")
+	}
 }
 
 func (s *Scheduler) processDigest(ctx context.Context, logger *zerolog.Logger) error {
 	cfg := s.loadDigestProcessConfig(ctx, logger)
+	now := time.Now()
 
 	var anomalies []anomalyInfo
 
-	now := time.Now()
+	var err error
 
 	if cfg.schedule != nil {
-		windows, err := s.buildScheduledWindows(cfg, now, logger)
-		if err != nil {
-			return err
-		}
-
-		for _, window := range windows {
-			anomaly, err := s.processWindow(ctx, window.start, window.end, cfg.targetChatID, cfg.importanceThreshold, logger)
-			if err != nil {
-				logger.Error().Err(err).
-					Time(LogFieldStart, window.start).
-					Time(LogFieldEnd, window.end).
-					Int64("target_chat_id", cfg.targetChatID).
-					Msg("failed to process window")
-			}
-
-			if anomaly != nil {
-				anomalies = append(anomalies, *anomaly)
-			}
-		}
+		anomalies, err = s.processScheduledDigest(ctx, cfg, now, logger)
 	} else {
-		now = now.Truncate(cfg.window)
+		anomalies, err = s.processLegacyDigest(ctx, cfg, now, logger)
+	}
 
-		for t := now.Add(-cfg.catchupWindow); !t.After(now.Add(-cfg.window)); t = t.Add(cfg.window) {
-			start := t
-			end := t.Add(cfg.window)
-
-			anomaly, err := s.processWindow(ctx, start, end, cfg.targetChatID, cfg.importanceThreshold, logger)
-			if err != nil {
-				logger.Error().Err(err).
-					Time(LogFieldStart, start).
-					Time(LogFieldEnd, end).
-					Int64("target_chat_id", cfg.targetChatID).
-					Msg("failed to process window")
-			}
-
-			if anomaly != nil {
-				anomalies = append(anomalies, *anomaly)
-			}
-		}
+	if err != nil {
+		return err
 	}
 
 	if cfg.anomalyNotificationsEnabled && len(anomalies) > 0 {
@@ -405,6 +391,58 @@ func (s *Scheduler) processDigest(ctx context.Context, logger *zerolog.Logger) e
 	}
 
 	return nil
+}
+
+func (s *Scheduler) processScheduledDigest(ctx context.Context, cfg digestProcessConfig, now time.Time, logger *zerolog.Logger) ([]anomalyInfo, error) {
+	windows, err := s.buildScheduledWindows(cfg, now, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	var anomalies []anomalyInfo
+
+	for _, window := range windows {
+		anomaly, err := s.processWindow(ctx, window.start, window.end, cfg.targetChatID, cfg.importanceThreshold, logger)
+		if err != nil {
+			logger.Error().Err(err).
+				Time(LogFieldStart, window.start).
+				Time(LogFieldEnd, window.end).
+				Int64(SettingTargetChatID, cfg.targetChatID).
+				Msg(msgFailedToProcessWindow)
+		}
+
+		if anomaly != nil {
+			anomalies = append(anomalies, *anomaly)
+		}
+	}
+
+	return anomalies, nil
+}
+
+func (s *Scheduler) processLegacyDigest(ctx context.Context, cfg digestProcessConfig, now time.Time, logger *zerolog.Logger) ([]anomalyInfo, error) {
+	now = now.Truncate(cfg.window)
+
+	var anomalies []anomalyInfo
+
+	for t := now.Add(-cfg.catchupWindow); !t.After(now.Add(-cfg.window)); t = t.Add(cfg.window) {
+		start := t
+		end := t.Add(cfg.window)
+
+		anomaly, err := s.processWindow(ctx, start, end, cfg.targetChatID, cfg.importanceThreshold, logger)
+		if err != nil {
+			logger.Error().Err(err).
+				Time(LogFieldStart, start).
+				Time(LogFieldEnd, end).
+				Int64(SettingTargetChatID, cfg.targetChatID).
+				Msg(msgFailedToProcessWindow)
+		}
+
+		if anomaly != nil {
+			anomalies = append(anomalies, *anomaly)
+		}
+	}
+
+	return anomalies, nil
 }
 
 type scheduleWindow struct {
@@ -417,32 +455,54 @@ func (s *Scheduler) buildScheduledWindows(cfg digestProcessConfig, now time.Time
 		return nil, nil
 	}
 
-	rangeStart := now.Add(-cfg.catchupWindow)
-	minStart := rangeStart
-
-	if !cfg.scheduleAnchor.IsZero() && cfg.scheduleAnchor.After(minStart) {
-		minStart = cfg.scheduleAnchor
-	}
+	minStart := s.getScheduleMinStart(cfg, now)
 
 	times, err := cfg.schedule.TimesBetween(minStart, now)
 	if err != nil {
 		return nil, fmt.Errorf("expand digest schedule: %w", err)
 	}
 
-	prev, ok, err := cfg.schedule.PreviousTimeBefore(minStart)
-	if err != nil {
-		return nil, fmt.Errorf("find previous schedule time: %w", err)
-	}
-
-	if !ok || prev.Before(minStart) {
-		prev = minStart
-	}
-
 	if len(times) == 0 {
 		logger.Debug().Msg("no scheduled digest windows to process")
+
 		return nil, nil
 	}
 
+	prev, err := s.getSchedulePreviousTime(cfg.schedule, minStart)
+	if err != nil {
+		return nil, err
+	}
+
+	windows := buildWindowsFromScheduleTimes(times, prev, minStart)
+	s.logScheduleWindows(cfg.schedule, windows, logger)
+
+	return windows, nil
+}
+
+func (s *Scheduler) getScheduleMinStart(cfg digestProcessConfig, now time.Time) time.Time {
+	minStart := now.Add(-cfg.catchupWindow)
+
+	if !cfg.scheduleAnchor.IsZero() && cfg.scheduleAnchor.After(minStart) {
+		minStart = cfg.scheduleAnchor
+	}
+
+	return minStart
+}
+
+func (s *Scheduler) getSchedulePreviousTime(sched *schedule.Schedule, minStart time.Time) (time.Time, error) {
+	prev, ok, err := sched.PreviousTimeBefore(minStart)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("find previous schedule time: %w", err)
+	}
+
+	if !ok || prev.Before(minStart) {
+		return minStart, nil
+	}
+
+	return prev, nil
+}
+
+func buildWindowsFromScheduleTimes(times []time.Time, prev, minStart time.Time) []scheduleWindow {
 	windows := make([]scheduleWindow, 0, len(times))
 
 	for _, t := range times {
@@ -462,9 +522,7 @@ func (s *Scheduler) buildScheduledWindows(cfg digestProcessConfig, now time.Time
 		prev = t
 	}
 
-	s.logScheduleWindows(cfg.schedule, windows, logger)
-
-	return windows, nil
+	return windows
 }
 
 func (s *Scheduler) logScheduleWindows(sched *schedule.Schedule, windows []scheduleWindow, logger *zerolog.Logger) {

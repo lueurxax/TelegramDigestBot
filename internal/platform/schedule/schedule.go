@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -13,6 +14,26 @@ import (
 const (
 	SettingDigestSchedule       = "digest_schedule"
 	SettingDigestScheduleAnchor = "digest_schedule_anchor"
+)
+
+// Time conversion constants.
+const (
+	minutesPerHour = 60
+	maxHour        = 23
+)
+
+// Error messages.
+const (
+	errFmtInvalidTimezone = "invalid timezone: %w"
+)
+
+// Static errors for schedule validation.
+var (
+	ErrMidnightCrossing = errors.New("hourly range crosses midnight")
+	ErrTimeFormat       = errors.New("time must be HH:MM")
+	ErrInvalidHour      = errors.New("invalid hour")
+	ErrInvalidMinute    = errors.New("invalid minute")
+	ErrHourOutOfRange   = errors.New("hour out of range")
 )
 
 // Schedule defines digest send times for weekdays/weekends in a timezone.
@@ -52,7 +73,7 @@ func (s Schedule) Location() (*time.Location, error) {
 
 	loc, err := time.LoadLocation(s.Timezone)
 	if err != nil {
-		return nil, fmt.Errorf("invalid timezone: %w", err)
+		return nil, fmt.Errorf(errFmtInvalidTimezone, err)
 	}
 
 	return loc, nil
@@ -62,7 +83,7 @@ func (s Schedule) Location() (*time.Location, error) {
 func (s Schedule) Validate() error {
 	if strings.TrimSpace(s.Timezone) != "" {
 		if _, err := time.LoadLocation(s.Timezone); err != nil {
-			return fmt.Errorf("invalid timezone: %w", err)
+			return fmt.Errorf(errFmtInvalidTimezone, err)
 		}
 	}
 
@@ -98,13 +119,14 @@ func (s Schedule) TimesBetween(start, end time.Time) ([]time.Time, error) {
 
 	for d := startDate; !d.After(endDate); d = d.AddDate(0, 0, 1) {
 		daySchedule := s.daySchedule(d.Weekday())
+
 		minutes, err := expandDayTimes(daySchedule)
 		if err != nil {
 			return nil, err
 		}
 
 		for _, min := range minutes {
-			t := time.Date(d.Year(), d.Month(), d.Day(), min/60, min%60, 0, 0, loc)
+			t := time.Date(d.Year(), d.Month(), d.Day(), min/minutesPerHour, min%minutesPerHour, 0, 0, loc)
 			if t.Before(startLocal) || t.After(endLocal) {
 				continue
 			}
@@ -133,13 +155,14 @@ func (s Schedule) PreviousTimeBefore(before time.Time) (time.Time, bool, error) 
 	for offset := 0; offset < 8; offset++ {
 		d := startDate.AddDate(0, 0, -offset)
 		daySchedule := s.daySchedule(d.Weekday())
+
 		minutes, err := expandDayTimes(daySchedule)
 		if err != nil {
 			return time.Time{}, false, err
 		}
 
 		for i := len(minutes) - 1; i >= 0; i-- {
-			t := time.Date(d.Year(), d.Month(), d.Day(), minutes[i]/60, minutes[i]%60, 0, 0, loc)
+			t := time.Date(d.Year(), d.Month(), d.Day(), minutes[i]/minutesPerHour, minutes[i]%minutesPerHour, 0, 0, loc)
 			if t.Before(beforeLocal) {
 				return t, true, nil
 			}
@@ -176,7 +199,7 @@ func (d DaySchedule) validate(label string) error {
 		}
 
 		if start > end {
-			return fmt.Errorf("%s hourly range crosses midnight", label)
+			return fmt.Errorf("%s: %w", label, ErrMidnightCrossing)
 		}
 	}
 
@@ -190,40 +213,62 @@ func expandDayTimes(d DaySchedule) ([]int, error) {
 
 	set := make(map[int]struct{})
 
-	for _, t := range d.Times {
+	if err := addExplicitTimes(d.Times, set); err != nil {
+		return nil, err
+	}
+
+	if err := addHourlyTimes(d.Hourly, set); err != nil {
+		return nil, err
+	}
+
+	return sortedMinutes(set), nil
+}
+
+func addExplicitTimes(times []string, set map[int]struct{}) error {
+	for _, t := range times {
 		minutes, err := parseTimeHM(t)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		set[minutes] = struct{}{}
 	}
 
-	if d.Hourly != nil {
-		startMin, err := parseTimeHM(d.Hourly.Start)
-		if err != nil {
-			return nil, err
-		}
+	return nil
+}
 
-		endMin, err := parseTimeHM(d.Hourly.End)
-		if err != nil {
-			return nil, err
-		}
-
-		if startMin > endMin {
-			return nil, fmt.Errorf("hourly range crosses midnight")
-		}
-
-		firstHour := startMin / 60
-		if startMin%60 != 0 {
-			firstHour++
-		}
-
-		for hour := firstHour; hour*60 <= endMin; hour++ {
-			set[hour*60] = struct{}{}
-		}
+func addHourlyTimes(hourly *HourlyRange, set map[int]struct{}) error {
+	if hourly == nil {
+		return nil
 	}
 
+	startMin, err := parseTimeHM(hourly.Start)
+	if err != nil {
+		return err
+	}
+
+	endMin, err := parseTimeHM(hourly.End)
+	if err != nil {
+		return err
+	}
+
+	if startMin > endMin {
+		return ErrMidnightCrossing
+	}
+
+	firstHour := startMin / minutesPerHour
+	if startMin%minutesPerHour != 0 {
+		firstHour++
+	}
+
+	for hour := firstHour; hour*minutesPerHour <= endMin; hour++ {
+		set[hour*minutesPerHour] = struct{}{}
+	}
+
+	return nil
+}
+
+func sortedMinutes(set map[int]struct{}) []int {
 	minutes := make([]int, 0, len(set))
 	for min := range set {
 		minutes = append(minutes, min)
@@ -231,31 +276,31 @@ func expandDayTimes(d DaySchedule) ([]int, error) {
 
 	sort.Ints(minutes)
 
-	return minutes, nil
+	return minutes
 }
 
 var timePattern = regexp.MustCompile(`^[0-2][0-9]:[0-5][0-9]$`)
 
 func parseTimeHM(value string) (int, error) {
 	if !timePattern.MatchString(value) {
-		return 0, fmt.Errorf("time must be HH:MM")
+		return 0, ErrTimeFormat
 	}
 
 	hour, err := strconv.Atoi(value[:2])
 	if err != nil {
-		return 0, fmt.Errorf("invalid hour")
+		return 0, ErrInvalidHour
 	}
 
 	minute, err := strconv.Atoi(value[3:])
 	if err != nil {
-		return 0, fmt.Errorf("invalid minute")
+		return 0, ErrInvalidMinute
 	}
 
-	if hour > 23 {
-		return 0, fmt.Errorf("hour out of range")
+	if hour > maxHour {
+		return 0, ErrHourOutOfRange
 	}
 
-	return hour*60 + minute, nil
+	return hour*minutesPerHour + minute, nil
 }
 
 func dateOnly(t time.Time) time.Time {

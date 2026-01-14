@@ -50,15 +50,20 @@ const (
 
 // Subcommand names.
 const (
-	SubCmdStats   = "stats"
-	SubCmdAds     = "ads"
-	SubCmdReset   = "reset"
-	SubCmdClear   = "clear"
-	SubCmdApprove = "approve"
-	SubCmdReject  = "reject"
-	SubCmdConfirm = "confirm"
-	SubCmdAuto    = "auto"
-	SubCmdMode    = "mode"
+	SubCmdStats    = "stats"
+	SubCmdAds      = "ads"
+	SubCmdReset    = "reset"
+	SubCmdClear    = "clear"
+	SubCmdApprove  = "approve"
+	SubCmdReject   = "reject"
+	SubCmdConfirm  = "confirm"
+	SubCmdAuto     = "auto"
+	SubCmdMode     = "mode"
+	SubCmdShow     = "show"
+	SubCmdWeekdays = "weekdays"
+	SubCmdWeekends = "weekends"
+	SubCmdTimes    = "times"
+	SubCmdHourly   = "hourly"
 )
 
 // Weight override mode and toggle values.
@@ -495,78 +500,101 @@ func (b *Bot) handleSchedule(ctx context.Context, msg *tgbotapi.Message) {
 	}
 
 	subcommand := strings.ToLower(args[0])
+
 	switch subcommand {
-	case "show":
+	case SubCmdShow:
 		b.reply(msg, b.formatDigestSchedule(ctx))
-		return
 	case "timezone":
-		if len(args) < 2 {
-			b.reply(msg, "Usage: <code>/schedule timezone &lt;IANA&gt;</code> (e.g. <code>Europe/Kyiv</code>)")
-			return
-		}
-
-		sched := b.loadDigestSchedule(ctx)
-		sched.Timezone = args[1]
-
-		b.saveDigestSchedule(ctx, msg, sched)
-		return
-	case "weekdays", "weekends":
-		if len(args) < 3 {
-			b.reply(msg, "Usage: <code>/schedule weekdays times &lt;HH:MM,...&gt;</code> | <code>/schedule weekdays hourly &lt;HH:MM-HH:MM&gt;</code>")
-			return
-		}
-
-		dayTarget := subcommand
-		mode := strings.ToLower(args[1])
-		value := strings.Join(args[2:], " ")
-
-		sched := b.loadDigestSchedule(ctx)
-		var day *schedule.DaySchedule
-		if dayTarget == "weekdays" {
-			day = &sched.Weekdays
-		} else {
-			day = &sched.Weekends
-		}
-
-		switch mode {
-		case "times":
-			if strings.EqualFold(value, "clear") || strings.EqualFold(value, "off") {
-				day.Times = nil
-				b.saveDigestSchedule(ctx, msg, sched)
-				return
-			}
-
-			times := parseScheduleTimes(value)
-			if len(times) == 0 {
-				b.reply(msg, "❌ Provide a comma-separated list of times, e.g. <code>09:00,13:00,18:00</code>.")
-				return
-			}
-
-			day.Times = times
-			b.saveDigestSchedule(ctx, msg, sched)
-		case "hourly":
-			if strings.EqualFold(value, "clear") || strings.EqualFold(value, "off") {
-				day.Hourly = nil
-				b.saveDigestSchedule(ctx, msg, sched)
-				return
-			}
-
-			start, end, ok := parseHourlyRange(value)
-			if !ok {
-				b.reply(msg, "❌ Provide an hourly range like <code>06:30-22:00</code>.")
-				return
-			}
-
-			day.Hourly = &schedule.HourlyRange{Start: start, End: end}
-			b.saveDigestSchedule(ctx, msg, sched)
-		default:
-			b.reply(msg, "❌ Unknown schedule mode. Use <code>times</code> or <code>hourly</code>.")
-		}
-
-		return
+		b.handleScheduleTimezone(ctx, msg, args)
+	case SubCmdWeekdays, SubCmdWeekends:
+		b.handleScheduleDayGroup(ctx, msg, subcommand, args)
 	default:
 		b.reply(msg, fmt.Sprintf("❓ Unknown schedule subcommand: <code>%s</code>", html.EscapeString(subcommand)))
 	}
+}
+
+func (b *Bot) handleScheduleTimezone(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) < 2 {
+		b.reply(msg, "Usage: <code>/schedule timezone &lt;IANA&gt;</code> (e.g. <code>Europe/Kyiv</code>)")
+
+		return
+	}
+
+	sched := b.loadDigestSchedule(ctx)
+	sched.Timezone = args[1]
+
+	b.saveDigestSchedule(ctx, msg, sched)
+}
+
+func (b *Bot) handleScheduleDayGroup(ctx context.Context, msg *tgbotapi.Message, dayTarget string, args []string) {
+	if len(args) < 3 {
+		b.reply(msg, "Usage: <code>/schedule weekdays times &lt;HH:MM,...&gt;</code> | <code>/schedule weekdays hourly &lt;HH:MM-HH:MM&gt;</code>")
+
+		return
+	}
+
+	mode := strings.ToLower(args[1])
+	value := strings.Join(args[2:], " ")
+
+	sched := b.loadDigestSchedule(ctx)
+
+	var day *schedule.DaySchedule
+	if dayTarget == SubCmdWeekdays {
+		day = &sched.Weekdays
+	} else {
+		day = &sched.Weekends
+	}
+
+	switch mode {
+	case SubCmdTimes:
+		b.handleScheduleTimes(ctx, msg, day, value, sched)
+	case SubCmdHourly:
+		b.handleScheduleHourly(ctx, msg, day, value, sched)
+	default:
+		b.reply(msg, "❌ Unknown schedule mode. Use <code>times</code> or <code>hourly</code>.")
+	}
+}
+
+func (b *Bot) handleScheduleTimes(ctx context.Context, msg *tgbotapi.Message, day *schedule.DaySchedule, value string, sched schedule.Schedule) {
+	if strings.EqualFold(value, SubCmdClear) || strings.EqualFold(value, ToggleOff) {
+		day.Times = nil
+
+		b.saveDigestSchedule(ctx, msg, sched)
+
+		return
+	}
+
+	times := parseScheduleTimes(value)
+	if len(times) == 0 {
+		b.reply(msg, "❌ Provide a comma-separated list of times, e.g. <code>09:00,13:00,18:00</code>.")
+
+		return
+	}
+
+	day.Times = times
+
+	b.saveDigestSchedule(ctx, msg, sched)
+}
+
+func (b *Bot) handleScheduleHourly(ctx context.Context, msg *tgbotapi.Message, day *schedule.DaySchedule, value string, sched schedule.Schedule) {
+	if strings.EqualFold(value, SubCmdClear) || strings.EqualFold(value, ToggleOff) {
+		day.Hourly = nil
+
+		b.saveDigestSchedule(ctx, msg, sched)
+
+		return
+	}
+
+	start, end, ok := parseHourlyRange(value)
+	if !ok {
+		b.reply(msg, "❌ Provide an hourly range like <code>06:30-22:00</code>.")
+
+		return
+	}
+
+	day.Hourly = &schedule.HourlyRange{Start: start, End: end}
+
+	b.saveDigestSchedule(ctx, msg, sched)
 }
 
 func (b *Bot) loadDigestSchedule(ctx context.Context) schedule.Schedule {
@@ -598,6 +626,7 @@ func (b *Bot) saveDigestSchedule(ctx context.Context, msg *tgbotapi.Message, sch
 
 func (b *Bot) formatDigestSchedule(ctx context.Context) string {
 	sched := b.loadDigestSchedule(ctx)
+
 	timezone := sched.Timezone
 	if strings.TrimSpace(timezone) == "" {
 		timezone = "UTC"
@@ -617,7 +646,7 @@ func (b *Bot) formatDigestSchedule(ctx context.Context) string {
 }
 
 func formatScheduleDay(day schedule.DaySchedule) string {
-	parts := make([]string, 0, 2)
+	var parts []string
 
 	if len(day.Times) > 0 {
 		parts = append(parts, "times "+strings.Join(day.Times, ", "))
@@ -653,12 +682,15 @@ func parseScheduleTimes(value string) []string {
 }
 
 func parseHourlyRange(value string) (string, string, bool) {
-	rangeParts := strings.SplitN(value, "-", 2)
-	if len(rangeParts) != 2 {
+	const expectedParts = 2
+
+	rangeParts := strings.SplitN(value, "-", expectedParts)
+	if len(rangeParts) != expectedParts {
 		return "", "", false
 	}
 
 	start := strings.TrimSpace(rangeParts[0])
+
 	end := strings.TrimSpace(rangeParts[1])
 	if start == "" || end == "" {
 		return "", "", false

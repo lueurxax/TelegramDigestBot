@@ -56,6 +56,7 @@ const (
 	MsgCouldNotGetDigestLanguage = "could not get digest_language from DB"
 	MsgCouldNotGetSmartLLMModel  = "could not get smart_llm_model from DB"
 	MsgFailedToProcessDigest     = "failed to process digest"
+	msgFailedToProcessWindow     = "failed to process window"
 )
 
 // Time format constants
