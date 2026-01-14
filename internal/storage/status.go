@@ -1,0 +1,92 @@
+package db
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+)
+
+type LastDigestInfo struct {
+	Start    time.Time
+	End      time.Time
+	PostedAt time.Time
+}
+
+func (db *DB) GetLastPostedDigest(ctx context.Context) (*LastDigestInfo, error) {
+	row, err := db.Queries.GetLastPostedDigest(ctx)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil //nolint:nilnil // nil,nil is idiomatic for "not found"
+		}
+
+		return nil, fmt.Errorf("get last posted digest: %w", err)
+	}
+
+	return &LastDigestInfo{
+		Start:    row.WindowStart.Time,
+		End:      row.WindowEnd.Time,
+		PostedAt: row.PostedAt.Time,
+	}, nil
+}
+
+type ChannelStats struct {
+	ChannelID        string
+	ConversionRate   float32
+	AvgRelevance     float32
+	StddevRelevance  float32
+	AvgImportance    float32
+	StddevImportance float32
+}
+
+func (db *DB) GetChannelStats(ctx context.Context) (map[string]ChannelStats, error) {
+	rows, err := db.Queries.GetChannelStats(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get channel stats: %w", err)
+	}
+
+	res := make(map[string]ChannelStats)
+
+	for _, row := range rows {
+		cID := fromUUID(row.ChannelID)
+		res[cID] = ChannelStats{
+			ChannelID:        cID,
+			ConversionRate:   row.ConversionRate,
+			AvgRelevance:     row.AvgRelevance,
+			StddevRelevance:  row.StddevRelevance,
+			AvgImportance:    row.AvgImportance,
+			StddevImportance: row.StddevImportance,
+		}
+	}
+
+	return res, nil
+}
+
+func (db *DB) CountActiveChannels(ctx context.Context) (int, error) {
+	count, err := db.Queries.CountActiveChannels(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count active channels: %w", err)
+	}
+
+	return int(count), nil
+}
+
+func (db *DB) CountRecentlyActiveChannels(ctx context.Context) (int, error) {
+	count, err := db.Queries.CountRecentlyActiveChannels(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count recently active channels: %w", err)
+	}
+
+	return int(count), nil
+}
+
+func (db *DB) CountReadyItems(ctx context.Context) (int, error) {
+	count, err := db.Queries.CountReadyItems(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count ready items: %w", err)
+	}
+
+	return int(count), nil
+}

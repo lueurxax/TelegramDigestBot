@@ -1,0 +1,219 @@
+package links
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/tg"
+	"golang.org/x/time/rate"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/core/links/linkextract"
+)
+
+const (
+	errFmtString         = "%w: %s"
+	errFmtInt            = "%w: %d"
+	rateLimiterBurst     = 3
+	rateLimiterRateLimit = 0.5
+)
+
+type TelegramResolver struct {
+	client      *telegram.Client
+	channelRepo ChannelRepository
+	rateLimiter *rate.Limiter
+}
+
+type TelegramContent struct {
+	ChannelTitle    string
+	ChannelUsername string
+	MessageID       int64
+	Text            string
+	Date            time.Time
+	Views           int
+	Forwards        int
+	HasMedia        bool
+	MediaType       string
+}
+
+// ErrClientNotInitialized indicates the telegram client is not initialized.
+var ErrClientNotInitialized = errors.New("telegram client not initialized")
+
+// ErrUnsupportedTelegramLinkType indicates an unsupported telegram link type.
+var ErrUnsupportedTelegramLinkType = errors.New("unsupported telegram link type")
+
+// ErrNoUsernameOrChannelID indicates no username or channel ID was provided.
+var ErrNoUsernameOrChannelID = errors.New("no username or channel ID")
+
+// ErrMessageNotFound indicates the message was not found.
+var ErrMessageNotFound = errors.New("message not found")
+
+// ErrUnexpectedMessageType indicates an unexpected message type.
+var ErrUnexpectedMessageType = errors.New("unexpected message type")
+
+// ErrChannelNotFound indicates the channel was not found.
+var ErrChannelNotFound = errors.New("channel not found")
+
+// ErrNotAChannel indicates the peer is not a channel.
+var ErrNotAChannel = errors.New("not a channel")
+
+// ErrPrivateChannelNotTracked indicates a private channel is not tracked.
+var ErrPrivateChannelNotTracked = errors.New("private channel not tracked")
+
+func NewTelegramResolver(client *telegram.Client, channelRepo ChannelRepository) *TelegramResolver {
+	return &TelegramResolver{
+		client:      client,
+		channelRepo: channelRepo,
+		rateLimiter: rate.NewLimiter(rate.Limit(rateLimiterRateLimit), rateLimiterBurst), // 30 req/min for Telegram
+	}
+}
+
+func (r *TelegramResolver) Resolve(ctx context.Context, link *linkextract.Link) (*TelegramContent, error) {
+	if err := r.validateResolveRequest(link); err != nil {
+		return nil, err
+	}
+
+	if err := r.rateLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limiter wait: %w", err)
+	}
+
+	api := tg.NewClient(r.client)
+
+	inputChannel, err := r.resolveChannel(ctx, api, link)
+	if err != nil {
+		return nil, err
+	}
+
+	msg, channelMessages, err := r.fetchMessage(ctx, api, inputChannel, link.MessageID)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.buildTelegramContent(link.MessageID, msg, channelMessages), nil
+}
+
+func (r *TelegramResolver) validateResolveRequest(link *linkextract.Link) error {
+	if r.client == nil {
+		return ErrClientNotInitialized
+	}
+
+	if link.TelegramType != "post" {
+		return fmt.Errorf(errFmtString, ErrUnsupportedTelegramLinkType, link.TelegramType)
+	}
+
+	return nil
+}
+
+func (r *TelegramResolver) resolveChannel(ctx context.Context, api *tg.Client, link *linkextract.Link) (*tg.InputChannel, error) {
+	if link.Username != "" {
+		return r.resolveByUsername(ctx, api, link.Username)
+	}
+
+	if link.ChannelID != 0 {
+		return r.resolveByID(ctx, link.ChannelID)
+	}
+
+	return nil, ErrNoUsernameOrChannelID
+}
+
+func (r *TelegramResolver) fetchMessage(ctx context.Context, api *tg.Client, inputChannel *tg.InputChannel, messageID int64) (*tg.Message, *tg.MessagesChannelMessages, error) {
+	messages, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
+		Channel: inputChannel,
+		ID:      []tg.InputMessageClass{&tg.InputMessageID{ID: int(messageID)}},
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get message: %w", err)
+	}
+
+	channelMessages, ok := messages.(*tg.MessagesChannelMessages)
+	if !ok || len(channelMessages.Messages) == 0 {
+		return nil, nil, ErrMessageNotFound
+	}
+
+	msg, ok := channelMessages.Messages[0].(*tg.Message)
+	if !ok {
+		return nil, nil, ErrUnexpectedMessageType
+	}
+
+	return msg, channelMessages, nil
+}
+
+func (r *TelegramResolver) buildTelegramContent(messageID int64, msg *tg.Message, channelMessages *tg.MessagesChannelMessages) *TelegramContent {
+	channelTitle, channelUsername := extractChannelInfo(channelMessages.Chats)
+
+	result := &TelegramContent{
+		ChannelTitle:    channelTitle,
+		ChannelUsername: channelUsername,
+		MessageID:       messageID,
+		Text:            msg.Message,
+		Date:            time.Unix(int64(msg.Date), 0),
+		Views:           msg.Views,
+		Forwards:        msg.Forwards,
+	}
+
+	if msg.Media != nil {
+		result.HasMedia = true
+		result.MediaType = getMediaType(msg.Media)
+	}
+
+	return result
+}
+
+func extractChannelInfo(chats []tg.ChatClass) (title, username string) {
+	for _, chat := range chats {
+		if ch, ok := chat.(*tg.Channel); ok {
+			return ch.Title, ch.Username
+		}
+	}
+
+	return "", ""
+}
+
+func getMediaType(media tg.MessageMediaClass) string {
+	switch media.(type) {
+	case *tg.MessageMediaPhoto:
+		return "photo"
+	case *tg.MessageMediaDocument:
+		return "document"
+	default:
+		return "other"
+	}
+}
+
+func (r *TelegramResolver) resolveByUsername(ctx context.Context, api *tg.Client, username string) (*tg.InputChannel, error) {
+	resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{
+		Username: username,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolve username %s: %w", username, err)
+	}
+
+	if len(resolved.Chats) == 0 {
+		return nil, fmt.Errorf(errFmtString, ErrChannelNotFound, username)
+	}
+
+	channel, ok := resolved.Chats[0].(*tg.Channel)
+	if !ok {
+		return nil, fmt.Errorf(errFmtString, ErrNotAChannel, username)
+	}
+
+	return &tg.InputChannel{
+		ChannelID:  channel.ID,
+		AccessHash: channel.AccessHash,
+	}, nil
+}
+
+func (r *TelegramResolver) resolveByID(ctx context.Context, channelID int64) (*tg.InputChannel, error) {
+	// Check if we're tracking this channel
+	ch, err := r.channelRepo.GetChannelByPeerID(ctx, channelID)
+	if err != nil {
+		return nil, fmt.Errorf(errFmtInt, ErrPrivateChannelNotTracked, channelID)
+	}
+
+	return &tg.InputChannel{
+		ChannelID:  ch.TGPeerID,
+		AccessHash: ch.AccessHash,
+	}, nil
+}

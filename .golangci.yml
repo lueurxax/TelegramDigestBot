@@ -173,7 +173,7 @@ linters:
     # Custom exclusion rules
     rules:
       # Exclude SQLC generated code
-      - path: internal/db/sqlc/
+      - path: \.sql.go$
         linters:
           - gocritic
           - govet
@@ -184,14 +184,6 @@ linters:
       - path: cmd/
         linters:
           - contextcheck
-          - wrapcheck
-      # Exclude wrapcheck for internal packages
-      - path: internal/
-        linters:
-          - wrapcheck
-      # Exclude wrapcheck for db package
-      - path: internal/db/
-        linters:
           - wrapcheck
       # Common false positives for revive
       - linters:
@@ -205,17 +197,8 @@ linters:
         linters:
           - gocritic
         text: "exitAfterDefer"
-      # Auth implements interface - ctx is required
-      - path: internal/telegramreader/auth\.go
-        linters:
-          - revive
-        text: "unused-parameter"
-      # Allow unused ctx parameter - often required by interfaces
-      - linters:
-          - revive
-        text: "unused-parameter.*ctx"
       # Exclude bot package from revive unused-parameter
-      - path: internal/telegrambot/
+      - path: internal/bot/
         linters:
           - revive
         text: "unused-parameter"
@@ -231,24 +214,6 @@ linters:
       - linters:
           - revive
         text: "redefines-builtin-id"
-      # Exclude LLM package from revive - mock implementations
-      - path: internal/llm/
-        linters:
-          - revive
-        text: "unused-parameter"
-      # Exclude observability from revive - http handler signature required
-      - path: internal/observability/
-        linters:
-          - revive
-        text: "unused-parameter"
-      # Exclude promlinter - prometheus naming is intentional
-      - path: \.go$
-        linters:
-          - promlinter
-      # Exclude nilerr - intentional fallbacks
-      - path: internal/linkresolver/
-        linters:
-          - nilerr
       # Exclude predeclared for min/max - common naming
       - linters:
           - predeclared
@@ -273,20 +238,6 @@ linters:
       - linters:
           - revive
         text: "exported.*stutters"
-      # Exclude dedup unused-parameter - interface signature required
-      - path: internal/dedup/
-        linters:
-          - revive
-        text: "unused-parameter"
-      # Exclude web_fetcher unused-parameter - http.Request required
-      - path: internal/linkresolver/web_fetcher\.go
-        linters:
-          - revive
-        text: "unused-parameter"
-      # Exclude contextcheck for observability shutdown
-      - path: internal/observability/
-        linters:
-          - contextcheck
   settings:
     # Check for pass []any as any in variadic func(...any).
     asasalint:
