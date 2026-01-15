@@ -2543,23 +2543,13 @@ func (b *Bot) sendPreviewRichDigest(ctx context.Context, msg *tgbotapi.Message, 
 
 // fetchPreviewCoverImage fetches or generates cover image for preview.
 func (b *Bot) fetchPreviewCoverImage(ctx context.Context, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, threshold float32) []byte {
-	var coverImageEnabled = true
-
-	if err := b.database.GetSetting(ctx, SettingDigestCoverImage, &coverImageEnabled); err != nil {
-		b.logger.Debug().Err(err).Msg("could not get digest_cover_image from DB")
-	}
-
-	if !coverImageEnabled {
-		return nil
-	}
-
 	var aiCoverEnabled bool
 
 	if err := b.database.GetSetting(ctx, SettingDigestAICover, &aiCoverEnabled); err != nil {
 		b.logger.Debug().Err(err).Msg("could not get digest_ai_cover from DB")
 	}
 
-	// Try AI cover first if enabled
+	// Try AI cover first if enabled (independent of cover_image setting)
 	if aiCoverEnabled && b.llmClient != nil {
 		topics := extractTopicsForPreview(items, clusters)
 
@@ -2569,6 +2559,17 @@ func (b *Bot) fetchPreviewCoverImage(ctx context.Context, items []db.Item, clust
 		} else {
 			return coverImage
 		}
+	}
+
+	// Check if regular cover image is enabled
+	var coverImageEnabled = true
+
+	if err := b.database.GetSetting(ctx, SettingDigestCoverImage, &coverImageEnabled); err != nil {
+		b.logger.Debug().Err(err).Msg("could not get digest_cover_image from DB")
+	}
+
+	if !coverImageEnabled {
+		return nil
 	}
 
 	// Fall back to DB cover image

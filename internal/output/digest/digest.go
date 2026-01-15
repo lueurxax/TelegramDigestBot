@@ -648,18 +648,7 @@ func (s *Scheduler) postDigest(ctx context.Context, targetChatID int64, text, di
 
 // fetchCoverImage fetches or generates a cover image for the digest.
 func (s *Scheduler) fetchCoverImage(ctx context.Context, start, end time.Time, importanceThreshold float32, items []db.Item, clusters []db.ClusterWithItems, logger *zerolog.Logger) []byte {
-	// Check if cover images are enabled
-	var coverImageEnabled = true
-
-	if err := s.database.GetSetting(ctx, "digest_cover_image", &coverImageEnabled); err != nil {
-		logger.Debug().Err(err).Msg("could not get digest_cover_image from DB, defaulting to enabled")
-	}
-
-	if !coverImageEnabled {
-		return nil
-	}
-
-	// Check if AI cover generation is enabled
+	// Check if AI cover generation is enabled (independent of cover_image setting)
 	var aiCoverEnabled bool
 
 	if err := s.database.GetSetting(ctx, "digest_ai_cover", &aiCoverEnabled); err != nil {
@@ -678,6 +667,17 @@ func (s *Scheduler) fetchCoverImage(ctx context.Context, start, end time.Time, i
 
 			return coverImage
 		}
+	}
+
+	// Check if regular cover images are enabled
+	var coverImageEnabled = true
+
+	if err := s.database.GetSetting(ctx, "digest_cover_image", &coverImageEnabled); err != nil {
+		logger.Debug().Err(err).Msg("could not get digest_cover_image from DB, defaulting to enabled")
+	}
+
+	if !coverImageEnabled {
+		return nil
 	}
 
 	// Fall back to original cover image selection
