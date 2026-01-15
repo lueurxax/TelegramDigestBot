@@ -799,10 +799,10 @@ func (c *openaiClient) GenerateDigestCover(ctx context.Context, topics []string,
 	c.logger.Debug().Str("prompt", prompt).Msg("Generating digest cover image")
 
 	resp, err := c.client.CreateImage(ctx, openai.ImageRequest{
-		Model:          openai.CreateImageModelDallE3,
+		Model:          "gpt-image-1.5",
 		Prompt:         prompt,
 		Size:           openai.CreateImageSize1024x1024,
-		Quality:        openai.CreateImageQualityStandard,
+		Quality:        openai.CreateImageQualityMedium,
 		N:              1,
 		ResponseFormat: openai.CreateImageResponseFormatB64JSON,
 	})
