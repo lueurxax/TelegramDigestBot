@@ -658,12 +658,13 @@ func (s *Scheduler) fetchCoverImage(ctx context.Context, start, end time.Time, i
 	// Try AI-generated cover first if enabled
 	if aiCoverEnabled && s.llmClient != nil {
 		topics := extractTopicsFromDigest(items, clusters)
+		narrative := extractCoverNarrative(items, clusters)
 
-		coverImage, err := s.llmClient.GenerateDigestCover(ctx, topics, "")
+		coverImage, err := s.llmClient.GenerateDigestCover(ctx, topics, narrative)
 		if err != nil {
 			logger.Warn().Err(err).Msg("failed to generate AI cover, falling back to original image")
 		} else {
-			logger.Info().Int("topics_count", len(topics)).Msg("AI cover generated successfully")
+			logger.Info().Int("topics_count", len(topics)).Str("narrative_preview", truncateForLog(narrative)).Msg("AI cover generated successfully")
 
 			return coverImage
 		}
@@ -830,6 +831,63 @@ func extractTopicsFromDigest(items []db.Item, clusters []db.ClusterWithItems) []
 	}
 
 	return topics
+}
+
+// truncateForLog truncates a string for logging purposes.
+func truncateForLog(s string) string {
+	if len(s) <= LogTruncateLength {
+		return s
+	}
+
+	return s[:LogTruncateLength] + "..."
+}
+
+// narrativeMaxItems is the maximum number of summaries to include in narrative.
+const narrativeMaxItems = 5
+
+// extractCoverNarrative extracts key summaries from top items for AI cover generation.
+// Returns a concise description of the main stories.
+func extractCoverNarrative(items []db.Item, clusters []db.ClusterWithItems) string {
+	summaries := collectClusterSummaries(clusters, narrativeMaxItems)
+	summaries = appendItemSummaries(summaries, items, narrativeMaxItems)
+
+	if len(summaries) == 0 {
+		return ""
+	}
+
+	return strings.Join(summaries, "; ")
+}
+
+// collectClusterSummaries extracts summaries from clusters up to maxItems.
+func collectClusterSummaries(clusters []db.ClusterWithItems, maxItems int) []string {
+	summaries := make([]string, 0, maxItems)
+
+	for _, c := range clusters {
+		if len(summaries) >= maxItems {
+			break
+		}
+
+		if c.Topic != "" && len(c.Items) > 0 {
+			summaries = append(summaries, c.Items[0].Summary)
+		}
+	}
+
+	return summaries
+}
+
+// appendItemSummaries adds item summaries to existing slice up to maxItems.
+func appendItemSummaries(summaries []string, items []db.Item, maxItems int) []string {
+	for _, item := range items {
+		if len(summaries) >= maxItems {
+			break
+		}
+
+		if item.Summary != "" {
+			summaries = append(summaries, item.Summary)
+		}
+	}
+
+	return summaries
 }
 
 func (s *Scheduler) finalizeDigest(ctx context.Context, digestID string, start, end time.Time, targetChatID, msgID int64, items []db.Item, clusters []db.ClusterWithItems, logger *zerolog.Logger) {

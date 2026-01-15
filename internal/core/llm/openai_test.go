@@ -18,49 +18,50 @@ func TestBuildCoverPrompt(t *testing.T) {
 			topics:    nil,
 			narrative: "",
 			wantContains: []string{
-				"abstract, artistic news illustration",
-				"Modern minimalist style",
-				"No text, no letters",
-				"Professional newspaper/magazine cover",
+				"abstract editorial illustration for a news digest",
+				"modern conceptual art",
+				"Absolutely no text",
 			},
-			wantMissing: []string{"Themes:", "Context:"},
+			wantMissing: []string{"current events", "news digest covering"},
 		},
 		{
 			name:      "with topics only",
 			topics:    []string{"Technology", "Finance"},
 			narrative: "",
 			wantContains: []string{
-				"Themes: Technology, Finance",
-				"No text, no letters",
+				"news digest covering: Technology, Finance",
+				"Absolutely no text",
 			},
-			wantMissing: []string{"Context:"},
+			wantMissing: []string{"current events"},
 		},
 		{
 			name:      "with narrative only",
 			topics:    nil,
 			narrative: "Breaking news about tech startups",
 			wantContains: []string{
-				"Context: Breaking news about tech startups",
-				"No text, no letters",
+				"representing these current events: Breaking news about tech startups",
+				"Absolutely no text",
 			},
-			wantMissing: []string{"Themes:"},
+			wantMissing: []string{"news digest covering"},
 		},
 		{
 			name:      "with both topics and narrative",
 			topics:    []string{"Politics", "World News"},
 			narrative: "Important summit meeting",
 			wantContains: []string{
-				"Themes: Politics, World News",
-				"Context: Important summit meeting",
-				"No text, no letters",
+				// When narrative is present, it takes precedence over topics
+				"representing these current events: Important summit meeting",
+				"Absolutely no text",
 			},
+			wantMissing: []string{"Politics", "World News"},
 		},
 		{
 			name:      "long narrative is truncated",
 			topics:    nil,
 			narrative: strings.Repeat("This is a very long narrative. ", 20),
 			wantContains: []string{
-				"Context:",
+				"current events",
+				"...", // Truncation indicator
 			},
 		},
 	}

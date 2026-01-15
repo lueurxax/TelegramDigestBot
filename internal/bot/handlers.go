@@ -2552,8 +2552,9 @@ func (b *Bot) fetchPreviewCoverImage(ctx context.Context, items []db.Item, clust
 	// Try AI cover first if enabled (independent of cover_image setting)
 	if aiCoverEnabled && b.llmClient != nil {
 		topics := extractTopicsForPreview(items, clusters)
+		narrative := extractNarrativeForPreview(items, clusters)
 
-		coverImage, err := b.llmClient.GenerateDigestCover(ctx, topics, "")
+		coverImage, err := b.llmClient.GenerateDigestCover(ctx, topics, narrative)
 		if err != nil {
 			b.logger.Warn().Err(err).Msg("failed to generate AI cover for preview")
 		} else {
@@ -2605,6 +2606,54 @@ func extractTopicsForPreview(items []db.Item, clusters []db.ClusterWithItems) []
 	}
 
 	return topics
+}
+
+// narrativeMaxItems is the maximum number of summaries to include in narrative.
+const narrativeMaxItems = 5
+
+// extractNarrativeForPreview extracts key summaries from top items for AI cover generation.
+// Returns a concise description of the main stories.
+func extractNarrativeForPreview(items []db.Item, clusters []db.ClusterWithItems) string {
+	summaries := collectClusterSummariesForPreview(clusters, narrativeMaxItems)
+	summaries = appendItemSummariesForPreview(summaries, items, narrativeMaxItems)
+
+	if len(summaries) == 0 {
+		return ""
+	}
+
+	return strings.Join(summaries, "; ")
+}
+
+// collectClusterSummariesForPreview extracts summaries from clusters up to maxItems.
+func collectClusterSummariesForPreview(clusters []db.ClusterWithItems, maxItems int) []string {
+	summaries := make([]string, 0, maxItems)
+
+	for _, c := range clusters {
+		if len(summaries) >= maxItems {
+			break
+		}
+
+		if c.Topic != "" && len(c.Items) > 0 {
+			summaries = append(summaries, c.Items[0].Summary)
+		}
+	}
+
+	return summaries
+}
+
+// appendItemSummariesForPreview adds item summaries to existing slice up to maxItems.
+func appendItemSummariesForPreview(summaries []string, items []db.Item, maxItems int) []string {
+	for _, item := range items {
+		if len(summaries) >= maxItems {
+			break
+		}
+
+		if item.Summary != "" {
+			summaries = append(summaries, item.Summary)
+		}
+	}
+
+	return summaries
 }
 
 func (b *Bot) handleTone(ctx context.Context, msg *tgbotapi.Message) {

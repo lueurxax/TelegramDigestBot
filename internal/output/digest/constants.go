@@ -140,3 +140,8 @@ const (
 	SourceDiversityBonus = 0.1
 	BacklogThreshold     = 100
 )
+
+// Log truncation constants
+const (
+	LogTruncateLength = 50
+)

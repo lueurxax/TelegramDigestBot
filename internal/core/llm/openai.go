@@ -763,26 +763,26 @@ func (c *openaiClient) GenerateDigestCover(ctx context.Context, topics []string,
 func buildCoverPrompt(topics []string, narrative string) string {
 	var sb strings.Builder
 
-	sb.WriteString("Create an abstract, artistic news illustration. ")
-	sb.WriteString("Modern minimalist style with bold geometric shapes and vibrant colors. ")
-
-	if len(topics) > 0 {
-		sb.WriteString("Themes: ")
+	// If we have narrative (actual content summaries), create a content-specific prompt
+	if narrative != "" {
+		sb.WriteString("Create a symbolic illustration representing these current events: ")
+		sb.WriteString(truncate(narrative, coverPromptNarrativeMaxLength))
+		sb.WriteString(". ")
+		sb.WriteString("Style: editorial illustration, conceptual art, metaphorical imagery. ")
+		sb.WriteString("Use symbolic visual elements that represent the subjects (not literal depictions). ")
+	} else if len(topics) > 0 {
+		// Fallback to topic-based prompt
+		sb.WriteString("Create an editorial illustration for a news digest covering: ")
 		sb.WriteString(strings.Join(topics, ", "))
 		sb.WriteString(". ")
+		sb.WriteString("Style: conceptual magazine cover art with symbolic imagery. ")
+	} else {
+		sb.WriteString("Create an abstract editorial illustration for a news digest. ")
+		sb.WriteString("Style: modern conceptual art, magazine cover aesthetic. ")
 	}
 
-	if narrative != "" {
-		// Use first N chars of narrative for context
-		shortNarrative := truncate(narrative, coverPromptNarrativeMaxLength)
-
-		sb.WriteString("Context: ")
-		sb.WriteString(shortNarrative)
-		sb.WriteString(" ")
-	}
-
-	sb.WriteString("No text, no letters, no words, no numbers. ")
-	sb.WriteString("Professional newspaper/magazine cover aesthetic.")
+	sb.WriteString("IMPORTANT: Absolutely no text, letters, words, numbers, or writing of any kind. ")
+	sb.WriteString("Clean, professional, visually striking.")
 
 	return sb.String()
 }
