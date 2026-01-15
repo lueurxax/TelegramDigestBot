@@ -67,6 +67,44 @@ func (db *DB) GetItemsForWindow(ctx context.Context, start, end time.Time, impor
 	return items, nil
 }
 
+// GetItemsForWindowWithMedia returns items including media data for inline image display.
+func (db *DB) GetItemsForWindowWithMedia(ctx context.Context, start, end time.Time, importanceThreshold float32, limit int) ([]ItemWithMedia, error) {
+	sqlcItems, err := db.Queries.GetItemsForWindowWithMedia(ctx, sqlc.GetItemsForWindowWithMediaParams{
+		TgDate:          toTimestamptz(start),
+		TgDate_2:        toTimestamptz(end),
+		ImportanceScore: importanceThreshold,
+		Limit:           safeIntToInt32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get items for window with media: %w", err)
+	}
+
+	items := make([]ItemWithMedia, len(sqlcItems))
+	for i, item := range sqlcItems {
+		items[i] = ItemWithMedia{
+			Item: Item{
+				ID:                 fromUUID(item.ID),
+				RawMessageID:       fromUUID(item.RawMessageID),
+				RelevanceScore:     item.RelevanceScore,
+				ImportanceScore:    item.ImportanceScore,
+				Topic:              item.Topic.String,
+				Summary:            item.Summary.String,
+				Language:           item.Language.String,
+				Status:             item.Status,
+				TGDate:             item.TgDate.Time,
+				SourceChannel:      item.SourceChannel.String,
+				SourceChannelTitle: item.SourceChannelTitle.String,
+				SourceChannelID:    item.SourceChannelID,
+				SourceMsgID:        item.SourceMsgID,
+				Embedding:          item.Embedding.Slice(),
+			},
+			MediaData: item.MediaData,
+		}
+	}
+
+	return items, nil
+}
+
 func (db *DB) CountItemsInWindow(ctx context.Context, start, end time.Time) (int, error) {
 	count, err := db.Queries.CountItemsInWindow(ctx, sqlc.CountItemsInWindowParams{
 		TgDate:   toTimestamptz(start),

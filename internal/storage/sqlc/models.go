@@ -9,6 +9,18 @@ import (
 	"github.com/pgvector/pgvector-go"
 )
 
+type AnnotationQueue struct {
+	ID         int32              `json:"id"`
+	ItemID     pgtype.UUID        `json:"item_id"`
+	Status     string             `json:"status"`
+	AssignedTo pgtype.Int8        `json:"assigned_to"`
+	AssignedAt pgtype.Timestamptz `json:"assigned_at"`
+	Label      pgtype.Text        `json:"label"`
+	Comment    pgtype.Text        `json:"comment"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Channel struct {
 	ID                      pgtype.UUID        `json:"id"`
 	TgPeerID                int64              `json:"tg_peer_id"`
@@ -35,6 +47,19 @@ type Channel struct {
 	WeightUpdatedBy         pgtype.Int8        `json:"weight_updated_by"`
 	AutoRelevanceEnabled    pgtype.Bool        `json:"auto_relevance_enabled"`
 	RelevanceThresholdDelta pgtype.Float4      `json:"relevance_threshold_delta"`
+}
+
+type ChannelRatingStat struct {
+	ChannelID          pgtype.UUID        `json:"channel_id"`
+	PeriodStart        pgtype.Date        `json:"period_start"`
+	PeriodEnd          pgtype.Date        `json:"period_end"`
+	WeightedGood       float64            `json:"weighted_good"`
+	WeightedBad        float64            `json:"weighted_bad"`
+	WeightedIrrelevant float64            `json:"weighted_irrelevant"`
+	WeightedTotal      float64            `json:"weighted_total"`
+	RatingCount        int32              `json:"rating_count"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ChannelStat struct {
@@ -130,6 +155,18 @@ type Filter struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type GlobalRatingStat struct {
+	PeriodStart        pgtype.Date        `json:"period_start"`
+	PeriodEnd          pgtype.Date        `json:"period_end"`
+	WeightedGood       float64            `json:"weighted_good"`
+	WeightedBad        float64            `json:"weighted_bad"`
+	WeightedIrrelevant float64            `json:"weighted_irrelevant"`
+	WeightedTotal      float64            `json:"weighted_total"`
+	RatingCount        int32              `json:"rating_count"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Item struct {
 	ID              pgtype.UUID        `json:"id"`
 	RawMessageID    pgtype.UUID        `json:"raw_message_id"`
@@ -203,6 +240,15 @@ type RawMessage struct {
 	ProcessedAt          pgtype.Timestamptz `json:"processed_at"`
 	MediaData            []byte             `json:"media_data"`
 	DiscoveriesExtracted pgtype.Bool        `json:"discoveries_extracted"`
+}
+
+type RawMessageDropLog struct {
+	ID           int32              `json:"id"`
+	RawMessageID pgtype.UUID        `json:"raw_message_id"`
+	Reason       string             `json:"reason"`
+	Detail       pgtype.Text        `json:"detail"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type RelevanceGateLog struct {

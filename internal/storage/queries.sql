@@ -99,8 +99,21 @@ FROM items i
 JOIN raw_messages rm ON i.raw_message_id = rm.id
 JOIN channels c ON rm.channel_id = c.id
 LEFT JOIN embeddings e ON i.id = e.item_id
-WHERE rm.tg_date >= $1 AND rm.tg_date < $2 
-  AND i.status = 'ready' 
+WHERE rm.tg_date >= $1 AND rm.tg_date < $2
+  AND i.status = 'ready'
+  AND i.importance_score >= COALESCE(c.importance_threshold, $3)
+  AND i.digested_at IS NULL
+ORDER BY i.importance_score DESC, i.relevance_score DESC
+LIMIT $4;
+
+-- name: GetItemsForWindowWithMedia :many
+SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language, i.status, rm.tg_date, rm.media_data, c.username as source_channel, c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id, e.embedding
+FROM items i
+JOIN raw_messages rm ON i.raw_message_id = rm.id
+JOIN channels c ON rm.channel_id = c.id
+LEFT JOIN embeddings e ON i.id = e.item_id
+WHERE rm.tg_date >= $1 AND rm.tg_date < $2
+  AND i.status = 'ready'
   AND i.importance_score >= COALESCE(c.importance_threshold, $3)
   AND i.digested_at IS NULL
 ORDER BY i.importance_score DESC, i.relevance_score DESC

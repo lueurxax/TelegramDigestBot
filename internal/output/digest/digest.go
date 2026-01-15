@@ -34,9 +34,28 @@ var topicEmojis = map[string]string{
 	"Humor":         "😂",
 }
 
+// RichDigestItem represents a digest item with media for inline display.
+type RichDigestItem struct {
+	Summary    string
+	Topic      string
+	Importance float32
+	Channel    string
+	ChannelID  int64
+	MsgID      int64
+	MediaData  []byte
+}
+
+// RichDigestContent holds content for inline image digest display.
+type RichDigestContent struct {
+	Header   string
+	Items    []RichDigestItem
+	DigestID string
+}
+
 type DigestPoster interface {
 	SendDigest(ctx context.Context, chatID int64, text string, digestID string) (int64, error)
 	SendDigestWithImage(ctx context.Context, chatID int64, text string, digestID string, imageData []byte) (int64, error)
+	SendRichDigest(ctx context.Context, chatID int64, content RichDigestContent) (int64, error)
 	SendNotification(ctx context.Context, text string) error
 }
 
@@ -583,7 +602,7 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	// Generate digest ID early to use in rating buttons
 	digestID := uuid.New().String()
 
-	msgID, err := s.postDigest(ctx, targetChatID, text, digestID, start, end, importanceThreshold, logger)
+	msgID, err := s.postDigest(ctx, targetChatID, text, digestID, start, end, importanceThreshold, items, clusters, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -593,28 +612,92 @@ func (s *Scheduler) processWindow(ctx context.Context, start, end time.Time, tar
 	return nil, nil //nolint:nilnil // nil,nil indicates successful completion with no anomaly
 }
 
-func (s *Scheduler) postDigest(ctx context.Context, targetChatID int64, text, digestID string, start, end time.Time, importanceThreshold float32, logger *zerolog.Logger) (int64, error) {
+func (s *Scheduler) postDigest(ctx context.Context, targetChatID int64, text, digestID string, start, end time.Time, importanceThreshold float32, items []db.Item, clusters []db.ClusterWithItems, logger *zerolog.Logger) (int64, error) {
+	// Check if inline images are enabled
+	var inlineImagesEnabled bool
+
+	if err := s.database.GetSetting(ctx, "digest_inline_images", &inlineImagesEnabled); err != nil {
+		logger.Debug().Err(err).Msg("could not get digest_inline_images from DB, defaulting to disabled")
+	}
+
+	// If inline images are enabled, use rich digest mode
+	if inlineImagesEnabled {
+		return s.postRichDigest(ctx, targetChatID, text, digestID, start, end, importanceThreshold, items, logger)
+	}
+
+	// Fetch cover image
+	coverImage := s.fetchCoverImage(ctx, start, end, importanceThreshold, items, clusters, logger)
+
+	// Post digest (with or without image)
+	msgID, err := s.sendDigest(ctx, targetChatID, text, digestID, coverImage)
+	if err != nil {
+		observability.DigestsPosted.WithLabelValues(StatusError).Inc()
+
+		if errSave := s.database.SaveDigestError(ctx, start, end, targetChatID, err); errSave != nil {
+			logger.Error().Err(errSave).Msg(ErrMsgFailedToSaveDigestError)
+		}
+
+		return 0, fmt.Errorf("failed to send digest: %w", err)
+	}
+
+	logger.Info().Int64(LogFieldMsgID, msgID).Msg("Digest posted successfully")
+	observability.DigestsPosted.WithLabelValues(StatusPosted).Inc()
+
+	return msgID, nil
+}
+
+// fetchCoverImage fetches or generates a cover image for the digest.
+func (s *Scheduler) fetchCoverImage(ctx context.Context, start, end time.Time, importanceThreshold float32, items []db.Item, clusters []db.ClusterWithItems, logger *zerolog.Logger) []byte {
 	// Check if cover images are enabled
 	var coverImageEnabled = true
+
 	if err := s.database.GetSetting(ctx, "digest_cover_image", &coverImageEnabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get digest_cover_image from DB, defaulting to enabled")
 	}
 
-	// Fetch cover image if enabled
-	var (
-		coverImage []byte
-		err        error
-	)
+	if !coverImageEnabled {
+		return nil
+	}
 
-	if coverImageEnabled {
-		coverImage, err = s.database.GetDigestCoverImage(ctx, start, end, importanceThreshold)
+	// Check if AI cover generation is enabled
+	var aiCoverEnabled bool
+
+	if err := s.database.GetSetting(ctx, "digest_ai_cover", &aiCoverEnabled); err != nil {
+		logger.Debug().Err(err).Msg("could not get digest_ai_cover from DB, defaulting to disabled")
+	}
+
+	// Try AI-generated cover first if enabled
+	if aiCoverEnabled && s.llmClient != nil {
+		topics := extractTopicsFromDigest(items, clusters)
+
+		coverImage, err := s.llmClient.GenerateDigestCover(ctx, topics, "")
 		if err != nil {
-			logger.Debug().Err(err).Msg("no cover image available for digest")
+			logger.Warn().Err(err).Msg("failed to generate AI cover, falling back to original image")
+		} else {
+			logger.Info().Int("topics_count", len(topics)).Msg("AI cover generated successfully")
+
+			return coverImage
 		}
 	}
 
-	// Post digest (with or without image)
-	var msgID int64
+	// Fall back to original cover image selection
+	coverImage, err := s.database.GetDigestCoverImage(ctx, start, end, importanceThreshold)
+	if err != nil {
+		logger.Debug().Err(err).Msg("no cover image available for digest")
+
+		return nil
+	}
+
+	return coverImage
+}
+
+// sendDigest sends the digest using the bot.
+func (s *Scheduler) sendDigest(ctx context.Context, targetChatID int64, text, digestID string, coverImage []byte) (int64, error) {
+	var (
+		msgID int64
+		err   error
+	)
+
 	if len(coverImage) > 0 {
 		msgID, err = s.bot.SendDigestWithImage(ctx, targetChatID, text, digestID, coverImage)
 	} else {
@@ -622,19 +705,131 @@ func (s *Scheduler) postDigest(ctx context.Context, targetChatID int64, text, di
 	}
 
 	if err != nil {
+		return 0, fmt.Errorf("failed to send digest message: %w", err)
+	}
+
+	return msgID, nil
+}
+
+// postRichDigest sends the digest with inline images per item.
+func (s *Scheduler) postRichDigest(ctx context.Context, targetChatID int64, headerText, digestID string, start, end time.Time, importanceThreshold float32, items []db.Item, logger *zerolog.Logger) (int64, error) {
+	// Fetch items with media data
+	itemsWithMedia, err := s.database.GetItemsForWindowWithMedia(ctx, start, end, importanceThreshold, len(items))
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to fetch items with media, falling back to text-only")
+
+		// Fallback to regular text digest
+		msgID, sendErr := s.bot.SendDigest(ctx, targetChatID, headerText, digestID)
+		if sendErr != nil {
+			return 0, fmt.Errorf("failed to send text digest: %w", sendErr)
+		}
+
+		return msgID, nil
+	}
+
+	// Build header from the text (extract first part before items)
+	header := extractDigestHeader(headerText)
+
+	// Convert items to RichDigestItem format
+	richItems := make([]RichDigestItem, 0, len(itemsWithMedia))
+
+	for _, item := range itemsWithMedia {
+		richItems = append(richItems, RichDigestItem{
+			Summary:    item.Summary,
+			Topic:      item.Topic,
+			Importance: item.ImportanceScore,
+			Channel:    item.SourceChannel,
+			ChannelID:  item.SourceChannelID,
+			MsgID:      item.SourceMsgID,
+			MediaData:  item.MediaData,
+		})
+	}
+
+	content := RichDigestContent{
+		Header:   header,
+		Items:    richItems,
+		DigestID: digestID,
+	}
+
+	msgID, err := s.bot.SendRichDigest(ctx, targetChatID, content)
+	if err != nil {
 		observability.DigestsPosted.WithLabelValues(StatusError).Inc()
 
 		if errSave := s.database.SaveDigestError(ctx, start, end, targetChatID, err); errSave != nil {
-			logger.Error().Err(errSave).Msg("failed to save digest error")
+			logger.Error().Err(errSave).Msg(ErrMsgFailedToSaveDigestError)
 		}
 
-		return 0, fmt.Errorf("failed to send digest: %w", err)
+		return 0, fmt.Errorf("failed to send rich digest: %w", err)
 	}
 
-	logger.Info().Int64("msg_id", msgID).Msg("Digest posted successfully")
+	logger.Info().Int64(LogFieldMsgID, msgID).Int("items_with_images", countItemsWithMedia(itemsWithMedia)).Msg("Rich digest posted successfully")
 	observability.DigestsPosted.WithLabelValues(StatusPosted).Inc()
 
 	return msgID, nil
+}
+
+// extractDigestHeader extracts the header portion of the digest text.
+func extractDigestHeader(text string) string {
+	// Find the first item marker or section header
+	// The header typically contains: separator, title, metadata
+	lines := strings.Split(text, "\n")
+
+	var header strings.Builder
+
+	for _, line := range lines {
+		// Stop at the first section marker (Breaking, Notable, Also)
+		if strings.Contains(line, "🔴") || strings.Contains(line, "📌") || strings.Contains(line, "📝") {
+			break
+		}
+		// Stop at topic headers
+		if strings.HasPrefix(line, "┌") || strings.HasPrefix(line, "│") {
+			break
+		}
+
+		header.WriteString(line)
+		header.WriteString("\n")
+	}
+
+	return strings.TrimRight(header.String(), "\n")
+}
+
+// countItemsWithMedia counts how many items have media data.
+func countItemsWithMedia(items []db.ItemWithMedia) int {
+	count := 0
+
+	for _, item := range items {
+		if len(item.MediaData) > 0 {
+			count++
+		}
+	}
+
+	return count
+}
+
+// extractTopicsFromDigest extracts unique topics from items and clusters for AI cover generation.
+func extractTopicsFromDigest(items []db.Item, clusters []db.ClusterWithItems) []string {
+	topicSet := make(map[string]struct{})
+
+	// Extract topics from clusters first (they're more specific)
+	for _, c := range clusters {
+		if c.Topic != "" {
+			topicSet[c.Topic] = struct{}{}
+		}
+	}
+
+	// Extract topics from individual items
+	for _, item := range items {
+		if item.Topic != "" {
+			topicSet[item.Topic] = struct{}{}
+		}
+	}
+
+	topics := make([]string, 0, len(topicSet))
+	for topic := range topicSet {
+		topics = append(topics, topic)
+	}
+
+	return topics
 }
 
 func (s *Scheduler) finalizeDigest(ctx context.Context, digestID string, start, end time.Time, targetChatID, msgID int64, items []db.Item, clusters []db.ClusterWithItems, logger *zerolog.Logger) {

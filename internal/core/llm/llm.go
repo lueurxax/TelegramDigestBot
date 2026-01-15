@@ -36,6 +36,7 @@ type Client interface {
 	SummarizeCluster(ctx context.Context, items []domain.Item, targetLanguage string, model string, tone string) (string, error)
 	GenerateClusterTopic(ctx context.Context, items []domain.Item, targetLanguage string, model string) (string, error)
 	RelevanceGate(ctx context.Context, text string, model string, prompt string) (RelevanceGateResult, error)
+	GenerateDigestCover(ctx context.Context, topics []string, narrative string) ([]byte, error)
 }
 
 type RelevanceGateResult struct {
@@ -125,4 +126,9 @@ func (c *mockClient) RelevanceGate(_ context.Context, _ string, _ string, _ stri
 		Confidence: mockConfidenceScore,
 		Reason:     "mock",
 	}, nil
+}
+
+func (c *mockClient) GenerateDigestCover(_ context.Context, _ []string, _ string) ([]byte, error) {
+	// Mock returns nil - no image generated
+	return nil, nil
 }

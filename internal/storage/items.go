@@ -19,6 +19,12 @@ const errSaveItemRating = "save item rating: %w"
 // Item is an alias for the domain type.
 type Item = domain.Item
 
+// ItemWithMedia extends Item with media data for inline image support.
+type ItemWithMedia struct {
+	Item
+	MediaData []byte
+}
+
 type ItemRating struct {
 	ChannelID string
 	Rating    string

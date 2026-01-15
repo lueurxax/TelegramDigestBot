@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/output/digest"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -519,6 +520,139 @@ func TestFormatDiscoveryIdentifier(t *testing.T) {
 
 			if got != tt.want {
 				t.Errorf("formatDiscoveryIdentifier() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetImageFileName(t *testing.T) {
+	tests := []struct {
+		mimeType string
+		want     string
+	}{
+		{"image/jpeg", "cover.jpg"},
+		{"image/png", "cover.png"},
+		{"image/webp", "cover.webp"},
+		{"image/gif", ""},        // GIFs should be skipped
+		{"video/mp4", ""},        // Videos should be skipped
+		{"application/pdf", ""},  // Non-images should be skipped
+		{"text/html", ""},        // Non-images should be skipped
+		{"", ""},                 // Empty should be skipped
+		{"unknown/type", ""},     // Unknown types should be skipped
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.mimeType, func(t *testing.T) {
+			got := getImageFileName(tt.mimeType)
+
+			if got != tt.want {
+				t.Errorf("getImageFileName(%q) = %q, want %q", tt.mimeType, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetTopicEmoji(t *testing.T) {
+	tests := []struct {
+		topic string
+		want  string
+	}{
+		{"Technology", "💻"},
+		{"Finance", "💰"},
+		{"Politics", "⚖️"},
+		{"Sports", "🏆"},
+		{"Entertainment", "🎬"},
+		{"Science", "🔬"},
+		{"Health", "🏥"},
+		{"Business", "📊"},
+		{"World News", "🌍"},
+		{"Local News", "📍"},
+		{"Culture", "🎨"},
+		{"Education", "📚"},
+		{"Humor", "😂"},
+		{"Unknown Topic", "•"},  // Unknown should return bullet
+		{"", "•"},               // Empty should return bullet
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.topic, func(t *testing.T) {
+			got := getTopicEmoji(tt.topic)
+
+			if got != tt.want {
+				t.Errorf("getTopicEmoji(%q) = %q, want %q", tt.topic, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatDigestItemCaption(t *testing.T) {
+	tests := []struct {
+		name         string
+		item         digest.RichDigestItem
+		wantContains []string
+	}{
+		{
+			name: "basic item",
+			item: digest.RichDigestItem{
+				Summary:    "Test summary",
+				Topic:      "Technology",
+				Importance: 0.5,
+				Channel:    "testchannel",
+				ChannelID:  123456,
+				MsgID:      42,
+			},
+			wantContains: []string{"💻", "Test summary", "@testchannel"},
+		},
+		{
+			name: "breaking news item",
+			item: digest.RichDigestItem{
+				Summary:    "Breaking news!",
+				Topic:      "Politics",
+				Importance: 0.9,
+				Channel:    "newschannel",
+			},
+			wantContains: []string{"⚖️", "🔴", "Breaking news!"},
+		},
+		{
+			name: "notable item",
+			item: digest.RichDigestItem{
+				Summary:    "Notable event",
+				Topic:      "Sports",
+				Importance: 0.7,
+				Channel:    "sportschannel",
+			},
+			wantContains: []string{"🏆", "📌", "Notable event"},
+		},
+		{
+			name: "item without topic",
+			item: digest.RichDigestItem{
+				Summary:    "Simple update",
+				Topic:      "",
+				Importance: 0.3,
+				Channel:    "channel",
+			},
+			wantContains: []string{"Simple update", "@channel"},
+		},
+		{
+			name: "item with link",
+			item: digest.RichDigestItem{
+				Summary:    "Link test",
+				Channel:    "linkchannel",
+				ChannelID:  789,
+				MsgID:      100,
+			},
+			wantContains: []string{"Link test", "https://t.me/linkchannel/100"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatDigestItemCaption(tt.item)
+
+			for _, s := range tt.wantContains {
+				if !strings.Contains(got, s) {
+					t.Errorf("formatDigestItemCaption() = %q, want to contain %q", got, s)
+				}
 			}
 		})
 	}

@@ -40,6 +40,12 @@ const (
 	LogFieldEnd           = "end"
 	LogFieldNetScore      = "net_score"
 	LogFieldRatingCount   = "rating_count"
+	LogFieldMsgID         = "msg_id"
+)
+
+// Error message constants
+const (
+	ErrMsgFailedToSaveDigestError = "failed to save digest error"
 )
 
 // Database setting key constants

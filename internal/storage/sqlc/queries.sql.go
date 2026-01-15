@@ -1072,8 +1072,8 @@ FROM items i
 JOIN raw_messages rm ON i.raw_message_id = rm.id
 JOIN channels c ON rm.channel_id = c.id
 LEFT JOIN embeddings e ON i.id = e.item_id
-WHERE rm.tg_date >= $1 AND rm.tg_date < $2 
-  AND i.status = 'ready' 
+WHERE rm.tg_date >= $1 AND rm.tg_date < $2
+  AND i.status = 'ready'
   AND i.importance_score >= COALESCE(c.importance_threshold, $3)
   AND i.digested_at IS NULL
 ORDER BY i.importance_score DESC, i.relevance_score DESC
@@ -1128,6 +1128,86 @@ func (q *Queries) GetItemsForWindow(ctx context.Context, arg GetItemsForWindowPa
 			&i.Language,
 			&i.Status,
 			&i.TgDate,
+			&i.SourceChannel,
+			&i.SourceChannelTitle,
+			&i.SourceChannelID,
+			&i.SourceMsgID,
+			&i.Embedding,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getItemsForWindowWithMedia = `-- name: GetItemsForWindowWithMedia :many
+SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language, i.status, rm.tg_date, rm.media_data, c.username as source_channel, c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id, e.embedding
+FROM items i
+JOIN raw_messages rm ON i.raw_message_id = rm.id
+JOIN channels c ON rm.channel_id = c.id
+LEFT JOIN embeddings e ON i.id = e.item_id
+WHERE rm.tg_date >= $1 AND rm.tg_date < $2
+  AND i.status = 'ready'
+  AND i.importance_score >= COALESCE(c.importance_threshold, $3)
+  AND i.digested_at IS NULL
+ORDER BY i.importance_score DESC, i.relevance_score DESC
+LIMIT $4
+`
+
+type GetItemsForWindowWithMediaParams struct {
+	TgDate          pgtype.Timestamptz `json:"tg_date"`
+	TgDate_2        pgtype.Timestamptz `json:"tg_date_2"`
+	ImportanceScore float32            `json:"importance_score"`
+	Limit           int32              `json:"limit"`
+}
+
+type GetItemsForWindowWithMediaRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	RawMessageID       pgtype.UUID        `json:"raw_message_id"`
+	RelevanceScore     float32            `json:"relevance_score"`
+	ImportanceScore    float32            `json:"importance_score"`
+	Topic              pgtype.Text        `json:"topic"`
+	Summary            pgtype.Text        `json:"summary"`
+	Language           pgtype.Text        `json:"language"`
+	Status             string             `json:"status"`
+	TgDate             pgtype.Timestamptz `json:"tg_date"`
+	MediaData          []byte             `json:"media_data"`
+	SourceChannel      pgtype.Text        `json:"source_channel"`
+	SourceChannelTitle pgtype.Text        `json:"source_channel_title"`
+	SourceChannelID    int64              `json:"source_channel_id"`
+	SourceMsgID        int64              `json:"source_msg_id"`
+	Embedding          pgvector.Vector    `json:"embedding"`
+}
+
+func (q *Queries) GetItemsForWindowWithMedia(ctx context.Context, arg GetItemsForWindowWithMediaParams) ([]GetItemsForWindowWithMediaRow, error) {
+	rows, err := q.db.Query(ctx, getItemsForWindowWithMedia,
+		arg.TgDate,
+		arg.TgDate_2,
+		arg.ImportanceScore,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetItemsForWindowWithMediaRow
+	for rows.Next() {
+		var i GetItemsForWindowWithMediaRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RawMessageID,
+			&i.RelevanceScore,
+			&i.ImportanceScore,
+			&i.Topic,
+			&i.Summary,
+			&i.Language,
+			&i.Status,
+			&i.TgDate,
+			&i.MediaData,
 			&i.SourceChannel,
 			&i.SourceChannelTitle,
 			&i.SourceChannelID,

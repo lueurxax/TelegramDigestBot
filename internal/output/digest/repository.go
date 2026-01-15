@@ -26,6 +26,7 @@ type Repository interface {
 
 	// Item operations
 	GetItemsForWindow(ctx context.Context, start, end time.Time, threshold float32, limit int) ([]db.Item, error)
+	GetItemsForWindowWithMedia(ctx context.Context, start, end time.Time, threshold float32, limit int) ([]db.ItemWithMedia, error)
 	CountItemsInWindow(ctx context.Context, start, end time.Time) (int, error)
 	CountReadyItemsInWindow(ctx context.Context, start, end time.Time) (int, error)
 	MarkItemsAsDigested(ctx context.Context, ids []string) error

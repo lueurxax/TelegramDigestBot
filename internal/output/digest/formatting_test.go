@@ -327,3 +327,172 @@ func TestCountDistinctTopics(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractTopicsFromDigest(t *testing.T) {
+	tests := []struct {
+		name     string
+		items    []db.Item
+		clusters []db.ClusterWithItems
+		want     int
+	}{
+		{
+			name:     "empty items and clusters",
+			items:    nil,
+			clusters: nil,
+			want:     0,
+		},
+		{
+			name: "items only",
+			items: []db.Item{
+				{Topic: "Technology"},
+				{Topic: "Finance"},
+				{Topic: "Technology"},
+			},
+			clusters: nil,
+			want:     2,
+		},
+		{
+			name:  "clusters only",
+			items: nil,
+			clusters: []db.ClusterWithItems{
+				{Topic: "Politics"},
+				{Topic: "Sports"},
+			},
+			want: 2,
+		},
+		{
+			name: "items and clusters with overlap",
+			items: []db.Item{
+				{Topic: "Technology"},
+				{Topic: "Finance"},
+			},
+			clusters: []db.ClusterWithItems{
+				{Topic: "Technology"},
+				{Topic: "Sports"},
+			},
+			want: 3,
+		},
+		{
+			name: "empty topics not counted",
+			items: []db.Item{
+				{Topic: ""},
+				{Topic: "Science"},
+			},
+			clusters: []db.ClusterWithItems{
+				{Topic: ""},
+			},
+			want: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractTopicsFromDigest(tt.items, tt.clusters)
+
+			if len(got) != tt.want {
+				t.Errorf("extractTopicsFromDigest() returned %d topics, want %d. Topics: %v", len(got), tt.want, got)
+			}
+		})
+	}
+}
+
+func TestCountItemsWithMedia(t *testing.T) {
+	tests := []struct {
+		name  string
+		items []db.ItemWithMedia
+		want  int
+	}{
+		{
+			name:  "empty items",
+			items: nil,
+			want:  0,
+		},
+		{
+			name: "all items have media",
+			items: []db.ItemWithMedia{
+				{MediaData: []byte{1, 2, 3}},
+				{MediaData: []byte{4, 5, 6}},
+			},
+			want: 2,
+		},
+		{
+			name: "no items have media",
+			items: []db.ItemWithMedia{
+				{MediaData: nil},
+				{MediaData: []byte{}},
+			},
+			want: 0,
+		},
+		{
+			name: "mixed items",
+			items: []db.ItemWithMedia{
+				{MediaData: []byte{1, 2, 3}},
+				{MediaData: nil},
+				{MediaData: []byte{4, 5}},
+				{MediaData: []byte{}},
+			},
+			want: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := countItemsWithMedia(tt.items); got != tt.want {
+				t.Errorf("countItemsWithMedia() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractDigestHeader(t *testing.T) {
+	tests := []struct {
+		name         string
+		text         string
+		wantContains string
+		wantMissing  string
+	}{
+		{
+			name:         "basic header",
+			text:         "━━━━━━\nDigest Title\n12:00 - 13:00\n🔴 Breaking news",
+			wantContains: "Digest Title",
+			wantMissing:  "🔴",
+		},
+		{
+			name:         "header with notable marker",
+			text:         "Header\n📌 Notable item",
+			wantContains: "Header",
+			wantMissing:  "📌",
+		},
+		{
+			name:         "header with standard marker",
+			text:         "First line\nSecond line\n📝 Standard item",
+			wantContains: "Second line",
+			wantMissing:  "📝",
+		},
+		{
+			name:         "header with topic border",
+			text:         "Digest\n┌─────\n│ Topic content",
+			wantContains: "Digest",
+			wantMissing:  "┌",
+		},
+		{
+			name:         "empty text",
+			text:         "",
+			wantContains: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractDigestHeader(tt.text)
+
+			if tt.wantContains != "" && !strings.Contains(got, tt.wantContains) {
+				t.Errorf("extractDigestHeader() = %q, want to contain %q", got, tt.wantContains)
+			}
+
+			if tt.wantMissing != "" && strings.Contains(got, tt.wantMissing) {
+				t.Errorf("extractDigestHeader() = %q, should not contain %q", got, tt.wantMissing)
+			}
+		})
+	}
+}

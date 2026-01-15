@@ -39,10 +39,14 @@ var ErrCircuitBreakerOpen = errors.New("circuit breaker is open")
 // ErrNoResultsExtracted indicates no results could be extracted from LLM response.
 var ErrNoResultsExtracted = errors.New("failed to extract any results from LLM response")
 
+// ErrEmptyDALLEResponse indicates DALL-E returned no image data.
+var ErrEmptyDALLEResponse = errors.New("empty response from DALL-E")
+
 const (
-	circuitBreakerThreshold = 5
-	circuitBreakerTimeout   = 1 * time.Minute
-	translatePromptTemplate = "Translate the following text to %s. Preserve HTML tags and return only the translated text."
+	circuitBreakerThreshold        = 5
+	circuitBreakerTimeout          = 1 * time.Minute
+	translatePromptTemplate        = "Translate the following text to %s. Preserve HTML tags and return only the translated text."
+	coverPromptNarrativeMaxLength  = 200
 )
 
 func NewOpenAI(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
@@ -710,4 +714,75 @@ func truncate(s string, max int) string {
 	runes := []rune(s)
 
 	return string(runes[:max]) + "..."
+}
+
+// GenerateDigestCover generates a cover image for the digest using DALL-E.
+func (c *openaiClient) GenerateDigestCover(ctx context.Context, topics []string, narrative string) ([]byte, error) {
+	if err := c.checkCircuit(); err != nil {
+		return nil, err
+	}
+
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf(errRateLimiter, err)
+	}
+
+	prompt := buildCoverPrompt(topics, narrative)
+	c.logger.Debug().Str("prompt", prompt).Msg("Generating digest cover image")
+
+	resp, err := c.client.CreateImage(ctx, openai.ImageRequest{
+		Model:          openai.CreateImageModelDallE3,
+		Prompt:         prompt,
+		Size:           openai.CreateImageSize1024x1024,
+		Quality:        openai.CreateImageQualityStandard,
+		N:              1,
+		ResponseFormat: openai.CreateImageResponseFormatB64JSON,
+	})
+	if err != nil {
+		c.recordFailure()
+
+		return nil, fmt.Errorf("failed to generate cover image: %w", err)
+	}
+
+	c.recordSuccess()
+
+	if len(resp.Data) == 0 || resp.Data[0].B64JSON == "" {
+		return nil, ErrEmptyDALLEResponse
+	}
+
+	imageData, err := base64.StdEncoding.DecodeString(resp.Data[0].B64JSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode cover image: %w", err)
+	}
+
+	c.logger.Info().Int("image_size", len(imageData)).Msg("Generated digest cover image")
+
+	return imageData, nil
+}
+
+// buildCoverPrompt creates a DALL-E prompt from digest topics and narrative.
+func buildCoverPrompt(topics []string, narrative string) string {
+	var sb strings.Builder
+
+	sb.WriteString("Create an abstract, artistic news illustration. ")
+	sb.WriteString("Modern minimalist style with bold geometric shapes and vibrant colors. ")
+
+	if len(topics) > 0 {
+		sb.WriteString("Themes: ")
+		sb.WriteString(strings.Join(topics, ", "))
+		sb.WriteString(". ")
+	}
+
+	if narrative != "" {
+		// Use first N chars of narrative for context
+		shortNarrative := truncate(narrative, coverPromptNarrativeMaxLength)
+
+		sb.WriteString("Context: ")
+		sb.WriteString(shortNarrative)
+		sb.WriteString(" ")
+	}
+
+	sb.WriteString("No text, no letters, no words, no numbers. ")
+	sb.WriteString("Professional newspaper/magazine cover aesthetic.")
+
+	return sb.String()
 }

@@ -53,6 +53,7 @@ type Querier interface {
 	GetItemEmbedding(ctx context.Context, itemID pgtype.UUID) (string, error)
 	GetItemRatingsSince(ctx context.Context, createdAt pgtype.Timestamptz) ([]GetItemRatingsSinceRow, error)
 	GetItemsForWindow(ctx context.Context, arg GetItemsForWindowParams) ([]GetItemsForWindowRow, error)
+	GetItemsForWindowWithMedia(ctx context.Context, arg GetItemsForWindowWithMediaParams) ([]GetItemsForWindowWithMediaRow, error)
 	GetLastPostedDigest(ctx context.Context) (GetLastPostedDigestRow, error)
 	GetLinkCache(ctx context.Context, url string) (LinkCache, error)
 	GetLinksForMessage(ctx context.Context, rawMessageID pgtype.UUID) ([]LinkCache, error)
