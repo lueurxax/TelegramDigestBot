@@ -1063,7 +1063,13 @@ func (s *Scheduler) renderDetailedItems(ctx context.Context, sb *strings.Builder
 
 	rc.renderGroup(ctx, sb, breaking, EmojiBreaking, breakingTitle)
 	rc.renderGroup(ctx, sb, notable, EmojiNotable, notableTitle)
-	rc.renderGroup(ctx, sb, also, EmojiStandard, alsoTitle)
+
+	// For "others" section, optionally use narrative summary instead of detailed list
+	if rc.settings.othersAsNarrative {
+		rc.renderOthersAsNarrative(ctx, sb, also, EmojiStandard, alsoTitle)
+	} else {
+		rc.renderGroup(ctx, sb, also, EmojiStandard, alsoTitle)
+	}
 }
 
 // sendConsolidatedAnomalyNotification sends a single notification summarizing all anomalies

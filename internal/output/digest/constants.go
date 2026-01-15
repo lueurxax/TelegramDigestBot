@@ -77,6 +77,7 @@ const (
 	DigestTopicBorderBot  = "└─────────────────────\n"
 	DigestSourceSeparator = " • "
 	FormatPrefixSummary   = "%s %s"
+	FormatSectionHeader   = "\n%s <b>%s</b>\n"
 	DefaultTopicEmoji     = "📂"
 	EmojiBreaking         = "🔴"
 	EmojiNotable          = "📌"

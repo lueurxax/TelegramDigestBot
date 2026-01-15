@@ -9,9 +9,9 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
-	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
+	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 // digestSettings holds all settings needed for building a digest
@@ -27,6 +27,7 @@ type digestSettings struct {
 	editorDetailedItems         bool
 	digestLanguage              string
 	digestTone                  string
+	othersAsNarrative           bool
 }
 
 func (s *Scheduler) getDigestSettings(ctx context.Context, logger *zerolog.Logger) digestSettings {
@@ -62,6 +63,7 @@ func (s *Scheduler) loadDigestSettingsFromDB(ctx context.Context, logger *zerolo
 	loadSetting("editor_detailed_items", &ds.editorDetailedItems, "could not get editor_detailed_items from DB")
 	loadSetting(SettingDigestLanguage, &ds.digestLanguage, MsgCouldNotGetDigestLanguage)
 	loadSetting("digest_tone", &ds.digestTone, "could not get digest_tone from DB")
+	loadSetting("others_as_narrative", &ds.othersAsNarrative, "could not get others_as_narrative from DB")
 }
 
 // clusterGroup groups clusters or items by importance level
@@ -285,9 +287,66 @@ func (rc *digestRenderContext) renderGroup(ctx context.Context, sb *strings.Buil
 	}
 
 	if hasContent {
-		fmt.Fprintf(sb, "\n%s <b>%s</b>\n", emoji, title)
+		fmt.Fprintf(sb, FormatSectionHeader, emoji, title)
 		sb.WriteString(groupSb.String())
 	}
+}
+
+// renderOthersAsNarrative generates an LLM narrative summary for the "others" section instead of listing items individually.
+func (rc *digestRenderContext) renderOthersAsNarrative(ctx context.Context, sb *strings.Builder, group clusterGroup, emoji, title string) bool {
+	// Calculate total items for preallocation
+	totalItems := len(group.items)
+
+	for _, c := range group.clusters {
+		totalItems += len(c.Items)
+	}
+
+	if totalItems == 0 {
+		return false
+	}
+
+	// Collect all items from the group
+	allItems := make([]db.Item, 0, totalItems)
+
+	for _, c := range group.clusters {
+		allItems = append(allItems, c.Items...)
+	}
+
+	allItems = append(allItems, group.items...)
+
+	model := rc.settings.smartLLMModel
+	if model == "" {
+		model = rc.scheduler.cfg.LLMModel
+	}
+
+	if model == "" {
+		// No LLM model configured, fall back to regular rendering
+		rc.renderGroup(ctx, sb, group, emoji, title)
+
+		return true
+	}
+
+	// Generate narrative for "others" items
+	narrative, err := rc.llmClient.SummarizeCluster(ctx, allItems, rc.settings.digestLanguage, model, rc.settings.digestTone)
+	if err != nil {
+		rc.logger.Warn().Err(err).Msg("failed to generate others narrative, falling back to detailed list")
+		rc.renderGroup(ctx, sb, group, emoji, title)
+
+		return true
+	}
+
+	if narrative == "" {
+		rc.renderGroup(ctx, sb, group, emoji, title)
+
+		return true
+	}
+
+	// Render the narrative summary
+	fmt.Fprintf(sb, FormatSectionHeader, emoji, title)
+	sb.WriteString(htmlutils.SanitizeHTML(narrative))
+	sb.WriteString("\n")
+
+	return true
 }
 
 func (rc *digestRenderContext) renderMultiItemCluster(ctx context.Context, sb *strings.Builder, c db.ClusterWithItems) bool {

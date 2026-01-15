@@ -105,6 +105,8 @@ func (b *Bot) registerToggleCommands(r *commandRegistry) {
 	r.toggleSettings[CmdAICoverAlt] = SettingDigestAICover
 	r.toggleSettings[CmdInlineImages] = SettingDigestInlineImages
 	r.toggleSettings[CmdInlineImagesAlt] = SettingDigestInlineImages
+	r.toggleSettings[CmdOthersNarrative] = SettingOthersAsNarrative
+	r.toggleSettings[CmdOthersNarrativeAlt] = SettingOthersAsNarrative
 }
 
 // route handles the command routing for a message.
