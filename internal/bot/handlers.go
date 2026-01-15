@@ -2557,6 +2557,9 @@ func (b *Bot) handleSettings(ctx context.Context, msg *tgbotapi.Message) {
 		{"filters_min_length", "Min Message Length", 20},
 		{"filters_skip_forwards", "Skip Forwards", false},
 		{SettingFiltersAdsKeywords, "Ads Keywords Count", 0},
+		{SettingDigestCoverImage, "Cover Image", true},
+		{SettingDigestAICover, "AI Cover (DALL-E)", false},
+		{SettingDigestInlineImages, "Inline Images", false},
 		{"admin_ids", "Additional Admins", "none"},
 	}
 

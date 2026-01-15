@@ -99,6 +99,12 @@ func (b *Bot) registerToggleCommands(r *commandRegistry) {
 	r.toggleSettings[CmdConsolidated] = SettingConsolidatedClustersEnabled
 	r.toggleSettings["editor_details"] = SettingEditorDetailedItems
 	r.toggleSettings[CmdEditorDetail] = SettingEditorDetailedItems
+	r.toggleSettings[CmdCoverImage] = SettingDigestCoverImage
+	r.toggleSettings[CmdCoverImageAlt] = SettingDigestCoverImage
+	r.toggleSettings[CmdAICover] = SettingDigestAICover
+	r.toggleSettings[CmdAICoverAlt] = SettingDigestAICover
+	r.toggleSettings[CmdInlineImages] = SettingDigestInlineImages
+	r.toggleSettings[CmdInlineImagesAlt] = SettingDigestInlineImages
 }
 
 // route handles the command routing for a message.

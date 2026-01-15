@@ -73,12 +73,18 @@ const (
 	CmdVision        = "vision"
 	CmdVisionAlt     = "visionrouting"
 	CmdConsolidated  = "consolidated"
-	CmdEditorDetail  = "editordetails"
-	CmdErrors        = "errors"
-	CmdRetry         = "retry"
-	CmdChannel       = "channel"
-	CmdScores        = "scores"
-	CmdRatings       = "ratings"
+	CmdEditorDetail    = "editordetails"
+	CmdErrors          = "errors"
+	CmdRetry           = "retry"
+	CmdChannel         = "channel"
+	CmdScores          = "scores"
+	CmdRatings         = "ratings"
+	CmdCoverImage      = "cover_image"
+	CmdCoverImageAlt   = "coverimage"
+	CmdAICover         = "ai_cover"
+	CmdAICoverAlt      = "aicover"
+	CmdInlineImages    = "inline_images"
+	CmdInlineImagesAlt = "inlineimages"
 )
 
 // Setting keys.
@@ -91,6 +97,9 @@ const (
 	SettingVisionRoutingEnabled        = "vision_routing_enabled"
 	SettingConsolidatedClustersEnabled = "consolidated_clusters_enabled"
 	SettingEditorDetailedItems         = "editor_detailed_items"
+	SettingDigestCoverImage            = "digest_cover_image"
+	SettingDigestAICover               = "digest_ai_cover"
+	SettingDigestInlineImages          = "digest_inline_images"
 )
 
 // Log field names.
