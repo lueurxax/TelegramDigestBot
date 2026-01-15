@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -45,13 +46,16 @@ var ErrEmptyDALLEResponse = errors.New("empty response from DALL-E")
 // ErrEmptyLLMResponse indicates the LLM returned no choices.
 var ErrEmptyLLMResponse = errors.New("empty response from LLM")
 
+// ErrUnexpectedStatusCode indicates an unexpected HTTP status code was received.
+var ErrUnexpectedStatusCode = errors.New("unexpected status code")
+
 const (
-	circuitBreakerThreshold        = 5
-	circuitBreakerTimeout          = 1 * time.Minute
-	translatePromptTemplate        = "Translate the following text to %s. Preserve HTML tags and return only the translated text."
-	coverPromptNarrativeMaxLength  = 200
-	compressSummariesTemperature   = 0.3
-	compressSummariesSystemPrompt  = `You are a news headline writer. Your task is to compress news summaries into very short English phrases (3-6 words each) suitable for image generation.
+	circuitBreakerThreshold       = 5
+	circuitBreakerTimeout         = 1 * time.Minute
+	translatePromptTemplate       = "Translate the following text to %s. Preserve HTML tags and return only the translated text."
+	coverPromptNarrativeMaxLength = 200
+	compressSummariesTemperature  = 0.3
+	compressSummariesSystemPrompt = `You are a news headline writer. Your task is to compress news summaries into very short English phrases (3-6 words each) suitable for image generation.
 
 Rules:
 - Output one phrase per line
@@ -799,12 +803,11 @@ func (c *openaiClient) GenerateDigestCover(ctx context.Context, topics []string,
 	c.logger.Debug().Str("prompt", prompt).Msg("Generating digest cover image")
 
 	resp, err := c.client.CreateImage(ctx, openai.ImageRequest{
-		Model:          "gpt-image-1.5",
-		Prompt:         prompt,
-		Size:           openai.CreateImageSize1024x1024,
-		Quality:        openai.CreateImageQualityMedium,
-		N:              1,
-		ResponseFormat: openai.CreateImageResponseFormatB64JSON,
+		Model:   "gpt-image-1.5",
+		Prompt:  prompt,
+		Size:    openai.CreateImageSize1024x1024,
+		Quality: openai.CreateImageQualityMedium,
+		N:       1,
 	})
 	if err != nil {
 		c.recordFailure()
@@ -814,18 +817,53 @@ func (c *openaiClient) GenerateDigestCover(ctx context.Context, topics []string,
 
 	c.recordSuccess()
 
-	if len(resp.Data) == 0 || resp.Data[0].B64JSON == "" {
+	if len(resp.Data) == 0 {
 		return nil, ErrEmptyDALLEResponse
 	}
 
+	// gpt-image-1 returns base64 data directly
 	imageData, err := base64.StdEncoding.DecodeString(resp.Data[0].B64JSON)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode cover image: %w", err)
+		// If base64 decoding fails, try fetching from URL
+		if resp.Data[0].URL == "" {
+			return nil, ErrEmptyDALLEResponse
+		}
+
+		imageData, err = c.fetchImageFromURL(ctx, resp.Data[0].URL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch cover image from URL: %w", err)
+		}
 	}
 
 	c.logger.Info().Int("image_size", len(imageData)).Msg("Generated digest cover image")
 
 	return imageData, nil
+}
+
+// fetchImageFromURL downloads an image from the given URL.
+func (c *openaiClient) fetchImageFromURL(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: %d", ErrUnexpectedStatusCode, resp.StatusCode)
+	}
+
+	var buf bytes.Buffer
+
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
+		return nil, fmt.Errorf("failed to read image body: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
 // buildCoverPrompt creates a DALL-E prompt from digest topics and narrative.
