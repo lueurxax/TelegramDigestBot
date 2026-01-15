@@ -42,11 +42,25 @@ var ErrNoResultsExtracted = errors.New("failed to extract any results from LLM r
 // ErrEmptyDALLEResponse indicates DALL-E returned no image data.
 var ErrEmptyDALLEResponse = errors.New("empty response from DALL-E")
 
+// ErrEmptyLLMResponse indicates the LLM returned no choices.
+var ErrEmptyLLMResponse = errors.New("empty response from LLM")
+
 const (
 	circuitBreakerThreshold        = 5
 	circuitBreakerTimeout          = 1 * time.Minute
 	translatePromptTemplate        = "Translate the following text to %s. Preserve HTML tags and return only the translated text."
 	coverPromptNarrativeMaxLength  = 200
+	compressSummariesTemperature   = 0.3
+	compressSummariesSystemPrompt  = `You are a news headline writer. Your task is to compress news summaries into very short English phrases (3-6 words each) suitable for image generation.
+
+Rules:
+- Output one phrase per line
+- Each phrase should be 3-6 words maximum
+- Translate non-English text to English
+- Focus on the key subject/event (e.g., "Trump tariff announcement", "Panama Canal dispute", "Tech company merger")
+- Remove any HTML tags or formatting
+- Be concrete and specific, avoid generic terms like "news" or "update"
+- Do not number the phrases`
 )
 
 func NewOpenAI(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
@@ -717,6 +731,61 @@ func truncate(s string, max int) string {
 }
 
 // GenerateDigestCover generates a cover image for the digest using DALL-E.
+// CompressSummariesForCover takes raw summaries and compresses them into short English phrases
+// suitable for DALL-E image generation prompts.
+func (c *openaiClient) CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error) {
+	if len(summaries) == 0 {
+		return nil, nil
+	}
+
+	if err := c.checkCircuit(); err != nil {
+		return nil, err
+	}
+
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf(errRateLimiter, err)
+	}
+
+	prompt := buildCompressSummariesPrompt(summaries)
+
+	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model: openai.GPT4oMini,
+		Messages: []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleSystem, Content: compressSummariesSystemPrompt},
+			{Role: openai.ChatMessageRoleUser, Content: prompt},
+		},
+		Temperature: compressSummariesTemperature,
+	})
+	if err != nil {
+		c.recordFailure()
+
+		return nil, fmt.Errorf("failed to compress summaries: %w", err)
+	}
+
+	c.recordSuccess()
+
+	if len(resp.Choices) == 0 {
+		return nil, ErrEmptyLLMResponse
+	}
+
+	// Parse the response - each line is a compressed phrase
+	result := strings.Split(strings.TrimSpace(resp.Choices[0].Message.Content), "\n")
+
+	// Clean up empty lines
+	phrases := make([]string, 0, len(result))
+
+	for _, line := range result {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			phrases = append(phrases, line)
+		}
+	}
+
+	c.logger.Debug().Strs("phrases", phrases).Msg("Compressed summaries for cover")
+
+	return phrases, nil
+}
+
 func (c *openaiClient) GenerateDigestCover(ctx context.Context, topics []string, narrative string) ([]byte, error) {
 	if err := c.checkCircuit(); err != nil {
 		return nil, err
@@ -783,6 +852,19 @@ func buildCoverPrompt(topics []string, narrative string) string {
 
 	sb.WriteString("IMPORTANT: Absolutely no text, letters, words, numbers, or writing of any kind. ")
 	sb.WriteString("Clean, professional, visually striking.")
+
+	return sb.String()
+}
+
+// buildCompressSummariesPrompt creates a prompt to compress summaries into short English phrases.
+func buildCompressSummariesPrompt(summaries []string) string {
+	var sb strings.Builder
+
+	sb.WriteString("Compress each of these news summaries into a short English phrase (3-6 words):\n\n")
+
+	for i, summary := range summaries {
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, summary))
+	}
 
 	return sb.String()
 }

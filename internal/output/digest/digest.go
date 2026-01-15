@@ -658,7 +658,7 @@ func (s *Scheduler) fetchCoverImage(ctx context.Context, start, end time.Time, i
 	// Try AI-generated cover first if enabled
 	if aiCoverEnabled && s.llmClient != nil {
 		topics := extractTopicsFromDigest(items, clusters)
-		narrative := extractCoverNarrative(items, clusters)
+		narrative := s.prepareNarrativeForCover(ctx, items, clusters, logger)
 
 		coverImage, err := s.llmClient.GenerateDigestCover(ctx, topics, narrative)
 		if err != nil {
@@ -845,9 +845,9 @@ func truncateForLog(s string) string {
 // narrativeMaxItems is the maximum number of summaries to include in narrative.
 const narrativeMaxItems = 5
 
-// extractCoverNarrative extracts key summaries from top items for AI cover generation.
-// Returns a concise description of the main stories.
-func extractCoverNarrative(items []db.Item, clusters []db.ClusterWithItems) string {
+// prepareNarrativeForCover prepares summaries for DALL-E by stripping HTML and compressing to short English phrases.
+func (s *Scheduler) prepareNarrativeForCover(ctx context.Context, items []db.Item, clusters []db.ClusterWithItems, logger *zerolog.Logger) string {
+	// Get raw summaries
 	summaries := collectClusterSummaries(clusters, narrativeMaxItems)
 	summaries = appendItemSummaries(summaries, items, narrativeMaxItems)
 
@@ -855,7 +855,25 @@ func extractCoverNarrative(items []db.Item, clusters []db.ClusterWithItems) stri
 		return ""
 	}
 
-	return strings.Join(summaries, "; ")
+	// Strip HTML tags from each summary
+	cleanSummaries := make([]string, len(summaries))
+	for i, summary := range summaries {
+		cleanSummaries[i] = htmlutils.StripHTMLTags(summary)
+	}
+
+	// Compress summaries to short English phrases using LLM
+	phrases, err := s.llmClient.CompressSummariesForCover(ctx, cleanSummaries)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to compress summaries, using raw text")
+
+		return strings.Join(cleanSummaries, "; ")
+	}
+
+	if len(phrases) == 0 {
+		return strings.Join(cleanSummaries, "; ")
+	}
+
+	return strings.Join(phrases, "; ")
 }
 
 // collectClusterSummaries extracts summaries from clusters up to maxItems.

@@ -143,6 +143,14 @@ func StripItemMarkers(text string) string {
 	return text
 }
 
+// StripHTMLTags removes all HTML tags from text, keeping only the content.
+func StripHTMLTags(text string) string {
+	result := tagRegex.ReplaceAllString(text, "")
+	result = html.UnescapeString(result)
+
+	return strings.TrimSpace(result)
+}
+
 // splitAfter defines markers where we split AFTER the marker (marker stays in current part)
 var splitAfter = []string{
 	ItemEnd + "\n",    // Highest priority: between complete items

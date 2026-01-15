@@ -2552,7 +2552,7 @@ func (b *Bot) fetchPreviewCoverImage(ctx context.Context, items []db.Item, clust
 	// Try AI cover first if enabled (independent of cover_image setting)
 	if aiCoverEnabled && b.llmClient != nil {
 		topics := extractTopicsForPreview(items, clusters)
-		narrative := extractNarrativeForPreview(items, clusters)
+		narrative := b.prepareNarrativeForPreview(ctx, items, clusters)
 
 		coverImage, err := b.llmClient.GenerateDigestCover(ctx, topics, narrative)
 		if err != nil {
@@ -2611,19 +2611,6 @@ func extractTopicsForPreview(items []db.Item, clusters []db.ClusterWithItems) []
 // narrativeMaxItems is the maximum number of summaries to include in narrative.
 const narrativeMaxItems = 5
 
-// extractNarrativeForPreview extracts key summaries from top items for AI cover generation.
-// Returns a concise description of the main stories.
-func extractNarrativeForPreview(items []db.Item, clusters []db.ClusterWithItems) string {
-	summaries := collectClusterSummariesForPreview(clusters, narrativeMaxItems)
-	summaries = appendItemSummariesForPreview(summaries, items, narrativeMaxItems)
-
-	if len(summaries) == 0 {
-		return ""
-	}
-
-	return strings.Join(summaries, "; ")
-}
-
 // collectClusterSummariesForPreview extracts summaries from clusters up to maxItems.
 func collectClusterSummariesForPreview(clusters []db.ClusterWithItems, maxItems int) []string {
 	summaries := make([]string, 0, maxItems)
@@ -2654,6 +2641,37 @@ func appendItemSummariesForPreview(summaries []string, items []db.Item, maxItems
 	}
 
 	return summaries
+}
+
+// prepareNarrativeForPreview prepares summaries for DALL-E by stripping HTML and compressing to short English phrases.
+func (b *Bot) prepareNarrativeForPreview(ctx context.Context, items []db.Item, clusters []db.ClusterWithItems) string {
+	// Get raw summaries
+	summaries := collectClusterSummariesForPreview(clusters, narrativeMaxItems)
+	summaries = appendItemSummariesForPreview(summaries, items, narrativeMaxItems)
+
+	if len(summaries) == 0 {
+		return ""
+	}
+
+	// Strip HTML tags from each summary
+	cleanSummaries := make([]string, len(summaries))
+	for i, summary := range summaries {
+		cleanSummaries[i] = htmlutils.StripHTMLTags(summary)
+	}
+
+	// Compress summaries to short English phrases using LLM
+	phrases, err := b.llmClient.CompressSummariesForCover(ctx, cleanSummaries)
+	if err != nil {
+		b.logger.Warn().Err(err).Msg("failed to compress summaries for preview, using raw text")
+
+		return strings.Join(cleanSummaries, "; ")
+	}
+
+	if len(phrases) == 0 {
+		return strings.Join(cleanSummaries, "; ")
+	}
+
+	return strings.Join(phrases, "; ")
 }
 
 func (b *Bot) handleTone(ctx context.Context, msg *tgbotapi.Message) {
