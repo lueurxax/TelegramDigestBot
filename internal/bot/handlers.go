@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/lueurxax/telegram-digest-bot/internal/output/digest"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/schedule"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
@@ -2417,28 +2418,10 @@ func (b *Bot) handlePreview(ctx context.Context, msg *tgbotapi.Message) {
 		return
 	}
 
-	windowStr := b.cfg.DigestWindow
+	window, threshold := b.getPreviewParams(ctx)
+	start, end := time.Now().Add(-window), time.Now()
 
-	if err := b.database.GetSetting(ctx, SettingDigestWindow, &windowStr); err != nil {
-		b.logger.Debug().Err(err).Msg("could not get SettingDigestWindow from DB")
-	}
-
-	window, err := time.ParseDuration(windowStr)
-	if err != nil {
-		window = time.Hour
-	}
-
-	importanceThreshold := b.cfg.ImportanceThreshold
-
-	if err := b.database.GetSetting(ctx, SettingImportanceThreshold, &importanceThreshold); err != nil {
-		b.logger.Debug().Err(err).Msg(MsgCouldNotGetImportanceThreshold)
-	}
-
-	now := time.Now()
-	end := now
-	start := now.Add(-window)
-
-	text, items, _, _, err := b.digestBuilder.BuildDigest(ctx, start, end, importanceThreshold, b.logger)
+	text, items, clusters, err := b.buildPreviewDigest(ctx, start, end, threshold)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error building digest preview: %s", html.EscapeString(err.Error())))
 
@@ -2452,7 +2435,175 @@ func (b *Bot) handlePreview(ctx context.Context, msg *tgbotapi.Message) {
 	}
 
 	header := fmt.Sprintf("📝 <b>Digest Preview</b> (%d items)\n<i>This has not been posted to the target channel.</i>\n\n", len(items))
+	b.sendPreviewWithSettings(ctx, msg, header, text, items, clusters, start, end, threshold)
+}
+
+// getPreviewParams retrieves window and threshold settings for preview.
+func (b *Bot) getPreviewParams(ctx context.Context) (time.Duration, float32) {
+	windowStr := b.cfg.DigestWindow
+
+	if err := b.database.GetSetting(ctx, SettingDigestWindow, &windowStr); err != nil {
+		b.logger.Debug().Err(err).Msg("could not get SettingDigestWindow from DB")
+	}
+
+	window, err := time.ParseDuration(windowStr)
+	if err != nil {
+		window = time.Hour
+	}
+
+	threshold := b.cfg.ImportanceThreshold
+
+	if err := b.database.GetSetting(ctx, SettingImportanceThreshold, &threshold); err != nil {
+		b.logger.Debug().Err(err).Msg(MsgCouldNotGetImportanceThreshold)
+	}
+
+	return window, threshold
+}
+
+// buildPreviewDigest builds the digest text and returns items/clusters.
+func (b *Bot) buildPreviewDigest(ctx context.Context, start, end time.Time, threshold float32) (string, []db.Item, []db.ClusterWithItems, error) {
+	text, items, clusters, _, err := b.digestBuilder.BuildDigest(ctx, start, end, threshold, b.logger)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("failed to build digest: %w", err)
+	}
+
+	return text, items, clusters, nil
+}
+
+// sendPreviewWithSettings sends preview based on current image settings.
+func (b *Bot) sendPreviewWithSettings(ctx context.Context, msg *tgbotapi.Message, header, text string, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, threshold float32) {
+	var inlineImagesEnabled bool
+
+	if err := b.database.GetSetting(ctx, SettingDigestInlineImages, &inlineImagesEnabled); err != nil {
+		b.logger.Debug().Err(err).Msg("could not get digest_inline_images from DB")
+	}
+
+	if inlineImagesEnabled {
+		b.sendPreviewRichDigest(ctx, msg, header, text, items, start, end, threshold)
+
+		return
+	}
+
+	b.sendPreviewWithCover(ctx, msg, header, text, items, clusters, start, end, threshold)
+}
+
+// sendPreviewWithCover sends preview with cover image if enabled.
+func (b *Bot) sendPreviewWithCover(ctx context.Context, msg *tgbotapi.Message, header, text string, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, threshold float32) {
+	coverImage := b.fetchPreviewCoverImage(ctx, items, clusters, start, end, threshold)
+
+	if len(coverImage) > 0 {
+		if _, err := b.SendDigestWithImage(ctx, msg.Chat.ID, header+text, "", coverImage); err != nil {
+			b.logger.Warn().Err(err).Msg("failed to send preview with image, falling back to text")
+			b.reply(msg, header+text)
+		}
+
+		return
+	}
+
 	b.reply(msg, header+text)
+}
+
+// sendPreviewRichDigest sends preview with inline images per item.
+func (b *Bot) sendPreviewRichDigest(ctx context.Context, msg *tgbotapi.Message, header, text string, items []db.Item, start, end time.Time, threshold float32) {
+	// Fetch items with media
+	itemsWithMedia, err := b.database.GetItemsForWindowWithMedia(ctx, start, end, threshold, len(items))
+	if err != nil {
+		b.logger.Warn().Err(err).Msg("failed to fetch items with media for preview")
+		b.reply(msg, header+text)
+
+		return
+	}
+
+	// Build rich content
+	richItems := make([]digest.RichDigestItem, 0, len(itemsWithMedia))
+
+	for _, item := range itemsWithMedia {
+		richItems = append(richItems, digest.RichDigestItem{
+			Summary:    item.Summary,
+			Topic:      item.Topic,
+			Importance: item.ImportanceScore,
+			Channel:    item.SourceChannel,
+			ChannelID:  item.SourceChannelID,
+			MsgID:      item.SourceMsgID,
+			MediaData:  item.MediaData,
+		})
+	}
+
+	content := digest.RichDigestContent{
+		Header:   header,
+		Items:    richItems,
+		DigestID: "", // No rating buttons for preview
+	}
+
+	if _, err := b.SendRichDigest(ctx, msg.Chat.ID, content); err != nil {
+		b.logger.Warn().Err(err).Msg("failed to send rich digest preview, falling back to text")
+		b.reply(msg, header+text)
+	}
+}
+
+// fetchPreviewCoverImage fetches or generates cover image for preview.
+func (b *Bot) fetchPreviewCoverImage(ctx context.Context, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, threshold float32) []byte {
+	var coverImageEnabled = true
+
+	if err := b.database.GetSetting(ctx, SettingDigestCoverImage, &coverImageEnabled); err != nil {
+		b.logger.Debug().Err(err).Msg("could not get digest_cover_image from DB")
+	}
+
+	if !coverImageEnabled {
+		return nil
+	}
+
+	var aiCoverEnabled bool
+
+	if err := b.database.GetSetting(ctx, SettingDigestAICover, &aiCoverEnabled); err != nil {
+		b.logger.Debug().Err(err).Msg("could not get digest_ai_cover from DB")
+	}
+
+	// Try AI cover first if enabled
+	if aiCoverEnabled && b.llmClient != nil {
+		topics := extractTopicsForPreview(items, clusters)
+
+		coverImage, err := b.llmClient.GenerateDigestCover(ctx, topics, "")
+		if err != nil {
+			b.logger.Warn().Err(err).Msg("failed to generate AI cover for preview")
+		} else {
+			return coverImage
+		}
+	}
+
+	// Fall back to DB cover image
+	coverImage, err := b.database.GetDigestCoverImage(ctx, start, end, threshold)
+	if err != nil {
+		b.logger.Debug().Err(err).Msg("no cover image available for preview")
+
+		return nil
+	}
+
+	return coverImage
+}
+
+// extractTopicsForPreview extracts unique topics from items and clusters.
+func extractTopicsForPreview(items []db.Item, clusters []db.ClusterWithItems) []string {
+	topicSet := make(map[string]struct{})
+
+	for _, c := range clusters {
+		if c.Topic != "" {
+			topicSet[c.Topic] = struct{}{}
+		}
+	}
+
+	for _, item := range items {
+		if item.Topic != "" {
+			topicSet[item.Topic] = struct{}{}
+		}
+	}
+
+	topics := make([]string, 0, len(topicSet))
+	for topic := range topicSet {
+		topics = append(topics, topic)
+	}
+
+	return topics
 }
 
 func (b *Bot) handleTone(ctx context.Context, msg *tgbotapi.Message) {

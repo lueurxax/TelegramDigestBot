@@ -65,6 +65,8 @@ type Repository interface {
 	GetLastPostedDigest(ctx context.Context) (*db.LastDigestInfo, error)
 	GetRecentErrors(ctx context.Context, limit int) ([]db.Item, error)
 	ClearDigestErrors(ctx context.Context) error
+	GetDigestCoverImage(ctx context.Context, start, end time.Time, threshold float32) ([]byte, error)
+	GetItemsForWindowWithMedia(ctx context.Context, start, end time.Time, threshold float32, limit int) ([]db.ItemWithMedia, error)
 
 	// Discovery operations
 	GetPendingDiscoveries(ctx context.Context, limit int) ([]db.DiscoveredChannel, error)
