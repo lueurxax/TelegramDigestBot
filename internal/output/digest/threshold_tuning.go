@@ -101,7 +101,7 @@ func (s *Scheduler) calculateNetScore(now time.Time, ratings []db.ItemRating, lo
 func (s *Scheduler) getThresholdTuningStep() float32 {
 	step := s.cfg.ThresholdTuningStep
 	if step <= 0 {
-		step = 0.05
+		step = DefaultThresholdTuningStep
 	}
 
 	return step

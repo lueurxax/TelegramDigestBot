@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -11,10 +12,21 @@ import (
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
+	"github.com/lueurxax/telegram-digest-bot/internal/process/filters"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
-const testTieredModel = "gpt-4o"
+var errLLM = errors.New("llm error")
+
+const (
+	testTieredModel = "gpt-4o"
+
+	tech = "Tech"
+
+	image = "image"
+
+	testID = "test-id"
+)
 
 type mockRepo struct {
 	settings            map[string]interface{}
@@ -26,10 +38,12 @@ type mockRepo struct {
 
 func (m *mockRepo) GetSetting(_ context.Context, key string, target interface{}) error {
 	val, ok := m.settings[key]
+
 	if !ok {
 		return nil
 	}
 	// For simplicity in tests, assume types match
+
 	data, _ := json.Marshal(val) //nolint:errchkjson // test helper, marshaling test data
 
 	if err := json.Unmarshal(data, target); err != nil {
@@ -57,6 +71,7 @@ func (m *mockRepo) GetActiveFilters(_ context.Context) ([]db.Filter, error) {
 
 func (m *mockRepo) MarkAsProcessed(_ context.Context, id string) error {
 	m.markedProcessed = append(m.markedProcessed, id)
+
 	return nil
 }
 
@@ -117,6 +132,7 @@ func (m *mockLLM) GetEmbedding(_ context.Context, text string) ([]float32, error
 
 func (m *mockLLM) ProcessBatch(_ context.Context, messages []llm.MessageInput, _, _, _ string) ([]llm.BatchResult, error) {
 	res := make([]llm.BatchResult, len(messages))
+
 	for i := range messages {
 		res[i] = llm.BatchResult{
 			Index:           i,
@@ -149,6 +165,7 @@ func TestPipeline_processNextBatch(t *testing.T) {
 		WorkerBatchSize:    10,
 		RelevanceThreshold: 0.5,
 	}
+
 	repo := &mockRepo{
 		settings: make(map[string]interface{}),
 		unprocessedMessages: []db.RawMessage{
@@ -156,7 +173,9 @@ func TestPipeline_processNextBatch(t *testing.T) {
 			{ID: "2", Text: "Message 2 that is also long enough", CanonicalHash: "hash2"},
 		},
 	}
+
 	llmClient := &mockLLM{}
+
 	logger := zerolog.Nop()
 
 	p := New(cfg, repo, llmClient, nil, &logger)
@@ -240,6 +259,7 @@ func TestPipeline_ImportanceWeightApplication(t *testing.T) {
 				WorkerBatchSize:    10,
 				RelevanceThreshold: 0.5,
 			}
+
 			repo := &mockRepo{
 				settings: make(map[string]interface{}),
 				unprocessedMessages: []db.RawMessage{
@@ -251,7 +271,9 @@ func TestPipeline_ImportanceWeightApplication(t *testing.T) {
 					},
 				},
 			}
+
 			llmClient := &mockLLMWithImportance{importance: tt.llmImportance}
+
 			logger := zerolog.Nop()
 
 			p := New(cfg, repo, llmClient, nil, &logger)
@@ -266,6 +288,7 @@ func TestPipeline_ImportanceWeightApplication(t *testing.T) {
 			}
 
 			got := repo.savedItems[0].ImportanceScore
+
 			if got < tt.expectedMin || got > tt.expectedMax {
 				t.Errorf("ImportanceScore = %v, want between %v and %v", got, tt.expectedMin, tt.expectedMax)
 			}
@@ -285,6 +308,7 @@ func (m *mockLLMWithImportance) GetEmbedding(_ context.Context, _ string) ([]flo
 
 func (m *mockLLMWithImportance) ProcessBatch(_ context.Context, messages []llm.MessageInput, _, _, _ string) ([]llm.BatchResult, error) {
 	res := make([]llm.BatchResult, len(messages))
+
 	for i := range messages {
 		res[i] = llm.BatchResult{
 			Index:           i,
@@ -353,6 +377,7 @@ func TestHasUniqueInfo(t *testing.T) {
 	}
 
 	cfg := &config.Config{}
+
 	p := New(cfg, nil, nil, nil, nil)
 
 	for _, tt := range tests {
@@ -531,11 +556,13 @@ func TestSelectTieredCandidates(t *testing.T) {
 			{RawMessage: db.RawMessage{ID: "2"}},
 			{RawMessage: db.RawMessage{ID: "3"}},
 		}
+
 		results := []llm.BatchResult{
 			{ImportanceScore: 0.5},  // below threshold
 			{ImportanceScore: 0.85}, // above threshold
 			{ImportanceScore: 0.9},  // above threshold, already smart model
 		}
+
 		modelUsed := []string{"gpt-4o-mini", "gpt-4o-mini", testTieredModel}
 
 		indices, selected := selectTieredCandidates(candidates, results, modelUsed, testTieredModel)
@@ -555,7 +582,9 @@ func TestSelectTieredCandidates(t *testing.T) {
 
 	t.Run("returns empty when all below threshold", func(t *testing.T) {
 		candidates := []llm.MessageInput{{RawMessage: db.RawMessage{ID: "1"}}}
+
 		results := []llm.BatchResult{{ImportanceScore: 0.5}}
+
 		modelUsed := []string{"gpt-4o-mini"}
 
 		indices, selected := selectTieredCandidates(candidates, results, modelUsed, testTieredModel)
@@ -724,6 +753,832 @@ func TestHasAlphaNum(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := hasAlphaNum(tt.s); got != tt.want {
 				t.Errorf("hasAlphaNum() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGroupIndicesByModel(t *testing.T) {
+	tests := []struct {
+		name                 string
+		candidates           []llm.MessageInput
+		llmModel             string
+		smartLLMModel        string
+		visionRoutingEnabled bool
+		expectedGroups       map[string][]int
+	}{
+		{
+			name: "all same model without vision routing",
+			candidates: []llm.MessageInput{
+				{RawMessage: db.RawMessage{ID: "1"}},
+				{RawMessage: db.RawMessage{ID: "2"}},
+				{RawMessage: db.RawMessage{ID: "3"}},
+			},
+			llmModel:             "gpt-4o-mini",
+			smartLLMModel:        "gpt-4o",
+			visionRoutingEnabled: false,
+			expectedGroups:       map[string][]int{"gpt-4o-mini": {0, 1, 2}},
+		},
+		{
+			name: "vision routing enabled with media",
+			candidates: []llm.MessageInput{
+				{RawMessage: db.RawMessage{ID: "1"}},
+				{RawMessage: db.RawMessage{ID: "2", MediaData: []byte(image)}},
+				{RawMessage: db.RawMessage{ID: "3"}},
+			},
+			llmModel:             "gpt-4o-mini",
+			smartLLMModel:        "gpt-4o",
+			visionRoutingEnabled: true,
+			expectedGroups: map[string][]int{
+				"gpt-4o-mini": {0, 2},
+				"gpt-4o":      {1},
+			},
+		},
+		{
+			name: "vision routing enabled but no smart model",
+			candidates: []llm.MessageInput{
+				{RawMessage: db.RawMessage{ID: "1", MediaData: []byte(image)}},
+			},
+			llmModel:             "gpt-4o-mini",
+			smartLLMModel:        "",
+			visionRoutingEnabled: true,
+			expectedGroups:       map[string][]int{"gpt-4o-mini": {0}},
+		},
+		{
+			name: "empty model uses default",
+			candidates: []llm.MessageInput{
+				{RawMessage: db.RawMessage{ID: "1"}},
+			},
+			llmModel:             "",
+			smartLLMModel:        "",
+			visionRoutingEnabled: false,
+			expectedGroups:       map[string][]int{"": {0}},
+		},
+	}
+
+	cfg := &config.Config{}
+
+	p := New(cfg, nil, nil, nil, nil)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &pipelineSettings{
+				llmModel:             tt.llmModel,
+				smartLLMModel:        tt.smartLLMModel,
+				visionRoutingEnabled: tt.visionRoutingEnabled,
+			}
+
+			result := p.groupIndicesByModel(tt.candidates, s)
+
+			if len(result) != len(tt.expectedGroups) {
+				t.Errorf("expected %d groups, got %d", len(tt.expectedGroups), len(result))
+			}
+
+			for model, expectedIndices := range tt.expectedGroups {
+				actualIndices, ok := result[model]
+
+				if !ok {
+					t.Errorf("expected group for model %q not found", model)
+					continue
+				}
+
+				if len(actualIndices) != len(expectedIndices) {
+					t.Errorf("model %q: expected %d indices, got %d", model, len(expectedIndices), len(actualIndices))
+					continue
+				}
+
+				for i, idx := range expectedIndices {
+					if actualIndices[i] != idx {
+						t.Errorf("model %q: index %d = %d, want %d", model, i, actualIndices[i], idx)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestDetermineStatus(t *testing.T) {
+	tests := []struct {
+		name                    string
+		relevanceScore          float32
+		relevanceThreshold      float32
+		channelRelevance        float32
+		autoRelevanceEnabled    bool
+		relevanceThresholdDelta float32
+		expectedStatus          string
+	}{
+		{
+			name:               "above threshold returns ready",
+			relevanceScore:     0.8,
+			relevanceThreshold: 0.5,
+			expectedStatus:     StatusReady,
+		},
+		{
+			name:               "below threshold returns rejected",
+			relevanceScore:     0.3,
+			relevanceThreshold: 0.5,
+			expectedStatus:     StatusRejected,
+		},
+		{
+			name:               "equal to threshold returns ready",
+			relevanceScore:     0.5,
+			relevanceThreshold: 0.5,
+			expectedStatus:     StatusReady,
+		},
+		{
+			name:               "channel specific threshold overrides default",
+			relevanceScore:     0.6,
+			relevanceThreshold: 0.5,
+			channelRelevance:   0.7,
+			expectedStatus:     StatusRejected,
+		},
+		{
+			name:                    "auto relevance adds delta",
+			relevanceScore:          0.65,
+			relevanceThreshold:      0.5,
+			autoRelevanceEnabled:    true,
+			relevanceThresholdDelta: 0.2,
+			expectedStatus:          StatusRejected, // 0.5 + 0.2 = 0.7 > 0.65
+		},
+		{
+			name:                    "threshold clamped to 0",
+			relevanceScore:          0.1,
+			relevanceThreshold:      0.5,
+			autoRelevanceEnabled:    true,
+			relevanceThresholdDelta: -0.6, // would make it -0.1
+			expectedStatus:          StatusReady,
+		},
+		{
+			name:                    "threshold clamped to 1",
+			relevanceScore:          0.95,
+			relevanceThreshold:      0.8,
+			autoRelevanceEnabled:    true,
+			relevanceThresholdDelta: 0.5, // would make it 1.3
+			expectedStatus:          StatusRejected,
+		},
+	}
+
+	cfg := &config.Config{}
+
+	p := New(cfg, nil, nil, nil, nil)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &pipelineSettings{
+				relevanceThreshold: tt.relevanceThreshold,
+			}
+
+			c := llm.MessageInput{
+				RawMessage: db.RawMessage{
+					RelevanceThreshold:      tt.channelRelevance,
+					AutoRelevanceEnabled:    tt.autoRelevanceEnabled,
+					RelevanceThresholdDelta: tt.relevanceThresholdDelta,
+				},
+			}
+
+			status := p.determineStatus(c, tt.relevanceScore, s)
+
+			if status != tt.expectedStatus {
+				t.Errorf("determineStatus() = %q, want %q", status, tt.expectedStatus)
+			}
+		})
+	}
+}
+
+func TestCalculateImportance(t *testing.T) {
+	tests := []struct {
+		name             string
+		importanceWeight float32
+		llmImportance    float32
+		summary          string
+		expectedMin      float32
+		expectedMax      float32
+	}{
+		{
+			name:             "normal weight with unique info",
+			importanceWeight: 1.0,
+			llmImportance:    0.8,
+			summary:          "John announced new features on Monday",
+			expectedMin:      0.79,
+			expectedMax:      0.81,
+		},
+		{
+			name:             "weight below minimum defaults to 1.0",
+			importanceWeight: 0.05, // below MinChannelWeight (0.1)
+			llmImportance:    0.7,
+			summary:          "Company reported 25% growth",
+			expectedMin:      0.69,
+			expectedMax:      0.71,
+		},
+		{
+			name:             "weight above maximum clamped to 2.0",
+			importanceWeight: 3.0,
+			llmImportance:    0.4,
+			summary:          "Breaking news from January",
+			expectedMin:      0.79,
+			expectedMax:      0.81, // 0.4 * 2.0 = 0.8
+		},
+		{
+			name:             "result capped at 1.0",
+			importanceWeight: 2.0,
+			llmImportance:    0.9,
+			summary:          "Major update on Tuesday",
+			expectedMin:      0.99,
+			expectedMax:      1.01, // 0.9 * 2.0 = 1.8, capped to 1.0
+		},
+		{
+			name:             "penalty for no unique info",
+			importanceWeight: 1.0,
+			llmImportance:    0.5,
+			summary:          "something happened somewhere",
+			expectedMin:      0.29,
+			expectedMax:      0.31, // 0.5 - 0.2 = 0.3
+		},
+		{
+			name:             "penalty does not go below zero",
+			importanceWeight: 1.0,
+			llmImportance:    0.1,
+			summary:          "generic stuff",
+			expectedMin:      0.0,
+			expectedMax:      0.01, // 0.1 - 0.2 = -0.1, clamped to 0
+		},
+	}
+
+	cfg := &config.Config{}
+
+	logger := zerolog.Nop()
+
+	p := New(cfg, nil, nil, nil, &logger)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := llm.MessageInput{
+				RawMessage: db.RawMessage{
+					ID:               testID,
+					ImportanceWeight: tt.importanceWeight,
+				},
+			}
+
+			res := llm.BatchResult{
+				ImportanceScore: tt.llmImportance,
+				Summary:         tt.summary,
+			}
+
+			got := p.calculateImportance(logger, c, res)
+
+			if got < tt.expectedMin || got > tt.expectedMax {
+				t.Errorf("calculateImportance() = %v, want between %v and %v", got, tt.expectedMin, tt.expectedMax)
+			}
+		})
+	}
+}
+
+func TestNormalizeResults(t *testing.T) {
+	tests := []struct {
+		name               string
+		normalizeScores    bool
+		channelStats       map[string]db.ChannelStats
+		candidates         []llm.MessageInput
+		results            []llm.BatchResult
+		expectedRelevance  []float32
+		expectedImportance []float32
+	}{
+		{
+			name:            "normalization disabled",
+			normalizeScores: false,
+			candidates: []llm.MessageInput{
+				{RawMessage: db.RawMessage{ChannelID: "ch1"}},
+			},
+			results: []llm.BatchResult{
+				{RelevanceScore: 0.8, ImportanceScore: 0.6, Summary: "test"},
+			},
+			expectedRelevance:  []float32{0.8},
+			expectedImportance: []float32{0.6},
+		},
+		{
+			name:            "normalization enabled with stats",
+			normalizeScores: true,
+			channelStats: map[string]db.ChannelStats{
+				"ch1": {AvgRelevance: 0.5, StddevRelevance: 0.2, AvgImportance: 0.4, StddevImportance: 0.2},
+			},
+			candidates: []llm.MessageInput{
+				{RawMessage: db.RawMessage{ChannelID: "ch1"}},
+			},
+			results: []llm.BatchResult{
+				{RelevanceScore: 0.7, ImportanceScore: 0.6, Summary: "test"},
+			},
+			expectedRelevance:  []float32{1.0}, // (0.7 - 0.5) / 0.2 = 1.0
+			expectedImportance: []float32{1.0}, // (0.6 - 0.4) / 0.2 = 1.0
+		},
+		{
+			name:            "no stats for channel",
+			normalizeScores: true,
+			channelStats: map[string]db.ChannelStats{
+				"ch2": {AvgRelevance: 0.5, StddevRelevance: 0.2, AvgImportance: 0.4, StddevImportance: 0.2},
+			},
+			candidates: []llm.MessageInput{
+				{RawMessage: db.RawMessage{ChannelID: "ch1"}},
+			},
+			results: []llm.BatchResult{
+				{RelevanceScore: 0.8, ImportanceScore: 0.6, Summary: "test"},
+			},
+			expectedRelevance:  []float32{0.8}, // unchanged
+			expectedImportance: []float32{0.6}, // unchanged
+		},
+		{
+			name:            "stddev below minimum skips normalization",
+			normalizeScores: true,
+			channelStats: map[string]db.ChannelStats{
+				"ch1": {AvgRelevance: 0.5, StddevRelevance: 0.005, AvgImportance: 0.4, StddevImportance: 0.005},
+			},
+			candidates: []llm.MessageInput{
+				{RawMessage: db.RawMessage{ChannelID: "ch1"}},
+			},
+			results: []llm.BatchResult{
+				{RelevanceScore: 0.8, ImportanceScore: 0.6, Summary: "test"},
+			},
+			expectedRelevance:  []float32{0.8}, // unchanged due to low stddev
+			expectedImportance: []float32{0.6}, // unchanged due to low stddev
+		},
+		{
+			name:            "empty summary skipped",
+			normalizeScores: true,
+			channelStats: map[string]db.ChannelStats{
+				"ch1": {AvgRelevance: 0.5, StddevRelevance: 0.2, AvgImportance: 0.4, StddevImportance: 0.2},
+			},
+			candidates: []llm.MessageInput{
+				{RawMessage: db.RawMessage{ChannelID: "ch1"}},
+			},
+			results: []llm.BatchResult{
+				{RelevanceScore: 0.8, ImportanceScore: 0.6, Summary: ""},
+			},
+			expectedRelevance:  []float32{0.8}, // unchanged
+			expectedImportance: []float32{0.6}, // unchanged
+		},
+	}
+
+	cfg := &config.Config{}
+
+	p := New(cfg, nil, nil, nil, nil)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &pipelineSettings{
+				normalizeScores: tt.normalizeScores,
+				channelStats:    tt.channelStats,
+			}
+
+			p.normalizeResults(tt.candidates, tt.results, s)
+
+			for i := range tt.results {
+				if tt.results[i].RelevanceScore < tt.expectedRelevance[i]-0.01 ||
+					tt.results[i].RelevanceScore > tt.expectedRelevance[i]+0.01 {
+					t.Errorf("result[%d].RelevanceScore = %v, want %v", i, tt.results[i].RelevanceScore, tt.expectedRelevance[i])
+				}
+
+				if tt.results[i].ImportanceScore < tt.expectedImportance[i]-0.01 ||
+					tt.results[i].ImportanceScore > tt.expectedImportance[i]+0.01 {
+					t.Errorf("result[%d].ImportanceScore = %v, want %v", i, tt.results[i].ImportanceScore, tt.expectedImportance[i])
+				}
+			}
+		})
+	}
+}
+
+func TestEvaluateRelevanceGate(t *testing.T) {
+	tests := []struct {
+		name         string
+		text         string
+		gateMode     string
+		gateEnabled  bool
+		wantDecision string
+	}{
+		{
+			name:         "heuristic mode with empty text",
+			text:         "",
+			gateMode:     "heuristic",
+			gateEnabled:  true,
+			wantDecision: DecisionIrrelevant,
+		},
+		{
+			name:         "heuristic mode with valid text",
+			text:         "Breaking news about technology",
+			gateMode:     "heuristic",
+			gateEnabled:  true,
+			wantDecision: DecisionRelevant,
+		},
+		{
+			name:         "empty mode defaults to heuristic",
+			text:         "Valid message content",
+			gateMode:     "",
+			gateEnabled:  true,
+			wantDecision: DecisionRelevant,
+		},
+		{
+			name:         "hybrid mode with irrelevant heuristic",
+			text:         "",
+			gateMode:     "hybrid",
+			gateEnabled:  true,
+			wantDecision: DecisionIrrelevant,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+
+			repo := &mockRepo{settings: make(map[string]interface{})}
+
+			llmClient := &mockLLM{}
+
+			logger := zerolog.Nop()
+
+			p := New(cfg, repo, llmClient, nil, &logger)
+
+			s := &pipelineSettings{
+				relevanceGateEnabled: tt.gateEnabled,
+				relevanceGateMode:    tt.gateMode,
+			}
+
+			decision := p.evaluateRelevanceGate(context.Background(), logger, tt.text, s)
+
+			if decision.decision != tt.wantDecision {
+				t.Errorf("evaluateRelevanceGate() decision = %q, want %q", decision.decision, tt.wantDecision)
+			}
+		})
+	}
+}
+
+func TestEvaluateGateLLM(t *testing.T) {
+	tests := []struct {
+		name                 string
+		relevanceGateModel   string
+		smartLLMModel        string
+		llmModel             string
+		mockRelevanceGateErr error
+		mockDecision         string
+		mockConfidence       float32
+		expectOK             bool
+		expectedModel        string
+	}{
+		{
+			name:               "uses relevance gate model when set",
+			relevanceGateModel: "gpt-4",
+			smartLLMModel:      "gpt-4o",
+			llmModel:           "gpt-4o-mini",
+			mockDecision:       DecisionRelevant,
+			mockConfidence:     0.8,
+			expectOK:           true,
+			expectedModel:      "gpt-4",
+		},
+		{
+			name:               "falls back to smart model",
+			relevanceGateModel: "",
+			smartLLMModel:      "gpt-4o",
+			llmModel:           "gpt-4o-mini",
+			mockDecision:       DecisionRelevant,
+			mockConfidence:     0.9,
+			expectOK:           true,
+			expectedModel:      "gpt-4o",
+		},
+		{
+			name:               "falls back to llm model",
+			relevanceGateModel: "",
+			smartLLMModel:      "",
+			llmModel:           "gpt-4o-mini",
+			mockDecision:       DecisionRelevant,
+			mockConfidence:     0.7,
+			expectOK:           true,
+			expectedModel:      "gpt-4o-mini",
+		},
+		{
+			name:               "returns false when no model available",
+			relevanceGateModel: "",
+			smartLLMModel:      "",
+			llmModel:           "",
+			expectOK:           false,
+		},
+		{
+			name:                 "returns false on LLM error",
+			relevanceGateModel:   "gpt-4",
+			mockRelevanceGateErr: errLLM,
+			expectOK:             false,
+		},
+		{
+			name:               "clamps confidence above 1",
+			relevanceGateModel: "gpt-4",
+			mockDecision:       DecisionRelevant,
+			mockConfidence:     1.5,
+			expectOK:           true,
+		},
+		{
+			name:               "clamps confidence below 0",
+			relevanceGateModel: "gpt-4",
+			mockDecision:       DecisionRelevant,
+			mockConfidence:     -0.5,
+			expectOK:           true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+
+			repo := &mockRepo{settings: make(map[string]interface{})}
+
+			llmClient := &mockLLMForGate{
+				decision:   tt.mockDecision,
+				confidence: tt.mockConfidence,
+				err:        tt.mockRelevanceGateErr,
+			}
+
+			logger := zerolog.Nop()
+
+			p := New(cfg, repo, llmClient, nil, &logger)
+
+			s := &pipelineSettings{
+				relevanceGateModel: tt.relevanceGateModel,
+				smartLLMModel:      tt.smartLLMModel,
+				llmModel:           tt.llmModel,
+			}
+
+			decision, ok := p.evaluateGateLLM(context.Background(), logger, "test text", s)
+
+			if ok != tt.expectOK {
+				t.Errorf("evaluateGateLLM() ok = %v, want %v", ok, tt.expectOK)
+			}
+
+			if tt.expectOK && tt.expectedModel != "" && decision.model != tt.expectedModel {
+				t.Errorf("evaluateGateLLM() model = %q, want %q", decision.model, tt.expectedModel)
+			}
+		})
+	}
+}
+
+type mockLLMForGate struct {
+	llm.Client
+	decision   string
+	confidence float32
+	err        error
+}
+
+func (m *mockLLMForGate) GetEmbedding(_ context.Context, _ string) ([]float32, error) {
+	return []float32{1.0, 0.0}, nil
+}
+
+func (m *mockLLMForGate) RelevanceGate(_ context.Context, _, _, _ string) (llm.RelevanceGateResult, error) {
+	if m.err != nil {
+		return llm.RelevanceGateResult{}, m.err
+	}
+
+	return llm.RelevanceGateResult{
+		Decision:   m.decision,
+		Confidence: m.confidence,
+		Reason:     "mock reason",
+	}, nil
+}
+
+func TestLoadGatePrompt(t *testing.T) {
+	tests := []struct {
+		name            string
+		activeVersion   string
+		promptOverride  string
+		expectedVersion string
+		expectedPrompt  string
+	}{
+		{
+			name:            "default prompt when no settings",
+			expectedVersion: "v1",
+			expectedPrompt:  defaultGatePrompt,
+		},
+		{
+			name:            "uses active version",
+			activeVersion:   "v2",
+			expectedVersion: "v2",
+			expectedPrompt:  defaultGatePrompt,
+		},
+		{
+			name:            "uses prompt override",
+			activeVersion:   "v2",
+			promptOverride:  "Custom prompt",
+			expectedVersion: "v2",
+			expectedPrompt:  "Custom prompt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := make(map[string]interface{})
+
+			if tt.activeVersion != "" {
+				settings[gatePromptActiveKey] = tt.activeVersion
+			}
+
+			if tt.promptOverride != "" {
+				settings[gatePromptVersionPrefix+tt.activeVersion] = tt.promptOverride
+			}
+
+			cfg := &config.Config{}
+
+			repo := &mockRepo{settings: settings}
+
+			logger := zerolog.Nop()
+
+			p := New(cfg, repo, nil, nil, &logger)
+
+			prompt, version := p.loadGatePrompt(context.Background(), logger)
+
+			if version != tt.expectedVersion {
+				t.Errorf("loadGatePrompt() version = %q, want %q", version, tt.expectedVersion)
+			}
+
+			if prompt != tt.expectedPrompt {
+				t.Errorf("loadGatePrompt() prompt = %q, want %q", prompt, tt.expectedPrompt)
+			}
+		})
+	}
+}
+
+func TestCreateItem(t *testing.T) {
+	tests := []struct {
+		name           string
+		relevanceScore float32
+		threshold      float32
+		expectedStatus string
+	}{
+		{
+			name:           "above threshold returns ready",
+			relevanceScore: 0.8,
+			threshold:      0.5,
+			expectedStatus: StatusReady,
+		},
+		{
+			name:           "below threshold returns rejected",
+			relevanceScore: 0.3,
+			threshold:      0.5,
+			expectedStatus: StatusRejected,
+		},
+	}
+
+	cfg := &config.Config{}
+
+	logger := zerolog.Nop()
+
+	p := New(cfg, nil, nil, nil, &logger)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := llm.MessageInput{
+				RawMessage: db.RawMessage{
+					ID:               testID,
+					ImportanceWeight: 1.0,
+				},
+			}
+
+			res := llm.BatchResult{
+				RelevanceScore:  tt.relevanceScore,
+				ImportanceScore: 0.8,
+				Topic:           tech,
+				Summary:         "Test summary with John",
+				Language:        "en",
+			}
+
+			s := &pipelineSettings{
+				relevanceThreshold: tt.threshold,
+			}
+
+			item := p.createItem(logger, c, res, s)
+
+			if item.Status != tt.expectedStatus {
+				t.Errorf("createItem() status = %q, want %q", item.Status, tt.expectedStatus)
+			}
+
+			if item.RawMessageID != testID {
+				t.Errorf("createItem() RawMessageID = %q, want %q", item.RawMessageID, testID)
+			}
+
+			if item.Topic != tech {
+				t.Errorf("createItem() Topic = %q, want %q", item.Topic, tech)
+			}
+		})
+	}
+}
+
+func TestGetDurationSetting(t *testing.T) {
+	tests := []struct {
+		name         string
+		settingValue string
+		defaultVal   time.Duration
+		expected     time.Duration
+	}{
+		{
+			name:         "valid duration string",
+			settingValue: "30s",
+			defaultVal:   10 * time.Second,
+			expected:     30 * time.Second,
+		},
+		{
+			name:         "invalid duration uses default",
+			settingValue: "invalid",
+			defaultVal:   15 * time.Second,
+			expected:     15 * time.Second,
+		},
+		{
+			name:         "empty uses default",
+			settingValue: "",
+			defaultVal:   20 * time.Second,
+			expected:     20 * time.Second,
+		},
+		{
+			name:         "minutes duration",
+			settingValue: "5m",
+			defaultVal:   1 * time.Minute,
+			expected:     5 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := make(map[string]interface{})
+
+			if tt.settingValue != "" {
+				settings["test_duration"] = tt.settingValue
+			}
+
+			cfg := &config.Config{}
+
+			repo := &mockRepo{settings: settings}
+
+			logger := zerolog.Nop()
+
+			p := New(cfg, repo, nil, nil, &logger)
+
+			result := p.getDurationSetting(context.Background(), "test_duration", tt.defaultVal, logger)
+
+			if result != tt.expected {
+				t.Errorf("getDurationSetting() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSkipMessage(t *testing.T) {
+	tests := []struct {
+		name         string
+		message      db.RawMessage
+		skipForwards bool
+		seenHashes   map[string]string
+		expectSkip   bool
+	}{
+		{
+			name:       "duplicate hash in batch",
+			message:    db.RawMessage{ID: "2", CanonicalHash: "hash1", Text: "Long enough text for filter"},
+			seenHashes: map[string]string{"hash1": "1"},
+			expectSkip: true,
+		},
+		{
+			name:         "forwarded message when skip enabled",
+			message:      db.RawMessage{ID: "1", CanonicalHash: "hash1", Text: "Long enough text for filter", IsForward: true},
+			skipForwards: true,
+			seenHashes:   make(map[string]string),
+			expectSkip:   true,
+		},
+		{
+			name:         "forwarded message when skip disabled",
+			message:      db.RawMessage{ID: "1", CanonicalHash: "hash1", Text: "Long enough text for filter", IsForward: true},
+			skipForwards: false,
+			seenHashes:   make(map[string]string),
+			expectSkip:   false,
+		},
+		{
+			name:       "normal message passes",
+			message:    db.RawMessage{ID: "1", CanonicalHash: "hash1", Text: "Long enough text for filter"},
+			seenHashes: make(map[string]string),
+			expectSkip: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{}
+
+			repo := &mockRepo{settings: make(map[string]interface{})}
+
+			logger := zerolog.Nop()
+
+			p := New(cfg, repo, nil, nil, &logger)
+
+			s := &pipelineSettings{
+				skipForwards: tt.skipForwards,
+				minLength:    10,
+			}
+
+			f := filters.New(nil, false, 10, nil, "mixed")
+
+			skip := p.skipMessage(context.Background(), logger, &tt.message, s, tt.seenHashes, f)
+
+			if skip != tt.expectSkip {
+				t.Errorf("skipMessage() = %v, want %v", skip, tt.expectSkip)
 			}
 		})
 	}

@@ -8,6 +8,15 @@ import (
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
+const (
+	errIsNumericWeightFmt           = "isNumericWeight(%q) = %v, want %v"
+	errFormatRatingsChannelNameFmt  = "formatRatingsChannelName() = %q, want %q"
+	errFindChannelNilFmt            = "findChannelByIdentifier() = %v, want nil"
+	errFindChannelNonNil            = "findChannelByIdentifier() = nil, want non-nil"
+	errFindChannelIDFmt             = "findChannelByIdentifier().ID = %q, want %q"
+	errFormatDiscoveryIdentifierFmt = "formatDiscoveryIdentifier() = %q, want %q"
+)
+
 func TestIsNumericWeight(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -33,7 +42,7 @@ func TestIsNumericWeight(t *testing.T) {
 			got := isNumericWeight(tt.input)
 
 			if got != tt.expected {
-				t.Errorf("isNumericWeight(%q) = %v, want %v", tt.input, got, tt.expected)
+				t.Errorf(errIsNumericWeightFmt, tt.input, got, tt.expected)
 			}
 		})
 	}
@@ -365,7 +374,7 @@ func TestFormatRatingsChannelName(t *testing.T) {
 			got := formatRatingsChannelName(tt.channelID, tt.username, tt.title)
 
 			if got != tt.want {
-				t.Errorf("formatRatingsChannelName() = %q, want %q", got, tt.want)
+				t.Errorf(errFormatRatingsChannelNameFmt, got, tt.want)
 			}
 		})
 	}
@@ -453,18 +462,18 @@ func TestFindChannelByIdentifier(t *testing.T) {
 
 			if tt.wantNil {
 				if got != nil {
-					t.Errorf("findChannelByIdentifier() = %v, want nil", got)
+					t.Errorf(errFindChannelNilFmt, got)
 				}
 
 				return
 			}
 
 			if got == nil {
-				t.Fatal("findChannelByIdentifier() = nil, want non-nil")
+				t.Fatal(errFindChannelNonNil)
 			}
 
 			if got.ID != tt.wantID {
-				t.Errorf("findChannelByIdentifier().ID = %q, want %q", got.ID, tt.wantID)
+				t.Errorf(errFindChannelIDFmt, got.ID, tt.wantID)
 			}
 		})
 	}
@@ -519,7 +528,7 @@ func TestFormatDiscoveryIdentifier(t *testing.T) {
 			got := formatDiscoveryIdentifier(tt.discovery)
 
 			if got != tt.want {
-				t.Errorf("formatDiscoveryIdentifier() = %q, want %q", got, tt.want)
+				t.Errorf(errFormatDiscoveryIdentifierFmt, got, tt.want)
 			}
 		})
 	}
@@ -533,12 +542,12 @@ func TestGetImageFileName(t *testing.T) {
 		{"image/jpeg", "cover.jpg"},
 		{"image/png", "cover.png"},
 		{"image/webp", "cover.webp"},
-		{"image/gif", ""},        // GIFs should be skipped
-		{"video/mp4", ""},        // Videos should be skipped
-		{"application/pdf", ""},  // Non-images should be skipped
-		{"text/html", ""},        // Non-images should be skipped
-		{"", ""},                 // Empty should be skipped
-		{"unknown/type", ""},     // Unknown types should be skipped
+		{"image/gif", ""},       // GIFs should be skipped
+		{"video/mp4", ""},       // Videos should be skipped
+		{"application/pdf", ""}, // Non-images should be skipped
+		{"text/html", ""},       // Non-images should be skipped
+		{"", ""},                // Empty should be skipped
+		{"unknown/type", ""},    // Unknown types should be skipped
 	}
 
 	for _, tt := range tests {
@@ -570,8 +579,8 @@ func TestGetTopicEmoji(t *testing.T) {
 		{"Culture", "🎨"},
 		{"Education", "📚"},
 		{"Humor", "😂"},
-		{"Unknown Topic", "•"},  // Unknown should return bullet
-		{"", "•"},               // Empty should return bullet
+		{"Unknown Topic", "•"}, // Unknown should return bullet
+		{"", "•"},              // Empty should return bullet
 	}
 
 	for _, tt := range tests {
@@ -636,10 +645,10 @@ func TestFormatDigestItemCaption(t *testing.T) {
 		{
 			name: "item with link",
 			item: digest.RichDigestItem{
-				Summary:    "Link test",
-				Channel:    "linkchannel",
-				ChannelID:  789,
-				MsgID:      100,
+				Summary:   "Link test",
+				Channel:   "linkchannel",
+				ChannelID: 789,
+				MsgID:     100,
 			},
 			wantContains: []string{"Link test", "https://t.me/linkchannel/100"},
 		},

@@ -1977,7 +1977,7 @@ func isRelevanceKeyword(s string) bool {
 func (b *Bot) lookupChannel(ctx context.Context, identifier string) (*db.Channel, string) {
 	channels, err := b.database.GetActiveChannels(ctx)
 	if err != nil {
-		return nil, fmt.Sprintf("❌ Error fetching channels: %s", html.EscapeString(err.Error()))
+		return nil, fmt.Sprintf(ErrFetchingChannelsFmt, html.EscapeString(err.Error()))
 	}
 
 	channel := findChannelByIdentifier(channels, identifier)
@@ -2012,7 +2012,7 @@ func (b *Bot) showChannelRelevanceStatus(ctx context.Context, msg *tgbotapi.Mess
 	globalThreshold := b.cfg.RelevanceThreshold
 	_ = b.database.GetSetting(ctx, "SettingRelevanceThreshold", &globalThreshold) //nolint:errcheck // best-effort read
 
-	baseThreshold, baseLabel := channel.RelevanceThreshold, "channel"
+	baseThreshold, baseLabel := channel.RelevanceThreshold, CmdChannel
 	if baseThreshold <= 0 {
 		baseThreshold, baseLabel = globalThreshold, "global"
 	}
@@ -2928,62 +2928,183 @@ func (b *Bot) handleSettingsReset(ctx context.Context, msg *tgbotapi.Message, ar
 }
 
 func (b *Bot) handleHelp(_ context.Context, msg *tgbotapi.Message) {
-	b.reply(msg, "👋 <b>Welcome to Telegram Digest Bot!</b>\n\n"+
-		"I help you reduce noise by summarizing news from multiple Telegram channels into a single digest.\n\n"+
-		"🚀 <b>Getting Started</b>\n"+
-		"• Use <code>/setup</code> for a guided configuration wizard.\n"+
-		"• Use <code>/status</code> to check system health and backlog.\n\n"+
-		"📋 <b>Channel Management</b> (<code>/channel</code>)\n"+
-		"• <code>/channel add &lt;id|@user|link&gt;</code> - Track a new channel\n"+
-		"• <code>/channel remove &lt;id|@user&gt;</code> - Stop tracking\n"+
-		"• <code>/channel list</code> - List all tracked channels\n"+
-		"• <code>/channel context &lt;id&gt; &lt;text&gt;</code> - Set channel context\n"+
-		"• <code>/channel weight &lt;@user&gt; [0.1-2.0|auto]</code> - Get/set importance weight\n"+
-		"• <code>/channel relevance &lt;@user&gt; [auto|manual]</code> - Toggle auto relevance\n"+
-		"• <code>/channel stats</code> - Channel quality metrics\n\n"+
-		"🔍 <b>Channel Discovery</b> (<code>/discover</code>)\n"+
-		"• <code>/discover</code> - View pending discovered channels\n"+
-		"• <code>/discover approve @channel</code> - Add channel to tracking\n"+
-		"• <code>/discover reject @channel</code> - Reject channel\n"+
-		"• <code>/discover stats</code> - Discovery statistics\n\n"+
-		"🔍 <b>Filters</b> (<code>/filter</code>)\n"+
-		"• <code>/filter list</code> - View active filters\n"+
-		"• <code>/filter add &lt;allow|deny&gt; &lt;word&gt;</code> - Filter by keyword\n"+
-		"• <code>/filter ads &lt;on|off&gt;</code> - Toggle heuristic ads filter\n"+
-		"• <code>/filter mode &lt;mixed|allow|deny&gt;</code> - Set filtering mode\n"+
-		"• <code>/filter keywords</code> - Manage ad keywords\n"+
-		"• <code>/filter min_length &lt;n&gt;</code> - Min message length\n\n"+
-		"⚙️ <b>Configuration</b> (<code>/config</code>)\n"+
-		"• <code>/config target &lt;id|@user&gt;</code> - Set digest destination\n"+
-		"• <code>/config window &lt;duration&gt;</code> - Set fallback digest interval (e.g., 60m)\n"+
-		"• <code>/schedule show</code> - View/update digest schedule\n"+
-		"• <code>/schedule preview [count]</code> - Preview upcoming digest times\n"+
-		"• <code>/schedule clear</code> - Clear schedule and use digest_window\n"+
-		"• <code>/config language &lt;code&gt;</code> - Set digest language (e.g., ru)\n"+
-		"• <code>/config tone &lt;professional|casual|brief&gt;</code> - Set digest tone\n"+
-		"• <code>/config relevance &lt;0-1&gt;</code> - Set relevance threshold\n"+
-		"• <code>/config reset &lt;key&gt;</code> - Restore default setting\n\n"+
-		"🧠 <b>AI &amp; Features</b> (<code>/ai</code>)\n"+
-		"• <code>/ai model &lt;name&gt;</code> - Set primary LLM model\n"+
-		"• <code>/ai tone &lt;professional|casual|brief&gt;</code> - Set digest tone\n"+
-		"• <code>/ai prompt</code> - Manage prompt templates\n"+
-		"• <code>/ai editor &lt;on|off&gt;</code> - Toggle narrative overview\n"+
-		"• <code>/ai vision &lt;on|off&gt;</code> - Toggle image analysis\n"+
-		"• <code>/ai consolidated &lt;on|off&gt;</code> - Merge similar stories\n"+
-		"• <code>/preview</code> - See what the next digest will look like\n\n"+
-		"🛠 <b>System</b> (<code>/system</code>)\n"+
-		"• <code>/channel stats</code> - Channel quality metrics (last 7 days)\n"+
-		"• <code>/ratings [days] [limit]</code> - Item rating summary\n"+
-		"• <code>/ratings stats [limit]</code> - Decayed rating summary\n"+
-		"• <code>/scores [hours] [limit]</code> - Importance score snapshot\n"+
-		"• <code>/scores debug [hours]</code> - Item status counts\n"+
-		"• <code>/scores debug reasons [hours]</code> - Drop reason counts\n"+
-		"• <code>/annotate</code> - Annotation queue (enqueue/next/label/skip/stats)\n"+
-		"• <code>/system status</code> - Detailed system health\n"+
-		"• <code>/system settings</code> - View all configuration overrides\n"+
-		"• <code>/system errors</code> - Review processing failures\n"+
-		"• <code>/system retry</code> - Requeue failed items\n\n"+
-		"<i>Use <code>/settings</code> to see all current values at once.</i>")
+	args := strings.Fields(msg.CommandArguments())
+	if len(args) == 0 {
+		b.reply(msg, helpSummaryMessage())
+
+		return
+	}
+
+	topic := strings.ToLower(args[0])
+	helpMsgs := map[string]string{
+		"all":         helpAllMessage(),
+		"channels":    helpChannelsMessage(),
+		CmdChannel:    helpChannelsMessage(),
+		"filters":     helpFiltersMessage(),
+		"filter":      helpFiltersMessage(),
+		"schedule":    helpScheduleMessage(),
+		"config":      helpConfigMessage(),
+		"ai":          helpAIMessage(),
+		"system":      helpSystemMessage(),
+		"scores":      helpScoresMessage(),
+		"ratings":     helpRatingsMessage(),
+		"annotate":    helpAnnotateMessage(),
+		"annotations": helpAnnotateMessage(),
+		"botfather":   botFatherCommandsMessage(),
+	}
+
+	if m, ok := helpMsgs[topic]; ok {
+		b.reply(msg, m)
+	} else {
+		b.reply(msg, fmt.Sprintf("❓ Unknown help topic: <code>%s</code>\n\n%s", html.EscapeString(topic), helpSummaryMessage()))
+	}
+}
+
+func (b *Bot) handleBotFather(_ context.Context, msg *tgbotapi.Message) {
+	b.reply(msg, botFatherCommandsMessage())
+}
+
+func helpSummaryMessage() string {
+	return "👋 <b>Telegram Digest Bot</b>\n\n" +
+		"Quick start:\n" +
+		"• <code>/setup</code> - Guided setup\n" +
+		"• <code>/status</code> - System status\n" +
+		"• <code>/preview</code> - Preview next digest\n\n" +
+		"Core areas:\n" +
+		"• <code>/channel</code> - Manage sources\n" +
+		"• <code>/filter</code> - Filter rules\n" +
+		"• <code>/schedule</code> - Digest timing\n" +
+		"• <code>/config</code> - Settings\n" +
+		"• <code>/ai</code> - AI features\n" +
+		"• <code>/system</code> - Diagnostics\n\n" +
+		"Data & feedback:\n" +
+		"• <code>/scores</code> <code>/ratings</code> <code>/annotate</code> <code>/feedback</code>\n\n" +
+		"More: <code>/help &lt;topic&gt;</code> (channels, filters, schedule, config, ai, system, scores, ratings, annotate)\n" +
+		"Full list: <code>/help all</code>\n" +
+		"BotFather list: <code>/help botfather</code>"
+}
+
+func helpChannelsMessage() string {
+	return "📋 <b>Channel Management</b>\n" +
+		"• <code>/channel add &lt;id|@user|link&gt;</code>\n" +
+		"• <code>/channel remove &lt;id|@user&gt;</code>\n" +
+		"• <code>/channel list</code>\n" +
+		"• <code>/channel context &lt;id&gt; &lt;text&gt;</code>\n" +
+		"• <code>/channel weight &lt;@user&gt; [0.1-2.0|auto]</code>\n" +
+		"• <code>/channel relevance &lt;@user&gt; [auto|manual]</code>\n" +
+		"• <code>/channel stats</code>"
+}
+
+func helpFiltersMessage() string {
+	return "🔍 <b>Filters</b>\n" +
+		"• <code>/filter list</code>\n" +
+		"• <code>/filter add &lt;allow|deny&gt; &lt;pattern&gt;</code>\n" +
+		"• <code>/filter remove &lt;pattern&gt;</code>\n" +
+		"• <code>/filter ads &lt;on|off&gt;</code>\n" +
+		"• <code>/filter mode &lt;mixed|allow|deny&gt;</code>\n" +
+		"• <code>/filter keywords</code>\n" +
+		"• <code>/filter min_length &lt;n&gt;</code>\n" +
+		"• <code>/filter skip_forwards &lt;on|off&gt;</code>"
+}
+
+func helpScheduleMessage() string {
+	return "🗓️ <b>Schedule</b>\n" +
+		"Times are hour-only (<code>HH:00</code>).\n" +
+		"• <code>/schedule timezone &lt;IANA&gt;</code>\n" +
+		"• <code>/schedule weekdays times &lt;HH:00,...&gt;</code>\n" +
+		"• <code>/schedule weekdays hourly &lt;HH:00-HH:00&gt;</code>\n" +
+		"• <code>/schedule weekends hourly &lt;HH:00-HH:00&gt;</code>\n" +
+		"• <code>/schedule preview [count]</code>\n" +
+		"• <code>/schedule clear</code>\n" +
+		"• <code>/schedule show</code>"
+}
+
+func helpConfigMessage() string {
+	return "⚙️ <b>Configuration</b>\n" +
+		"• <code>/config target &lt;id|@user&gt;</code>\n" +
+		"• <code>/config window &lt;duration&gt;</code>\n" +
+		"• <code>/config language &lt;code&gt;</code>\n" +
+		"• <code>/config tone &lt;professional|casual|brief&gt;</code>\n" +
+		"• <code>/config relevance &lt;0-1&gt;</code>\n" +
+		"• <code>/config importance &lt;0-1&gt;</code>\n" +
+		"• <code>/config reset &lt;key&gt;</code>"
+}
+
+func helpAIMessage() string {
+	return "🧠 <b>AI &amp; Features</b>\n" +
+		"• <code>/ai model &lt;name&gt;</code>\n" +
+		"• <code>/ai smart_model &lt;name&gt;</code>\n" +
+		"• <code>/ai tone &lt;professional|casual|brief&gt;</code>\n" +
+		"• <code>/ai prompt</code>\n" +
+		"• <code>/ai editor &lt;on|off&gt;</code>\n" +
+		"• <code>/ai tiered &lt;on|off&gt;</code>\n" +
+		"• <code>/ai vision &lt;on|off&gt;</code>\n" +
+		"• <code>/ai consolidated &lt;on|off&gt;</code>\n" +
+		"• <code>/ai details &lt;on|off&gt;</code>\n" +
+		"• <code>/ai topics &lt;on|off&gt;</code>\n" +
+		"• <code>/ai dedup &lt;mode&gt;</code>"
+}
+
+func helpSystemMessage() string {
+	return "🛠 <b>System</b>\n" +
+		"• <code>/system status</code>\n" +
+		"• <code>/system settings</code>\n" +
+		"• <code>/system errors</code>\n" +
+		"• <code>/system retry</code>"
+}
+
+func helpScoresMessage() string {
+	return "📊 <b>Scores</b>\n" +
+		"• <code>/scores [hours] [limit]</code>\n" +
+		"• <code>/scores debug [hours]</code>\n" +
+		"• <code>/scores debug reasons [hours]</code>"
+}
+
+func helpRatingsMessage() string {
+	return "⭐ <b>Ratings</b>\n" +
+		"• <code>/ratings [days] [limit]</code>\n" +
+		"• <code>/ratings stats [limit]</code>"
+}
+
+func helpAnnotateMessage() string {
+	return "🧩 <b>Annotations</b>\n" +
+		"• <code>/annotate</code> - enqueue/next/label/skip/stats"
+}
+
+func helpAllMessage() string {
+	return helpSummaryMessage() + "\n\n" +
+		helpChannelsMessage() + "\n\n" +
+		helpFiltersMessage() + "\n\n" +
+		helpScheduleMessage() + "\n\n" +
+		helpConfigMessage() + "\n\n" +
+		helpAIMessage() + "\n\n" +
+		helpSystemMessage() + "\n\n" +
+		helpScoresMessage() + "\n\n" +
+		helpRatingsMessage() + "\n\n" +
+		helpAnnotateMessage()
+}
+
+func botFatherCommandsMessage() string {
+	return "Use <code>/setcommands</code> in BotFather with:\n\n" +
+		"<code>" +
+		"start - Show help\n" +
+		"help - Command overview\n" +
+		"setup - Guided setup\n" +
+		"status - System status\n" +
+		"preview - Preview next digest\n" +
+		"channel - Manage channels\n" +
+		"filter - Manage filters\n" +
+		"config - Configure settings\n" +
+		"schedule - Digest schedule\n" +
+		"ai - AI features\n" +
+		"system - System tools\n" +
+		"scores - Score stats\n" +
+		"ratings - Rating stats\n" +
+		"annotate - Annotation queue\n" +
+		"discover - Channel discovery\n" +
+		"feedback - Rate an item\n" +
+		"settings - Show current settings" +
+		"</code>"
 }
 
 func (b *Bot) handleErrors(ctx context.Context, msg *tgbotapi.Message) {
@@ -3331,7 +3452,7 @@ func (b *Bot) handleDiscoverCallback(ctx context.Context, query *tgbotapi.Callba
 
 	if err != nil {
 		callbackText = fmt.Sprintf(ErrGenericFmt, err.Error())
-		b.logger.Error().Err(err).Str("action", action).Str("username", username).Msg("discover callback failed")
+		b.logger.Error().Err(err).Str("action", action).Str(LogFieldUsername, username).Msg("discover callback failed")
 	}
 
 	callback := tgbotapi.NewCallback(query.ID, callbackText)

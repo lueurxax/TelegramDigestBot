@@ -34,6 +34,8 @@ func (b *Bot) registerCoreCommands(r *commandRegistry) {
 	// Basic commands
 	r.handlers["start"] = b.handleHelp
 	r.handlers["help"] = b.handleHelp
+	r.handlers["botfather"] = b.handleBotFather
+	r.handlers["commands"] = b.handleBotFather
 	r.handlers["setup"] = b.handleSetup
 	r.handlers[CmdStatus] = b.handleStatus
 	r.handlers["preview"] = b.handlePreview

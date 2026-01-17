@@ -146,3 +146,8 @@ const (
 const (
 	LogTruncateLength = 50
 )
+
+// Threshold tuning constants
+const (
+	DefaultThresholdTuningStep = 0.05
+)

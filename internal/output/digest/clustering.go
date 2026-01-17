@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
-	"github.com/lueurxax/telegram-digest-bot/internal/process/dedup"
 	"github.com/rs/zerolog"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/process/dedup"
+	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, end time.Time, logger *zerolog.Logger) error {
@@ -28,12 +29,12 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 
 	cfg := s.getClusteringConfig(ctx, logger)
 	clusterCtx := &clusterBuildContext{
-		topicIndex: s.getTopicIndex(items),
+		topicIndex:  s.getTopicIndex(items),
 		topicGroups: s.getTopicGroups(items),
-		embeddings: s.getEmbeddings(ctx, items, logger),
-		assigned:   make(map[string]bool),
-		allItems:   items,
-		cfg:        cfg,
+		embeddings:  s.getEmbeddings(ctx, items, logger),
+		assigned:    make(map[string]bool),
+		allItems:    items,
+		cfg:         cfg,
 	}
 
 	for topic, groupItems := range clusterCtx.topicGroups {
@@ -91,8 +92,8 @@ func (s *Scheduler) validateClusterCoherence(clusterItemsList []db.Item, bc *clu
 	if len(clusterItemsList) > 2 && coherence < bc.cfg.coherenceThreshold {
 		logger.Debug().Float32("coherence", coherence).Int("size", len(clusterItemsList)).Msg("Rejecting cluster due to low coherence")
 
-		for k := 1; k < len(clusterItemsList); k++ {
-			bc.assigned[clusterItemsList[k].ID] = false
+		for _, item := range clusterItemsList[1:] {
+			bc.assigned[item.ID] = false
 		}
 
 		return clusterItemsList[:1]
@@ -313,10 +314,10 @@ func (s *Scheduler) calculateCoherence(items []db.Item, embeddings map[string][]
 
 	var count int
 
-	for i := 0; i < len(items); i++ {
-		for j := i + 1; j < len(items); j++ {
-			embI, okI := embeddings[items[i].ID]
-			embJ, okJ := embeddings[items[j].ID]
+	for i, itemI := range items {
+		for _, itemJ := range items[i+1:] {
+			embI, okI := embeddings[itemI.ID]
+			embJ, okJ := embeddings[itemJ.ID]
 
 			if okI && okJ {
 				sum += dedup.CosineSimilarity(embI, embJ)

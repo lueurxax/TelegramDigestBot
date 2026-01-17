@@ -285,3 +285,87 @@ func TestCalculateAutoWeightComponents(t *testing.T) {
 		}
 	})
 }
+
+func TestCalculateAutoWeightConsistencyScore(t *testing.T) {
+	cfg := DefaultAutoWeightConfig()
+
+	t.Run("higher posting frequency boosts weight", func(t *testing.T) {
+		// 150 messages over 30 days = 5/day (matches expected freq)
+		consistentChannel := &db.RollingStats{
+			TotalMessages:      150,
+			TotalItemsCreated:  75,
+			TotalItemsDigested: 50,
+			AvgImportance:      0.5,
+		}
+
+		// 30 messages over 30 days = 1/day (below expected freq)
+		infrequentChannel := &db.RollingStats{
+			TotalMessages:      30,
+			TotalItemsCreated:  15,
+			TotalItemsDigested: 10,
+			AvgImportance:      0.5,
+		}
+
+		consistentWeight := CalculateAutoWeight(consistentChannel, cfg, 30)
+		infrequentWeight := CalculateAutoWeight(infrequentChannel, cfg, 30)
+
+		if consistentWeight <= infrequentWeight {
+			t.Errorf("consistent channel weight %v should exceed infrequent weight %v", consistentWeight, infrequentWeight)
+		}
+	})
+
+	t.Run("very high frequency caps at max consistency", func(t *testing.T) {
+		// 300 messages over 30 days = 10/day (2x expected freq)
+		// Consistency should cap at 1.0
+		highFreq := &db.RollingStats{
+			TotalMessages:      300,
+			TotalItemsCreated:  150,
+			TotalItemsDigested: 100,
+			AvgImportance:      0.5,
+		}
+
+		weight := CalculateAutoWeight(highFreq, cfg, 30)
+		if weight > cfg.AutoMax {
+			t.Errorf("weight %v should not exceed AutoMax %v", weight, cfg.AutoMax)
+		}
+	})
+}
+
+func TestCalculateAutoWeightZeroItemsCreated(t *testing.T) {
+	cfg := DefaultAutoWeightConfig()
+
+	stats := &db.RollingStats{
+		TotalMessages:      100,
+		TotalItemsCreated:  0,
+		TotalItemsDigested: 0,
+		AvgImportance:      0.5,
+	}
+
+	weight := CalculateAutoWeight(stats, cfg, 30)
+
+	// inclusionScore should be 0, signalScore should be 0
+	// Should still get some weight from importance and consistency
+	if weight < cfg.AutoMin || weight > cfg.AutoMax {
+		t.Errorf(testErrWeightOutsideBounds, weight, cfg.AutoMin, cfg.AutoMax)
+	}
+}
+
+func TestCalculateAutoWeightExactlyAtMinMessages(t *testing.T) {
+	cfg := DefaultAutoWeightConfig()
+
+	// Exactly at the minimum threshold
+	stats := &db.RollingStats{
+		TotalMessages:      cfg.MinMessages,
+		TotalItemsCreated:  5,
+		TotalItemsDigested: 3,
+		AvgImportance:      0.5,
+	}
+
+	weight := CalculateAutoWeight(stats, cfg, 30)
+
+	// Should be processed, not return neutral
+	// Since min is exactly met, we expect a calculated weight
+	if weight < cfg.AutoMin || weight > cfg.AutoMax {
+		t.Errorf(testErrWeightOutsideBounds, weight, cfg.AutoMin, cfg.AutoMax)
+	}
+}

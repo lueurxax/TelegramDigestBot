@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +12,12 @@ import (
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
+)
+
+var (
+	errKeyNotFound  = errors.New("key not found")
+	errTypeMismatch = errors.New("type mismatch")
+	errStoreError   = errors.New("store error")
 )
 
 const (
@@ -31,6 +38,30 @@ const (
 	testErrAlignedSummary             = "aligned[0].Summary = %q, want %q"
 	testErrAlignBatchResultsCountTwo  = "alignBatchResults() returned %d results, want 2"
 	testErrAlignBySourceChannel       = "alignBySourceChannel() error = %v"
+	testErrTranslateText              = "TranslateText() error = %v"
+	testErrGenerateNarrative          = "GenerateNarrative() error = %v"
+	testErrSummarizeCluster           = "SummarizeCluster() error = %v"
+	testErrCompressSummaries          = "CompressSummariesForCover() error = %v"
+	testPromptKey                     = "test"
+	testPromptActiveKey               = "prompt:" + testPromptKey + ":active"
+	testPromptV1Key                   = "prompt:" + testPromptKey + ":v1"
+	testPromptV2Key                   = "prompt:" + testPromptKey + ":v2"
+	testPromptV2                      = "v2"
+	testPromptV3                      = "v3"
+	testErrLoadPrompt                 = "loadPrompt() prompt = %q, want %q"
+	testErrLoadPromptVersion          = "loadPrompt() version = %q, want %q"
+	testPromptCustomV2                = "custom prompt v2"
+	testPromptOverride                = "overridden default prompt"
+	testWhitespaceOnly                = "   "
+	testHello                         = "Hello"
+	testErrTranslateHello             = "TranslateText() = %q, want 'Hello'"
+	expectedToneProfessional          = "professional"
+	expectedToneCasual                = "casual"
+	expectedToneBrief                 = "brief"
+	errKeyNotFoundFmt                 = "%w: %s"
+	expectedDefaultTopic              = "General"
+	expectedLinkTypeTelegram          = "telegram"
+	expectedLinkTypeWeb               = "web"
 )
 
 // testLogger returns a no-op logger for tests
@@ -769,7 +800,7 @@ func TestMockClient_TranslateText(t *testing.T) {
 
 	result, err := client.TranslateText(context.Background(), text, "ru", testModelGPT4)
 	if err != nil {
-		t.Fatalf("TranslateText() error = %v", err)
+		t.Fatalf(testErrTranslateText, err)
 	}
 
 	if result != text {
@@ -788,7 +819,7 @@ func TestMockClient_GenerateNarrative(t *testing.T) {
 
 	result, err := client.GenerateNarrative(context.Background(), items, "en", testModelGPT4, ToneProfessional)
 	if err != nil {
-		t.Fatalf("GenerateNarrative() error = %v", err)
+		t.Fatalf(testErrGenerateNarrative, err)
 	}
 
 	if result == "" {
@@ -799,7 +830,7 @@ func TestMockClient_GenerateNarrative(t *testing.T) {
 		t.Errorf("GenerateNarrative() = %q, should contain item count", result)
 	}
 
-	if !strings.Contains(result, "professional") {
+	if !strings.Contains(result, ToneProfessional) {
 		t.Errorf("GenerateNarrative() = %q, should contain tone", result)
 	}
 }
@@ -814,9 +845,9 @@ func TestMockClient_SummarizeCluster(t *testing.T) {
 		{ID: "3", Summary: "Summary 3"},
 	}
 
-	result, err := client.SummarizeCluster(context.Background(), items, "en", testModelGPT4, "casual")
+	result, err := client.SummarizeCluster(context.Background(), items, "en", testModelGPT4, ToneCasual)
 	if err != nil {
-		t.Fatalf("SummarizeCluster() error = %v", err)
+		t.Fatalf(testErrSummarizeCluster, err)
 	}
 
 	if result == "" {
@@ -887,7 +918,7 @@ func TestMockClient_CompressSummariesForCover(t *testing.T) {
 
 	result, err := client.CompressSummariesForCover(context.Background(), summaries)
 	if err != nil {
-		t.Fatalf("CompressSummariesForCover() error = %v", err)
+		t.Fatalf(testErrCompressSummaries, err)
 	}
 
 	if len(result) != len(summaries) {
@@ -944,13 +975,13 @@ func TestBuildLangInstruction(t *testing.T) {
 		{
 			name:         "tone only",
 			targetLang:   "",
-			tone:         "professional",
+			tone:         ToneProfessional,
 			wantContains: []string{"formal", "journalistic"},
 		},
 		{
 			name:         "both language and tone",
 			targetLang:   "Spanish",
-			tone:         "casual",
+			tone:         ToneCasual,
 			wantContains: []string{"Spanish", "conversational"},
 		},
 	}
@@ -1510,5 +1541,407 @@ func TestTruncateEdgeCases(t *testing.T) {
 		if got != tt.want {
 			t.Errorf(testErrTruncate, tt.input, tt.max, got, tt.want)
 		}
+	}
+}
+
+// mockPromptStore implements PromptStore for testing
+type mockPromptStore struct {
+	settings map[string]interface{}
+	err      error
+}
+
+func (m *mockPromptStore) GetSetting(_ context.Context, key string, target interface{}) error {
+	if m.err != nil {
+		return m.err
+	}
+
+	val, ok := m.settings[key]
+	if !ok {
+		return fmt.Errorf(errKeyNotFoundFmt, errKeyNotFound, key)
+	}
+
+	// Handle string target
+	if strPtr, ok := target.(*string); ok {
+		if strVal, ok := val.(string); ok {
+			*strPtr = strVal
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%w for key %s", errTypeMismatch, key)
+}
+
+//nolint:gocyclo // table-driven test with many cases
+func TestLoadPrompt(t *testing.T) {
+	defaultPrompt := "default prompt text"
+
+	t.Run("nil store uses default", func(t *testing.T) {
+		c := &openaiClient{cfg: &config.Config{}, promptStore: nil}
+		prompt, version := c.loadPrompt(context.Background(), testPromptKey, defaultPrompt)
+
+		if prompt != defaultPrompt {
+			t.Errorf(testErrLoadPrompt, prompt, defaultPrompt)
+		}
+
+		if version != promptDefaultVersion {
+			t.Errorf(testErrLoadPromptVersion, version, promptDefaultVersion)
+		}
+	})
+
+	t.Run("store error uses default", func(t *testing.T) {
+		store := &mockPromptStore{
+			err: errStoreError,
+		}
+		c := &openaiClient{cfg: &config.Config{}, promptStore: store}
+		prompt, version := c.loadPrompt(context.Background(), testPromptKey, defaultPrompt)
+
+		if prompt != defaultPrompt {
+			t.Errorf(testErrLoadPrompt, prompt, defaultPrompt)
+		}
+
+		if version != promptDefaultVersion {
+			t.Errorf(testErrLoadPromptVersion, version, promptDefaultVersion)
+		}
+	})
+
+	t.Run("custom active version", func(t *testing.T) {
+		store := &mockPromptStore{
+			settings: map[string]interface{}{
+				testPromptActiveKey: testPromptV2,
+				testPromptV2Key:     testPromptCustomV2,
+			},
+		}
+		c := &openaiClient{cfg: &config.Config{}, promptStore: store}
+		prompt, version := c.loadPrompt(context.Background(), testPromptKey, defaultPrompt)
+
+		if prompt != testPromptCustomV2 {
+			t.Errorf(testErrLoadPrompt, prompt, testPromptCustomV2)
+		}
+
+		if version != testPromptV2 {
+			t.Errorf(testErrLoadPromptVersion, version, testPromptV2)
+		}
+	})
+
+	t.Run("active version set but prompt not found uses default", func(t *testing.T) {
+		store := &mockPromptStore{
+			settings: map[string]interface{}{
+				testPromptActiveKey: testPromptV3,
+				// v3 prompt not set
+			},
+		}
+		c := &openaiClient{cfg: &config.Config{}, promptStore: store}
+		prompt, version := c.loadPrompt(context.Background(), testPromptKey, defaultPrompt)
+
+		if prompt != defaultPrompt {
+			t.Errorf(testErrLoadPrompt, prompt, defaultPrompt)
+		}
+
+		if version != testPromptV3 {
+			t.Errorf(testErrLoadPromptVersion, version, testPromptV3)
+		}
+	})
+
+	t.Run("empty active version string uses default", func(t *testing.T) {
+		store := &mockPromptStore{
+			settings: map[string]interface{}{
+				testPromptActiveKey: "",
+			},
+		}
+		c := &openaiClient{cfg: &config.Config{}, promptStore: store}
+		prompt, version := c.loadPrompt(context.Background(), testPromptKey, defaultPrompt)
+
+		if prompt != defaultPrompt {
+			t.Errorf(testErrLoadPrompt, prompt, defaultPrompt)
+		}
+
+		if version != promptDefaultVersion {
+			t.Errorf(testErrLoadPromptVersion, version, promptDefaultVersion)
+		}
+	})
+
+	t.Run("whitespace-only active version uses default", func(t *testing.T) {
+		store := &mockPromptStore{
+			settings: map[string]interface{}{
+				testPromptActiveKey: testWhitespaceOnly,
+			},
+		}
+		c := &openaiClient{cfg: &config.Config{}, promptStore: store}
+		prompt, version := c.loadPrompt(context.Background(), testPromptKey, defaultPrompt)
+
+		if prompt != defaultPrompt {
+			t.Errorf(testErrLoadPrompt, prompt, defaultPrompt)
+		}
+
+		if version != promptDefaultVersion {
+			t.Errorf(testErrLoadPromptVersion, version, promptDefaultVersion)
+		}
+	})
+
+	t.Run("default version prompt override", func(t *testing.T) {
+		store := &mockPromptStore{
+			settings: map[string]interface{}{
+				testPromptV1Key: testPromptOverride,
+			},
+		}
+		c := &openaiClient{cfg: &config.Config{}, promptStore: store}
+		prompt, version := c.loadPrompt(context.Background(), testPromptKey, defaultPrompt)
+
+		if prompt != testPromptOverride {
+			t.Errorf(testErrLoadPrompt, prompt, testPromptOverride)
+		}
+
+		if version != promptDefaultVersion {
+			t.Errorf(testErrLoadPromptVersion, version, promptDefaultVersion)
+		}
+	})
+
+	t.Run("empty prompt override uses default", func(t *testing.T) {
+		store := &mockPromptStore{
+			settings: map[string]interface{}{
+				testPromptV1Key: "",
+			},
+		}
+		c := &openaiClient{cfg: &config.Config{}, promptStore: store}
+		prompt, _ := c.loadPrompt(context.Background(), testPromptKey, defaultPrompt)
+
+		if prompt != defaultPrompt {
+			t.Errorf(testErrLoadPrompt, prompt, defaultPrompt)
+		}
+	})
+}
+
+func TestTranslateTextEmpty(t *testing.T) {
+	c := &openaiClient{cfg: &config.Config{}, logger: testLogger()}
+
+	t.Run("empty text returns unchanged", func(t *testing.T) {
+		result, err := c.TranslateText(context.Background(), "", "en", testModelGPT4)
+		if err != nil {
+			t.Fatalf(testErrTranslateText, err)
+		}
+
+		if result != "" {
+			t.Errorf("TranslateText() = %q, want empty", result)
+		}
+	})
+
+	t.Run("whitespace text returns unchanged", func(t *testing.T) {
+		result, err := c.TranslateText(context.Background(), testWhitespaceOnly, "en", testModelGPT4)
+		if err != nil {
+			t.Fatalf(testErrTranslateText, err)
+		}
+
+		if result != testWhitespaceOnly {
+			t.Errorf("TranslateText() = %q, want %q", result, testWhitespaceOnly)
+		}
+	})
+
+	t.Run("empty language returns unchanged", func(t *testing.T) {
+		result, err := c.TranslateText(context.Background(), testHello, "", testModelGPT4)
+		if err != nil {
+			t.Fatalf(testErrTranslateText, err)
+		}
+
+		if result != testHello {
+			t.Errorf(testErrTranslateHello, result)
+		}
+	})
+
+	t.Run("whitespace language returns unchanged", func(t *testing.T) {
+		result, err := c.TranslateText(context.Background(), testHello, testWhitespaceOnly, testModelGPT4)
+		if err != nil {
+			t.Fatalf(testErrTranslateText, err)
+		}
+
+		if result != testHello {
+			t.Errorf(testErrTranslateHello, result)
+		}
+	})
+}
+
+func TestGenerateNarrativeEmpty(t *testing.T) {
+	c := &openaiClient{cfg: &config.Config{}, logger: testLogger()}
+
+	result, err := c.GenerateNarrative(context.Background(), []domain.Item{}, "en", testModelGPT4, ToneProfessional)
+	if err != nil {
+		t.Fatalf(testErrGenerateNarrative, err)
+	}
+
+	if result != "" {
+		t.Errorf("GenerateNarrative() = %q, want empty for empty items", result)
+	}
+}
+
+func TestSummarizeClusterEmpty(t *testing.T) {
+	c := &openaiClient{cfg: &config.Config{}, logger: testLogger()}
+
+	result, err := c.SummarizeCluster(context.Background(), []domain.Item{}, "en", testModelGPT4, ToneProfessional)
+	if err != nil {
+		t.Fatalf(testErrSummarizeCluster, err)
+	}
+
+	if result != "" {
+		t.Errorf("SummarizeCluster() = %q, want empty for empty items", result)
+	}
+}
+
+func TestGenerateClusterTopicEmpty(t *testing.T) {
+	c := &openaiClient{cfg: &config.Config{}, logger: testLogger()}
+
+	result, err := c.GenerateClusterTopic(context.Background(), []domain.Item{}, "en", testModelGPT4)
+	if err != nil {
+		t.Fatalf("GenerateClusterTopic() error = %v", err)
+	}
+
+	if result != "" {
+		t.Errorf("GenerateClusterTopic() = %q, want empty for empty items", result)
+	}
+}
+
+func TestCompressSummariesForCoverEmpty(t *testing.T) {
+	c := &openaiClient{cfg: &config.Config{}, logger: testLogger()}
+
+	result, err := c.CompressSummariesForCover(context.Background(), []string{})
+	if err != nil {
+		t.Fatalf(testErrCompressSummaries, err)
+	}
+
+	if result != nil {
+		t.Errorf("CompressSummariesForCover() = %v, want nil for empty summaries", result)
+	}
+}
+
+func TestCheckCircuitBreakerRecovery(t *testing.T) {
+	c := &openaiClient{cfg: &config.Config{}, logger: testLogger()}
+
+	// Open circuit
+	for i := 0; i < circuitBreakerThreshold+1; i++ {
+		c.recordFailure()
+	}
+
+	// Circuit should be open
+	err := c.checkCircuit()
+	if err == nil {
+		t.Error("expected circuit to be open")
+	}
+
+	// Simulate time passing by resetting circuitOpenUntil
+	c.mu.Lock()
+	c.circuitOpenUntil = c.circuitOpenUntil.Add(-2 * circuitBreakerTimeout)
+	c.mu.Unlock()
+
+	// Circuit should now be closed
+	err = c.checkCircuit()
+	if err != nil {
+		t.Errorf("expected circuit to be closed after timeout, got error: %v", err)
+	}
+}
+
+func TestBuildMessageTextPartWithAllFields(t *testing.T) {
+	c := &openaiClient{cfg: &config.Config{}}
+
+	input := MessageInput{
+		RawMessage: domain.RawMessage{
+			Text:               "Main message text",
+			ChannelTitle:       "My Channel",
+			ChannelContext:     "Tech news",
+			ChannelDescription: "Daily tech updates",
+			ChannelCategory:    testTopicTechnology,
+			ChannelTone:        ToneProfessional,
+			ChannelUpdateFreq:  "Daily",
+		},
+		Context: []string{"Previous context 1", "Previous context 2"},
+		ResolvedLinks: []domain.ResolvedLink{
+			{
+				LinkType:     LinkTypeTelegram,
+				ChannelTitle: "Source Channel",
+				Content:      "Referenced content",
+				Views:        5000,
+			},
+		},
+	}
+
+	result := c.buildMessageTextPart(0, input)
+
+	expectedParts := []string{
+		"[0]",
+		"(Source Channel: My Channel)",
+		"(Channel Context: Tech news)",
+		"(Channel Description: Daily tech updates)",
+		"(Channel Category: " + testTopicTechnology + ")",
+		"(Channel Tone: professional)",
+		"(Channel Frequency: Daily)",
+		"[BACKGROUND CONTEXT",
+		"Previous context 1",
+		"[Referenced Content:",
+		"[Telegram]",
+		"Source Channel",
+		"5000 views",
+		">>> MESSAGE TO SUMMARIZE <<<",
+		"Main message text",
+	}
+
+	for _, part := range expectedParts {
+		if !strings.Contains(result, part) {
+			t.Errorf("buildMessageTextPart() missing %q in result: %s", part, result)
+		}
+	}
+}
+
+func TestBuildResolvedLinksTextWebWithDetails(t *testing.T) {
+	c := &openaiClient{}
+
+	links := []domain.ResolvedLink{
+		{
+			LinkType: LinkTypeWeb,
+			Domain:   "example.com",
+			Title:    "Article Title",
+			Content:  "This is the article content that should be included.",
+		},
+	}
+
+	result := c.buildResolvedLinksText(links)
+
+	expectedParts := []string{
+		"[Web]",
+		"example.com",
+		"Title: Article Title",
+		"Content: This is the article content",
+	}
+
+	for _, part := range expectedParts {
+		if !strings.Contains(result, part) {
+			t.Errorf("buildResolvedLinksText() missing %q in result: %s", part, result)
+		}
+	}
+}
+
+func TestDefaultTopicConstant(t *testing.T) {
+	if DefaultTopic != expectedDefaultTopic {
+		t.Errorf("DefaultTopic = %q, want %q", DefaultTopic, expectedDefaultTopic)
+	}
+}
+
+func TestLinkTypeConstants(t *testing.T) {
+	if LinkTypeTelegram != expectedLinkTypeTelegram {
+		t.Errorf("LinkTypeTelegram = %q, want %q", LinkTypeTelegram, expectedLinkTypeTelegram)
+	}
+
+	if LinkTypeWeb != expectedLinkTypeWeb {
+		t.Errorf("LinkTypeWeb = %q, want %q", LinkTypeWeb, expectedLinkTypeWeb)
+	}
+}
+
+func TestToneConstants(t *testing.T) {
+	if ToneProfessional != expectedToneProfessional {
+		t.Errorf("ToneProfessional = %q, want %q", ToneProfessional, expectedToneProfessional)
+	}
+
+	if ToneCasual != expectedToneCasual {
+		t.Errorf("ToneCasual = %q, want %q", ToneCasual, expectedToneCasual)
+	}
+
+	if ToneBrief != expectedToneBrief {
+		t.Errorf("ToneBrief = %q, want %q", ToneBrief, expectedToneBrief)
 	}
 }
