@@ -3,6 +3,7 @@ package digest
 import (
 	"strings"
 	"testing"
+	"time"
 
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
@@ -444,6 +445,43 @@ func TestCountItemsWithMedia(t *testing.T) {
 	}
 }
 
+func TestTruncateForLog(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "short string unchanged",
+			input: "Short text",
+			want:  "Short text",
+		},
+		{
+			name:  "exact length unchanged",
+			input: strings.Repeat("a", LogTruncateLength),
+			want:  strings.Repeat("a", LogTruncateLength),
+		},
+		{
+			name:  "long string truncated",
+			input: strings.Repeat("a", LogTruncateLength+10),
+			want:  strings.Repeat("a", LogTruncateLength) + "...",
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := truncateForLog(tt.input); got != tt.want {
+				t.Errorf("truncateForLog() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractDigestHeader(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -494,5 +532,322 @@ func TestExtractDigestHeader(t *testing.T) {
 				t.Errorf("extractDigestHeader() = %q, should not contain %q", got, tt.wantMissing)
 			}
 		})
+	}
+}
+
+func TestBuildWindowsFromScheduleTimes(t *testing.T) {
+	base := time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		times    []time.Time
+		prev     time.Time
+		minStart time.Time
+		wantLen  int
+	}{
+		{
+			name:     "empty times",
+			times:    []time.Time{},
+			prev:     base,
+			minStart: base.Add(-24 * time.Hour),
+			wantLen:  0,
+		},
+		{
+			name:     "single window",
+			times:    []time.Time{base.Add(time.Hour)},
+			prev:     base,
+			minStart: base.Add(-24 * time.Hour),
+			wantLen:  1,
+		},
+		{
+			name:     "multiple windows",
+			times:    []time.Time{base.Add(time.Hour), base.Add(2 * time.Hour), base.Add(3 * time.Hour)},
+			prev:     base,
+			minStart: base.Add(-24 * time.Hour),
+			wantLen:  3,
+		},
+		{
+			name:     "times before prev are skipped",
+			times:    []time.Time{base.Add(-time.Hour), base.Add(time.Hour)},
+			prev:     base,
+			minStart: base.Add(-24 * time.Hour),
+			wantLen:  1,
+		},
+		{
+			name:     "minStart constrains window start",
+			times:    []time.Time{base.Add(2 * time.Hour)},
+			prev:     base.Add(-time.Hour),
+			minStart: base,
+			wantLen:  1,
+		},
+		{
+			name:     "equal prev and time produces no window",
+			times:    []time.Time{base},
+			prev:     base,
+			minStart: base.Add(-24 * time.Hour),
+			wantLen:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			windows := buildWindowsFromScheduleTimes(tt.times, tt.prev, tt.minStart)
+			if len(windows) != tt.wantLen {
+				t.Errorf("buildWindowsFromScheduleTimes() returned %d windows, want %d", len(windows), tt.wantLen)
+			}
+		})
+	}
+}
+
+func TestBuildWindowsFromScheduleTimesContent(t *testing.T) {
+	base := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
+	times := []time.Time{base.Add(time.Hour), base.Add(2 * time.Hour)}
+	prev := base
+	minStart := base.Add(-24 * time.Hour)
+
+	windows := buildWindowsFromScheduleTimes(times, prev, minStart)
+
+	if len(windows) != 2 {
+		t.Fatalf("expected 2 windows, got %d", len(windows))
+	}
+
+	// First window: prev -> times[0]
+
+	if !windows[0].start.Equal(base) {
+		t.Errorf("first window start = %v, want %v", windows[0].start, base)
+	}
+
+	if !windows[0].end.Equal(base.Add(time.Hour)) {
+		t.Errorf("first window end = %v, want %v", windows[0].end, base.Add(time.Hour))
+	}
+
+	// Second window: times[0] -> times[1]
+
+	if !windows[1].start.Equal(base.Add(time.Hour)) {
+		t.Errorf("second window start = %v, want %v", windows[1].start, base.Add(time.Hour))
+	}
+
+	if !windows[1].end.Equal(base.Add(2 * time.Hour)) {
+		t.Errorf("second window end = %v, want %v", windows[1].end, base.Add(2*time.Hour))
+	}
+}
+
+func TestClampThreshold(t *testing.T) {
+	tests := []struct {
+		name   string
+		value  float32
+		minVal float32
+		maxVal float32
+		want   float32
+	}{
+		{name: "within range", value: 0.5, minVal: 0.0, maxVal: 1.0, want: 0.5},
+		{name: "at min", value: 0.0, minVal: 0.0, maxVal: 1.0, want: 0.0},
+		{name: "at max", value: 1.0, minVal: 0.0, maxVal: 1.0, want: 1.0},
+		{name: "below min", value: -0.5, minVal: 0.0, maxVal: 1.0, want: 0.0},
+		{name: "above max", value: 1.5, minVal: 0.0, maxVal: 1.0, want: 1.0},
+		{name: "typical threshold range", value: 0.3, minVal: 0.1, maxVal: 0.9, want: 0.3},
+		{name: "small values", value: 0.05, minVal: 0.1, maxVal: 0.9, want: 0.1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampThreshold(tt.value, tt.minVal, tt.maxVal); got != tt.want {
+				t.Errorf("clampThreshold(%v, %v, %v) = %v, want %v", tt.value, tt.minVal, tt.maxVal, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCollectClusterSummaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		clusters []db.ClusterWithItems
+		maxItems int
+		wantLen  int
+	}{
+		{
+			name:     "empty clusters",
+			clusters: []db.ClusterWithItems{},
+			maxItems: 10,
+			wantLen:  0,
+		},
+		{
+			name: "single cluster with topic",
+			clusters: []db.ClusterWithItems{
+				{Topic: "Tech", Items: []db.Item{{Summary: "Test summary"}}},
+			},
+			maxItems: 10,
+			wantLen:  1,
+		},
+		{
+			name: "multiple clusters takes first item each",
+			clusters: []db.ClusterWithItems{
+				{Topic: "Tech", Items: []db.Item{{Summary: "Summary 1"}, {Summary: "Summary 2"}}},
+				{Topic: "Finance", Items: []db.Item{{Summary: "Summary 3"}}},
+			},
+			maxItems: 10,
+			wantLen:  2, // Only first item from each cluster
+		},
+		{
+			name: "respects maxItems limit",
+			clusters: []db.ClusterWithItems{
+				{Topic: "A", Items: []db.Item{{Summary: "S1"}}},
+				{Topic: "B", Items: []db.Item{{Summary: "S2"}}},
+				{Topic: "C", Items: []db.Item{{Summary: "S3"}}},
+				{Topic: "D", Items: []db.Item{{Summary: "S4"}}},
+			},
+			maxItems: 2,
+			wantLen:  2,
+		},
+		{
+			name: "skips clusters without topic",
+			clusters: []db.ClusterWithItems{
+				{Topic: "", Items: []db.Item{{Summary: "No topic"}}},
+				{Topic: "Tech", Items: []db.Item{{Summary: "With topic"}}},
+			},
+			maxItems: 10,
+			wantLen:  1,
+		},
+		{
+			name: "skips clusters without items",
+			clusters: []db.ClusterWithItems{
+				{Topic: "Tech", Items: []db.Item{}},
+				{Topic: "Finance", Items: []db.Item{{Summary: "Has item"}}},
+			},
+			maxItems: 10,
+			wantLen:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := collectClusterSummaries(tt.clusters, tt.maxItems)
+			if len(got) != tt.wantLen {
+				t.Errorf("collectClusterSummaries() returned %d summaries, want %d", len(got), tt.wantLen)
+			}
+		})
+	}
+}
+
+func TestAppendItemSummaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []string
+		items    []db.Item
+		maxItems int
+		wantLen  int
+	}{
+		{
+			name:     "empty items",
+			existing: []string{},
+			items:    []db.Item{},
+			maxItems: 10,
+			wantLen:  0,
+		},
+		{
+			name:     "append to empty",
+			existing: []string{},
+			items:    []db.Item{{Summary: "New item"}},
+			maxItems: 10,
+			wantLen:  1,
+		},
+		{
+			name:     "append to existing",
+			existing: []string{"Existing"},
+			items:    []db.Item{{Summary: "New item"}},
+			maxItems: 10,
+			wantLen:  2,
+		},
+		{
+			name:     "respects max limit",
+			existing: []string{"One", "Two"},
+			items:    []db.Item{{Summary: "Three"}, {Summary: "Four"}},
+			maxItems: 3,
+			wantLen:  3,
+		},
+		{
+			name:     "already at max",
+			existing: []string{"One", "Two", "Three"},
+			items:    []db.Item{{Summary: "Four"}},
+			maxItems: 3,
+			wantLen:  3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := appendItemSummaries(tt.existing, tt.items, tt.maxItems)
+			if len(got) != tt.wantLen {
+				t.Errorf("appendItemSummaries() returned %d summaries, want %d", len(got), tt.wantLen)
+			}
+		})
+	}
+}
+
+func TestCountDistinctTopicsEdgeCases(t *testing.T) {
+	t.Run("case insensitivity", func(t *testing.T) {
+		items := []db.Item{
+			{Topic: "Technology"},
+			{Topic: "technology"},
+			{Topic: "TECHNOLOGY"},
+		}
+		// These are treated as the same topic (case insensitive)
+		got := countDistinctTopics(items)
+		if got != 1 {
+			t.Errorf("countDistinctTopics() = %d, want 1 (case insensitive)", got)
+		}
+	})
+
+	t.Run("whitespace only topics", func(t *testing.T) {
+		items := []db.Item{
+			{Topic: " "},
+			{Topic: "  "},
+			{Topic: "\t"},
+		}
+		// Whitespace-only topics are treated as empty/not counted
+		got := countDistinctTopics(items)
+
+		if got != 0 {
+			t.Errorf("countDistinctTopics() = %d, want 0 for whitespace topics", got)
+		}
+	})
+
+	t.Run("mixed valid and whitespace topics", func(t *testing.T) {
+		items := []db.Item{
+			{Topic: "Technology"},
+			{Topic: ""},
+			{Topic: "Finance"},
+			{Topic: " "},
+		}
+
+		got := countDistinctTopics(items)
+
+		if got != 2 {
+			t.Errorf("countDistinctTopics() = %d, want 2", got)
+		}
+	})
+}
+
+func TestGetImportancePrefixEdgeCases(t *testing.T) {
+	tests := []struct {
+		score float32
+		want  string
+	}{
+		{1.0, EmojiBreaking},
+		{0.8, EmojiBreaking},
+		{0.79, EmojiNotable},
+		{0.6, EmojiNotable},
+		{0.59, EmojiStandard},
+		{0.4, EmojiStandard},
+		{0.39, EmojiBullet},
+		{0.0, EmojiBullet},
+		{-0.1, EmojiBullet},
+	}
+
+	for _, tt := range tests {
+		got := getImportancePrefix(tt.score)
+		if got != tt.want {
+			t.Errorf("getImportancePrefix(%v) = %s, want %s", tt.score, got, tt.want)
+		}
 	}
 }

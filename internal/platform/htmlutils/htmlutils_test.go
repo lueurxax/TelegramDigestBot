@@ -384,3 +384,81 @@ func TestSplitHTMLItemBoundaryFlush(t *testing.T) {
 		t.Errorf("Second part should not start with a newline: %q", parts[1])
 	}
 }
+
+func TestStripHTMLTags(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no tags",
+			input:    "Hello World",
+			expected: "Hello World",
+		},
+		{
+			name:     "simple bold tag",
+			input:    "<b>Bold text</b>",
+			expected: "Bold text",
+		},
+		{
+			name:     "multiple tags",
+			input:    "<b>Bold</b> and <i>italic</i> text",
+			expected: "Bold and italic text",
+		},
+		{
+			name:     "nested tags",
+			input:    "<b><i>Bold italic</i></b>",
+			expected: "Bold italic",
+		},
+		{
+			name:     "anchor with href",
+			input:    `<a href="https://example.com">Link text</a>`,
+			expected: "Link text",
+		},
+		{
+			name:     "escaped HTML entities",
+			input:    "Apple &amp; Google &gt; Microsoft",
+			expected: "Apple & Google > Microsoft",
+		},
+		{
+			name:     "mixed content",
+			input:    "<b>Breaking:</b> Trump announces <i>new tariffs</i> on imports",
+			expected: "Breaking: Trump announces new tariffs on imports",
+		},
+		{
+			name:     "blockquote",
+			input:    "<blockquote>Quoted content here</blockquote>",
+			expected: "Quoted content here",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "only tags no content",
+			input:    "<b></b><i></i>",
+			expected: "",
+		},
+		{
+			name:     "whitespace preservation",
+			input:    "<b>Word1</b>  <i>Word2</i>",
+			expected: "Word1  Word2",
+		},
+		{
+			name:     "newlines preserved",
+			input:    "<b>Line1</b>\n<i>Line2</i>",
+			expected: "Line1\nLine2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StripHTMLTags(tt.input)
+			if got != tt.expected {
+				t.Errorf("StripHTMLTags() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}

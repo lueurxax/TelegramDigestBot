@@ -1,10 +1,37 @@
 package digest
 
 import (
+	"math"
 	"testing"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
+
+const testErrWeightOutsideBounds = "weight %v outside bounds [%v, %v]"
+
+func TestDefaultAutoWeightConfig(t *testing.T) {
+	cfg := DefaultAutoWeightConfig()
+
+	if cfg.MinMessages != AutoWeightDefaultMinMessages {
+		t.Errorf("MinMessages = %d, want %d", cfg.MinMessages, AutoWeightDefaultMinMessages)
+	}
+
+	if cfg.ExpectedFrequency != AutoWeightDefaultExpectedFrequency {
+		t.Errorf("ExpectedFrequency = %v, want %v", cfg.ExpectedFrequency, AutoWeightDefaultExpectedFrequency)
+	}
+
+	if cfg.AutoMin != AutoWeightDefaultMinWeight {
+		t.Errorf("AutoMin = %v, want %v", cfg.AutoMin, AutoWeightDefaultMinWeight)
+	}
+
+	if cfg.AutoMax != AutoWeightDefaultMaxWeight {
+		t.Errorf("AutoMax = %v, want %v", cfg.AutoMax, AutoWeightDefaultMaxWeight)
+	}
+
+	if cfg.RollingDays != AutoWeightDefaultRollingDays {
+		t.Errorf("RollingDays = %d, want %d", cfg.RollingDays, AutoWeightDefaultRollingDays)
+	}
+}
 
 func TestCalculateAutoWeight(t *testing.T) {
 	cfg := DefaultAutoWeightConfig()
@@ -116,4 +143,145 @@ func TestCalculateAutoWeight_Bounds(t *testing.T) {
 	if weight < cfg.AutoMin {
 		t.Errorf("Terrible channel weight %v below AutoMin %v", weight, cfg.AutoMin)
 	}
+}
+
+func TestCalculateAutoWeightEdgeCases(t *testing.T) {
+	cfg := DefaultAutoWeightConfig()
+
+	t.Run("zero days clamps to 1", func(t *testing.T) {
+		stats := &db.RollingStats{
+			TotalMessages:      100,
+			TotalItemsCreated:  50,
+			TotalItemsDigested: 25,
+			AvgImportance:      0.5,
+		}
+
+		weight := CalculateAutoWeight(stats, cfg, 0)
+		if weight < cfg.AutoMin || weight > cfg.AutoMax {
+			t.Errorf(testErrWeightOutsideBounds, weight, cfg.AutoMin, cfg.AutoMax)
+		}
+	})
+
+	t.Run("negative days clamps to 1", func(t *testing.T) {
+		stats := &db.RollingStats{
+			TotalMessages:      100,
+			TotalItemsCreated:  50,
+			TotalItemsDigested: 25,
+			AvgImportance:      0.5,
+		}
+
+		weight := CalculateAutoWeight(stats, cfg, -5)
+		if weight < cfg.AutoMin || weight > cfg.AutoMax {
+			t.Errorf(testErrWeightOutsideBounds, weight, cfg.AutoMin, cfg.AutoMax)
+		}
+	})
+
+	t.Run("zero total messages returns neutral", func(t *testing.T) {
+		stats := &db.RollingStats{
+			TotalMessages:      0,
+			TotalItemsCreated:  0,
+			TotalItemsDigested: 0,
+			AvgImportance:      0,
+		}
+
+		weight := CalculateAutoWeight(stats, cfg, 30)
+		if math.Abs(float64(weight-db.DefaultImportanceWeight)) > 0.01 {
+			t.Errorf("weight = %v, want neutral %v", weight, db.DefaultImportanceWeight)
+		}
+	})
+
+	t.Run("custom config bounds respected", func(t *testing.T) {
+		customCfg := AutoWeightConfig{
+			MinMessages:       5,
+			ExpectedFrequency: 3.0,
+			AutoMin:           0.8,
+			AutoMax:           1.2,
+			RollingDays:       7,
+		}
+
+		stats := &db.RollingStats{
+			TotalMessages:      1000,
+			TotalItemsCreated:  1000,
+			TotalItemsDigested: 1000,
+			AvgImportance:      1.0,
+		}
+
+		weight := CalculateAutoWeight(stats, customCfg, 7)
+		if weight > customCfg.AutoMax {
+			t.Errorf("weight %v exceeds custom max %v", weight, customCfg.AutoMax)
+		}
+	})
+}
+
+func TestCalculateAutoWeightComponents(t *testing.T) {
+	cfg := DefaultAutoWeightConfig()
+
+	t.Run("high inclusion rate boosts weight", func(t *testing.T) {
+		highInclusion := &db.RollingStats{
+			TotalMessages:      100,
+			TotalItemsCreated:  50,
+			TotalItemsDigested: 50, // 100% inclusion
+			AvgImportance:      0.5,
+		}
+
+		lowInclusion := &db.RollingStats{
+			TotalMessages:      100,
+			TotalItemsCreated:  50,
+			TotalItemsDigested: 10, // 20% inclusion
+			AvgImportance:      0.5,
+		}
+
+		highWeight := CalculateAutoWeight(highInclusion, cfg, 30)
+		lowWeight := CalculateAutoWeight(lowInclusion, cfg, 30)
+
+		if highWeight <= lowWeight {
+			t.Errorf("high inclusion weight %v should exceed low inclusion weight %v", highWeight, lowWeight)
+		}
+	})
+
+	t.Run("high importance boosts weight", func(t *testing.T) {
+		highImportance := &db.RollingStats{
+			TotalMessages:      100,
+			TotalItemsCreated:  50,
+			TotalItemsDigested: 25,
+			AvgImportance:      0.9,
+		}
+
+		lowImportance := &db.RollingStats{
+			TotalMessages:      100,
+			TotalItemsCreated:  50,
+			TotalItemsDigested: 25,
+			AvgImportance:      0.2,
+		}
+
+		highWeight := CalculateAutoWeight(highImportance, cfg, 30)
+		lowWeight := CalculateAutoWeight(lowImportance, cfg, 30)
+
+		if highWeight <= lowWeight {
+			t.Errorf("high importance weight %v should exceed low importance weight %v", highWeight, lowWeight)
+		}
+	})
+
+	t.Run("high signal ratio boosts weight", func(t *testing.T) {
+		highSignal := &db.RollingStats{
+			TotalMessages:      100,
+			TotalItemsCreated:  80, // 80% signal
+			TotalItemsDigested: 40,
+			AvgImportance:      0.5,
+		}
+
+		lowSignal := &db.RollingStats{
+			TotalMessages:      100,
+			TotalItemsCreated:  20, // 20% signal
+			TotalItemsDigested: 10,
+			AvgImportance:      0.5,
+		}
+
+		highWeight := CalculateAutoWeight(highSignal, cfg, 30)
+		lowWeight := CalculateAutoWeight(lowSignal, cfg, 30)
+
+		if highWeight <= lowWeight {
+			t.Errorf("high signal weight %v should exceed low signal weight %v", highWeight, lowWeight)
+		}
+	})
 }

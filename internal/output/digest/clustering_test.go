@@ -2,6 +2,7 @@ package digest
 
 import (
 	"testing"
+	"time"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
@@ -91,5 +92,115 @@ func TestGetImportancePrefix(t *testing.T) {
 		if got := getImportancePrefix(tt.score); got != tt.want {
 			t.Errorf("getImportancePrefix(%v) = %v, want %v", tt.score, got, tt.want)
 		}
+	}
+}
+
+func TestNormalizeClusterTopic(t *testing.T) {
+	tests := []struct {
+		name  string
+		topic string
+		want  string
+	}{
+		{name: "lowercase", topic: "technology", want: "Technology"},
+		{name: "uppercase", topic: "FINANCE", want: "Finance"},
+		{name: "mixed case", topic: "wOrLd NeWs", want: "World News"},
+		{name: "with spaces", topic: "  politics  ", want: "Politics"},
+		{name: "empty returns default", topic: "", want: DefaultTopic},
+		{name: "whitespace only", topic: "   ", want: DefaultTopic},
+		{name: "already normalized", topic: "Science", want: "Science"},
+		{name: "multi word", topic: "local news", want: "Local News"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeClusterTopic(tt.topic); got != tt.want {
+				t.Errorf("normalizeClusterTopic(%q) = %q, want %q", tt.topic, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWithinClusterWindow(t *testing.T) {
+	now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	hour := time.Hour
+
+	tests := []struct {
+		name   string
+		a      time.Time
+		b      time.Time
+		window time.Duration
+		want   bool
+	}{
+		{
+			name:   "same time",
+			a:      now,
+			b:      now,
+			window: hour,
+			want:   true,
+		},
+		{
+			name:   "within window",
+			a:      now,
+			b:      now.Add(30 * time.Minute),
+			window: hour,
+			want:   true,
+		},
+		{
+			name:   "exactly at window",
+			a:      now,
+			b:      now.Add(hour),
+			window: hour,
+			want:   true,
+		},
+		{
+			name:   "outside window",
+			a:      now,
+			b:      now.Add(2 * hour),
+			window: hour,
+			want:   false,
+		},
+		{
+			name:   "reverse order still works",
+			a:      now.Add(30 * time.Minute),
+			b:      now,
+			window: hour,
+			want:   true,
+		},
+		{
+			name:   "zero time a",
+			a:      time.Time{},
+			b:      now,
+			window: hour,
+			want:   true,
+		},
+		{
+			name:   "zero time b",
+			a:      now,
+			b:      time.Time{},
+			window: hour,
+			want:   true,
+		},
+		{
+			name:   "both zero",
+			a:      time.Time{},
+			b:      time.Time{},
+			window: hour,
+			want:   true,
+		},
+		{
+			name:   "large window",
+			a:      now,
+			b:      now.Add(24 * time.Hour),
+			window: 48 * time.Hour,
+			want:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := withinClusterWindow(tt.a, tt.b, tt.window); got != tt.want {
+				t.Errorf("withinClusterWindow() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
