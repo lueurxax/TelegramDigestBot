@@ -81,7 +81,7 @@ Notes:
 - Schedule changes: apply immediately on the next scheduler tick; windows are generated from the latest schedule.
 
 ## Validation
-- Time format: must be `HH:00` (24h); reject `9:00`, `25:00`, `09:30`, `09:00:00`.
+- Time format: must be `H:00` or `HH:00` (24h); reject `25:00`, `09:30`, `09:00:00`.
 - Timezone: must be valid IANA name; reject invalid values.
 - Empty schedule: if both `times` and `hourly` are absent/empty for a day group, that group has no digests.
 - Hourly range crossing midnight (e.g., `22:00-06:00`) is invalid; require admins to split into two ranges across day groups.

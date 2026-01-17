@@ -281,8 +281,8 @@ func TestNormalizeTimeHM(t *testing.T) {
 		},
 		{
 			name:  "with whitespace",
-			input: "  09:30  ",
-			want:  "09:30",
+			input: "  09:00  ",
+			want:  "09:00",
 		},
 		{
 			name:    "empty string",
@@ -310,6 +310,11 @@ func TestNormalizeTimeHM(t *testing.T) {
 			wantErr: ErrHourOutOfRange,
 		},
 		{
+			name:    "non-zero minute",
+			input:   "09:30",
+			wantErr: ErrMinuteNotZero,
+		},
+		{
 			name:    "minute out of range",
 			input:   "09:60",
 			wantErr: ErrInvalidMinute,
@@ -320,9 +325,9 @@ func TestNormalizeTimeHM(t *testing.T) {
 			want:  "00:00",
 		},
 		{
-			name:  "max valid time",
-			input: "23:59",
-			want:  "23:59",
+			name:  "max valid hour",
+			input: "23:00",
+			want:  "23:00",
 		},
 	}
 
@@ -463,7 +468,7 @@ func TestTimesBetweenHourlySemantics(t *testing.T) {
 	s := Schedule{
 		Timezone: "UTC",
 		Weekdays: DaySchedule{
-			Hourly: &HourlyRange{Start: "06:30", End: "08:00"},
+			Hourly: &HourlyRange{Start: "06:00", End: "08:00"},
 		},
 	}
 
@@ -475,17 +480,21 @@ func TestTimesBetweenHourlySemantics(t *testing.T) {
 		t.Fatalf(testErrTimesBetween, err)
 	}
 
-	expectedCount := 2
+	expectedCount := 3
 	if len(times) != expectedCount {
 		t.Fatalf(testErrExpectedTimes, expectedCount, len(times))
 	}
 
-	if times[0].Hour() != 7 || times[0].Minute() != 0 {
-		t.Fatalf("expected first time 07:00, got %s", times[0].Format(testTimeFormat))
+	if times[0].Hour() != 6 || times[0].Minute() != 0 {
+		t.Fatalf("expected first time 06:00, got %s", times[0].Format(testTimeFormat))
 	}
 
-	if times[1].Hour() != 8 || times[1].Minute() != 0 {
-		t.Fatalf("expected second time 08:00, got %s", times[1].Format(testTimeFormat))
+	if times[1].Hour() != 7 || times[1].Minute() != 0 {
+		t.Fatalf("expected second time 07:00, got %s", times[1].Format(testTimeFormat))
+	}
+
+	if times[2].Hour() != 8 || times[2].Minute() != 0 {
+		t.Fatalf("expected third time 08:00, got %s", times[2].Format(testTimeFormat))
 	}
 }
 
@@ -493,7 +502,7 @@ func TestTimesBetweenMergeAndDedup(t *testing.T) {
 	s := Schedule{
 		Timezone: "UTC",
 		Weekdays: DaySchedule{
-			Times:  []string{"18:00", "19:30"},
+			Times:  []string{"18:00", "20:00"},
 			Hourly: &HourlyRange{Start: "18:00", End: "20:00"},
 		},
 	}
@@ -506,12 +515,12 @@ func TestTimesBetweenMergeAndDedup(t *testing.T) {
 		t.Fatalf(testErrTimesBetween, err)
 	}
 
-	expectedCount := 4
+	expectedCount := 3
 	if len(times) != expectedCount {
 		t.Fatalf(testErrExpectedTimes, expectedCount, len(times))
 	}
 
-	expected := []string{"18:00", "19:00", "19:30", "20:00"}
+	expected := []string{"18:00", "19:00", "20:00"}
 	for i, exp := range expected {
 		if times[i].Format(testTimeFormat) != exp {
 			t.Fatalf("expected %s at index %d, got %s", exp, i, times[i].Format(testTimeFormat))
@@ -639,6 +648,32 @@ func TestTimesBetweenEmptySchedule(t *testing.T) {
 
 	if len(times) != 0 {
 		t.Errorf("expected 0 times, got %d", len(times))
+	}
+}
+
+func TestNextTimes(t *testing.T) {
+	s := Schedule{
+		Timezone: "UTC",
+		Weekdays: DaySchedule{Times: []string{"09:00", "13:00"}},
+	}
+
+	start := time.Date(2026, 1, 5, 8, 0, 0, 0, time.UTC) // Monday
+
+	times, err := s.NextTimes(start, 2)
+	if err != nil {
+		t.Fatalf(testErrUnexpected, err)
+	}
+
+	if len(times) != 2 {
+		t.Fatalf(testErrExpectedTimes, 2, len(times))
+	}
+
+	if times[0].Format(testTimeFormat) != "09:00" {
+		t.Errorf("first time = %s, want 09:00", times[0].Format(testTimeFormat))
+	}
+
+	if times[1].Format(testTimeFormat) != "13:00" {
+		t.Errorf("second time = %s, want 13:00", times[1].Format(testTimeFormat))
 	}
 }
 

@@ -428,7 +428,11 @@ func (s *Scheduler) processScheduledDigest(ctx context.Context, cfg digestProces
 				Time(LogFieldEnd, window.end).
 				Int64(SettingTargetChatID, cfg.targetChatID).
 				Msg(msgFailedToProcessWindow)
+
+			continue
 		}
+
+		s.updateScheduleAnchor(ctx, window.end, logger)
 
 		if anomaly != nil {
 			anomalies = append(anomalies, *anomaly)
@@ -487,9 +491,16 @@ func (s *Scheduler) buildScheduledWindows(cfg digestProcessConfig, now time.Time
 		return nil, nil
 	}
 
-	prev, err := s.getSchedulePreviousTime(cfg.schedule, minStart)
-	if err != nil {
-		return nil, err
+	var prev time.Time
+	if !cfg.scheduleAnchor.IsZero() && !cfg.scheduleAnchor.Before(minStart) {
+		prev = cfg.scheduleAnchor
+	} else {
+		prevCandidate, err := s.getSchedulePreviousTime(cfg.schedule, minStart)
+		if err != nil {
+			return nil, err
+		}
+
+		prev = prevCandidate
 	}
 
 	windows := buildWindowsFromScheduleTimes(times, prev, minStart)
@@ -501,11 +512,17 @@ func (s *Scheduler) buildScheduledWindows(cfg digestProcessConfig, now time.Time
 func (s *Scheduler) getScheduleMinStart(cfg digestProcessConfig, now time.Time) time.Time {
 	minStart := now.Add(-cfg.catchupWindow)
 
-	if !cfg.scheduleAnchor.IsZero() && cfg.scheduleAnchor.After(minStart) {
+	if !cfg.scheduleAnchor.IsZero() && cfg.scheduleAnchor.After(minStart) && cfg.scheduleAnchor.Before(now) {
 		minStart = cfg.scheduleAnchor
 	}
 
 	return minStart
+}
+
+func (s *Scheduler) updateScheduleAnchor(ctx context.Context, anchor time.Time, logger *zerolog.Logger) {
+	if err := s.database.SaveSetting(ctx, schedule.SettingDigestScheduleAnchor, anchor.UTC()); err != nil {
+		logger.Warn().Err(err).Msg("failed to update digest_schedule_anchor")
+	}
 }
 
 func (s *Scheduler) getSchedulePreviousTime(sched *schedule.Schedule, minStart time.Time) (time.Time, error) {

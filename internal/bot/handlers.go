@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"strconv"
@@ -55,6 +56,7 @@ const (
 	SubCmdAds      = "ads"
 	SubCmdReset    = "reset"
 	SubCmdClear    = "clear"
+	SubCmdPreview  = "preview"
 	SubCmdApprove  = "approve"
 	SubCmdReject   = "reject"
 	SubCmdConfirm  = "confirm"
@@ -86,6 +88,18 @@ const (
 	DateTimeFormat = "2006-01-02 15:04:05"
 	TimeFormat     = "15:04"
 )
+
+const (
+	schedulePreviewDefault = 5
+	schedulePreviewMax     = 20
+)
+
+const (
+	errInvalidScheduleFmt   = "❌ Invalid schedule: %s"
+	scheduleTimezoneLineFmt = "• Timezone: <code>%s</code>\n"
+)
+
+var errInvalidPreviewCount = errors.New("invalid preview count")
 
 // Prompt template constants.
 const (
@@ -495,7 +509,7 @@ func (b *Bot) handleWindow(ctx context.Context, msg *tgbotapi.Message) {
 func (b *Bot) handleSchedule(ctx context.Context, msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 	if len(args) == 0 {
-		b.reply(msg, "Usage: <code>/schedule timezone &lt;IANA&gt;</code> | <code>/schedule weekdays times &lt;HH:MM,...&gt;</code> | <code>/schedule weekdays hourly &lt;HH:MM-HH:MM&gt;</code> | <code>/schedule weekends hourly &lt;HH:MM-HH:MM&gt;</code> | <code>/schedule show</code>")
+		b.reply(msg, "Usage: <code>/schedule timezone &lt;IANA&gt;</code> | <code>/schedule weekdays times &lt;HH:00,...&gt;</code> | <code>/schedule weekdays hourly &lt;HH:00-HH:00&gt;</code> | <code>/schedule weekends hourly &lt;HH:00-HH:00&gt;</code> | <code>/schedule preview [count]</code> | <code>/schedule clear</code> | <code>/schedule show</code>")
 
 		return
 	}
@@ -503,6 +517,10 @@ func (b *Bot) handleSchedule(ctx context.Context, msg *tgbotapi.Message) {
 	subcommand := strings.ToLower(args[0])
 
 	switch subcommand {
+	case SubCmdClear:
+		b.handleScheduleClear(ctx, msg)
+	case SubCmdPreview:
+		b.handleSchedulePreview(ctx, msg, args)
 	case SubCmdShow:
 		b.reply(msg, b.formatDigestSchedule(ctx))
 	case "timezone":
@@ -529,7 +547,7 @@ func (b *Bot) handleScheduleTimezone(ctx context.Context, msg *tgbotapi.Message,
 
 func (b *Bot) handleScheduleDayGroup(ctx context.Context, msg *tgbotapi.Message, dayTarget string, args []string) {
 	if len(args) < 3 {
-		b.reply(msg, "Usage: <code>/schedule weekdays times &lt;HH:MM,...&gt;</code> | <code>/schedule weekdays hourly &lt;HH:MM-HH:MM&gt;</code>")
+		b.reply(msg, "Usage: <code>/schedule weekdays times &lt;HH:00,...&gt;</code> | <code>/schedule weekdays hourly &lt;HH:00-HH:00&gt;</code>")
 
 		return
 	}
@@ -554,6 +572,90 @@ func (b *Bot) handleScheduleDayGroup(ctx context.Context, msg *tgbotapi.Message,
 	default:
 		b.reply(msg, "❌ Unknown schedule mode. Use <code>times</code> or <code>hourly</code>.")
 	}
+}
+
+func (b *Bot) handleScheduleClear(ctx context.Context, msg *tgbotapi.Message) {
+	if err := b.database.DeleteSettingWithHistory(ctx, schedule.SettingDigestSchedule, msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error clearing schedule: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	if err := b.database.DeleteSettingWithHistory(ctx, schedule.SettingDigestScheduleAnchor, msg.From.ID); err != nil {
+		b.logger.Debug().Err(err).Msg("failed to clear digest_schedule_anchor")
+	}
+
+	b.reply(msg, "✅ Digest schedule cleared. Scheduler uses <code>digest_window</code>.")
+}
+
+func (b *Bot) handleSchedulePreview(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	count, err := parseSchedulePreviewCount(args)
+	if err != nil {
+		b.reply(msg, "Usage: <code>/schedule preview [count]</code>")
+
+		return
+	}
+
+	message, err := b.formatSchedulePreview(ctx, count)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error computing schedule preview: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	b.reply(msg, message)
+}
+
+func parseSchedulePreviewCount(args []string) (int, error) {
+	if len(args) <= 1 {
+		return schedulePreviewDefault, nil
+	}
+
+	parsed, err := strconv.Atoi(args[1])
+	if err != nil || parsed <= 0 {
+		return 0, errInvalidPreviewCount
+	}
+
+	if parsed > schedulePreviewMax {
+		parsed = schedulePreviewMax
+	}
+
+	return parsed, nil
+}
+
+func (b *Bot) formatSchedulePreview(ctx context.Context, count int) (string, error) {
+	sched := b.loadDigestSchedule(ctx)
+	if sched.IsEmpty() {
+		return "ℹ️ No digest schedule configured.", nil
+	}
+
+	if err := sched.Validate(); err != nil {
+		return fmt.Sprintf(errInvalidScheduleFmt, html.EscapeString(err.Error())), nil
+	}
+
+	loc, err := sched.Location()
+	if err != nil {
+		return fmt.Sprintf("❌ Invalid timezone: %s", html.EscapeString(err.Error())), nil
+	}
+
+	times, err := sched.NextTimes(time.Now(), count)
+	if err != nil {
+		return "", fmt.Errorf("compute schedule preview: %w", err)
+	}
+
+	if len(times) == 0 {
+		return "ℹ️ No upcoming scheduled times found.", nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("🗓️ <b>Next scheduled digests</b>\n")
+	sb.WriteString(fmt.Sprintf(scheduleTimezoneLineFmt, html.EscapeString(loc.String())))
+
+	for _, t := range times {
+		sb.WriteString(fmt.Sprintf("• %s\n", t.In(loc).Format("Mon 2006-01-02 15:04")))
+	}
+
+	return sb.String(), nil
 }
 
 func (b *Bot) handleScheduleTimes(ctx context.Context, msg *tgbotapi.Message, day *schedule.DaySchedule, value string, sched *schedule.Schedule) {
@@ -616,7 +718,7 @@ func (b *Bot) saveDigestSchedule(ctx context.Context, msg *tgbotapi.Message, sch
 	sched.Timezone = schedule.NormalizeTimezone(sched.Timezone)
 
 	if err := sched.Validate(); err != nil {
-		b.reply(msg, fmt.Sprintf("❌ Invalid schedule: %s", html.EscapeString(err.Error())))
+		b.reply(msg, fmt.Sprintf(errInvalidScheduleFmt, html.EscapeString(err.Error())))
 		return
 	}
 
@@ -646,7 +748,7 @@ func (b *Bot) formatDigestSchedule(ctx context.Context) string {
 
 	var sb strings.Builder
 	sb.WriteString("🗓️ <b>Digest Schedule</b>\n")
-	sb.WriteString(fmt.Sprintf("• Timezone: <code>%s</code>\n", html.EscapeString(timezone)))
+	sb.WriteString(fmt.Sprintf(scheduleTimezoneLineFmt, html.EscapeString(timezone)))
 	sb.WriteString(fmt.Sprintf("• Weekdays: %s\n", html.EscapeString(formatScheduleDay(sched.Weekdays))))
 	sb.WriteString(fmt.Sprintf("• Weekends: %s", html.EscapeString(formatScheduleDay(sched.Weekends))))
 
@@ -2404,6 +2506,8 @@ func (b *Bot) handleSetup(ctx context.Context, msg *tgbotapi.Message) {
 	sb.WriteString("3️⃣ <b>Basic Configuration</b>\n")
 	sb.WriteString("• <code>/window 60m</code> - Set fallback digest interval\n")
 	sb.WriteString("• <code>/schedule show</code> - View digest schedule\n")
+	sb.WriteString("• <code>/schedule preview [count]</code> - Preview upcoming digest times\n")
+	sb.WriteString("• <code>/schedule clear</code> - Clear schedule and use digest_window\n")
 	sb.WriteString("• <code>/language ru</code> - Set digest language\n\n")
 
 	sb.WriteString("💡 <i>Tip: Use /settings to see all current values.</i>")
@@ -2853,6 +2957,8 @@ func (b *Bot) handleHelp(_ context.Context, msg *tgbotapi.Message) {
 		"• <code>/config target &lt;id|@user&gt;</code> - Set digest destination\n"+
 		"• <code>/config window &lt;duration&gt;</code> - Set fallback digest interval (e.g., 60m)\n"+
 		"• <code>/schedule show</code> - View/update digest schedule\n"+
+		"• <code>/schedule preview [count]</code> - Preview upcoming digest times\n"+
+		"• <code>/schedule clear</code> - Clear schedule and use digest_window\n"+
 		"• <code>/config language &lt;code&gt;</code> - Set digest language (e.g., ru)\n"+
 		"• <code>/config tone &lt;professional|casual|brief&gt;</code> - Set digest tone\n"+
 		"• <code>/config relevance &lt;0-1&gt;</code> - Set relevance threshold\n"+

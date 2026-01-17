@@ -31,9 +31,10 @@ const (
 // Static errors for schedule validation.
 var (
 	ErrMidnightCrossing = errors.New("hourly range crosses midnight")
-	ErrTimeFormat       = errors.New("time must be HH:MM")
+	ErrTimeFormat       = errors.New("time must be H:00 or HH:00")
 	ErrInvalidHour      = errors.New("invalid hour")
 	ErrInvalidMinute    = errors.New("invalid minute")
+	ErrMinuteNotZero    = errors.New("minutes must be 00")
 	ErrHourOutOfRange   = errors.New("hour out of range")
 )
 
@@ -317,41 +318,95 @@ func parseTimeHM(value string) (int, error) {
 	return hour*minutesPerHour + minute, nil
 }
 
-// NormalizeTimeHM accepts H:MM or HH:MM and returns HH:MM.
+// NormalizeTimeHM accepts H:00 or HH:00 and returns HH:00.
 func NormalizeTimeHM(value string) (string, error) {
+	hour, minute, err := parseHourMinute(value)
+	if err != nil {
+		return "", err
+	}
+
+	if minute != 0 {
+		return "", ErrMinuteNotZero
+	}
+
+	return fmt.Sprintf("%02d:%02d", hour, minute), nil
+}
+
+func parseHourMinute(value string) (int, int, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", ErrTimeFormat
+		return 0, 0, ErrTimeFormat
 	}
 
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 {
-		return "", ErrTimeFormat
+		return 0, 0, ErrTimeFormat
 	}
 
 	if len(parts[1]) != 2 {
-		return "", ErrTimeFormat
+		return 0, 0, ErrTimeFormat
 	}
 
 	hour, err := strconv.Atoi(parts[0])
 	if err != nil {
-		return "", ErrInvalidHour
+		return 0, 0, ErrInvalidHour
 	}
 
 	minute, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return "", ErrInvalidMinute
+		return 0, 0, ErrInvalidMinute
 	}
 
 	if hour > maxHour || hour < 0 {
-		return "", ErrHourOutOfRange
+		return 0, 0, ErrHourOutOfRange
 	}
 
 	if minute < 0 || minute >= minutesPerHour {
-		return "", ErrInvalidMinute
+		return 0, 0, ErrInvalidMinute
 	}
 
-	return fmt.Sprintf("%02d:%02d", hour, minute), nil
+	return hour, minute, nil
+}
+
+// NextTimes returns the next scheduled times strictly after the given moment.
+func (s Schedule) NextTimes(after time.Time, count int) ([]time.Time, error) {
+	if count <= 0 {
+		return nil, nil
+	}
+
+	loc, err := s.Location()
+	if err != nil {
+		return nil, err
+	}
+
+	afterLocal := after.In(loc)
+	startDate := dateOnly(afterLocal)
+
+	results := make([]time.Time, 0, count)
+
+	for offset := 0; offset < 370 && len(results) < count; offset++ {
+		d := startDate.AddDate(0, 0, offset)
+		daySchedule := s.daySchedule(d.Weekday())
+
+		minutes, err := expandDayTimes(daySchedule)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, min := range minutes {
+			t := time.Date(d.Year(), d.Month(), d.Day(), min/minutesPerHour, min%minutesPerHour, 0, 0, loc)
+			if !t.After(afterLocal) {
+				continue
+			}
+
+			results = append(results, t)
+			if len(results) >= count {
+				break
+			}
+		}
+	}
+
+	return results, nil
 }
 
 func dateOnly(t time.Time) time.Time {

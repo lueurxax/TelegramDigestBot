@@ -11,6 +11,7 @@ import (
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/schedule"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -29,6 +30,8 @@ type digestSettings struct {
 	digestTone                  string
 	othersAsNarrative           bool
 }
+
+const errInvalidScheduleTimezone = "invalid digest schedule timezone"
 
 func (s *Scheduler) getDigestSettings(ctx context.Context, logger *zerolog.Logger) digestSettings {
 	ds := digestSettings{
@@ -81,11 +84,21 @@ type digestRenderContext struct {
 	clusters      []db.ClusterWithItems
 	start         time.Time
 	end           time.Time
+	displayStart  time.Time
+	displayEnd    time.Time
 	seenSummaries map[string]bool
 	logger        *zerolog.Logger
 }
 
-func (s *Scheduler) newRenderContext(_ context.Context, settings digestSettings, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, logger *zerolog.Logger) *digestRenderContext {
+func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSettings, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, logger *zerolog.Logger) *digestRenderContext {
+	displayStart := start
+	displayEnd := end
+
+	if loc, ok := s.resolveScheduleLocation(ctx, logger); ok {
+		displayStart = start.In(loc)
+		displayEnd = end.In(loc)
+	}
+
 	return &digestRenderContext{
 		scheduler:     s,
 		llmClient:     s.llmClient,
@@ -94,9 +107,36 @@ func (s *Scheduler) newRenderContext(_ context.Context, settings digestSettings,
 		clusters:      clusters,
 		start:         start,
 		end:           end,
+		displayStart:  displayStart,
+		displayEnd:    displayEnd,
 		seenSummaries: make(map[string]bool),
 		logger:        logger,
 	}
+}
+
+func (s *Scheduler) resolveScheduleLocation(ctx context.Context, logger *zerolog.Logger) (*time.Location, bool) {
+	var sched schedule.Schedule
+	if err := s.database.GetSetting(ctx, schedule.SettingDigestSchedule, &sched); err != nil {
+		logger.Debug().Err(err).Msg("could not get digest_schedule for timezone")
+		return nil, false
+	}
+
+	if sched.IsEmpty() {
+		return nil, false
+	}
+
+	if err := sched.Validate(); err != nil {
+		logger.Debug().Err(err).Msg(errInvalidScheduleTimezone)
+		return nil, false
+	}
+
+	loc, err := sched.Location()
+	if err != nil {
+		logger.Debug().Err(err).Msg(errInvalidScheduleTimezone)
+		return nil, false
+	}
+
+	return loc, true
 }
 
 func (rc *digestRenderContext) getHeader() string {
@@ -153,7 +193,7 @@ func (rc *digestRenderContext) buildHeaderSection(sb *strings.Builder) {
 	header := rc.getHeader()
 
 	sb.WriteString(DigestSeparatorLine)
-	fmt.Fprintf(sb, "📰 <b>%s</b> • %s - %s\n", html.EscapeString(header), rc.start.Format(TimeFormatHourMinute), rc.end.Format(TimeFormatHourMinute))
+	fmt.Fprintf(sb, "📰 <b>%s</b> • %s - %s\n", html.EscapeString(header), rc.displayStart.Format(TimeFormatHourMinute), rc.displayEnd.Format(TimeFormatHourMinute))
 	sb.WriteString(DigestSeparatorLine)
 }
 
