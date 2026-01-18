@@ -1333,21 +1333,26 @@ func (q *Queries) GetLinksForMessage(ctx context.Context, rawMessageID pgtype.UU
 }
 
 const getPendingDiscoveries = `-- name: GetPendingDiscoveries :many
-SELECT dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.source_type, dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score
-FROM discovered_channels dc
-WHERE dc.status = 'pending'
-  AND dc.username IS NOT NULL AND dc.username != ''
-  AND NOT EXISTS (
-    SELECT 1
-    FROM channels c
-    WHERE c.is_active = TRUE AND (
-      (c.username = dc.username AND c.username != '') OR
-      ('@' || c.username = dc.username AND c.username != '') OR
-      (c.tg_peer_id = dc.tg_peer_id AND dc.tg_peer_id != 0 AND c.tg_peer_id != 0) OR
-      (c.invite_link = dc.invite_link AND dc.invite_link != '' AND c.invite_link != '')
+SELECT id, username, tg_peer_id, invite_link, title, source_type, discovery_count, first_seen_at, last_seen_at, max_views, max_forwards, engagement_score FROM (
+  SELECT DISTINCT ON (dc.username)
+    dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.source_type,
+    dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score
+  FROM discovered_channels dc
+  WHERE dc.status = 'pending'
+    AND dc.username IS NOT NULL AND dc.username != ''
+    AND NOT EXISTS (
+      SELECT 1
+      FROM channels c
+      WHERE c.is_active = TRUE AND (
+        (c.username = dc.username AND c.username != '') OR
+        ('@' || c.username = dc.username AND c.username != '') OR
+        (c.tg_peer_id = dc.tg_peer_id AND dc.tg_peer_id != 0 AND c.tg_peer_id != 0) OR
+        (c.invite_link = dc.invite_link AND dc.invite_link != '' AND c.invite_link != '')
+      )
     )
-  )
-ORDER BY dc.engagement_score DESC, dc.discovery_count DESC, dc.last_seen_at DESC
+  ORDER BY dc.username, dc.engagement_score DESC
+) deduped
+ORDER BY engagement_score DESC, discovery_count DESC, last_seen_at DESC
 LIMIT $1
 `
 
@@ -1367,6 +1372,7 @@ type GetPendingDiscoveriesRow struct {
 }
 
 // Only return actionable discoveries (with username for approve/reject)
+// Uses DISTINCT ON to deduplicate multiple rows for the same channel (discovered via different identifiers)
 func (q *Queries) GetPendingDiscoveries(ctx context.Context, limit int32) ([]GetPendingDiscoveriesRow, error) {
 	rows, err := q.db.Query(ctx, getPendingDiscoveries, limit)
 	if err != nil {
@@ -2316,9 +2322,18 @@ func (q *Queries) UpdateDiscoveryStatus(ctx context.Context, arg UpdateDiscovery
 }
 
 const updateDiscoveryStatusByUsername = `-- name: UpdateDiscoveryStatusByUsername :exec
-UPDATE discovered_channels
+WITH target AS (
+    SELECT src.username AS t_username, src.tg_peer_id AS t_peer_id, src.invite_link AS t_invite
+    FROM discovered_channels src
+    WHERE src.username = $1 OR '@' || src.username = $1
+    LIMIT 1
+)
+UPDATE discovered_channels dc
 SET status = $2, status_changed_at = now(), status_changed_by = $3
-WHERE username = $1 OR '@' || username = $1
+FROM target
+WHERE (dc.username = target.t_username AND dc.username != '')
+   OR (dc.tg_peer_id = target.t_peer_id AND dc.tg_peer_id != 0 AND target.t_peer_id != 0)
+   OR (dc.invite_link = target.t_invite AND dc.invite_link != '' AND target.t_invite != '')
 `
 
 type UpdateDiscoveryStatusByUsernameParams struct {
@@ -2327,6 +2342,8 @@ type UpdateDiscoveryStatusByUsernameParams struct {
 	StatusChangedBy pgtype.Int8 `json:"status_changed_by"`
 }
 
+// Rejects the target row AND any related rows that share peer_id or invite_link
+// This prevents the same channel from reappearing via different discovery paths
 func (q *Queries) UpdateDiscoveryStatusByUsername(ctx context.Context, arg UpdateDiscoveryStatusByUsernameParams) error {
 	_, err := q.db.Exec(ctx, updateDiscoveryStatusByUsername, arg.Username, arg.Status, arg.StatusChangedBy)
 	return err

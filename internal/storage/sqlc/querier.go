@@ -58,6 +58,7 @@ type Querier interface {
 	GetLinkCache(ctx context.Context, url string) (LinkCache, error)
 	GetLinksForMessage(ctx context.Context, rawMessageID pgtype.UUID) ([]LinkCache, error)
 	// Only return actionable discoveries (with username for approve/reject)
+	// Uses DISTINCT ON to deduplicate multiple rows for the same channel (discovered via different identifiers)
 	GetPendingDiscoveries(ctx context.Context, limit int32) ([]GetPendingDiscoveriesRow, error)
 	GetRecentErrors(ctx context.Context, limit int32) ([]GetRecentErrorsRow, error)
 	GetRecentMessagesForChannel(ctx context.Context, arg GetRecentMessagesForChannelParams) ([]GetRecentMessagesForChannelRow, error)
@@ -96,6 +97,8 @@ type Querier interface {
 	UpdateDiscoveryChannelInfo(ctx context.Context, arg UpdateDiscoveryChannelInfoParams) error
 	UpdateDiscoveryFromInvite(ctx context.Context, arg UpdateDiscoveryFromInviteParams) error
 	UpdateDiscoveryStatus(ctx context.Context, arg UpdateDiscoveryStatusParams) error
+	// Rejects the target row AND any related rows that share peer_id or invite_link
+	// This prevents the same channel from reappearing via different discovery paths
 	UpdateDiscoveryStatusByUsername(ctx context.Context, arg UpdateDiscoveryStatusByUsernameParams) error
 	// Channel stats queries
 	UpsertChannelStats(ctx context.Context, arg UpsertChannelStatsParams) error
