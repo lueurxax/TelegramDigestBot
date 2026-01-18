@@ -1,5 +1,21 @@
 package digest
 
+var topicEmojis = map[string]string{
+	"Technology":    "💻",
+	"Finance":       "💰",
+	"Politics":      "⚖️",
+	"Sports":        "🏆",
+	"Entertainment": "🎬",
+	"Science":       "🔬",
+	"Health":        "🏥",
+	"Business":      "📊",
+	"World News":    "🌍",
+	"Local News":    "📍",
+	"Culture":       "🎨",
+	"Education":     "📚",
+	"Humor":         "😂",
+}
+
 // Default topic for items without a topic
 const (
 	DefaultTopic = "General"

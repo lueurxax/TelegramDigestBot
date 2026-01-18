@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"sort"
 	"strings"
 	"time"
 
@@ -340,7 +341,7 @@ func (rc *digestRenderContext) renderGroup(ctx context.Context, sb *strings.Buil
 					hasContent = true
 				}
 			} else {
-				formatted := rc.scheduler.formatItems(c.Items, true, rc.seenSummaries, rc.factChecks)
+				formatted := rc.formatItems(c.Items, true)
 				if formatted != "" {
 					hasContent = true
 
@@ -349,7 +350,7 @@ func (rc *digestRenderContext) renderGroup(ctx context.Context, sb *strings.Buil
 			}
 		}
 	} else {
-		formatted := rc.scheduler.formatItems(group.items, true, rc.seenSummaries, rc.factChecks)
+		formatted := rc.formatItems(group.items, true)
 		if formatted != "" {
 			hasContent = true
 
@@ -440,6 +441,8 @@ func (rc *digestRenderContext) renderNarrativeSection(sb *strings.Builder, narra
 	if line := rc.scheduler.buildCorroborationLine(allItems, allItems[0]); line != "" {
 		sb.WriteString(line)
 	}
+
+	rc.appendEvidenceLine(sb, allItems)
 }
 
 func (rc *digestRenderContext) renderMultiItemCluster(ctx context.Context, sb *strings.Builder, c db.ClusterWithItems) bool {
@@ -580,9 +583,18 @@ func (rc *digestRenderContext) appendEvidenceLine(sb *strings.Builder, items []d
 			break
 		}
 
-		fmt.Fprintf(sb, "\n    • %s", html.EscapeString(ev.Source.Title))
+		title := ev.Source.Title
+		if title == "" {
+			title = ev.Source.Domain
+		}
 
-		if ev.Source.Domain != "" {
+		if ev.Source.URL != "" {
+			fmt.Fprintf(sb, "\n    • <a href=\"%s\">%s</a>", html.EscapeString(ev.Source.URL), html.EscapeString(title))
+		} else {
+			fmt.Fprintf(sb, "\n    • %s", html.EscapeString(title))
+		}
+
+		if ev.Source.Domain != "" && title != ev.Source.Domain {
 			fmt.Fprintf(sb, " <i>(%s)</i>", html.EscapeString(ev.Source.Domain))
 		}
 	}
@@ -678,4 +690,203 @@ func formatConfidenceTier(tier string, sourceCount int) string {
 	}
 
 	return fmt.Sprintf("\n    ↳ <i>%s Corroborated (%d sources)</i>", emoji, sourceCount)
+}
+
+// summaryGroup groups items with the same summary.
+type summaryGroup struct {
+	summary         string
+	items           []db.Item
+	importanceScore float32
+}
+
+func (rc *digestRenderContext) formatItems(items []db.Item, includeTopic bool) string {
+	if len(items) == 0 {
+		return ""
+	}
+
+	groups := groupItemsBySummary(items, rc.seenSummaries)
+
+	var sb strings.Builder
+
+	for _, g := range groups {
+		rc.seenSummaries[g.summary] = true
+		rc.formatSummaryGroup(&sb, g, includeTopic)
+	}
+
+	return sb.String()
+}
+
+func groupItemsBySummary(items []db.Item, seenSummaries map[string]bool) []summaryGroup {
+	var groups []summaryGroup
+
+	summaryToIdx := make(map[string]int)
+
+	for _, item := range items {
+		if seenSummaries[item.Summary] {
+			continue
+		}
+
+		idx, seen := summaryToIdx[item.Summary]
+		if !seen {
+			summaryToIdx[item.Summary] = len(groups)
+			groups = append(groups, summaryGroup{
+				summary:         item.Summary,
+				items:           []db.Item{item},
+				importanceScore: item.ImportanceScore,
+			})
+		} else {
+			groups[idx].items = append(groups[idx].items, item)
+			if item.ImportanceScore > groups[idx].importanceScore {
+				groups[idx].importanceScore = item.ImportanceScore
+			}
+		}
+	}
+
+	return groups
+}
+
+func (rc *digestRenderContext) formatSummaryGroup(sb *strings.Builder, g summaryGroup, includeTopic bool) {
+	sanitizedSummary := htmlutils.SanitizeHTML(g.summary)
+	prefix := getImportancePrefix(g.importanceScore)
+
+	sb.WriteString(htmlutils.ItemStart)
+	sb.WriteString(formatSummaryLine(g, includeTopic, prefix, sanitizedSummary))
+	fmt.Fprintf(sb, DigestSourceVia, strings.Join(rc.formatItemLinks(g.items), DigestSourceSeparator))
+
+	if rc.factChecks != nil {
+		if match, ok := findFactCheckMatch(g.items, rc.factChecks); ok {
+			sb.WriteString(formatFactCheckLine(match))
+		}
+	}
+
+	if len(g.items) > 0 {
+		if line := rc.scheduler.buildCorroborationLine(g.items, g.items[0]); line != "" {
+			sb.WriteString(line)
+		}
+	}
+
+	// Append evidence bullets (Phase 2)
+	rc.appendEvidenceLine(sb, g.items)
+
+	sb.WriteString(htmlutils.ItemEnd)
+	sb.WriteString("\n")
+}
+
+func (rc *digestRenderContext) buildContextSection(sb *strings.Builder) {
+	backgroundSources := make(map[string]db.EvidenceSource)
+
+	for _, sources := range rc.evidence {
+		for _, es := range sources {
+			// Heuristic for background info: Wikipedia is the primary source for context
+			if strings.Contains(strings.ToLower(es.Source.Domain), "wikipedia.org") {
+				if _, seen := backgroundSources[es.Source.URL]; !seen {
+					backgroundSources[es.Source.URL] = es.Source
+				}
+			}
+		}
+	}
+
+	if len(backgroundSources) == 0 {
+		return
+	}
+
+	sb.WriteString("\n<b>📖 Контекст</b>\n")
+
+	// Sort URLs for stable output
+	urls := make([]string, 0, len(backgroundSources))
+	for url := range backgroundSources {
+		urls = append(urls, url)
+	}
+
+	sort.Strings(urls)
+
+	for _, url := range urls {
+		src := backgroundSources[url]
+		title := src.Title
+
+		if title == "" {
+			title = src.Domain
+		}
+
+		fmt.Fprintf(sb, "• <a href=\"%s\">%s</a> (%s)\n", html.EscapeString(src.URL), html.EscapeString(title), html.EscapeString(src.Domain))
+	}
+}
+
+func formatSummaryLine(g summaryGroup, includeTopic bool, prefix, sanitizedSummary string) string {
+	if !includeTopic || g.items[0].Topic == "" {
+		return fmt.Sprintf(FormatPrefixSummary, prefix, sanitizedSummary)
+	}
+
+	emoji := topicEmojis[g.items[0].Topic]
+	if emoji == "" {
+		emoji = EmojiBullet
+	} else {
+		emoji += " " + EmojiBullet
+	}
+
+	return fmt.Sprintf("%s %s <b>%s</b>: %s", prefix, emoji, html.EscapeString(g.items[0].Topic), sanitizedSummary)
+}
+
+func findFactCheckMatch(items []db.Item, factChecks map[string]db.FactCheckMatch) (db.FactCheckMatch, bool) {
+	for _, item := range items {
+		if item.ID == "" {
+			continue
+		}
+
+		match, ok := factChecks[item.ID]
+		if ok {
+			return match, true
+		}
+	}
+
+	return db.FactCheckMatch{}, false
+}
+
+func formatFactCheckLine(match db.FactCheckMatch) string {
+	if match.URL == "" {
+		return ""
+	}
+
+	label := "Fact-check"
+	if match.Publisher != "" {
+		label = match.Publisher
+	}
+
+	return fmt.Sprintf("\n    ↳ <i>Related fact-check: <a href=\"%s\">%s</a></i>", html.EscapeString(match.URL), html.EscapeString(label))
+}
+
+func (rc *digestRenderContext) formatItemLinks(items []db.Item) []string {
+	links := make([]string, 0, len(items))
+
+	for _, item := range items {
+		label := formatItemLabel(item)
+		links = append(links, rc.scheduler.formatLink(item, label))
+	}
+
+	return links
+}
+
+func formatItemLabel(item db.Item) string {
+	if item.SourceChannel != "" {
+		return "@" + item.SourceChannel
+	}
+
+	if item.SourceChannelTitle != "" {
+		return item.SourceChannelTitle
+	}
+
+	return DefaultSourceLabel
+}
+
+func getImportancePrefix(score float32) string {
+	switch {
+	case score >= ImportanceScoreBreaking:
+		return EmojiBreaking // Breaking/Critical
+	case score >= ImportanceScoreNotable:
+		return EmojiNotable // Notable
+	case score >= ImportanceScoreStandard:
+		return EmojiStandard // Standard
+	default:
+		return EmojiBullet // Minor
+	}
 }

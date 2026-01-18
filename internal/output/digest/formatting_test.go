@@ -2358,6 +2358,7 @@ func TestFormatLink(t *testing.T) {
 
 func TestFormatItemLinks(t *testing.T) {
 	s := &Scheduler{}
+	rc := &digestRenderContext{scheduler: s}
 
 	t.Run("multiple items", func(t *testing.T) {
 		items := []db.Item{
@@ -2366,7 +2367,7 @@ func TestFormatItemLinks(t *testing.T) {
 			{SourceChannel: "ch3", SourceMsgID: 3},
 		}
 
-		links := s.formatItemLinks(items)
+		links := rc.formatItemLinks(items)
 
 		if len(links) != 3 {
 			t.Errorf("expected 3 links, got %d", len(links))
@@ -2380,7 +2381,7 @@ func TestFormatItemLinks(t *testing.T) {
 	})
 
 	t.Run(testNameEmptyItems, func(t *testing.T) {
-		links := s.formatItemLinks([]db.Item{})
+		links := rc.formatItemLinks([]db.Item{})
 
 		if len(links) != 0 {
 			t.Errorf(testErrExpected0Links, len(links))
@@ -2530,7 +2531,8 @@ func TestSchedulerFormatItems(t *testing.T) {
 			{ID: "2", Summary: "Summary two", SourceChannel: "ch2", SourceMsgID: 2, ImportanceScore: 0.65},
 		}
 
-		got := s.formatItems(items, false, make(map[string]bool), nil)
+		rc := &digestRenderContext{scheduler: s, seenSummaries: make(map[string]bool)}
+		got := rc.formatItems(items, false)
 
 		if !strings.Contains(got, "Summary one") {
 			t.Errorf("formatItems() should contain first summary, got %q", got)
@@ -2548,8 +2550,9 @@ func TestSchedulerFormatItems(t *testing.T) {
 		}
 
 		seen := map[string]bool{"Already seen": true}
+		rc := &digestRenderContext{scheduler: s, seenSummaries: seen}
 
-		got := s.formatItems(items, false, seen, nil)
+		got := rc.formatItems(items, false)
 
 		if strings.Contains(got, "Already seen") {
 			t.Errorf("formatItems() should skip seen summary, got %q", got)
@@ -2561,7 +2564,8 @@ func TestSchedulerFormatItems(t *testing.T) {
 	})
 
 	t.Run(testNameEmptyItems, func(t *testing.T) {
-		got := s.formatItems([]db.Item{}, false, make(map[string]bool), nil)
+		rc := &digestRenderContext{scheduler: s, seenSummaries: make(map[string]bool)}
+		got := rc.formatItems([]db.Item{}, false)
 
 		if got != "" {
 			t.Errorf("formatItems() with empty items = %q, want empty", got)
@@ -2574,9 +2578,9 @@ func TestSchedulerFormatItems(t *testing.T) {
 			{ID: "2", Summary: "Same news", SourceChannel: "ch2", SourceMsgID: 2, ImportanceScore: 0.7},
 		}
 
-		seen := make(map[string]bool)
+		rc := &digestRenderContext{scheduler: s, seenSummaries: make(map[string]bool)}
 
-		got := s.formatItems(items, false, seen, nil)
+		got := rc.formatItems(items, false)
 
 		// Should only show the summary once
 
@@ -2597,7 +2601,8 @@ func TestSchedulerFormatItems(t *testing.T) {
 			{ID: "1", Summary: "Tech news", SourceChannel: "ch1", SourceMsgID: 1, Topic: "Technology"},
 		}
 
-		got := s.formatItems(items, true, make(map[string]bool), nil)
+		rc := &digestRenderContext{scheduler: s, seenSummaries: make(map[string]bool)}
+		got := rc.formatItems(items, true)
 
 		if !strings.Contains(got, testTopicTechnology) {
 			t.Errorf("formatItems() with includeTopic=true should show topic, got %q", got)
@@ -2607,6 +2612,7 @@ func TestSchedulerFormatItems(t *testing.T) {
 
 func TestFormatSummaryGroupWithMultipleSources(t *testing.T) {
 	s := &Scheduler{}
+	rc := &digestRenderContext{scheduler: s}
 
 	group := summaryGroup{
 		summary: "Multi-source news",
@@ -2619,7 +2625,7 @@ func TestFormatSummaryGroupWithMultipleSources(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	s.formatSummaryGroup(&sb, group, false, nil)
+	rc.formatSummaryGroup(&sb, group, false)
 
 	got := sb.String()
 

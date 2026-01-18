@@ -18,22 +18,6 @@ import (
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
-var topicEmojis = map[string]string{
-	"Technology":    "💻",
-	"Finance":       "💰",
-	"Politics":      "⚖️",
-	"Sports":        "🏆",
-	"Entertainment": "🎬",
-	"Science":       "🔬",
-	"Health":        "🏥",
-	"Business":      "📊",
-	"World News":    "🌍",
-	"Local News":    "📍",
-	"Culture":       "🎨",
-	"Education":     "📚",
-	"Humor":         "😂",
-}
-
 // RichDigestItem represents a digest item with media for inline display.
 type RichDigestItem struct {
 	Summary    string
@@ -1070,6 +1054,8 @@ func (s *Scheduler) renderDigest(ctx context.Context, items []db.Item, clusters 
 		s.renderDetailedItems(ctx, &sb, rc)
 	}
 
+	rc.buildContextSection(&sb)
+
 	sb.WriteString("\n" + DigestSeparatorLine)
 
 	return sb.String(), items, clusters, nil, nil
@@ -1191,162 +1177,6 @@ func (s *Scheduler) sendConsolidatedAnomalyNotification(ctx context.Context, ano
 	}
 
 	logger.Info().Int("anomaly_count", len(anomalies)).Msg("Sent consolidated anomaly notification")
-}
-
-// summaryGroup groups items with the same summary.
-type summaryGroup struct {
-	summary         string
-	items           []db.Item
-	importanceScore float32
-}
-
-func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummaries map[string]bool, factChecks map[string]db.FactCheckMatch) string {
-	if len(items) == 0 {
-		return ""
-	}
-
-	groups := groupItemsBySummary(items, seenSummaries)
-
-	var sb strings.Builder
-
-	for _, g := range groups {
-		seenSummaries[g.summary] = true
-		s.formatSummaryGroup(&sb, g, includeTopic, factChecks)
-	}
-
-	return sb.String()
-}
-
-func groupItemsBySummary(items []db.Item, seenSummaries map[string]bool) []summaryGroup {
-	var groups []summaryGroup
-
-	summaryToIdx := make(map[string]int)
-
-	for _, item := range items {
-		if seenSummaries[item.Summary] {
-			continue
-		}
-
-		idx, seen := summaryToIdx[item.Summary]
-		if !seen {
-			summaryToIdx[item.Summary] = len(groups)
-			groups = append(groups, summaryGroup{
-				summary:         item.Summary,
-				items:           []db.Item{item},
-				importanceScore: item.ImportanceScore,
-			})
-		} else {
-			groups[idx].items = append(groups[idx].items, item)
-			if item.ImportanceScore > groups[idx].importanceScore {
-				groups[idx].importanceScore = item.ImportanceScore
-			}
-		}
-	}
-
-	return groups
-}
-
-func (s *Scheduler) formatSummaryGroup(sb *strings.Builder, g summaryGroup, includeTopic bool, factChecks map[string]db.FactCheckMatch) {
-	sanitizedSummary := htmlutils.SanitizeHTML(g.summary)
-	prefix := getImportancePrefix(g.importanceScore)
-
-	sb.WriteString(htmlutils.ItemStart)
-	sb.WriteString(formatSummaryLine(g, includeTopic, prefix, sanitizedSummary))
-	fmt.Fprintf(sb, DigestSourceVia, strings.Join(s.formatItemLinks(g.items), DigestSourceSeparator))
-
-	if factChecks != nil {
-		if match, ok := findFactCheckMatch(g.items, factChecks); ok {
-			sb.WriteString(formatFactCheckLine(match))
-		}
-	}
-
-	if len(g.items) > 0 {
-		if line := s.buildCorroborationLine(g.items, g.items[0]); line != "" {
-			sb.WriteString(line)
-		}
-	}
-
-	sb.WriteString(htmlutils.ItemEnd)
-	sb.WriteString("\n")
-}
-
-func formatSummaryLine(g summaryGroup, includeTopic bool, prefix, sanitizedSummary string) string {
-	if !includeTopic || g.items[0].Topic == "" {
-		return fmt.Sprintf(FormatPrefixSummary, prefix, sanitizedSummary)
-	}
-
-	emoji := topicEmojis[g.items[0].Topic]
-	if emoji == "" {
-		emoji = EmojiBullet
-	} else {
-		emoji += " " + EmojiBullet
-	}
-
-	return fmt.Sprintf("%s %s <b>%s</b>: %s", prefix, emoji, html.EscapeString(g.items[0].Topic), sanitizedSummary)
-}
-
-func findFactCheckMatch(items []db.Item, factChecks map[string]db.FactCheckMatch) (db.FactCheckMatch, bool) {
-	for _, item := range items {
-		if item.ID == "" {
-			continue
-		}
-
-		match, ok := factChecks[item.ID]
-		if ok {
-			return match, true
-		}
-	}
-
-	return db.FactCheckMatch{}, false
-}
-
-func formatFactCheckLine(match db.FactCheckMatch) string {
-	if match.URL == "" {
-		return ""
-	}
-
-	label := "Fact-check"
-	if match.Publisher != "" {
-		label = match.Publisher
-	}
-
-	return fmt.Sprintf("\n    ↳ <i>Related fact-check: <a href=\"%s\">%s</a></i>", html.EscapeString(match.URL), html.EscapeString(label))
-}
-
-func (s *Scheduler) formatItemLinks(items []db.Item) []string {
-	links := make([]string, 0, len(items))
-
-	for _, item := range items {
-		label := formatItemLabel(item)
-		links = append(links, s.formatLink(item, label))
-	}
-
-	return links
-}
-
-func formatItemLabel(item db.Item) string {
-	if item.SourceChannel != "" {
-		return "@" + item.SourceChannel
-	}
-
-	if item.SourceChannelTitle != "" {
-		return item.SourceChannelTitle
-	}
-
-	return DefaultSourceLabel
-}
-
-func getImportancePrefix(score float32) string {
-	switch {
-	case score >= ImportanceScoreBreaking:
-		return EmojiBreaking // Breaking/Critical
-	case score >= ImportanceScoreNotable:
-		return EmojiNotable // Notable
-	case score >= ImportanceScoreStandard:
-		return EmojiStandard // Standard
-	default:
-		return EmojiBullet // Minor
-	}
 }
 
 func (s *Scheduler) formatLink(item db.Item, label string) string {
