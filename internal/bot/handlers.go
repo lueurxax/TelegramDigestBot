@@ -11,12 +11,13 @@ import (
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	"github.com/lueurxax/telegram-digest-bot/internal/output/digest"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/schedule"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // Query limit constants.
@@ -3357,6 +3358,10 @@ func (b *Bot) getDiscoveryThresholds(ctx context.Context) (int, float32) {
 	minEngagement := DefaultDiscoveryMinEngagement
 	if err := b.database.GetSetting(ctx, SettingDiscoveryMinScore, &minEngagement); err != nil {
 		b.logger.Warn().Err(err).Msg("failed to read discovery_min_engagement")
+	}
+
+	if minEngagement < 0 {
+		minEngagement = DefaultDiscoveryMinEngagement
 	}
 
 	return minSeen, minEngagement

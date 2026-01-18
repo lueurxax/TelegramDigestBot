@@ -138,7 +138,7 @@ func (db *DB) AddChannelByInviteLink(ctx context.Context, inviteLink string) err
 
 func (db *DB) markDiscoveryAdded(ctx context.Context, username string, peerID int64, inviteLink string) error {
 	normalized := normalizeUsername(username)
-	statuses := []string{DiscoveryStatusPending, DiscoveryStatusRejected}
+	statuses := []string{DiscoveryStatusPending, DiscoveryStatusRejected, DiscoveryStatusAdded}
 
 	_, err := db.Pool.Exec(ctx, `
 		UPDATE discovered_channels dc

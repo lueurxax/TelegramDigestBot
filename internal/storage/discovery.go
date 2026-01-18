@@ -384,7 +384,7 @@ func (db *DB) UpdateDiscoveryFromInvite(ctx context.Context, id string, title st
 
 // CleanupDiscoveriesBatch marks discoveries as added when a tracked channel matches identifiers.
 func (db *DB) CleanupDiscoveriesBatch(ctx context.Context, limit int, adminID int64) (int, error) {
-	allowedStatuses := []string{DiscoveryStatusPending, DiscoveryStatusRejected}
+	allowedStatuses := []string{DiscoveryStatusPending, DiscoveryStatusRejected, DiscoveryStatusAdded}
 
 	tag, err := db.Pool.Exec(ctx, `
 		WITH candidates AS (
