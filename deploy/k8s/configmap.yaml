@@ -44,7 +44,7 @@ data:
   ENRICHMENT_ALLOWLIST_DOMAINS: ""
   ENRICHMENT_DENYLIST_DOMAINS: ""
   ENRICHMENT_QUERY_TRANSLATE: "true"
-  ENRICHMENT_PROVIDERS: "yacy,gdelt,eventregistry,newsapi,searxng,opensearch"
+  ENRICHMENT_PROVIDERS: "yacy,gdelt,newsapi,searxng"
   ENRICHMENT_PROVIDER_COOLDOWN: "10m"
   ENRICHMENT_YACY_ENABLED: "true"
   ENRICHMENT_YACY_URL: "http://yacy:8090"
@@ -68,7 +68,7 @@ data:
   ENRICHMENT_EVENTREGISTRY_ENABLED: "false"
   ENRICHMENT_EVENTREGISTRY_TIMEOUT: "30s"
   # NewsAPI provider
-  ENRICHMENT_NEWSAPI_ENABLED: "false"
+  ENRICHMENT_NEWSAPI_ENABLED: "true"
   ENRICHMENT_NEWSAPI_TIMEOUT: "30s"
   SEARXNG_ENABLED: "true"
   SEARXNG_BASE_URL: "http://searxng:8080"
@@ -77,7 +77,7 @@ data:
   YACY_ENABLED: "true"
   YACY_BASE_URL: "http://yacy:8090"
   YACY_TIMEOUT: "10s"
-  GDELT_ENABLED: "false"
+  GDELT_ENABLED: "true"
   GDELT_RPM: "30"
   GDELT_TIMEOUT: "30s"
   # Evidence-enhanced clustering

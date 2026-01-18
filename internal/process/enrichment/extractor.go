@@ -37,6 +37,7 @@ const (
 
 	errWrapFmtWithCode = "%w: %d"
 	httpHeaderContent  = "Content-Type"
+	fieldResponse      = "response"
 )
 
 var (
@@ -187,12 +188,12 @@ Text:
 	}
 
 	if lastErr == nil {
-		e.logger.Warn().Str("response", res).Msg("invalid LLM response format: no JSON array found")
+		e.logger.Warn().Str(fieldResponse, res).Msg("invalid LLM response format: no JSON array found")
 
 		return nil, errInvalidLLMResponse
 	}
 
-	e.logger.Warn().Err(lastErr).Str("response", res).Msg("unmarshal llm claims failed")
+	e.logger.Warn().Err(lastErr).Str(fieldResponse, res).Msg("unmarshal llm claims failed")
 
 	return nil, fmt.Errorf("unmarshal llm claims: %w", lastErr)
 }
