@@ -424,9 +424,20 @@ SET status = $2, status_changed_at = now(), status_changed_by = $3
 WHERE id = $1;
 
 -- name: UpdateDiscoveryStatusByUsername :exec
-UPDATE discovered_channels
+-- Rejects the target row AND any related rows that share peer_id or invite_link
+-- This prevents the same channel from reappearing via different discovery paths
+WITH target AS (
+    SELECT username, tg_peer_id, invite_link
+    FROM discovered_channels
+    WHERE username = $1 OR '@' || username = $1
+    LIMIT 1
+)
+UPDATE discovered_channels dc
 SET status = $2, status_changed_at = now(), status_changed_by = $3
-WHERE username = $1 OR '@' || username = $1;
+FROM target t
+WHERE (dc.username = t.username AND dc.username != '')
+   OR (dc.tg_peer_id = t.tg_peer_id AND dc.tg_peer_id != 0 AND t.tg_peer_id != 0)
+   OR (dc.invite_link = t.invite_link AND dc.invite_link != '' AND t.invite_link != '');
 
 -- name: GetDiscoveryStats :one
 SELECT
