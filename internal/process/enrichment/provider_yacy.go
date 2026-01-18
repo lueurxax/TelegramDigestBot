@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -129,13 +130,13 @@ type yacyChannel struct {
 }
 
 type yacyItem struct {
-	Title       string  `json:"title"`
-	Link        string  `json:"link"`
-	Description string  `json:"description"`
-	PubDate     string  `json:"pubDate"` //nolint:tagliatelle // YaCy API uses camelCase
-	Size        string  `json:"size"`
-	SizeNumber  int64   `json:"sizelong"`
-	Ranking     float64 `json:"ranking"`
+	Title       string          `json:"title"`
+	Link        string          `json:"link"`
+	Description string          `json:"description"`
+	PubDate     string          `json:"pubDate"` //nolint:tagliatelle // YaCy API uses camelCase
+	Size        string          `json:"size"`
+	SizeNumber  int64           `json:"sizelong"`
+	Ranking     floatFlexible64 `json:"ranking"`
 }
 
 func (p *YaCyProvider) parseResponse(body []byte) ([]SearchResult, error) {
@@ -153,7 +154,7 @@ func (p *YaCyProvider) parseResponse(body []byte) ([]SearchResult, error) {
 				Title:       item.Title,
 				Description: item.Description,
 				Domain:      extractDomain(item.Link),
-				Score:       item.Ranking,
+				Score:       float64(item.Ranking),
 			}
 
 			if item.PubDate != "" {
@@ -167,6 +168,45 @@ func (p *YaCyProvider) parseResponse(body []byte) ([]SearchResult, error) {
 	}
 
 	return results, nil
+}
+
+type floatFlexible64 float64
+
+func (f *floatFlexible64) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*f = 0
+		return nil
+	}
+
+	if data[0] == '"' {
+		var str string
+		if err := json.Unmarshal(data, &str); err != nil {
+			return fmt.Errorf("unmarshal float string: %w", err)
+		}
+
+		if strings.TrimSpace(str) == "" {
+			*f = 0
+			return nil
+		}
+
+		val, err := strconv.ParseFloat(str, 64)
+		if err != nil {
+			return fmt.Errorf("parse float: %w", err)
+		}
+
+		*f = floatFlexible64(val)
+
+		return nil
+	}
+
+	var val float64
+	if err := json.Unmarshal(data, &val); err != nil {
+		return fmt.Errorf("unmarshal float: %w", err)
+	}
+
+	*f = floatFlexible64(val)
+
+	return nil
 }
 
 func extractDomain(rawURL string) string {

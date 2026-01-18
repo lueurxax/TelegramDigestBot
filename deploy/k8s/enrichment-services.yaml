@@ -206,6 +206,9 @@ data:
       limiter: false
     search:
       safe_search: 0
+      formats:
+      - html
+      - json
     engines:
     - name: duckduckgo
       disabled: false
