@@ -198,13 +198,13 @@ Channels with fewer than 10 messages in the rolling window keep the default weig
 |------|---------|
 | `migrations/20260111120000_add_importance_weight.sql` | Weight columns migration |
 | `migrations/20260111130000_add_channel_stats.sql` | Stats table migration |
-| `internal/db/channels.go` | Channel model and weight queries |
-| `internal/db/channel_stats.go` | Stats collection and auto-weight queries |
-| `internal/db/queries.sql` | SQL queries |
+| `internal/storage/channels.go` | Channel model and weight queries |
+| `internal/storage/channel_stats.go` | Stats collection and auto-weight queries |
+| `internal/storage/queries.sql` | SQL queries |
 | `internal/process/pipeline/pipeline.go` | Weight application logic |
 | `internal/output/digest/autoweight.go` | Auto-weight calculation algorithm |
 | `internal/output/digest/digest.go` | Stats collection and weekly job |
-| `internal/telegrambot/handlers.go` | `/channel weight` command handler |
+| `internal/bot/handlers.go` | `/channel weight` command handler |
 
 ## See Also
 

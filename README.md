@@ -39,9 +39,10 @@ Feature documentation is available in `docs/features/`:
 - [Content Quality](docs/features/content-quality.md) - Relevance gates, feedback loops, clustering, topic balance
 - [Digest Schedule](docs/features/digest-schedule.md) - Timezone-aware scheduling
 - [Channel Importance](docs/features/channel-importance-weight.md) - Per-channel importance weighting
-- [Channel Discovery](docs/features/discovery.md) - Automatic channel discovery and admin review
+- [Channel Discovery](docs/features/discovery.md) - Automatic channel discovery, keyword filters, admin review
 - [Editor Mode](docs/features/editor-mode.md) - Narrative rendering, tiered importance, consolidated clusters
 - [Vision & Images](docs/features/vision-images.md) - Vision routing, cover images, AI covers
+- [Annotations](docs/features/annotations.md) - Item labeling for quality evaluation and threshold tuning
 
 ## Prerequisites
 - Docker and Docker Compose

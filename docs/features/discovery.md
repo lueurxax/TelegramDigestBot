@@ -144,6 +144,109 @@ Shows discovery counts and filter statistics:
 
 Backfills `matched_channel_id` for existing discoveries that match tracked channels. Safe to run multiple times (idempotent).
 
+### Help
+
+```
+/discover help
+```
+
+Shows comprehensive help for all discovery commands.
+
+---
+
+## Description Keyword Filters
+
+Filter discoveries by keywords in channel titles and descriptions. This reduces noise from off-topic channels before they appear in the review queue.
+
+### How It Works
+
+1. Build search text from `lower(title + ' ' + description)`
+2. Apply allow list: at least one keyword must match (if configured)
+3. Apply deny list: exclude if any keyword matches
+4. Deny list takes precedence over allow list
+
+### Allow List
+
+Require at least one keyword to match for a channel to appear:
+
+```
+/discover allow add ai security
+/discover allow remove security
+/discover allow clear
+/discover allow
+```
+
+- If set, channels without matching keywords are excluded
+- Empty titles/descriptions fail the allow filter
+
+### Deny List
+
+Exclude channels containing specific keywords:
+
+```
+/discover deny add gambling crypto
+/discover deny remove crypto
+/discover deny clear
+/discover deny
+```
+
+- Matching any deny keyword excludes the channel
+- Takes precedence over allow list matches
+
+### Shortcut Syntax
+
+You can add keywords directly without the `add` subcommand:
+
+```
+/discover deny gambling       # Same as /discover deny add gambling
+/discover allow ai news       # Same as /discover allow add ai news
+```
+
+---
+
+## Preview with Filter Reasons
+
+The `/discover preview` command shows detailed filter status for each discovery, explaining why it appears or is hidden:
+
+```
+/discover preview @channelname
+```
+
+Shows:
+- Whether the channel is actionable or filtered
+- Signal threshold status (seen count, engagement score)
+- Allow/deny keyword match status
+- Whether already tracked or matched
+
+This helps diagnose why a channel isn't appearing in the main `/discover` list.
+
+---
+
+## Observability
+
+### Prometheus Metrics
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `digest_discovery_pending` | Gauge | Pending discoveries (all, not filtered) |
+| `digest_discovery_actionable` | Gauge | Actionable discoveries (after filters) |
+| `digest_discovery_approval_rate` | Gauge | Approval rate (added / (added + rejected)) |
+| `digest_discovery_approved_total` | Counter | Total approved discoveries |
+| `digest_discovery_rejected_total` | Counter | Total rejected discoveries |
+
+### Filter Breakdown in Stats
+
+The `/discover stats` command shows filter breakdown:
+
+```
+Pending: 150
+  Already tracked: 12
+  Below threshold: 45
+  Allow miss: 20
+  Deny hit: 8
+  Actionable: 65
+```
+
 ---
 
 ## Resolution Process
@@ -204,17 +307,10 @@ It backfills `matched_channel_id` for discoveries that match tracked channels by
 | File | Purpose |
 |------|---------|
 | `internal/storage/discovery.go` | Discovery CRUD, filtering, scoring |
+| `internal/storage/discovery_filters.go` | Keyword filtering logic |
 | `internal/storage/channels.go` | `markDiscoveryAdded` linking |
-| `internal/bot/handlers.go` | Admin commands |
+| `internal/bot/handlers.go` | Admin commands (`/discover` namespace) |
 | `internal/app/app.go` | Background reconciliation job |
 | `internal/storage/queries.sql` | SQL queries |
+| `internal/platform/observability/metrics.go` | Discovery metrics |
 
----
-
-## Future Enhancements (v2)
-
-These features are planned but not yet implemented:
-
-- **Description keyword filters** - Allow/deny lists for channel descriptions
-- **Time-series metrics** - Track pending vs actionable counts over time
-- **Preview filters** - Show why a specific entry is hidden
