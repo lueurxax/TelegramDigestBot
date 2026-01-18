@@ -104,20 +104,18 @@ func (w *Worker) Run(ctx context.Context) error {
 	return w.runLoop(ctx)
 }
 
-// runLoop is the main processing loop for the enrichment worker.
 func (w *Worker) runLoop(ctx context.Context) error {
 	pollInterval := w.parsePollInterval()
 	lastCleanup := time.Now()
 	lastBudgetCheck := time.Time{}
 
 	for {
-		// Check budget limits before processing
-		budgetResult := w.handleBudgetCheck(ctx, &lastBudgetCheck)
-		if budgetResult.err != nil {
-			return budgetResult.err
+		paused, err := w.handleBudget(ctx, &lastBudgetCheck)
+		if err != nil {
+			return err
 		}
 
-		if budgetResult.shouldContinue {
+		if paused {
 			continue
 		}
 
@@ -129,46 +127,44 @@ func (w *Worker) runLoop(ctx context.Context) error {
 			lastCleanup = time.Now()
 		}
 
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf(errEnrichmentWorkerFmt, ctx.Err())
-		case <-time.After(pollInterval):
+		if err := w.wait(ctx, pollInterval); err != nil {
+			return err
 		}
 	}
 }
 
-// budgetCheckResult holds the result of a budget check operation.
-type budgetCheckResult struct {
-	shouldContinue bool
-	err            error
+func (w *Worker) parsePollInterval() time.Duration {
+	pollInterval, err := time.ParseDuration(w.cfg.WorkerPollInterval)
+	if err != nil {
+		w.logger.Warn().Err(err).Str("interval", w.cfg.WorkerPollInterval).Msg("invalid worker poll interval, using default")
+		return defaultEnrichmentPollInterval
+	}
+
+	return pollInterval
 }
 
-// handleBudgetCheck checks budget limits and waits if exceeded.
-func (w *Worker) handleBudgetCheck(ctx context.Context, lastBudgetCheck *time.Time) budgetCheckResult {
+func (w *Worker) handleBudget(ctx context.Context, lastBudgetCheck *time.Time) (bool, error) {
 	if !w.shouldCheckBudget(*lastBudgetCheck) {
-		return budgetCheckResult{}
+		return false, nil
 	}
 
 	exceeded, reason := w.checkBudgetLimits(ctx)
 	if !exceeded {
 		*lastBudgetCheck = time.Now()
-
-		return budgetCheckResult{}
+		return false, nil
 	}
 
 	w.logger.Warn().Str("reason", reason).Msg("budget limit exceeded, pausing enrichment")
 
 	*lastBudgetCheck = time.Now()
 
-	select {
-	case <-ctx.Done():
-		return budgetCheckResult{err: fmt.Errorf(errEnrichmentWorkerFmt, ctx.Err())}
-	case <-time.After(budgetCheckInterval):
-		return budgetCheckResult{shouldContinue: true}
+	if err := w.wait(ctx, budgetCheckInterval); err != nil {
+		return true, err
 	}
+
+	return true, nil
 }
 
-// processNextItem claims and processes the next enrichment item.
 func (w *Worker) processNextItem(ctx context.Context) {
 	item, err := w.db.ClaimNextEnrichment(ctx)
 	if err != nil {
@@ -181,14 +177,13 @@ func (w *Worker) processNextItem(ctx context.Context) {
 	}
 }
 
-func (w *Worker) parsePollInterval() time.Duration {
-	pollInterval, err := time.ParseDuration(w.cfg.WorkerPollInterval)
-	if err != nil {
-		w.logger.Warn().Err(err).Str("interval", w.cfg.WorkerPollInterval).Msg("invalid worker poll interval, using default")
-		return defaultEnrichmentPollInterval
+func (w *Worker) wait(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf(errEnrichmentWorkerFmt, ctx.Err())
+	case <-time.After(d):
+		return nil
 	}
-
-	return pollInterval
 }
 
 func (w *Worker) processItem(ctx context.Context, item *db.EnrichmentQueueItem) {

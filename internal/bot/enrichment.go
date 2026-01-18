@@ -15,6 +15,18 @@ import (
 const (
 	// DefaultEnrichmentRecentHours is the default lookback for recent evidence counts.
 	DefaultEnrichmentRecentHours = 24
+
+	// Setting keys for enrichment domain lists.
+	SettingEnrichmentAllowDomains = "enrichment_allow_domains"
+	SettingEnrichmentDenyDomains  = "enrichment_deny_domains"
+
+	// Subcommand names.
+	enrichmentSubCmdDomains = "domains"
+	enrichmentSubCmdHelp    = "help"
+
+	// Domain list types.
+	domainTypeAllow = "allow"
+	domainTypeDeny  = "deny"
 )
 
 type enrichmentStats struct {
@@ -26,14 +38,253 @@ type enrichmentStats struct {
 	monthlyUsage  int
 }
 
-func (b *Bot) handleEnrichment(ctx context.Context, msg *tgbotapi.Message) {
+func (b *Bot) handleEnrichmentNamespace(ctx context.Context, msg *tgbotapi.Message) {
+	args := strings.Fields(msg.CommandArguments())
+
+	if len(args) == 0 {
+		b.handleEnrichmentStatus(ctx, msg)
+
+		return
+	}
+
+	subcommand := strings.ToLower(args[0])
+
+	switch subcommand {
+	case enrichmentSubCmdDomains:
+		b.handleEnrichmentDomains(ctx, msg, args[1:])
+	case enrichmentSubCmdHelp:
+		b.reply(msg, enrichmentHelpMessage())
+	default:
+		b.reply(msg, fmt.Sprintf("Unknown subcommand: <code>%s</code>\n\nUse <code>/enrichment help</code> for available commands.", html.EscapeString(subcommand)))
+	}
+}
+
+func enrichmentHelpMessage() string {
+	return `📖 <b>Enrichment Commands</b>
+
+<b>Status:</b>
+• <code>/enrichment</code> - Show enrichment status
+
+<b>Domain Management:</b>
+• <code>/enrichment domains</code> - List all domains
+• <code>/enrichment domains allow</code> - List allowlist
+• <code>/enrichment domains allow &lt;domain&gt;</code> - Add to allowlist
+• <code>/enrichment domains allow remove &lt;domain&gt;</code> - Remove from allowlist
+• <code>/enrichment domains deny</code> - List denylist
+• <code>/enrichment domains deny &lt;domain&gt;</code> - Add to denylist
+• <code>/enrichment domains deny remove &lt;domain&gt;</code> - Remove from denylist
+• <code>/enrichment domains clear</code> - Clear all domain lists
+
+<b>Notes:</b>
+• Allowlist mode: only listed domains are searched
+• Denylist mode: listed domains are excluded
+• If both are set, allowlist takes precedence`
+}
+
+func (b *Bot) handleEnrichmentStatus(ctx context.Context, msg *tgbotapi.Message) {
 	stats, err := b.fetchEnrichmentStats(ctx)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("Error: %s", html.EscapeString(err.Error())))
+
 		return
 	}
 
 	b.reply(msg, b.renderEnrichmentStatus(stats))
+}
+
+func (b *Bot) handleEnrichmentDomains(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) == 0 {
+		b.showEnrichmentDomainsSummary(ctx, msg)
+
+		return
+	}
+
+	listType := strings.ToLower(args[0])
+
+	switch listType {
+	case domainTypeAllow:
+		b.handleEnrichmentDomainList(ctx, msg, args[1:], SettingEnrichmentAllowDomains, domainTypeAllow)
+	case domainTypeDeny:
+		b.handleEnrichmentDomainList(ctx, msg, args[1:], SettingEnrichmentDenyDomains, domainTypeDeny)
+	case SubCmdClear:
+		b.clearEnrichmentDomains(ctx, msg)
+	default:
+		b.reply(msg, fmt.Sprintf("Unknown domain list type: <code>%s</code>\n\nUse <code>allow</code> or <code>deny</code>.", html.EscapeString(listType)))
+	}
+}
+
+func (b *Bot) showEnrichmentDomainsSummary(ctx context.Context, msg *tgbotapi.Message) {
+	allowDomains := b.getEnrichmentDomainList(ctx, SettingEnrichmentAllowDomains)
+	denyDomains := b.getEnrichmentDomainList(ctx, SettingEnrichmentDenyDomains)
+
+	var sb strings.Builder
+
+	sb.WriteString("<b>Enrichment Domain Filters</b>\n\n")
+
+	if len(allowDomains) == 0 && len(denyDomains) == 0 {
+		sb.WriteString("No domain filters configured.\n")
+		sb.WriteString("Using config defaults if set.\n\n")
+	}
+
+	if len(allowDomains) > 0 {
+		fmt.Fprintf(&sb, "<b>Allowlist</b> (<code>%d</code> domains):\n<code>%s</code>\n\n",
+			len(allowDomains), html.EscapeString(strings.Join(allowDomains, ", ")))
+	}
+
+	if len(denyDomains) > 0 {
+		fmt.Fprintf(&sb, "<b>Denylist</b> (<code>%d</code> domains):\n<code>%s</code>\n\n",
+			len(denyDomains), html.EscapeString(strings.Join(denyDomains, ", ")))
+	}
+
+	sb.WriteString("Use <code>/enrichment domains allow|deny</code> to manage.")
+
+	b.reply(msg, sb.String())
+}
+
+func (b *Bot) handleEnrichmentDomainList(ctx context.Context, msg *tgbotapi.Message, args []string, settingKey, listType string) {
+	domains := b.getEnrichmentDomainList(ctx, settingKey)
+
+	if len(args) == 0 {
+		b.showEnrichmentDomainList(msg, domains, listType)
+
+		return
+	}
+
+	action := strings.ToLower(args[0])
+	updated, ok := b.processEnrichmentDomainAction(msg, listType, action, args[1:], domains)
+
+	if !ok {
+		return
+	}
+
+	if err := b.database.SaveSettingWithHistory(ctx, settingKey, updated, msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error saving %s domains: %s", html.EscapeString(listType), html.EscapeString(err.Error())))
+
+		return
+	}
+
+	b.reply(msg, fmt.Sprintf("✅ Enrichment %s domains updated. Total: <code>%d</code>.", html.EscapeString(listType), len(updated)))
+}
+
+func (b *Bot) showEnrichmentDomainList(msg *tgbotapi.Message, domains []string, listType string) {
+	if len(domains) == 0 {
+		b.reply(msg, fmt.Sprintf("📋 No enrichment %s domains configured.", html.EscapeString(listType)))
+
+		return
+	}
+
+	b.reply(msg, fmt.Sprintf("📋 <b>Enrichment %s domains:</b>\n<code>%s</code>\n\nUsage: <code>/enrichment domains %s &lt;domain&gt;</code> | <code>/enrichment domains %s remove &lt;domain&gt;</code>",
+		html.EscapeString(listType),
+		html.EscapeString(strings.Join(domains, ", ")),
+		html.EscapeString(listType),
+		html.EscapeString(listType)))
+}
+
+func (b *Bot) processEnrichmentDomainAction(msg *tgbotapi.Message, listType, action string, args []string, domains []string) ([]string, bool) {
+	switch action {
+	case CmdAdd:
+		return b.addEnrichmentDomain(msg, listType, args, domains)
+	case CmdRemove:
+		return b.removeEnrichmentDomain(msg, listType, args, domains)
+	case SubCmdClear:
+		return []string{}, true
+	default:
+		// Treat unknown action as a domain to add
+		allArgs := append([]string{action}, args...)
+
+		return b.addEnrichmentDomain(msg, listType, allArgs, domains)
+	}
+}
+
+func (b *Bot) addEnrichmentDomain(msg *tgbotapi.Message, listType string, args []string, domains []string) ([]string, bool) {
+	if len(args) == 0 {
+		b.reply(msg, fmt.Sprintf("Usage: <code>/enrichment domains %s &lt;domain&gt;</code>", html.EscapeString(listType)))
+
+		return nil, false
+	}
+
+	domain := normalizeDomain(args[0])
+	if domain == "" {
+		b.reply(msg, "❌ Invalid domain.")
+
+		return nil, false
+	}
+
+	for _, existing := range domains {
+		if existing == domain {
+			b.reply(msg, fmt.Sprintf("❌ Domain <code>%s</code> already exists in %s list.", html.EscapeString(domain), html.EscapeString(listType)))
+
+			return nil, false
+		}
+	}
+
+	return append(domains, domain), true
+}
+
+func (b *Bot) removeEnrichmentDomain(msg *tgbotapi.Message, listType string, args []string, domains []string) ([]string, bool) {
+	if len(args) == 0 {
+		b.reply(msg, fmt.Sprintf("Usage: <code>/enrichment domains %s remove &lt;domain&gt;</code>", html.EscapeString(listType)))
+
+		return nil, false
+	}
+
+	domain := normalizeDomain(args[0])
+	found := false
+	updated := make([]string, 0, len(domains))
+
+	for _, d := range domains {
+		if d == domain {
+			found = true
+
+			continue
+		}
+
+		updated = append(updated, d)
+	}
+
+	if !found {
+		b.reply(msg, fmt.Sprintf("❌ Domain <code>%s</code> not found in %s list.", html.EscapeString(domain), html.EscapeString(listType)))
+
+		return nil, false
+	}
+
+	return updated, true
+}
+
+func (b *Bot) clearEnrichmentDomains(ctx context.Context, msg *tgbotapi.Message) {
+	if err := b.database.SaveSettingWithHistory(ctx, SettingEnrichmentAllowDomains, []string{}, msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error clearing allow domains: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	if err := b.database.SaveSettingWithHistory(ctx, SettingEnrichmentDenyDomains, []string{}, msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error clearing deny domains: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	b.reply(msg, "✅ All enrichment domain filters cleared.")
+}
+
+func (b *Bot) getEnrichmentDomainList(ctx context.Context, settingKey string) []string {
+	var domains []string
+
+	if err := b.database.GetSetting(ctx, settingKey, &domains); err != nil {
+		return []string{}
+	}
+
+	return domains
+}
+
+func normalizeDomain(domain string) string {
+	domain = strings.TrimSpace(strings.ToLower(domain))
+	domain = strings.TrimPrefix(domain, "https://")
+	domain = strings.TrimPrefix(domain, "http://")
+	domain = strings.TrimPrefix(domain, "www.")
+	domain = strings.TrimSuffix(domain, "/")
+
+	return domain
 }
 
 func (b *Bot) fetchEnrichmentStats(ctx context.Context) (*enrichmentStats, error) {

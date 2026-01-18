@@ -25,9 +25,26 @@ spec:
       labels:
         app: digest-yacy
     spec:
+      enableServiceLinks: false
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: "OnRootMismatch"
+      initContainers:
+      - name: yacy-data-fix
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          rm -f /opt/yacy_search_server/DATA/yacy.running || true
+          for f in /opt/yacy_search_server/DATA/SETTINGS/*.properties /opt/yacy_search_server/DATA/SETTINGS/*.conf /opt/yacy_search_server/DATA/SETTINGS/yacy.conf; do
+            if [ -f "$f" ]; then
+              sed -i 's|tcp://[^:]*:||g' "$f"
+            fi
+          done
+        volumeMounts:
+        - name: yacy-data
+          mountPath: /opt/yacy_search_server/DATA
       containers:
       - name: yacy
         image: yacy/yacy_search_server:latest

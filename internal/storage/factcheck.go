@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,6 +48,9 @@ type FactCheckCacheEntry struct {
 }
 
 func (db *DB) EnqueueFactCheck(ctx context.Context, itemID, claim, normalizedClaim string) error {
+	claim = strings.ToValidUTF8(claim, "")
+	normalizedClaim = strings.ToValidUTF8(normalizedClaim, "")
+
 	_, err := db.Pool.Exec(ctx, `
 		INSERT INTO fact_check_queue (item_id, claim, normalized_claim)
 		VALUES ($1, $2, $3)
