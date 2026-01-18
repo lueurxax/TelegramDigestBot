@@ -3542,7 +3542,7 @@ func (b *Bot) handleDiscoverStats(ctx context.Context, msg *tgbotapi.Message) {
 	var sb strings.Builder
 
 	sb.WriteString("📊 <b>Channel Discovery Statistics</b>\n\n")
-	sb.WriteString(fmt.Sprintf("• <b>Pending:</b> <code>%d</code>\n", stats.PendingCount))
+	sb.WriteString(fmt.Sprintf("• <b>Pending (raw):</b> <code>%d</code>\n", stats.PendingCount))
 
 	if stats.UnresolvedCount > 0 {
 		sb.WriteString(fmt.Sprintf("• <b>Unresolved:</b> <code>%d</code> <i>(peer ID only)</i>\n", stats.UnresolvedCount))
@@ -3555,6 +3555,12 @@ func (b *Bot) handleDiscoverStats(ctx context.Context, msg *tgbotapi.Message) {
 	sb.WriteString(fmt.Sprintf("• <b>Thresholds:</b> seen ≥ <code>%d</code>, engagement ≥ <code>%.0f</code>\n", minSeen, minEngagement))
 
 	if filterStats != nil {
+		actionable := stats.PendingCount - filterStats.MatchedChannelIDCount - filterStats.BelowThresholdCount - filterStats.AlreadyTrackedCount
+		if actionable < 0 {
+			actionable = 0
+		}
+
+		sb.WriteString(fmt.Sprintf("• <b>Pending (actionable):</b> <code>%d</code>\n", actionable))
 		sb.WriteString("\n<b>Filtered (pending)</b>\n")
 		sb.WriteString(fmt.Sprintf("• <b>Matched channel:</b> <code>%d</code>\n", filterStats.MatchedChannelIDCount))
 		sb.WriteString(fmt.Sprintf("• <b>Below thresholds:</b> <code>%d</code>\n", filterStats.BelowThresholdCount))
