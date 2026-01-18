@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
 
 const (
@@ -60,7 +61,7 @@ type EvidenceClaim struct {
 	EvidenceID  string
 	ClaimText   string
 	EntitiesRaw []byte
-	Embedding   []float32
+	Embedding   pgvector.Vector
 	CreatedAt   time.Time
 }
 
@@ -289,13 +290,20 @@ func (db *DB) SaveEvidenceSource(ctx context.Context, src *EvidenceSource) (stri
 }
 
 func (db *DB) SaveEvidenceClaim(ctx context.Context, claim *EvidenceClaim) (string, error) {
-	var id uuid.UUID
+	var (
+		id        uuid.UUID
+		embedding any
+	)
+
+	if len(claim.Embedding.Slice()) > 0 {
+		embedding = claim.Embedding
+	}
 
 	err := db.Pool.QueryRow(ctx, `
 		INSERT INTO evidence_claims (evidence_id, claim_text, entities_json, embedding)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
-	`, toUUID(claim.EvidenceID), claim.ClaimText, claim.EntitiesRaw, claim.Embedding).Scan(&id)
+	`, toUUID(claim.EvidenceID), claim.ClaimText, claim.EntitiesRaw, embedding).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("save evidence claim: %w", err)
 	}
@@ -663,7 +671,7 @@ func (db *DB) FindSimilarClaim(ctx context.Context, evidenceID string, embedding
 		  AND embedding <=> $2::vector < $3
 		ORDER BY embedding <=> $2::vector
 		LIMIT 1
-	`, toUUID(evidenceID), embedding, distanceThreshold).Scan(
+	`, toUUID(evidenceID), pgvector.NewVector(embedding), distanceThreshold).Scan(
 		&id, &evidenceUID, &claim.ClaimText, &entitiesRaw, &claim.Embedding, &claim.CreatedAt,
 	)
 	if err != nil {

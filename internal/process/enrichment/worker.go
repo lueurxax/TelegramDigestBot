@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pgvector/pgvector-go"
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
@@ -681,7 +682,7 @@ func (w *Worker) saveClaimsWithDedup(ctx context.Context, sourceID string, claim
 			EvidenceID:  sourceID,
 			ClaimText:   claim.Text,
 			EntitiesRaw: claim.EntitiesJSON(),
-			Embedding:   embedding,
+			Embedding:   pgvector.NewVector(embedding),
 		}
 
 		if _, err := w.db.SaveEvidenceClaim(ctx, dbClaim); err != nil {

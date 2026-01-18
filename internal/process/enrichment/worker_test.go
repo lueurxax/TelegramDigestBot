@@ -244,7 +244,7 @@ func TestWorker_saveClaimsWithDedup(t *testing.T) {
 		}
 
 		// Check that embedding was saved
-		if repo.savedClaims[0].Embedding == nil {
+		if len(repo.savedClaims[0].Embedding.Slice()) == 0 {
 			t.Error("expected embedding to be saved with claim")
 		}
 	})
