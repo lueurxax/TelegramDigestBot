@@ -16,7 +16,7 @@ func (db *DB) SaveRelevanceGateLog(ctx context.Context, rawMsgID string, decisio
 	_, err := db.Pool.Exec(ctx, `
 		INSERT INTO relevance_gate_log (raw_message_id, decision, confidence, reason, model, gate_version)
 		VALUES ($1, $2, $3, $4, $5, $6)
-	`, toUUID(rawMsgID), decision, conf, toText(reason), toText(model), toText(gateVersion))
+	`, toUUID(rawMsgID), SanitizeUTF8(decision), conf, toText(reason), toText(model), toText(gateVersion))
 	if err != nil {
 		return fmt.Errorf("save relevance gate log: %w", err)
 	}

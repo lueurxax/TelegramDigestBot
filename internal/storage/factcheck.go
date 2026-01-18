@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,14 +47,11 @@ type FactCheckCacheEntry struct {
 }
 
 func (db *DB) EnqueueFactCheck(ctx context.Context, itemID, claim, normalizedClaim string) error {
-	claim = strings.ToValidUTF8(claim, "")
-	normalizedClaim = strings.ToValidUTF8(normalizedClaim, "")
-
 	_, err := db.Pool.Exec(ctx, `
 		INSERT INTO fact_check_queue (item_id, claim, normalized_claim)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (item_id) DO NOTHING
-	`, toUUID(itemID), claim, normalizedClaim)
+	`, toUUID(itemID), SanitizeUTF8(claim), SanitizeUTF8(normalizedClaim))
 	if err != nil {
 		return fmt.Errorf("enqueue fact check: %w", err)
 	}
@@ -116,7 +112,7 @@ func (db *DB) UpdateFactCheckStatus(ctx context.Context, queueID, status, errMsg
 			next_retry_at = $4,
 			updated_at = now()
 		WHERE id = $1
-	`, toUUID(queueID), status, errMsg, retryAt)
+	`, toUUID(queueID), status, SanitizeUTF8(errMsg), retryAt)
 	if err != nil {
 		return fmt.Errorf("update fact check status: %w", err)
 	}
@@ -204,7 +200,7 @@ func (db *DB) SaveItemFactChecks(ctx context.Context, itemID string, matches []F
 			INSERT INTO item_fact_checks (item_id, claim, url, publisher, rating, matched_at)
 			VALUES ($1, $2, $3, $4, $5, $6)
 			ON CONFLICT (item_id, url) DO NOTHING
-		`, toUUID(itemID), match.Claim, match.URL, match.Publisher, match.Rating, match.MatchedAt)
+		`, toUUID(itemID), SanitizeUTF8(match.Claim), SanitizeUTF8(match.URL), SanitizeUTF8(match.Publisher), SanitizeUTF8(match.Rating), match.MatchedAt)
 		if err != nil {
 			return fmt.Errorf("save item fact check: %w", err)
 		}

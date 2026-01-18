@@ -170,7 +170,7 @@ func (db *DB) markDiscoveryAdded(ctx context.Context, username string, peerID in
 			($4 != 0 AND dc.tg_peer_id = $4 AND c.tg_peer_id = $4) OR
 			($5 != '' AND dc.invite_link = $5 AND c.invite_link = $5)
 		  )
-	`, normalized, DiscoveryStatusAdded, statuses, peerID, inviteLink)
+	`, SanitizeUTF8(normalized), DiscoveryStatusAdded, statuses, peerID, SanitizeUTF8(inviteLink))
 	if err != nil {
 		return fmt.Errorf("update discovery matches: %w", err)
 	}

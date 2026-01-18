@@ -19,7 +19,7 @@ func (db *DB) SaveRawMessageDropLog(ctx context.Context, rawMsgID, reason, detai
 			reason = EXCLUDED.reason,
 			detail = EXCLUDED.detail,
 			updated_at = NOW()
-	`, toUUID(rawMsgID), reason, toText(detail))
+	`, toUUID(rawMsgID), SanitizeUTF8(reason), toText(detail))
 	if err != nil {
 		return fmt.Errorf("save raw message drop log: %w", err)
 	}

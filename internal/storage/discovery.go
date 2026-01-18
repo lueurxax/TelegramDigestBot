@@ -451,9 +451,9 @@ func (db *DB) GetDiscoveriesNeedingResolution(ctx context.Context, limit int) ([
 func (db *DB) UpdateDiscoveryChannelInfo(ctx context.Context, id string, title string, username string, description string) error {
 	if err := db.Queries.UpdateDiscoveryChannelInfo(ctx, sqlc.UpdateDiscoveryChannelInfoParams{
 		ID:          toUUID(id),
-		Title:       title,
-		Username:    normalizeUsername(username),
-		Description: description,
+		Title:       SanitizeUTF8(title),
+		Username:    normalizeUsername(SanitizeUTF8(username)),
+		Description: SanitizeUTF8(description),
 	}); err != nil {
 		return fmt.Errorf("update discovery channel info: %w", err)
 	}
@@ -498,9 +498,9 @@ func (db *DB) GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, lim
 func (db *DB) UpdateDiscoveryFromInvite(ctx context.Context, id string, title string, username string, description string, peerID int64, accessHash int64) error {
 	if err := db.Queries.UpdateDiscoveryFromInvite(ctx, sqlc.UpdateDiscoveryFromInviteParams{
 		ID:          toUUID(id),
-		Title:       title,
-		Username:    normalizeUsername(username),
-		Description: description,
+		Title:       SanitizeUTF8(title),
+		Username:    normalizeUsername(SanitizeUTF8(username)),
+		Description: SanitizeUTF8(description),
 		TgPeerID:    peerID,
 		AccessHash:  accessHash,
 	}); err != nil {

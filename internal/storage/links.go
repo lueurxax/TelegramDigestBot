@@ -85,9 +85,9 @@ func (db *DB) GetLinkCache(ctx context.Context, url string) (*ResolvedLink, erro
 
 func (db *DB) SaveLinkCache(ctx context.Context, link *ResolvedLink) (string, error) {
 	id, err := db.Queries.SaveLinkCache(ctx, sqlc.SaveLinkCacheParams{
-		Url:             link.URL,
-		Domain:          link.Domain,
-		LinkType:        link.LinkType,
+		Url:             SanitizeUTF8(link.URL),
+		Domain:          SanitizeUTF8(link.Domain),
+		LinkType:        SanitizeUTF8(link.LinkType),
 		Title:           toText(link.Title),
 		Content:         toText(link.Content),
 		Author:          toText(link.Author),
@@ -103,7 +103,7 @@ func (db *DB) SaveLinkCache(ctx context.Context, link *ResolvedLink) (string, er
 		Forwards:        pgtype.Int4{Int32: safeIntToInt32(link.Forwards), Valid: link.Forwards != 0},
 		HasMedia:        pgtype.Bool{Bool: link.HasMedia, Valid: true},
 		MediaType:       toText(link.MediaType),
-		Status:          link.Status,
+		Status:          SanitizeUTF8(link.Status),
 		ErrorMessage:    toText(link.ErrorMessage),
 		Language:        toText(link.Language),
 		ResolvedAt:      toTimestamptz(link.ResolvedAt),

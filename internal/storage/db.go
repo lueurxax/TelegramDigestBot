@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -107,7 +109,15 @@ func fromUUID(uid pgtype.UUID) string {
 }
 
 func toText(s string) pgtype.Text {
-	return pgtype.Text{String: s, Valid: s != ""}
+	return pgtype.Text{String: SanitizeUTF8(s), Valid: s != ""}
+}
+
+func SanitizeUTF8(s string) string {
+	if s == "" || utf8.ValidString(s) {
+		return s
+	}
+
+	return strings.ToValidUTF8(s, "")
 }
 
 func toTimestamptz(t time.Time) pgtype.Timestamptz {

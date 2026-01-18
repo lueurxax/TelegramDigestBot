@@ -87,7 +87,7 @@ func (db *DB) EnqueueEnrichment(ctx context.Context, itemID, summary string) err
 		INSERT INTO enrichment_queue (item_id, summary)
 		VALUES ($1, $2)
 		ON CONFLICT (item_id) DO NOTHING
-	`, toUUID(itemID), summary)
+	`, toUUID(itemID), SanitizeUTF8(summary))
 	if err != nil {
 		return fmt.Errorf("enqueue enrichment: %w", err)
 	}
@@ -158,7 +158,7 @@ func (db *DB) UpdateEnrichmentStatus(ctx context.Context, queueID, status, errMs
 			next_retry_at = $4,
 			updated_at = now()
 		WHERE id = $1
-	`, toUUID(queueID), status, errMsg, retryAt)
+	`, toUUID(queueID), status, SanitizeUTF8(errMsg), retryAt)
 	if err != nil {
 		return fmt.Errorf("update enrichment status: %w", err)
 	}
@@ -222,6 +222,17 @@ func URLHash(url string) string {
 	return hex.EncodeToString(h[:])
 }
 
+func sanitizeEvidenceSource(src *EvidenceSource) {
+	src.URL = SanitizeUTF8(src.URL)
+	src.Domain = SanitizeUTF8(src.Domain)
+	src.Title = SanitizeUTF8(src.Title)
+	src.Description = SanitizeUTF8(src.Description)
+	src.Content = SanitizeUTF8(src.Content)
+	src.Author = SanitizeUTF8(src.Author)
+	src.Language = SanitizeUTF8(src.Language)
+	src.Provider = SanitizeUTF8(src.Provider)
+}
+
 func (db *DB) GetEvidenceSource(ctx context.Context, urlHash string) (*EvidenceSource, error) {
 	var (
 		src         EvidenceSource
@@ -269,6 +280,8 @@ func (db *DB) GetEvidenceSource(ctx context.Context, urlHash string) (*EvidenceS
 func (db *DB) SaveEvidenceSource(ctx context.Context, src *EvidenceSource) (string, error) {
 	var id uuid.UUID
 
+	sanitizeEvidenceSource(src)
+
 	err := db.Pool.QueryRow(ctx, `
 		INSERT INTO evidence_sources (url, url_hash, domain, title, description, content,
 		                              author, published_at, language, provider, extraction_failed, fetched_at, expires_at)
@@ -301,6 +314,8 @@ func (db *DB) SaveEvidenceClaim(ctx context.Context, claim *EvidenceClaim) (stri
 		embedding any
 	)
 
+	claimText := SanitizeUTF8(claim.ClaimText)
+
 	if len(claim.Embedding.Slice()) > 0 {
 		embedding = claim.Embedding
 	}
@@ -309,7 +324,7 @@ func (db *DB) SaveEvidenceClaim(ctx context.Context, claim *EvidenceClaim) (stri
 		INSERT INTO evidence_claims (evidence_id, claim_text, entities_json, embedding)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id
-	`, toUUID(claim.EvidenceID), claim.ClaimText, claim.EntitiesRaw, embedding).Scan(&id)
+	`, toUUID(claim.EvidenceID), claimText, claim.EntitiesRaw, embedding).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("save evidence claim: %w", err)
 	}

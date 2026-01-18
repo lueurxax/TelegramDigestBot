@@ -151,7 +151,7 @@ func (db *DB) SaveDigestEntries(ctx context.Context, digestID string, entries []
 		err := db.Queries.SaveDigestEntry(ctx, sqlc.SaveDigestEntryParams{
 			DigestID:    toUUID(digestID),
 			Title:       toText(e.Title),
-			Body:        e.Body,
+			Body:        SanitizeUTF8(e.Body),
 			SourcesJson: sourcesJSON,
 		})
 		if err != nil {

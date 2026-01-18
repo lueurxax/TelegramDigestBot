@@ -39,7 +39,7 @@ func (db *DB) SaveItem(ctx context.Context, item *Item) error {
 		Topic:           toText(item.Topic),
 		Summary:         toText(item.Summary),
 		Language:        toText(item.Language),
-		Status:          item.Status,
+		Status:          SanitizeUTF8(item.Status),
 	})
 	if err != nil {
 		return fmt.Errorf("save item: %w", err)

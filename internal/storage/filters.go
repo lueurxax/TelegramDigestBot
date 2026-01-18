@@ -36,8 +36,8 @@ func (db *DB) GetActiveFilters(ctx context.Context) ([]Filter, error) {
 
 func (db *DB) AddFilter(ctx context.Context, fType, pattern string) error {
 	if err := db.Queries.AddFilter(ctx, sqlc.AddFilterParams{
-		Type:    fType,
-		Pattern: pattern,
+		Type:    SanitizeUTF8(fType),
+		Pattern: SanitizeUTF8(pattern),
 	}); err != nil {
 		return fmt.Errorf("add filter: %w", err)
 	}
@@ -46,7 +46,7 @@ func (db *DB) AddFilter(ctx context.Context, fType, pattern string) error {
 }
 
 func (db *DB) DeactivateFilter(ctx context.Context, pattern string) error {
-	if err := db.Queries.DeactivateFilter(ctx, pattern); err != nil {
+	if err := db.Queries.DeactivateFilter(ctx, SanitizeUTF8(pattern)); err != nil {
 		return fmt.Errorf("deactivate filter: %w", err)
 	}
 
