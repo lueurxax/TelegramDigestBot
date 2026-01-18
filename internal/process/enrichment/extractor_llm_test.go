@@ -62,7 +62,7 @@ func TestExtractor_ExtractClaimsWithLLM_Robustness(t *testing.T) {
 		{
 			name:        "empty array",
 			llmResponse: `[]`,
-			expectError: true, // we added check for len(claims) > 0
+			expectCount: 0,
 		},
 	}
 

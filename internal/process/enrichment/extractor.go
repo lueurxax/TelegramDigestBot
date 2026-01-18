@@ -161,18 +161,24 @@ Text:
 		return nil, fmt.Errorf("llm extract claims: %w", err)
 	}
 
-	var claims []ExtractedClaim
-
 	var lastErr error
+
+	var foundValidArray bool
 
 	// Try to find the valid JSON array by trying all combinations of [ and ] positions.
 	// This handles cases where the LLM might include preamble or postamble text with brackets.
+
 	for start := strings.Index(res, "["); start != -1; {
 		for end := strings.LastIndex(res, "]"); end > start; end = strings.LastIndex(res[:end], "]") {
-			if err := json.Unmarshal([]byte(res[start:end+1]), &claims); err == nil {
-				if len(claims) > 0 {
-					return claims, nil
+			var currentClaims []ExtractedClaim
+			if err := json.Unmarshal([]byte(res[start:end+1]), &currentClaims); err == nil {
+				if len(currentClaims) > 0 {
+					return currentClaims, nil
 				}
+
+				foundValidArray = true
+
+				continue
 			}
 
 			lastErr = err
@@ -185,6 +191,10 @@ Text:
 		}
 
 		start = start + 1 + nextStart
+	}
+
+	if foundValidArray {
+		return nil, nil
 	}
 
 	if lastErr == nil {
