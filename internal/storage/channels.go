@@ -12,6 +12,7 @@ import (
 const (
 	errAddChannelByUsername = "add channel by username: %w"
 	errMarkDiscoveryAdded   = "mark discovery added: %w"
+	errCheckChannelTracked  = "check if channel tracked: %w"
 )
 
 // normalizeUsername converts username to lowercase for consistent storage
@@ -134,6 +135,20 @@ func (db *DB) AddChannelByInviteLink(ctx context.Context, inviteLink string) err
 	}
 
 	return nil
+}
+
+// IsChannelTracked returns true when the channel is already active.
+func (db *DB) IsChannelTracked(ctx context.Context, username string, peerID int64, inviteLink string) (bool, error) {
+	tracked, err := db.Queries.IsChannelTracked(ctx, sqlc.IsChannelTrackedParams{
+		Username:   toText(normalizeUsername(username)),
+		TgPeerID:   peerID,
+		InviteLink: toText(inviteLink),
+	})
+	if err != nil {
+		return false, fmt.Errorf(errCheckChannelTracked, err)
+	}
+
+	return tracked, nil
 }
 
 func (db *DB) markDiscoveryAdded(ctx context.Context, username string, peerID int64, inviteLink string) error {

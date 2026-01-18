@@ -48,6 +48,7 @@ type Querier interface {
 	GetClustersForWindow(ctx context.Context, arg GetClustersForWindowParams) ([]GetClustersForWindowRow, error)
 	GetDigestCoverImage(ctx context.Context, arg GetDigestCoverImageParams) ([]byte, error)
 	GetDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetDiscoveriesNeedingResolutionRow, error)
+	GetDiscoveryByUsername(ctx context.Context, username pgtype.Text) (GetDiscoveryByUsernameRow, error)
 	GetDiscoveryFilterStats(ctx context.Context, arg GetDiscoveryFilterStatsParams) (GetDiscoveryFilterStatsRow, error)
 	GetDiscoveryStats(ctx context.Context) (GetDiscoveryStatsRow, error)
 	GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetInviteLinkDiscoveriesNeedingResolutionRow, error)

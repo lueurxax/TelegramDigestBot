@@ -96,8 +96,18 @@ const (
 
 // Date/time formats.
 const (
-	DateTimeFormat = "2006-01-02 15:04:05"
-	TimeFormat     = "15:04"
+	DateTimeFormat     = "2006-01-02 15:04:05"
+	TimeFormat         = "15:04"
+	DateFormatShort    = "Jan 02"
+	discoveryUnknown   = "Unknown"
+	discoveryUnknownLC = "unknown"
+)
+
+// Discovery formatting templates.
+const (
+	discoverPreviewUsage    = "Usage: <code>/discover preview &lt;@username&gt;</code>"
+	discoveryTitleIdentFmt  = "• <b>%s</b> (%s)\n"
+	discoveryLastSeenFormat = DateFormatShort
 )
 
 const (
@@ -276,7 +286,7 @@ func (b *Bot) handleConfigNamespace(ctx context.Context, msg *tgbotapi.Message) 
 	args := strings.Fields(msg.CommandArguments())
 
 	if len(args) == 0 {
-		b.reply(msg, "Usage: <code>/config &lt;links|max_links|link_cache|target|window|schedule|language|tone|relevance|importance|reset&gt;</code>")
+		b.reply(msg, "Usage: <code>/config &lt;links|max_links|link_cache|target|window|schedule|language|tone|relevance|importance|discovery_min_seen|discovery_min_engagement|reset&gt;</code>")
 
 		return
 	}
@@ -303,7 +313,15 @@ func (b *Bot) routeConfigSubcommand(ctx context.Context, msg *tgbotapi.Message, 
 		CmdTone:      func() { b.handleTone(ctx, msg) },
 		"relevance":  func() { b.handleThreshold(ctx, msg, SettingRelevanceThreshold) },
 		"importance": func() { b.handleThreshold(ctx, msg, SettingImportanceThreshold) },
-		"reset":      func() { b.handleSettings(ctx, msg) },
+		"discovery_min_seen": func() {
+			args := strings.Fields(msg.Text)
+			b.handleDiscoverMinSeen(ctx, msg, args)
+		},
+		"discovery_min_engagement": func() {
+			args := strings.Fields(msg.Text)
+			b.handleDiscoverMinEngagement(ctx, msg, args)
+		},
+		"reset": func() { b.handleSettings(ctx, msg) },
 	}
 
 	if handler, ok := handlers[subcommand]; ok {
@@ -1590,7 +1608,7 @@ func formatScoreItem(sb *strings.Builder, item db.ItemScore, threshold float32) 
 	} else if item.Title != "" {
 		name = item.Title
 	} else {
-		name = "unknown"
+		name = annotateUnknown
 	}
 
 	summary := item.Summary
@@ -2953,6 +2971,7 @@ func (b *Bot) handleHelp(_ context.Context, msg *tgbotapi.Message) {
 		"all":         helpAllMessage(),
 		"channels":    helpChannelsMessage(),
 		CmdChannel:    helpChannelsMessage(),
+		"discover":    helpDiscoverMessage(),
 		"filters":     helpFiltersMessage(),
 		"filter":      helpFiltersMessage(),
 		"schedule":    helpScheduleMessage(),
@@ -2986,13 +3005,14 @@ func helpSummaryMessage() string {
 		"Core areas:\n" +
 		"• <code>/channel</code> - Manage sources\n" +
 		"• <code>/filter</code> - Filter rules\n" +
+		"• <code>/discover</code> - Channel discovery\n" +
 		"• <code>/schedule</code> - Digest timing\n" +
 		"• <code>/config</code> - Settings\n" +
 		"• <code>/ai</code> - AI features\n" +
 		"• <code>/system</code> - Diagnostics\n\n" +
 		"Data & feedback:\n" +
 		"• <code>/scores</code> <code>/ratings</code> <code>/annotate</code> <code>/feedback</code>\n\n" +
-		"More: <code>/help &lt;topic&gt;</code> (channels, filters, schedule, config, ai, system, scores, ratings, annotate)\n" +
+		"More: <code>/help &lt;topic&gt;</code> (channels, discover, filters, schedule, config, ai, system, scores, ratings, annotate)\n" +
 		"Full list: <code>/help all</code>\n" +
 		"BotFather list: <code>/help botfather</code>"
 }
@@ -3020,6 +3040,19 @@ func helpFiltersMessage() string {
 		"• <code>/filter skip_forwards &lt;on|off&gt;</code>"
 }
 
+func helpDiscoverMessage() string {
+	return "🧭 <b>Discovery</b>\n" +
+		"• <code>/discover</code> - Show actionable discoveries\n" +
+		"• <code>/discover preview &lt;@username&gt;</code> - Explain why it is (not) actionable\n" +
+		"• <code>/discover approve &lt;@username&gt;</code>\n" +
+		"• <code>/discover reject &lt;@username&gt;</code>\n" +
+		"• <code>/discover min_seen &lt;n&gt;</code> - Min count for discovery\n" +
+		"• <code>/discover min_engagement &lt;n&gt;</code> - Min engagement score\n" +
+		"• <code>/discover show-rejected [limit]</code>\n" +
+		"• <code>/discover cleanup</code>\n" +
+		"• <code>/discover stats</code>"
+}
+
 func helpScheduleMessage() string {
 	return "🗓️ <b>Schedule</b>\n" +
 		"Times are hour-only (<code>HH:00</code>).\n" +
@@ -3040,6 +3073,8 @@ func helpConfigMessage() string {
 		"• <code>/config tone &lt;professional|casual|brief&gt;</code>\n" +
 		"• <code>/config relevance &lt;0-1&gt;</code>\n" +
 		"• <code>/config importance &lt;0-1&gt;</code>\n" +
+		"• <code>/config discovery_min_seen &lt;n&gt;</code>\n" +
+		"• <code>/config discovery_min_engagement &lt;n&gt;</code>\n" +
 		"• <code>/config reset &lt;key&gt;</code>"
 }
 
@@ -3087,6 +3122,7 @@ func helpAnnotateMessage() string {
 func helpAllMessage() string {
 	return helpSummaryMessage() + "\n\n" +
 		helpChannelsMessage() + "\n\n" +
+		helpDiscoverMessage() + "\n\n" +
 		helpFiltersMessage() + "\n\n" +
 		helpScheduleMessage() + "\n\n" +
 		helpConfigMessage() + "\n\n" +
@@ -3273,9 +3309,61 @@ func (b *Bot) handleDiscoverNamespace(ctx context.Context, msg *tgbotapi.Message
 		b.handleDiscoverCleanup(ctx, msg)
 	case SubCmdStats:
 		b.handleDiscoverStats(ctx, msg)
+	case SubCmdPreview:
+		b.handleDiscoverPreviewCmd(ctx, msg, args)
+	case "min_seen":
+		b.handleDiscoverMinSeen(ctx, msg, args)
+	case "min_engagement":
+		b.handleDiscoverMinEngagement(ctx, msg, args)
 	default:
-		b.reply(msg, fmt.Sprintf("❓ Unknown discover subcommand: <code>%s</code>. Use <code>approve</code>, <code>reject</code>, <code>show-rejected</code>, <code>cleanup</code>, or <code>stats</code>.", html.EscapeString(subcommand)))
+		b.reply(msg, fmt.Sprintf("❓ Unknown discover subcommand: <code>%s</code>. Use <code>approve</code>, <code>reject</code>, <code>min_seen</code>, <code>min_engagement</code>, <code>show-rejected</code>, <code>preview</code>, <code>cleanup</code>, or <code>stats</code>.", html.EscapeString(subcommand)))
 	}
+}
+
+func (b *Bot) handleDiscoverMinSeen(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) < 2 {
+		b.reply(msg, "Usage: <code>/discover min_seen &lt;number&gt;</code>")
+
+		return
+	}
+
+	val, err := strconv.Atoi(args[1])
+	if err != nil || val < 1 {
+		b.reply(msg, "❌ Invalid value. Please provide a positive number >= 1.")
+
+		return
+	}
+
+	if err := b.database.SaveSettingWithHistory(ctx, SettingDiscoveryMinSeen, val, msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error saving discovery_min_seen: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	b.reply(msg, fmt.Sprintf("✅ Discovery minimum seen count updated to <code>%d</code>.", val))
+}
+
+func (b *Bot) handleDiscoverMinEngagement(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) < 2 {
+		b.reply(msg, "Usage: <code>/discover min_engagement &lt;number&gt;</code>")
+
+		return
+	}
+
+	val, err := strconv.ParseFloat(args[1], 32)
+	if err != nil || val < 0 {
+		b.reply(msg, "❌ Invalid value. Please provide a non-negative number.")
+
+		return
+	}
+
+	if err := b.database.SaveSettingWithHistory(ctx, SettingDiscoveryMinScore, float32(val), msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error saving discovery_min_engagement: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	b.reply(msg, fmt.Sprintf("✅ Discovery minimum engagement updated to <code>%v</code>.", val))
 }
 
 func (b *Bot) handleDiscoverApproveCmd(ctx context.Context, msg *tgbotapi.Message, args []string) {
@@ -3312,6 +3400,16 @@ func (b *Bot) handleDiscoverShowRejectedCmd(ctx context.Context, msg *tgbotapi.M
 	}
 
 	b.handleDiscoverShowRejected(ctx, msg, limit)
+}
+
+func (b *Bot) handleDiscoverPreviewCmd(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) < 2 {
+		b.reply(msg, discoverPreviewUsage)
+
+		return
+	}
+
+	b.handleDiscoverPreview(ctx, msg, args[1])
 }
 
 func (b *Bot) handleDiscoverList(ctx context.Context, msg *tgbotapi.Message) {
@@ -3365,6 +3463,41 @@ func (b *Bot) getDiscoveryThresholds(ctx context.Context) (int, float32) {
 	}
 
 	return minSeen, minEngagement
+}
+
+func (b *Bot) handleDiscoverPreview(ctx context.Context, msg *tgbotapi.Message, identifier string) {
+	username := strings.ToLower(strings.TrimPrefix(identifier, "@"))
+	if username == "" {
+		b.reply(msg, discoverPreviewUsage)
+
+		return
+	}
+
+	discovery, err := b.database.GetDiscoveryByUsername(ctx, username)
+	if errors.Is(err, db.ErrDiscoveryNotFound) {
+		b.reply(msg, fmt.Sprintf("❌ No discovery record found for <code>@%s</code>.", html.EscapeString(username)))
+
+		return
+	}
+
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error fetching discovery: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	minSeen, minEngagement := b.getDiscoveryThresholds(ctx)
+
+	alreadyTracked, err := b.database.IsChannelTracked(ctx, discovery.Username, discovery.TGPeerID, discovery.InviteLink)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error checking channel status: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	actionable, reasons := buildDiscoveryActionability(*discovery, minSeen, minEngagement, alreadyTracked)
+
+	b.reply(msg, formatDiscoveryPreview(*discovery, minSeen, minEngagement, alreadyTracked, actionable, reasons))
 }
 
 func (b *Bot) handleDiscoverShowRejected(ctx context.Context, msg *tgbotapi.Message, limit int) {
@@ -3444,19 +3577,19 @@ func formatDiscoveryItem(d db.DiscoveredChannel) string {
 
 	title := d.Title
 	if title == "" {
-		title = "Unknown"
+		title = discoveryUnknown
 	}
 
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("• <b>%s</b> (%s)\n", html.EscapeString(title), html.EscapeString(identifier)))
+	sb.WriteString(fmt.Sprintf(discoveryTitleIdentFmt, html.EscapeString(title), html.EscapeString(identifier)))
 
 	infoLine := fmt.Sprintf("  Source: %s | Seen: %dx", d.SourceType, d.DiscoveryCount)
 	if d.MaxViews > 0 || d.MaxForwards > 0 {
 		infoLine += fmt.Sprintf(" | Engagement: %dv/%df", d.MaxViews, d.MaxForwards)
 	}
 
-	infoLine += fmt.Sprintf(" | Last: %s\n\n", d.LastSeenAt.Format("Jan 02"))
+	infoLine += fmt.Sprintf(" | Last: %s\n\n", d.LastSeenAt.Format(discoveryLastSeenFormat))
 	sb.WriteString(infoLine)
 
 	return sb.String()
@@ -3476,6 +3609,121 @@ func formatDiscoveryIdentifier(d db.DiscoveredChannel) string {
 	}
 
 	return ""
+}
+
+func buildDiscoveryActionability(d db.DiscoveredChannel, minSeen int, minEngagement float32, alreadyTracked bool) (bool, []string) {
+	status := d.Status
+	if status == "" {
+		status = discoveryUnknownLC
+	}
+
+	actionable := true
+
+	var reasons []string
+
+	if status != db.DiscoveryStatusPending {
+		reasons = append(reasons, "status="+status)
+		actionable = false
+	}
+
+	if d.MatchedChannelID != "" {
+		reasons = append(reasons, "matched channel")
+		actionable = false
+	}
+
+	if d.DiscoveryCount < minSeen || d.EngagementScore < float64(minEngagement) {
+		reasons = append(reasons, "below thresholds")
+		actionable = false
+	}
+
+	if alreadyTracked {
+		reasons = append(reasons, "already tracked")
+		actionable = false
+	}
+
+	return actionable, reasons
+}
+
+func formatDiscoveryPreview(d db.DiscoveredChannel, minSeen int, minEngagement float32, alreadyTracked, actionable bool, reasons []string) string {
+	title, identifier, status := extractDiscoveryFields(d)
+
+	var sb strings.Builder
+
+	sb.WriteString("🔍 <b>Discovery Preview</b>\n\n")
+	sb.WriteString(fmt.Sprintf(discoveryTitleIdentFmt, html.EscapeString(title), html.EscapeString(identifier)))
+	sb.WriteString(fmt.Sprintf("  Status: <code>%s</code>\n", html.EscapeString(status)))
+
+	writeDiscoveryPreviewDetails(&sb, d, minSeen, minEngagement, alreadyTracked)
+	writeActionabilityLine(&sb, actionable, reasons)
+
+	return sb.String()
+}
+
+func extractDiscoveryFields(d db.DiscoveredChannel) (title, identifier, status string) {
+	title = d.Title
+	if title == "" {
+		title = discoveryUnknown
+	}
+
+	identifier = formatDiscoveryIdentifier(d)
+	if identifier == "" && d.Username != "" {
+		identifier = "@" + d.Username
+	}
+
+	status = d.Status
+	if status == "" {
+		status = discoveryUnknownLC
+	}
+
+	return title, identifier, status
+}
+
+func writeDiscoveryPreviewDetails(sb *strings.Builder, d db.DiscoveredChannel, minSeen int, minEngagement float32, alreadyTracked bool) {
+	if d.SourceType != "" {
+		fmt.Fprintf(sb, "  Source: <code>%s</code>\n", html.EscapeString(d.SourceType))
+	}
+
+	fmt.Fprintf(sb, "  Seen: <code>%d</code> (min %d)\n", d.DiscoveryCount, minSeen)
+
+	if d.MaxViews > 0 || d.MaxForwards > 0 {
+		fmt.Fprintf(sb, "  Engagement: <code>%dv/%df</code> (score %.1f, min %.0f)\n", d.MaxViews, d.MaxForwards, d.EngagementScore, minEngagement)
+	} else {
+		fmt.Fprintf(sb, "  Engagement score: <code>%.1f</code> (min %.0f)\n", d.EngagementScore, minEngagement)
+	}
+
+	if !d.LastSeenAt.IsZero() {
+		fmt.Fprintf(sb, "  Last seen: <code>%s</code>\n", d.LastSeenAt.Format(discoveryLastSeenFormat))
+	}
+
+	if d.MatchedChannelID != "" {
+		fmt.Fprintf(sb, "  Matched channel: <code>yes</code> (<code>%s</code>)\n", html.EscapeString(d.MatchedChannelID))
+	} else {
+		sb.WriteString("  Matched channel: <code>no</code>\n")
+	}
+
+	trackedLine := "no"
+	if alreadyTracked {
+		trackedLine = "yes"
+	}
+
+	fmt.Fprintf(sb, "  Already tracked: <code>%s</code>\n", trackedLine)
+	sb.WriteString("\n")
+}
+
+func writeActionabilityLine(sb *strings.Builder, actionable bool, reasons []string) {
+	if actionable {
+		sb.WriteString("✅ Actionable. This discovery should appear in <code>/discover</code>.\n")
+
+		return
+	}
+
+	sb.WriteString("❌ Not actionable.")
+
+	if len(reasons) > 0 {
+		fmt.Fprintf(sb, " Reasons: <code>%s</code>.\n", html.EscapeString(strings.Join(reasons, ", ")))
+	} else {
+		sb.WriteString("\n")
+	}
 }
 
 func buildDiscoveryKeyboard(discoveries []db.DiscoveredChannel) [][]tgbotapi.InlineKeyboardButton {

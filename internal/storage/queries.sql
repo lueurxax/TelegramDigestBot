@@ -438,6 +438,15 @@ WHERE dc.status = 'rejected'
 ORDER BY dc.last_seen_at DESC
 LIMIT $1;
 
+-- name: GetDiscoveryByUsername :one
+SELECT dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.description, dc.source_type,
+       dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score,
+       dc.status, dc.matched_channel_id
+FROM discovered_channels dc
+WHERE dc.username = $1 OR '@' || dc.username = $1
+ORDER BY dc.last_seen_at DESC
+LIMIT 1;
+
 -- name: UpdateDiscoveryStatus :exec
 UPDATE discovered_channels
 SET status = $2, status_changed_at = now(), status_changed_by = $3

@@ -934,6 +934,57 @@ func (q *Queries) GetDiscoveriesNeedingResolution(ctx context.Context, limit int
 	return items, nil
 }
 
+const getDiscoveryByUsername = `-- name: GetDiscoveryByUsername :one
+SELECT dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.description, dc.source_type,
+       dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score,
+       dc.status, dc.matched_channel_id
+FROM discovered_channels dc
+WHERE dc.username = $1 OR '@' || dc.username = $1
+ORDER BY dc.last_seen_at DESC
+LIMIT 1
+`
+
+type GetDiscoveryByUsernameRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	Username         pgtype.Text        `json:"username"`
+	TgPeerID         pgtype.Int8        `json:"tg_peer_id"`
+	InviteLink       pgtype.Text        `json:"invite_link"`
+	Title            pgtype.Text        `json:"title"`
+	Description      pgtype.Text        `json:"description"`
+	SourceType       string             `json:"source_type"`
+	DiscoveryCount   int32              `json:"discovery_count"`
+	FirstSeenAt      pgtype.Timestamptz `json:"first_seen_at"`
+	LastSeenAt       pgtype.Timestamptz `json:"last_seen_at"`
+	MaxViews         pgtype.Int4        `json:"max_views"`
+	MaxForwards      pgtype.Int4        `json:"max_forwards"`
+	EngagementScore  pgtype.Float4      `json:"engagement_score"`
+	Status           string             `json:"status"`
+	MatchedChannelID pgtype.UUID        `json:"matched_channel_id"`
+}
+
+func (q *Queries) GetDiscoveryByUsername(ctx context.Context, username pgtype.Text) (GetDiscoveryByUsernameRow, error) {
+	row := q.db.QueryRow(ctx, getDiscoveryByUsername, username)
+	var i GetDiscoveryByUsernameRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.TgPeerID,
+		&i.InviteLink,
+		&i.Title,
+		&i.Description,
+		&i.SourceType,
+		&i.DiscoveryCount,
+		&i.FirstSeenAt,
+		&i.LastSeenAt,
+		&i.MaxViews,
+		&i.MaxForwards,
+		&i.EngagementScore,
+		&i.Status,
+		&i.MatchedChannelID,
+	)
+	return i, err
+}
+
 const getDiscoveryFilterStats = `-- name: GetDiscoveryFilterStats :one
 SELECT
     COUNT(*) FILTER (

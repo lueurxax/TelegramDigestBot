@@ -73,11 +73,13 @@ type Repository interface {
 	// Discovery operations
 	GetPendingDiscoveries(ctx context.Context, limit int, minSeen int, minEngagement float32) ([]db.DiscoveredChannel, error)
 	GetRejectedDiscoveries(ctx context.Context, limit int) ([]db.DiscoveredChannel, error)
+	GetDiscoveryByUsername(ctx context.Context, username string) (*db.DiscoveredChannel, error)
 	CleanupDiscoveriesBatch(ctx context.Context, limit int, adminID int64) (int, error)
 	ApproveDiscovery(ctx context.Context, username string, userID int64) error
 	RejectDiscovery(ctx context.Context, username string, userID int64) error
 	GetDiscoveryStats(ctx context.Context) (*db.DiscoveryStats, error)
 	GetDiscoveryFilterStats(ctx context.Context, minSeen int, minEngagement float32) (*db.DiscoveryFilterStats, error)
+	IsChannelTracked(ctx context.Context, username string, peerID int64, inviteLink string) (bool, error)
 }
 
 // Compile-time assertion that *db.DB implements Repository.

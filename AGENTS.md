@@ -45,3 +45,57 @@
 ## Security & Configuration Tips
 - Store credentials in `.env` and keep local session files under `data/`.
 - When changing schema or SQL, update `migrations/` and regenerate via `sqlc` if needed.
+
+## Channel Discovery System
+
+The discovery system tracks channels found through forwards, links, and mentions in tracked channels.
+
+### Key Files
+- `internal/storage/discovery.go` - Discovery CRUD and filtering logic
+- `internal/storage/channels.go` - Channel management, `markDiscoveryAdded` links discoveries to channels
+- `internal/bot/handlers.go` - Bot commands: `/discover`, `/discover stats`, `/discover cleanup`, `/discover show-rejected`
+- `internal/app/app.go` - Background reconciliation job (startup + every 6 hours)
+- `internal/storage/queries.sql` - All discovery-related SQL queries
+
+### Identity Model
+Channels have multiple identifiers: `username`, `tg_peer_id`, `invite_link`. The `matched_channel_id` column links discovery rows to tracked channels. Rejection cascades to all rows sharing any identifier.
+
+### Admin Commands
+- `/discover` - List pending discoveries with approve/reject buttons
+- `/discover approve @user` - Add channel to tracking
+- `/discover reject @user` - Reject (hides from list, cascades to related rows)
+- `/discover show-rejected [limit]` - View rejected discoveries
+- `/discover cleanup` - Backfill `matched_channel_id` for existing rows
+- `/discover stats` - Show counts and filter statistics
+
+## SQL & sqlc Workflow
+
+### Modifying Queries
+1. Edit `internal/storage/queries.sql`
+2. Run `~/go/bin/sqlc generate` (or `sqlc generate` if in PATH)
+3. Update Go code in `internal/storage/` to match new signatures
+4. Run `go build ./...` to verify
+
+### PostgreSQL Patterns Used
+- **CTE for cascading updates** - `WITH target AS (...) UPDATE ... FROM target`
+- **DISTINCT ON** - Deduplicate rows keeping highest-scoring one per group
+- **NOT EXISTS subquery** - Filter out rows matching tracked channels
+
+## Linting Guidelines
+
+Run `~/go/bin/golangci-lint run ./...` before committing.
+
+### Common Issues and Fixes
+| Issue | Fix |
+|-------|-----|
+| gocyclo (complexity > 10) | Extract logic into helper functions |
+| nestif (nested blocks) | Use early returns, extract to functions |
+| mage (magic numbers) | Define named constants |
+| err113 (dynamic errors) | Use `var errFoo = errors.New(...)` and wrap with `%w` |
+| goconst (repeated strings) | Extract to constants |
+| wsl_v5 (whitespace) | Add blank line after variable declarations before if/for |
+
+### Never Do
+- Add `nolint` comments
+- Add exclusions to `.golangci.yml`
+- Ignore lint errors

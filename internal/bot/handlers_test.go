@@ -2041,6 +2041,8 @@ func TestSettingConstants(t *testing.T) {
 		"digest_ai_cover":               SettingDigestAICover,
 		"digest_inline_images":          SettingDigestInlineImages,
 		"others_as_narrative":           SettingOthersAsNarrative,
+		"discovery_min_seen":            SettingDiscoveryMinSeen,
+		"discovery_min_engagement":      SettingDiscoveryMinScore,
 	}
 
 	for expected, actual := range settings {
@@ -2559,6 +2561,7 @@ func TestHelpSummaryMessage(t *testing.T) {
 		"/preview",
 		"/channel",
 		"/filter",
+		"/discover",
 		"/schedule",
 		"/config",
 		"/ai",
@@ -2619,6 +2622,29 @@ func TestHelpFiltersMessage(t *testing.T) {
 	}
 }
 
+func TestHelpDiscoverMessage(t *testing.T) {
+	msg := helpDiscoverMessage()
+
+	wantParts := []string{
+		"Discovery",
+		"/discover",
+		"/discover preview",
+		"/discover approve",
+		"/discover reject",
+		"/discover min_seen",
+		"/discover min_engagement",
+		"/discover show-rejected",
+		"/discover cleanup",
+		"/discover stats",
+	}
+
+	for _, part := range wantParts {
+		if !containsString(msg, part) {
+			t.Errorf("helpDiscoverMessage() missing %q", part)
+		}
+	}
+}
+
 func TestHelpScheduleMessage(t *testing.T) {
 	msg := helpScheduleMessage()
 
@@ -2651,6 +2677,8 @@ func TestHelpConfigMessage(t *testing.T) {
 		"/config tone",
 		"/config relevance",
 		"/config importance",
+		"/config discovery_min_seen",
+		"/config discovery_min_engagement",
 		"/config reset",
 	}
 
@@ -2758,6 +2786,7 @@ func TestHelpAllMessage(t *testing.T) {
 	wantParts := []string{
 		"Telegram Digest Bot", // from helpSummaryMessage
 		"Channel Management",  // from helpChannelsMessage
+		"Discovery",           // from helpDiscoverMessage
 		"Filters",             // from helpFiltersMessage
 		"Schedule",            // from helpScheduleMessage
 		"Configuration",       // from helpConfigMessage

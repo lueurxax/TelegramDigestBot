@@ -11,21 +11,26 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
 
+// ErrDiscoveryNotFound is returned when no discovery record exists for the given identifier.
+var ErrDiscoveryNotFound = errors.New("discovery not found")
+
 // DiscoveredChannel represents a channel found through discovery
 type DiscoveredChannel struct {
-	ID              string
-	Username        string
-	TGPeerID        int64
-	InviteLink      string
-	Title           string
-	Description     string
-	SourceType      string
-	DiscoveryCount  int
-	FirstSeenAt     time.Time
-	LastSeenAt      time.Time
-	MaxViews        int
-	MaxForwards     int
-	EngagementScore float64
+	ID               string
+	Username         string
+	TGPeerID         int64
+	InviteLink       string
+	Title            string
+	Description      string
+	SourceType       string
+	DiscoveryCount   int
+	FirstSeenAt      time.Time
+	LastSeenAt       time.Time
+	MaxViews         int
+	MaxForwards      int
+	EngagementScore  float64
+	Status           string
+	MatchedChannelID string
 }
 
 // DiscoveryStats contains statistics about channel discovery
@@ -83,7 +88,7 @@ func (db *DB) shouldSkipDiscovery(ctx context.Context, normalizedUsername string
 		InviteLink: toText(d.InviteLink),
 	})
 	if err != nil {
-		return false, fmt.Errorf("check if channel tracked: %w", err)
+		return false, fmt.Errorf(errCheckChannelTracked, err)
 	}
 
 	if tracked {
@@ -268,6 +273,41 @@ func (db *DB) GetRejectedDiscoveries(ctx context.Context, limit int) ([]Discover
 	}
 
 	return result, nil
+}
+
+// GetDiscoveryByUsername returns the most recently seen discovery for a username.
+// Returns ErrDiscoveryNotFound when no record exists.
+func (db *DB) GetDiscoveryByUsername(ctx context.Context, username string) (*DiscoveredChannel, error) {
+	normalized := normalizeUsername(username)
+
+	row, err := db.Queries.GetDiscoveryByUsername(ctx, toText(normalized))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrDiscoveryNotFound
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("get discovery by username: %w", err)
+	}
+
+	discovery := DiscoveredChannel{
+		ID:               fromUUID(row.ID),
+		Username:         row.Username.String,
+		TGPeerID:         row.TgPeerID.Int64,
+		InviteLink:       row.InviteLink.String,
+		Title:            row.Title.String,
+		Description:      row.Description.String,
+		SourceType:       row.SourceType,
+		DiscoveryCount:   int(row.DiscoveryCount),
+		FirstSeenAt:      row.FirstSeenAt.Time,
+		LastSeenAt:       row.LastSeenAt.Time,
+		MaxViews:         int(row.MaxViews.Int32),
+		MaxForwards:      int(row.MaxForwards.Int32),
+		EngagementScore:  float64(row.EngagementScore.Float32),
+		Status:           row.Status,
+		MatchedChannelID: fromUUID(row.MatchedChannelID),
+	}
+
+	return &discovery, nil
 }
 
 // ApproveDiscovery approves a discovery and adds it to active channels

@@ -64,3 +64,87 @@ Linters keep code clean, readable, and maintainable. They catch:
 ## Security & Configuration Tips
 - Store credentials in `.env` and keep local session files under `data/`.
 - When changing schema or SQL, update `migrations/` and regenerate via `sqlc` if needed.
+
+## Channel Discovery System
+
+The discovery system tracks channels found through forwards, links, and mentions in tracked channels.
+
+### Key Components
+- `internal/storage/discovery.go` - Discovery recording, filtering, and status management
+- `internal/storage/channels.go` - Channel management and `markDiscoveryAdded` for identity linking
+- `internal/bot/handlers.go` - Admin commands (`/discover`, `/discover stats`, `/discover cleanup`)
+- `internal/app/app.go` - Reconciliation job (runs at startup + every 6 hours)
+
+### Identity Matching
+Channels can be identified by multiple identifiers (username, `tg_peer_id`, invite_link). The system:
+- Uses `matched_channel_id` to link discovery rows to tracked channels
+- Cascades rejection across all rows sharing any identifier (CTE in `UpdateDiscoveryStatusByUsername`)
+- Uses `DISTINCT ON` in `GetPendingDiscoveries` to deduplicate rows for the same channel
+
+### Source Hygiene
+Discoveries are skipped when:
+- Source channel is inactive
+- Discovery is self-referential (same `tg_peer_id`, username, or invite_link as source)
+
+### Configurable Thresholds
+- `discovery_min_seen` (default: 2) - Minimum discovery count
+- `discovery_min_engagement` (default: 50) - Minimum engagement score
+- Settings stored in `settings` table, editable via `/settings`
+
+## SQL & sqlc Patterns
+
+### Regenerating sqlc
+After modifying `internal/storage/queries.sql`:
+```bash
+~/go/bin/sqlc generate
+```
+
+### CTE for Cascading Updates
+Use CTEs when an update needs to affect related rows:
+```sql
+WITH target AS (
+    SELECT src.username AS t_username, src.tg_peer_id AS t_peer_id
+    FROM discovered_channels src
+    WHERE src.username = $1
+    LIMIT 1
+)
+UPDATE discovered_channels dc
+SET status = $2
+FROM target
+WHERE dc.username = target.t_username OR dc.tg_peer_id = target.t_peer_id;
+```
+
+### DISTINCT ON for Deduplication
+PostgreSQL-specific pattern for keeping one row per group:
+```sql
+SELECT * FROM (
+  SELECT DISTINCT ON (dc.username)
+    dc.id, dc.username, ...
+  FROM discovered_channels dc
+  ORDER BY dc.username, dc.engagement_score DESC
+) deduped
+ORDER BY engagement_score DESC;
+```
+
+## Common Lint Fixes
+
+### Cyclomatic Complexity (gocyclo)
+When complexity exceeds 10, extract logical blocks into helper functions:
+- `shouldSkipDiscovery` → extracted `shouldSkipForSourceHygiene` and `isSelfDiscovery`
+- `handleDiscoverNamespace` → extracted `handleDiscoverApproveCmd`, `handleDiscoverRejectCmd`, etc.
+
+### Nested Blocks (nestif)
+Flatten nested conditionals by:
+- Early returns for error/skip cases
+- Extracting nested logic into separate functions
+
+### Magic Numbers (mage)
+Extract repeated numbers into named constants in the `const` block.
+
+### Dynamic Errors (err113)
+Define static error variables and wrap them:
+```go
+var errInvalidItemID = errors.New("invalid item id")
+// Usage:
+return fmt.Errorf("%w: %s", errInvalidItemID, itemID)
+```
