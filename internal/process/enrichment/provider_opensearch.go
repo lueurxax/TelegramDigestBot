@@ -78,7 +78,10 @@ func (p *OpenSearchProvider) Name() ProviderName {
 	return ProviderOpenSearch
 }
 
-// IsAvailable checks if the provider is enabled and reachable.
+func (p *OpenSearchProvider) Priority() int {
+	return PriorityLow
+}
+
 func (p *OpenSearchProvider) IsAvailable() bool {
 	if !p.enabled || p.baseURL == "" {
 		return false

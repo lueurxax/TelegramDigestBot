@@ -261,6 +261,11 @@ func isAlias(s1, s2 string) bool {
 		"donaldtrump":   {"trump"},
 		"joebiden":      {"biden"},
 		"vladimirputin": {"putin"},
+		"kyiv":          {"kiev"},
+		"zelenskyy":     {"zelensky"},
+		"netanyahu":     {"bibi"},
+		"macron":        {"emmanuelmacron"},
+		"scholz":        {"olafscholz"},
 	}
 
 	for k, vals := range aliases {

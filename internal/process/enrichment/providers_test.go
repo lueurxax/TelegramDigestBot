@@ -31,6 +31,10 @@ func (m *mockProvider) IsAvailable() bool {
 	return m.available
 }
 
+func (m *mockProvider) Priority() int {
+	return 0
+}
+
 func TestProviderRegistry_Register(t *testing.T) {
 	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 

@@ -10,6 +10,7 @@ import (
 	"github.com/pgvector/pgvector-go"
 	"github.com/rs/zerolog"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
@@ -100,12 +101,15 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 	registry := NewProviderRegistry(cfg.EnrichmentProviderCooldown)
 	registerProviders(cfg, registry)
 
+	extractor := NewExtractor()
+	// The actual wiring of LLM client happens in app.go.
+
 	return &Worker{
 		cfg:             cfg,
 		db:              database,
 		embeddingClient: embeddingClient,
 		registry:        registry,
-		extractor:       NewExtractor(),
+		extractor:       extractor,
 		scorer:          NewScorer(),
 		queryGenerator:  NewQueryGenerator(),
 		domainFilter:    NewDomainFilter(cfg.EnrichmentAllowlistDomains, cfg.EnrichmentDenylistDomains),
@@ -116,6 +120,11 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 // SetTranslationClient sets the translation client for query translation.
 func (w *Worker) SetTranslationClient(client TranslationClient) {
 	w.translationClient = client
+}
+
+// EnableLLMExtraction enables optional LLM claim extraction.
+func (w *Worker) EnableLLMExtraction(client llm.Client, model string) {
+	w.extractor.SetLLMClient(client, model)
 }
 
 func (w *Worker) Run(ctx context.Context) error {

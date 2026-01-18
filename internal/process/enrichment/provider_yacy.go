@@ -52,6 +52,10 @@ func (p *YaCyProvider) Name() ProviderName {
 	return ProviderYaCy
 }
 
+func (p *YaCyProvider) Priority() int {
+	return PriorityHighSelfHosted
+}
+
 func (p *YaCyProvider) IsAvailable() bool {
 	if !p.enabled || p.baseURL == "" {
 		return false

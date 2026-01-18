@@ -10,6 +10,8 @@ import (
 
 	"github.com/araddon/dateparse"
 	"github.com/go-shiori/go-readability"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
+	"github.com/mmcdole/gofeed"
 	"golang.org/x/net/html"
 )
 
@@ -26,6 +28,11 @@ type WebContent struct {
 
 func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent, error) {
 	u, _ := url.Parse(rawURL) //nolint:errcheck // URL was already validated
+
+	// Try RSS/Atom parsing first (Phase 2 gap)
+	if feedContent, ok := tryExtractFeed(htmlBytes, maxLen); ok {
+		return feedContent, nil
+	}
 
 	// Extract using readability (Firefox Reader Mode algorithm)
 	article, err := readability.FromReader(bytes.NewReader(htmlBytes), u)
@@ -52,6 +59,63 @@ func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent
 		ImageURL:    coalesce(jsonLD.Image, meta.OGImage),
 		WordCount:   countWords(article.TextContent),
 	}, nil
+}
+
+func tryExtractFeed(htmlBytes []byte, maxLen int) (*WebContent, bool) {
+	fp := gofeed.NewParser()
+
+	feed, err := fp.Parse(bytes.NewReader(htmlBytes))
+	if err != nil || len(feed.Items) == 0 {
+		return nil, false
+	}
+
+	// If it's a feed, we take the first item as the content for the specific URL if it matches,
+	// or just the first item if we are treating the feed URL as the source.
+	item := feed.Items[0]
+
+	return &WebContent{
+		Title:       item.Title,
+		Description: item.Description,
+		Content:     truncate(htmlutils.StripHTMLTags(item.Content), maxLen),
+		Author:      extractFeedAuthor(item),
+		PublishedAt: coalesceTime(toTime(item.PublishedParsed), toTime(item.UpdatedParsed)),
+		ImageURL:    extractFeedImage(item),
+		WordCount:   countWords(item.Content),
+	}, true
+}
+
+func extractFeedAuthor(item *gofeed.Item) string {
+	if item.Author != nil {
+		return item.Author.Name
+	}
+
+	if len(item.Authors) > 0 {
+		return item.Authors[0].Name
+	}
+
+	return ""
+}
+
+func extractFeedImage(item *gofeed.Item) string {
+	if item.Image != nil {
+		return item.Image.URL
+	}
+
+	for _, enclosure := range item.Enclosures {
+		if strings.HasPrefix(enclosure.Type, "image/") {
+			return enclosure.URL
+		}
+	}
+
+	return ""
+}
+
+func toTime(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+
+	return *t
 }
 
 type JSONLD struct {

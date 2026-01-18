@@ -124,6 +124,11 @@ func (a *App) runEnrichmentWorker(ctx context.Context) {
 
 	worker := enrichment.NewWorker(a.cfg, a.database, llmClient, a.logger)
 
+	// Wire optional LLM claim extraction
+	if a.cfg.LLMAPIKey != "" && a.cfg.LLMAPIKey != "mock" {
+		worker.EnableLLMExtraction(llmClient, a.cfg.LLMModel)
+	}
+
 	// Wire translation if configured
 	if a.cfg.EnrichmentQueryTranslate {
 		transModel := a.cfg.TranslationModel

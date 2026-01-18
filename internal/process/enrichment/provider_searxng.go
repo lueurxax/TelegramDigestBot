@@ -63,7 +63,10 @@ func (p *SearxNGProvider) Name() ProviderName {
 	return ProviderSearxNG
 }
 
-// IsAvailable checks if the provider is enabled and reachable.
+func (p *SearxNGProvider) Priority() int {
+	return PriorityHighMeta
+}
+
 func (p *SearxNGProvider) IsAvailable() bool {
 	if !p.enabled || p.baseURL == "" {
 		return false

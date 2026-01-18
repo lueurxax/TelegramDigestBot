@@ -67,7 +67,10 @@ func (p *EventRegistryProvider) Name() ProviderName {
 	return ProviderEventRegistry
 }
 
-// IsAvailable checks if the provider is enabled and has an API key.
+func (p *EventRegistryProvider) Priority() int {
+	return PriorityMedium
+}
+
 func (p *EventRegistryProvider) IsAvailable() bool {
 	return p.enabled && p.apiKey != ""
 }

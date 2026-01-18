@@ -573,6 +573,19 @@ func (rc *digestRenderContext) appendEvidenceLine(sb *strings.Builder, items []d
 	if tier != "" {
 		sb.WriteString(formatConfidenceTier(tier, len(evidenceList)))
 	}
+
+	// Append evidence bullets (Phase 2)
+	for i, ev := range evidenceList {
+		if i >= 3 { // Limit to top 3 evidence bullets
+			break
+		}
+
+		fmt.Fprintf(sb, "\n    • %s", html.EscapeString(ev.Source.Title))
+
+		if ev.Source.Domain != "" {
+			fmt.Fprintf(sb, " <i>(%s)</i>", html.EscapeString(ev.Source.Domain))
+		}
+	}
 }
 
 func determineTierFromEvidence(evidenceList []db.ItemEvidenceWithSource) string {

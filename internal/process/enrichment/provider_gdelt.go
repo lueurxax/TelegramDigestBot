@@ -62,6 +62,10 @@ func (p *GDELTProvider) Name() ProviderName {
 	return ProviderGDELT
 }
 
+func (p *GDELTProvider) Priority() int {
+	return PriorityHighFree
+}
+
 func (p *GDELTProvider) IsAvailable() bool {
 	return p.enabled
 }

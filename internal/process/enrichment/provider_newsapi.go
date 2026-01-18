@@ -71,7 +71,10 @@ func (p *NewsAPIProvider) Name() ProviderName {
 	return ProviderNewsAPI
 }
 
-// IsAvailable checks if the provider is enabled and has an API key.
+func (p *NewsAPIProvider) Priority() int {
+	return PriorityMediumFallback
+}
+
 func (p *NewsAPIProvider) IsAvailable() bool {
 	return p.enabled && p.apiKey != ""
 }

@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links"
+	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -24,6 +25,7 @@ const (
 	maxExtractedClaims = 10
 	minClaimLength     = 20
 	maxClaimLength     = 500
+	llmInputLimit      = 5000
 
 	entityTypePerson  = "PERSON"
 	entityTypeOrg     = "ORG"
@@ -35,10 +37,15 @@ const (
 	httpHeaderContent  = "Content-Type"
 )
 
-var errUnexpectedStatus = errors.New("unexpected http status")
+var (
+	errUnexpectedStatus   = errors.New("unexpected http status")
+	errInvalidLLMResponse = errors.New("invalid LLM response format")
+)
 
 type Extractor struct {
 	httpClient *http.Client
+	llmClient  llm.Client
+	llmModel   string
 }
 
 func NewExtractor() *Extractor {
@@ -49,14 +56,20 @@ func NewExtractor() *Extractor {
 	}
 }
 
+// SetLLMClient enables optional LLM claim extraction.
+func (e *Extractor) SetLLMClient(client llm.Client, model string) {
+	e.llmClient = client
+	e.llmModel = model
+}
+
 type ExtractedEvidence struct {
 	Source *db.EvidenceSource
 	Claims []ExtractedClaim
 }
 
 type ExtractedClaim struct {
-	Text     string
-	Entities []Entity
+	Text     string   `json:"text"`
+	Entities []Entity `json:"entities"`
 }
 
 type Entity struct {
@@ -106,12 +119,52 @@ func (e *Extractor) Extract(ctx context.Context, result SearchResult, provider P
 	source.PublishedAt = toTimePtr(coalesce2(content.PublishedAt, result.PublishedAt))
 	source.Language = content.Language
 
-	claims := extractClaims(content.Content)
+	var claims []ExtractedClaim
+	if e.llmClient != nil {
+		claims, err = e.extractClaimsWithLLM(ctx, content.Content)
+		if err != nil {
+			fmt.Printf("LLM extraction failed: %v\n", err)
+
+			claims = extractClaims(content.Content)
+		}
+	} else {
+		claims = extractClaims(content.Content)
+	}
 
 	return &ExtractedEvidence{
 		Source: source,
 		Claims: claims,
 	}, nil
+}
+
+func (e *Extractor) extractClaimsWithLLM(ctx context.Context, content string) ([]ExtractedClaim, error) {
+	prompt := `Extract the most significant factual claims from the following text. 
+Return a JSON array of objects, where each object has:
+- "text": the claim text (single sentence)
+- "entities": an array of objects with "text" and "type" (PERSON, ORG, LOC, MONEY, PERCENT)
+
+Text:
+` + truncateText(content, llmInputLimit)
+
+	res, err := e.llmClient.TranslateText(ctx, prompt, "", e.llmModel)
+	if err != nil {
+		return nil, fmt.Errorf("llm extract claims: %w", err)
+	}
+
+	// Find the JSON array in the response
+	start := strings.Index(res, "[")
+	end := strings.LastIndex(res, "]")
+
+	if start == -1 || end == -1 || end <= start {
+		return nil, errInvalidLLMResponse
+	}
+
+	var claims []ExtractedClaim
+	if err := json.Unmarshal([]byte(res[start:end+1]), &claims); err != nil {
+		return nil, fmt.Errorf("unmarshal llm claims: %w", err)
+	}
+
+	return claims, nil
 }
 
 func toTimePtr(t time.Time) *time.Time {

@@ -3,7 +3,6 @@ package enrichment
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -19,6 +18,13 @@ const (
 	ProviderEventRegistry ProviderName = "eventregistry"
 	ProviderNewsAPI       ProviderName = "newsapi"
 	ProviderOpenSearch    ProviderName = "opensearch"
+
+	PriorityHighSelfHosted = 100
+	PriorityHighFree       = 90
+	PriorityHighMeta       = 80
+	PriorityMedium         = 70
+	PriorityMediumFallback = 60
+	PriorityLow            = 50
 )
 
 var (
@@ -39,6 +45,7 @@ type Provider interface {
 	Name() ProviderName
 	Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error)
 	IsAvailable() bool
+	Priority() int
 }
 
 type ProviderRegistry struct {
@@ -81,49 +88,96 @@ func (r *ProviderRegistry) Get(name ProviderName) (Provider, error) {
 	return p, nil
 }
 
+type fanOutResult struct {
+	results  []SearchResult
+	name     ProviderName
+	err      error
+	priority int
+}
+
 func (r *ProviderRegistry) SearchWithFallback(ctx context.Context, query string, maxResults int) ([]SearchResult, ProviderName, error) {
-	r.mu.RLock()
-	providers := make([]ProviderName, len(r.order))
-	copy(providers, r.order)
-	r.mu.RUnlock()
-
-	var (
-		lastErr   error
-		attempted bool
-	)
-
-	for _, name := range providers {
-		provider, err := r.Get(name)
-		if err != nil {
-			continue
-		}
-
-		if !provider.IsAvailable() {
-			continue
-		}
-
-		cb := r.getCircuitBreaker(name)
-		if !cb.canAttempt() {
-			continue
-		}
-
-		attempted = true
-
-		results, err := provider.Search(ctx, query, maxResults)
-		if err != nil {
-			cb.recordFailure(name)
-
-			lastErr = fmt.Errorf("provider %s: %w", name, err)
-
-			continue
-		}
-
-		cb.recordSuccess()
-
-		return results, name, nil
+	activeProviders := r.getActiveProviders()
+	if len(activeProviders) == 0 {
+		return nil, "", errNoProvidersAvailable
 	}
 
-	if attempted && lastErr != nil {
+	resultsChan := make(chan fanOutResult, len(activeProviders))
+
+	var wg sync.WaitGroup
+
+	for _, p := range activeProviders {
+		wg.Add(1)
+
+		go func(provider Provider) {
+			defer wg.Done()
+
+			results, err := provider.Search(ctx, query, maxResults)
+			if err != nil {
+				r.getCircuitBreaker(provider.Name()).recordFailure(provider.Name())
+			} else {
+				r.getCircuitBreaker(provider.Name()).recordSuccess()
+			}
+
+			resultsChan <- fanOutResult{
+				results:  results,
+				name:     provider.Name(),
+				err:      err,
+				priority: provider.Priority(),
+			}
+		}(p)
+	}
+
+	// Close resultsChan when all goroutines are done
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	return r.selectBestResult(resultsChan)
+}
+
+func (r *ProviderRegistry) getActiveProviders() []Provider {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	active := make([]Provider, 0, len(r.providers))
+
+	for _, p := range r.providers {
+		if p.IsAvailable() && r.getCircuitBreaker(p.Name()).canAttempt() {
+			active = append(active, p)
+		}
+	}
+
+	return active
+}
+
+func (r *ProviderRegistry) selectBestResult(resultsChan chan fanOutResult) ([]SearchResult, ProviderName, error) {
+	var (
+		bestResults  []SearchResult
+		bestProvider ProviderName
+		bestPriority = -1
+		lastErr      error
+	)
+
+	for res := range resultsChan {
+		if res.err != nil {
+			lastErr = res.err
+
+			continue
+		}
+
+		if len(res.results) > 0 && res.priority > bestPriority {
+			bestResults = res.results
+			bestProvider = res.name
+			bestPriority = res.priority
+		}
+	}
+
+	if bestResults != nil {
+		return bestResults, bestProvider, nil
+	}
+
+	if lastErr != nil {
 		return nil, "", lastErr
 	}
 
