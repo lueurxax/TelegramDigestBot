@@ -77,7 +77,7 @@ func (qb *queryBuilder) add(query, strategy string) {
 // - Q2: primary_entity + location + date/time
 // - Q3: topic + primary_entity + keyword
 // - Fallback: top keywords if extraction fails.
-func (g *QueryGenerator) Generate(summary, topic string) []GeneratedQuery {
+func (g *QueryGenerator) Generate(summary, topic, channelTitle string) []GeneratedQuery {
 	if summary == "" {
 		return nil
 	}
@@ -98,7 +98,7 @@ func (g *QueryGenerator) Generate(summary, topic string) []GeneratedQuery {
 	g.addLocationQuery(qb, entities, locations, keywords)
 	g.addTopicQuery(qb, topic, entities, keywords)
 	g.addKeywordQuery(qb, keywords)
-	g.addFallbackQuery(qb, cleaned)
+	g.addFallbackQuery(qb, cleaned, channelTitle, keywords)
 
 	return qb.queries
 }
@@ -132,9 +132,18 @@ func (g *QueryGenerator) addKeywordQuery(qb *queryBuilder, keywords []string) {
 	}
 }
 
-func (g *QueryGenerator) addFallbackQuery(qb *queryBuilder, cleaned string) {
+func (g *QueryGenerator) addFallbackQuery(qb *queryBuilder, cleaned, channelTitle string, keywords []string) {
 	if len(qb.queries) == 0 {
-		qb.add(truncateQuery(cleaned), "fallback")
+		query := TruncateQuery(cleaned)
+		if channelTitle != "" {
+			if len(keywords) > 0 {
+				query = channelTitle + " " + strings.Join(keywords, " ")
+			} else {
+				query = channelTitle + " " + query
+			}
+		}
+
+		qb.add(TruncateQuery(query), "fallback")
 	}
 }
 
@@ -351,7 +360,7 @@ func buildEntityQuery(entity string, keywords []string) string {
 
 	query := strings.Join(parts, " ")
 
-	return truncateQuery(query)
+	return TruncateQuery(query)
 }
 
 // buildLocationQuery creates a query with entity and location.
@@ -370,7 +379,7 @@ func buildLocationQuery(entity, location string, keywords []string) string {
 
 	query := strings.Join(parts, " ")
 
-	return truncateQuery(query)
+	return TruncateQuery(query)
 }
 
 // buildTopicQuery creates a query with topic context.
@@ -393,7 +402,7 @@ func buildTopicQuery(topic string, entities, keywords []string) string {
 
 	query := strings.Join(parts, " ")
 
-	return truncateQuery(query)
+	return TruncateQuery(query)
 }
 
 // buildKeywordQuery creates a query from top keywords.
@@ -405,11 +414,11 @@ func buildKeywordQuery(keywords []string) string {
 
 	query := strings.Join(keywords[:limit], " ")
 
-	return truncateQuery(query)
+	return TruncateQuery(query)
 }
 
-// truncateQuery ensures the query doesn't exceed maxQueryLength.
-func truncateQuery(query string) string {
+// TruncateQuery ensures the query doesn't exceed maxQueryLength.
+func TruncateQuery(query string) string {
 	query = strings.TrimSpace(query)
 
 	if len(query) > maxQueryLength {

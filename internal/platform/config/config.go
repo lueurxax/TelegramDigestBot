@@ -94,6 +94,7 @@ type Config struct {
 	EnrichmentProviders        string        `env:"ENRICHMENT_PROVIDERS" envDefault:""`
 	EnrichmentProviderCooldown time.Duration `env:"ENRICHMENT_PROVIDER_COOLDOWN" envDefault:"10m"`
 	EnrichmentQueryTranslate   bool          `env:"ENRICHMENT_QUERY_TRANSLATE" envDefault:"true"`
+	TranslationModel           string        `env:"TRANSLATION_MODEL"`
 	EnrichmentDailyBudgetUSD   float64       `env:"ENRICHMENT_DAILY_BUDGET_USD" envDefault:"0"`
 	EnrichmentMonthlyCapUSD    float64       `env:"ENRICHMENT_MONTHLY_CAP_USD" envDefault:"0"`
 	EnrichmentEventRegistryRPM int           `env:"ENRICHMENT_EVENTREGISTRY_RPM" envDefault:"0"`

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 )
 
 type ProviderName string
@@ -109,7 +111,7 @@ func (r *ProviderRegistry) SearchWithFallback(ctx context.Context, query string,
 
 		results, err := provider.Search(ctx, query, maxResults)
 		if err != nil {
-			cb.recordFailure()
+			cb.recordFailure(name)
 
 			lastErr = fmt.Errorf("provider %s: %w", name, err)
 
@@ -220,7 +222,7 @@ func (cb *circuitBreaker) recordSuccess() {
 	}
 }
 
-func (cb *circuitBreaker) recordFailure() {
+func (cb *circuitBreaker) recordFailure(name ProviderName) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
@@ -228,6 +230,10 @@ func (cb *circuitBreaker) recordFailure() {
 	cb.lastFailure = time.Now()
 
 	if cb.failures >= circuitBreakerThreshold {
+		if cb.state != circuitOpen {
+			observability.EnrichmentCircuitBreakerOpens.WithLabelValues(string(name)).Inc()
+		}
+
 		cb.state = circuitOpen
 	}
 }

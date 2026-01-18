@@ -109,4 +109,15 @@ var (
 		Name: "digest_enrichment_cache_misses_total",
 		Help: "Total number of enrichment cache misses",
 	})
+
+	EnrichmentCircuitBreakerOpens = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_enrichment_cb_opens_total",
+		Help: "Total number of times circuit breaker opened",
+	}, []string{"provider"})
+
+	EnrichmentCorroborationScore = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "digest_enrichment_corroboration_score",
+		Help:    "Distribution of corroboration scores for enriched items",
+		Buckets: []float64{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0},
+	})
 )

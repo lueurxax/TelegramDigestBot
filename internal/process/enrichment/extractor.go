@@ -63,30 +63,44 @@ type Entity struct {
 }
 
 func (e *Extractor) Extract(ctx context.Context, result SearchResult, provider ProviderName, cacheTTL time.Duration) (*ExtractedEvidence, error) {
-	htmlBytes, err := e.fetchContent(ctx, result.URL)
-	if err != nil {
-		return nil, fmt.Errorf("fetch content: %w", err)
-	}
-
-	content, err := links.ExtractWebContent(htmlBytes, result.URL, maxContentLength)
-	if err != nil {
-		return nil, fmt.Errorf("extract web content: %w", err)
-	}
-
 	source := &db.EvidenceSource{
 		URL:         result.URL,
 		URLHash:     db.URLHash(result.URL),
 		Domain:      result.Domain,
-		Title:       coalesce(content.Title, result.Title),
-		Description: coalesce(content.Description, result.Description),
-		Content:     content.Content,
-		Author:      content.Author,
-		PublishedAt: coalesce2(content.PublishedAt, result.PublishedAt),
-		Language:    content.Language,
+		Title:       result.Title,
+		Description: result.Description,
+		PublishedAt: toTimePtr(result.PublishedAt),
 		Provider:    string(provider),
 		FetchedAt:   time.Now(),
 		ExpiresAt:   time.Now().Add(cacheTTL),
 	}
+
+	htmlBytes, err := e.fetchContent(ctx, result.URL)
+	if err != nil {
+		source.ExtractionFailed = true
+
+		return &ExtractedEvidence{
+			Source: source,
+			Claims: nil,
+		}, nil
+	}
+
+	content, err := links.ExtractWebContent(htmlBytes, result.URL, maxContentLength)
+	if err != nil {
+		source.ExtractionFailed = true
+
+		return &ExtractedEvidence{
+			Source: source,
+			Claims: nil,
+		}, nil
+	}
+
+	source.Title = coalesce(content.Title, result.Title)
+	source.Description = coalesce(content.Description, result.Description)
+	source.Content = content.Content
+	source.Author = content.Author
+	source.PublishedAt = toTimePtr(coalesce2(content.PublishedAt, result.PublishedAt))
+	source.Language = content.Language
 
 	claims := extractClaims(content.Content)
 
@@ -94,6 +108,14 @@ func (e *Extractor) Extract(ctx context.Context, result SearchResult, provider P
 		Source: source,
 		Claims: claims,
 	}, nil
+}
+
+func toTimePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+
+	return &t
 }
 
 func (e *Extractor) fetchContent(ctx context.Context, url string) ([]byte, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pgvector/pgvector-go"
@@ -42,6 +43,12 @@ const (
 
 const errEnrichmentWorkerFmt = "enrichment worker: %w"
 
+const (
+	costPerEventRegistryRequest = 0.005   // Estimation: $5 per 1k requests
+	costPerNewsAPIRequest       = 0.002   // Estimation: $2 per 1k requests
+	costPerEmbeddingRequest     = 0.00002 // Estimation
+)
+
 type Repository interface {
 	ClaimNextEnrichment(ctx context.Context) (*db.EnrichmentQueueItem, error)
 	UpdateEnrichmentStatus(ctx context.Context, queueID, status, errMsg string, retryAt *time.Time) error
@@ -57,7 +64,10 @@ type Repository interface {
 	// Budget tracking
 	GetDailyEnrichmentCount(ctx context.Context) (int, error)
 	GetMonthlyEnrichmentCount(ctx context.Context) (int, error)
-	IncrementEnrichmentUsage(ctx context.Context, provider string) error
+	GetDailyEnrichmentCost(ctx context.Context) (float64, error)
+	GetMonthlyEnrichmentCost(ctx context.Context) (float64, error)
+	IncrementEnrichmentUsage(ctx context.Context, provider string, cost float64) error
+	IncrementEmbeddingUsage(ctx context.Context, cost float64) error
 	// Settings access for domain lists
 	GetSetting(ctx context.Context, key string, target interface{}) error
 }
@@ -229,6 +239,7 @@ func (w *Worker) processItem(ctx context.Context, item *db.EnrichmentQueueItem) 
 
 // searchState tracks the state of search execution across multiple queries.
 type searchState struct {
+	mu           sync.Mutex
 	allResults   []SearchResult
 	seenURLs     map[string]bool
 	lastProvider ProviderName
@@ -265,11 +276,15 @@ func (w *Worker) getMaxResults() int {
 }
 
 func (w *Worker) generateQueries(item *db.EnrichmentQueueItem) []GeneratedQuery {
-	queries := w.queryGenerator.Generate(item.Summary, item.Topic)
+	queries := w.queryGenerator.Generate(item.Summary, item.Topic, item.ChannelTitle)
 	if len(queries) == 0 {
 		lang := w.queryGenerator.DetectLanguage(item.Summary)
+		query := item.Summary
+		if item.ChannelTitle != "" {
+			query = item.ChannelTitle + " " + item.Summary
+		}
 
-		return []GeneratedQuery{{Query: item.Summary, Strategy: "fallback", Language: lang}}
+		return []GeneratedQuery{{Query: TruncateQuery(query), Strategy: "fallback", Language: lang}}
 	}
 
 	return queries
@@ -320,13 +335,20 @@ func (w *Worker) executeQueries(ctx context.Context, queries []GeneratedQuery, m
 		seenURLs:   make(map[string]bool),
 	}
 
+	var wg sync.WaitGroup
 	for _, gq := range queries {
 		if ctx.Err() != nil {
 			break
 		}
 
-		w.executeQuery(ctx, gq, maxResults, state)
+		wg.Add(1)
+		go func(q GeneratedQuery) {
+			defer wg.Done()
+			w.executeQuery(ctx, q, maxResults, state)
+		}(gq)
 	}
+
+	wg.Wait()
 
 	return state
 }
@@ -334,14 +356,19 @@ func (w *Worker) executeQueries(ctx context.Context, queries []GeneratedQuery, m
 func (w *Worker) executeQuery(ctx context.Context, gq GeneratedQuery, maxResults int, state *searchState) {
 	start := time.Now()
 	results, provider, err := w.registry.SearchWithFallback(ctx, gq.Query, maxResults)
+
+	state.mu.Lock()
 	state.lastProvider = provider
+	state.mu.Unlock()
 
 	observability.EnrichmentRequestDuration.WithLabelValues(string(provider)).Observe(time.Since(start).Seconds())
 
 	if err != nil {
 		observability.EnrichmentRequests.WithLabelValues("", "error").Inc()
 
+		state.mu.Lock()
 		state.lastErr = err
+		state.mu.Unlock()
 
 		w.logger.Debug().Err(err).Str(logKeyQuery, gq.Query).Msg("query failed")
 
@@ -357,6 +384,9 @@ func (w *Worker) executeQuery(ctx context.Context, gq GeneratedQuery, maxResults
 }
 
 func (w *Worker) collectResults(results []SearchResult, state *searchState) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
 	for _, result := range results {
 		if state.seenURLs[result.URL] {
 			continue
@@ -580,6 +610,10 @@ func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQu
 			continue
 		}
 
+		if evidence.Source.ExtractionFailed {
+			continue
+		}
+
 		scoringResult := w.scorer.Score(item.Summary, evidence)
 
 		// Skip if agreement score is below minimum threshold
@@ -603,6 +637,7 @@ func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQu
 		sourceCount++
 
 		observability.EnrichmentMatches.Inc()
+		observability.EnrichmentCorroborationScore.Observe(float64(scoringResult.AgreementScore))
 	}
 
 	if sourceCount > 0 {
@@ -705,6 +740,10 @@ func (w *Worker) generateClaimEmbedding(ctx context.Context, text string) []floa
 		return nil
 	}
 
+	if err := w.db.IncrementEmbeddingUsage(ctx, costPerEmbeddingRequest); err != nil {
+		w.logger.Warn().Err(err).Msg("failed to track embedding usage")
+	}
+
 	return embedding
 }
 
@@ -801,7 +840,8 @@ func providerNamesToStrings(names []ProviderName) []string {
 // shouldCheckBudget returns true if enough time has passed since the last budget check.
 func (w *Worker) shouldCheckBudget(lastCheck time.Time) bool {
 	// If limits are not configured, skip budget checks
-	if w.cfg.EnrichmentDailyLimit <= 0 && w.cfg.EnrichmentMonthlyLimit <= 0 {
+	if w.cfg.EnrichmentDailyLimit <= 0 && w.cfg.EnrichmentMonthlyLimit <= 0 &&
+		w.cfg.EnrichmentDailyBudgetUSD <= 0 && w.cfg.EnrichmentMonthlyCapUSD <= 0 {
 		return false
 	}
 
@@ -816,7 +856,7 @@ func (w *Worker) checkBudgetLimits(ctx context.Context) (exceeded bool, reason s
 		if err != nil {
 			w.logger.Warn().Err(err).Msg("failed to get daily enrichment count")
 		} else if daily >= w.cfg.EnrichmentDailyLimit {
-			return true, fmt.Sprintf("daily limit reached (%d/%d)", daily, w.cfg.EnrichmentDailyLimit)
+			return true, fmt.Sprintf("daily request limit reached (%d/%d)", daily, w.cfg.EnrichmentDailyLimit)
 		}
 	}
 
@@ -825,7 +865,25 @@ func (w *Worker) checkBudgetLimits(ctx context.Context) (exceeded bool, reason s
 		if err != nil {
 			w.logger.Warn().Err(err).Msg("failed to get monthly enrichment count")
 		} else if monthly >= w.cfg.EnrichmentMonthlyLimit {
-			return true, fmt.Sprintf("monthly limit reached (%d/%d)", monthly, w.cfg.EnrichmentMonthlyLimit)
+			return true, fmt.Sprintf("monthly request limit reached (%d/%d)", monthly, w.cfg.EnrichmentMonthlyLimit)
+		}
+	}
+
+	if w.cfg.EnrichmentDailyBudgetUSD > 0 {
+		dailyCost, err := w.db.GetDailyEnrichmentCost(ctx)
+		if err != nil {
+			w.logger.Warn().Err(err).Msg("failed to get daily enrichment cost")
+		} else if dailyCost >= w.cfg.EnrichmentDailyBudgetUSD {
+			return true, fmt.Sprintf("daily budget reached ($%.2f/$%.2f)", dailyCost, w.cfg.EnrichmentDailyBudgetUSD)
+		}
+	}
+
+	if w.cfg.EnrichmentMonthlyCapUSD > 0 {
+		monthlyCost, err := w.db.GetMonthlyEnrichmentCost(ctx)
+		if err != nil {
+			w.logger.Warn().Err(err).Msg("failed to get monthly enrichment cost")
+		} else if monthlyCost >= w.cfg.EnrichmentMonthlyCapUSD {
+			return true, fmt.Sprintf("monthly budget cap reached ($%.2f/$%.2f)", monthlyCost, w.cfg.EnrichmentMonthlyCapUSD)
 		}
 	}
 
@@ -834,12 +892,21 @@ func (w *Worker) checkBudgetLimits(ctx context.Context) (exceeded bool, reason s
 
 // trackUsage records the enrichment request for budget tracking.
 func (w *Worker) trackUsage(ctx context.Context, provider ProviderName) {
-	if w.cfg.EnrichmentDailyLimit <= 0 && w.cfg.EnrichmentMonthlyLimit <= 0 {
-		return
-	}
+	cost := w.estimateCost(provider)
 
-	if err := w.db.IncrementEnrichmentUsage(ctx, string(provider)); err != nil {
+	if err := w.db.IncrementEnrichmentUsage(ctx, string(provider), cost); err != nil {
 		w.logger.Warn().Err(err).Msg("failed to track enrichment usage")
+	}
+}
+
+func (w *Worker) estimateCost(provider ProviderName) float64 {
+	switch provider {
+	case ProviderEventRegistry:
+		return costPerEventRegistryRequest
+	case ProviderNewsAPI:
+		return costPerNewsAPIRequest
+	default:
+		return 0
 	}
 }
 

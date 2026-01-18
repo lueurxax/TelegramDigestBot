@@ -123,6 +123,16 @@ func (a *App) runEnrichmentWorker(ctx context.Context) {
 	llmClient := a.newLLMClient()
 
 	worker := enrichment.NewWorker(a.cfg, a.database, llmClient, a.logger)
+
+	// Wire translation if configured
+	if a.cfg.EnrichmentQueryTranslate {
+		transModel := a.cfg.TranslationModel
+		if transModel == "" {
+			transModel = a.cfg.LLMModel // Fallback to main model
+		}
+		worker.SetTranslationClient(enrichment.NewTranslationAdapter(llmClient, transModel))
+	}
+
 	if err := worker.Run(ctx); err != nil {
 		a.logger.Warn().Err(err).Msg("enrichment worker stopped")
 	}

@@ -42,6 +42,33 @@ spec:
               sed -i 's|tcp://[^:]*:||g' "$f"
             fi
           done
+          cfg=/opt/yacy_search_server/DATA/SETTINGS/yacy.conf
+          touch "$cfg"
+          set_cfg() {
+            key="$1"
+            value="$2"
+            if grep -q "^${key}=" "$cfg"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$cfg"
+            else
+              printf '%s=%s\n' "$key" "$value" >> "$cfg"
+            fi
+          }
+          set_cfg javastart_Xms Xms512m
+          set_cfg javastart_Xmx Xmx2048m
+          set_cfg network.unit.dht false
+          set_cfg debug.search.remote.dht.off true
+          set_cfg network.unit.remotesearch.maxcount 0
+          set_cfg remotesearch.maxtime 0
+          set_cfg search.public.max.p2p.access.1mn 0
+          set_cfg search.public.max.p2p.jsresort.access.1mn 0
+          set_cfg searchProcessRemoteCount_c 0
+          set_cfg searchProcessRemoteCount_f 0
+          set_cfg searchProcessRemoteCount_j 0
+          set_cfg searchProcessRemoteCount_o 0
+          set_cfg searchProcessRemoteCount_r 0
+          set_cfg searchProcessRemoteCount_s 0
+          set_cfg searchProcessRemoteCount_u 0
+          set_cfg crawlingDepth 1
         volumeMounts:
         - name: yacy-data
           mountPath: /opt/yacy_search_server/DATA
@@ -52,7 +79,9 @@ spec:
         - containerPort: 8090
         env:
         - name: JAVA_TOOL_OPTIONS
-          value: "-Xms512m -Xmx1536m"
+          value: "-Xms512m -Xmx2048m"
+        - name: YACY_JAVASTART_XMX
+          value: "Xmx2048m"
         volumeMounts:
         - name: yacy-data
           mountPath: /opt/yacy_search_server/DATA

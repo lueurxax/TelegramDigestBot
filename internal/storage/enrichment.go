@@ -32,6 +32,7 @@ type EnrichmentQueueItem struct {
 	ItemID       string
 	Summary      string
 	Topic        string
+	ChannelTitle string
 	AttemptCount int
 }
 
@@ -41,19 +42,20 @@ type EnrichmentQueueStat struct {
 }
 
 type EvidenceSource struct {
-	ID          string
-	URL         string
-	URLHash     string
-	Domain      string
-	Title       string
-	Description string
-	Content     string
-	Author      string
-	PublishedAt time.Time
-	Language    string
-	Provider    string
-	FetchedAt   time.Time
-	ExpiresAt   time.Time
+	ID               string
+	URL              string
+	URLHash          string
+	Domain           string
+	Title            string
+	Description      string
+	Content          string
+	Author           string
+	PublishedAt      *time.Time
+	Language         string
+	Provider         string
+	ExtractionFailed bool
+	FetchedAt        time.Time
+	ExpiresAt        time.Time
 }
 
 type EvidenceClaim struct {
@@ -120,15 +122,18 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 			WHERE eq.id = picked.id
 			RETURNING eq.id, eq.item_id, eq.summary, eq.attempt_count
 		)
-		SELECT u.id, u.item_id, u.summary, u.attempt_count, i.topic
+		SELECT u.id, u.item_id, u.summary, u.attempt_count, i.topic, c.title
 		FROM updated u
-		LEFT JOIN items i ON i.id = u.item_id
+		JOIN items i ON i.id = u.item_id
+		JOIN raw_messages rm ON rm.id = i.raw_message_id
+		JOIN channels c ON c.id = rm.channel_id
 	`, EnrichmentStatusPending, EnrichmentStatusProcessing).Scan(
 		&queueID,
 		&itemUUID,
 		&item.Summary,
 		&item.AttemptCount,
 		&topic,
+		&item.ChannelTitle,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -231,13 +236,13 @@ func (db *DB) GetEvidenceSource(ctx context.Context, urlHash string) (*EvidenceS
 
 	err := db.Pool.QueryRow(ctx, `
 		SELECT id, url, url_hash, domain, title, description, content, author,
-		       published_at, language, provider, fetched_at, expires_at
+		       published_at, language, provider, extraction_failed, fetched_at, expires_at
 		FROM evidence_sources
 		WHERE url_hash = $1
 	`, urlHash).Scan(
 		&id, &src.URL, &src.URLHash, &src.Domain,
 		&title, &description, &content, &author,
-		&publishedAt, &language, &src.Provider, &src.FetchedAt, &src.ExpiresAt,
+		&publishedAt, &language, &src.Provider, &src.ExtractionFailed, &src.FetchedAt, &src.ExpiresAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -255,7 +260,7 @@ func (db *DB) GetEvidenceSource(ctx context.Context, urlHash string) (*EvidenceS
 	src.Language = language.String
 
 	if publishedAt.Valid {
-		src.PublishedAt = publishedAt.Time
+		src.PublishedAt = &publishedAt.Time
 	}
 
 	return &src, nil
@@ -266,8 +271,8 @@ func (db *DB) SaveEvidenceSource(ctx context.Context, src *EvidenceSource) (stri
 
 	err := db.Pool.QueryRow(ctx, `
 		INSERT INTO evidence_sources (url, url_hash, domain, title, description, content,
-		                              author, published_at, language, provider, fetched_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		                              author, published_at, language, provider, extraction_failed, fetched_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		ON CONFLICT (url_hash) DO UPDATE
 		SET title = EXCLUDED.title,
 			description = EXCLUDED.description,
@@ -276,12 +281,13 @@ func (db *DB) SaveEvidenceSource(ctx context.Context, src *EvidenceSource) (stri
 			published_at = EXCLUDED.published_at,
 			language = EXCLUDED.language,
 			provider = EXCLUDED.provider,
+			extraction_failed = EXCLUDED.extraction_failed,
 			fetched_at = EXCLUDED.fetched_at,
 			expires_at = EXCLUDED.expires_at
 		RETURNING id
 	`, src.URL, src.URLHash, src.Domain, toText(src.Title), toText(src.Description),
-		toText(src.Content), toText(src.Author), toTimestamptz(src.PublishedAt),
-		toText(src.Language), src.Provider, src.FetchedAt, src.ExpiresAt).Scan(&id)
+		toText(src.Content), toText(src.Author), toTimestamptzPtr(src.PublishedAt),
+		toText(src.Language), src.Provider, src.ExtractionFailed, src.FetchedAt, src.ExpiresAt).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("save evidence source: %w", err)
 	}
@@ -442,7 +448,7 @@ func scanItemEvidenceWithSource(row evidenceRowScanner) (ItemEvidenceWithSource,
 	}
 
 	if publishedAt.Valid {
-		ies.Source.PublishedAt = publishedAt.Time
+		ies.Source.PublishedAt = &publishedAt.Time
 	}
 
 	return ies, nil
@@ -558,18 +564,20 @@ type EnrichmentUsage struct {
 	Provider       string
 	RequestCount   int
 	EmbeddingCount int
+	CostUSD        float64
 }
 
-// IncrementEnrichmentUsage increments the request counter for the current day and provider.
-func (db *DB) IncrementEnrichmentUsage(ctx context.Context, provider string) error {
+// IncrementEnrichmentUsage increments the request counter and cost for the current day and provider.
+func (db *DB) IncrementEnrichmentUsage(ctx context.Context, provider string, cost float64) error {
 	_, err := db.Pool.Exec(ctx, `
-		INSERT INTO enrichment_usage (date, provider, request_count, embedding_count)
-		VALUES (CURRENT_DATE, $1, 1, 0)
+		INSERT INTO enrichment_usage (date, provider, request_count, embedding_count, cost_usd)
+		VALUES (CURRENT_DATE, $1, 1, 0, $2)
 		ON CONFLICT (date, provider)
 		DO UPDATE SET
 			request_count = enrichment_usage.request_count + 1,
+			cost_usd = enrichment_usage.cost_usd + EXCLUDED.cost_usd,
 			updated_at = now()
-	`, provider)
+	`, provider, cost)
 	if err != nil {
 		return fmt.Errorf("increment enrichment usage: %w", err)
 	}
@@ -577,16 +585,17 @@ func (db *DB) IncrementEnrichmentUsage(ctx context.Context, provider string) err
 	return nil
 }
 
-// IncrementEmbeddingUsage increments the embedding counter for the current day.
-func (db *DB) IncrementEmbeddingUsage(ctx context.Context) error {
+// IncrementEmbeddingUsage increments the embedding counter and cost for the current day.
+func (db *DB) IncrementEmbeddingUsage(ctx context.Context, cost float64) error {
 	_, err := db.Pool.Exec(ctx, `
-		INSERT INTO enrichment_usage (date, provider, request_count, embedding_count)
-		VALUES (CURRENT_DATE, 'embedding', 0, 1)
+		INSERT INTO enrichment_usage (date, provider, request_count, embedding_count, cost_usd)
+		VALUES (CURRENT_DATE, 'embedding', 0, 1, $1)
 		ON CONFLICT (date, provider)
 		DO UPDATE SET
 			embedding_count = enrichment_usage.embedding_count + 1,
+			cost_usd = enrichment_usage.cost_usd + EXCLUDED.cost_usd,
 			updated_at = now()
-	`)
+	`, cost)
 	if err != nil {
 		return fmt.Errorf("increment embedding usage: %w", err)
 	}
@@ -607,7 +616,18 @@ func (db *DB) GetDailyEnrichmentCount(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("get daily enrichment count: %w", err)
 	}
 
-	return int(count), nil
+	return int(count) + int(db.getEmbeddingCount(ctx)), nil
+}
+
+func (db *DB) getEmbeddingCount(ctx context.Context) int64 {
+	var count int64
+	_ = db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(embedding_count), 0)::bigint
+		FROM enrichment_usage
+		WHERE date = CURRENT_DATE
+	`).Scan(&count)
+
+	return count
 }
 
 // GetMonthlyEnrichmentCount returns the total enrichment request count for the current month.
@@ -615,7 +635,7 @@ func (db *DB) GetMonthlyEnrichmentCount(ctx context.Context) (int, error) {
 	var count int64
 
 	err := db.Pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(request_count), 0)::bigint
+		SELECT COALESCE(SUM(request_count + embedding_count), 0)::bigint
 		FROM enrichment_usage
 		WHERE date >= DATE_TRUNC('month', CURRENT_DATE)
 	`).Scan(&count)
@@ -624,6 +644,38 @@ func (db *DB) GetMonthlyEnrichmentCount(ctx context.Context) (int, error) {
 	}
 
 	return int(count), nil
+}
+
+// GetDailyEnrichmentCost returns the total enrichment cost in USD for the current day.
+func (db *DB) GetDailyEnrichmentCost(ctx context.Context) (float64, error) {
+	var cost float64
+
+	err := db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(cost_usd), 0)::numeric
+		FROM enrichment_usage
+		WHERE date = CURRENT_DATE
+	`).Scan(&cost)
+	if err != nil {
+		return 0, fmt.Errorf("get daily enrichment cost: %w", err)
+	}
+
+	return cost, nil
+}
+
+// GetMonthlyEnrichmentCost returns the total enrichment cost in USD for the current month.
+func (db *DB) GetMonthlyEnrichmentCost(ctx context.Context) (float64, error) {
+	var cost float64
+
+	err := db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(cost_usd), 0)::numeric
+		FROM enrichment_usage
+		WHERE date >= DATE_TRUNC('month', CURRENT_DATE)
+	`).Scan(&cost)
+	if err != nil {
+		return 0, fmt.Errorf("get monthly enrichment cost: %w", err)
+	}
+
+	return cost, nil
 }
 
 // GetEnrichmentUsageStats returns usage statistics for display.

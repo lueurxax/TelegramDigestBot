@@ -114,6 +114,14 @@ func toTimestamptz(t time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: t, Valid: !t.IsZero()}
 }
 
+func toTimestamptzPtr(t *time.Time) pgtype.Timestamptz {
+	if t == nil {
+		return pgtype.Timestamptz{Valid: false}
+	}
+
+	return pgtype.Timestamptz{Time: *t, Valid: true}
+}
+
 func toInt8(i int64) pgtype.Int8 {
 	return pgtype.Int8{Int64: i, Valid: i != 0}
 }
