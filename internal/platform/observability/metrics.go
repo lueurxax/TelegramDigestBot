@@ -82,4 +82,31 @@ var (
 		Name: "digest_factcheck_cache_misses_total",
 		Help: "Total number of fact check cache misses",
 	})
+
+	// Enrichment metrics (Phase 2)
+	EnrichmentRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "digest_enrichment_request_duration_seconds",
+		Help:    "Duration of enrichment provider requests",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"provider"})
+
+	EnrichmentRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_enrichment_requests_total",
+		Help: "Total number of enrichment requests",
+	}, []string{"provider", "result"})
+
+	EnrichmentMatches = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_enrichment_matches_total",
+		Help: "Total number of items with evidence matches",
+	})
+
+	EnrichmentCacheHits = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_enrichment_cache_hits_total",
+		Help: "Total number of enrichment cache hits",
+	})
+
+	EnrichmentCacheMisses = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_enrichment_cache_misses_total",
+		Help: "Total number of enrichment cache misses",
+	})
 )

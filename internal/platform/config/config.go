@@ -71,6 +71,26 @@ type Config struct {
 	TelegramLinkCacheTTL  time.Duration `env:"TG_LINK_CACHE_TTL" envDefault:"1h"`
 	MaxLinksPerMessage    int           `env:"MAX_LINKS_PER_MESSAGE" envDefault:"3"`
 	MaxContentLength      int           `env:"MAX_CONTENT_LENGTH" envDefault:"5000"`
+
+	// Source enrichment (Phase 2)
+	EnrichmentEnabled          bool    `env:"ENRICHMENT_ENABLED" envDefault:"false"`
+	EnrichmentMaxResults       int     `env:"ENRICHMENT_MAX_RESULTS" envDefault:"5"`
+	EnrichmentCacheTTLHours    int     `env:"ENRICHMENT_CACHE_TTL_HOURS" envDefault:"168"`
+	EnrichmentQueueMax         int     `env:"ENRICHMENT_QUEUE_MAX" envDefault:"5000"`
+	EnrichmentMinAgreement     float32 `env:"ENRICHMENT_MIN_AGREEMENT" envDefault:"0.3"`
+	EnrichmentMaxEvidenceItem  int     `env:"ENRICHMENT_MAX_EVIDENCE_PER_ITEM" envDefault:"5"`
+	EnrichmentAllowlistDomains string  `env:"ENRICHMENT_ALLOWLIST_DOMAINS" envDefault:""`
+	EnrichmentDenylistDomains  string  `env:"ENRICHMENT_DENYLIST_DOMAINS" envDefault:""`
+
+	// YaCy provider
+	YaCyEnabled bool          `env:"YACY_ENABLED" envDefault:"false"`
+	YaCyBaseURL string        `env:"YACY_BASE_URL" envDefault:"http://localhost:8090"`
+	YaCyTimeout time.Duration `env:"YACY_TIMEOUT" envDefault:"30s"`
+
+	// GDELT provider
+	GDELTEnabled        bool          `env:"GDELT_ENABLED" envDefault:"false"`
+	GDELTRequestsPerMin int           `env:"GDELT_RPM" envDefault:"60"`
+	GDELTTimeout        time.Duration `env:"GDELT_TIMEOUT" envDefault:"30s"`
 }
 
 func Load() (*Config, error) {

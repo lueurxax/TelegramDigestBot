@@ -36,6 +36,8 @@ type Repository interface {
 	SaveEmbedding(ctx context.Context, itemID string, embedding []float32) error
 	EnqueueFactCheck(ctx context.Context, itemID, claim, normalizedClaim string) error
 	CountPendingFactChecks(ctx context.Context) (int, error)
+	EnqueueEnrichment(ctx context.Context, itemID, summary string) error
+	CountPendingEnrichments(ctx context.Context) (int, error)
 	CheckStrictDuplicate(ctx context.Context, hash string, id string) (bool, error)
 	FindSimilarItem(ctx context.Context, embedding []float32, threshold float32) (string, error)
 	LinkMessageToLink(ctx context.Context, rawMsgID, linkCacheID string, position int) error
@@ -797,6 +799,7 @@ func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logg
 	}
 
 	p.enqueueFactCheck(ctx, logger, item)
+	p.enqueueEnrichment(ctx, logger, item)
 
 	return true
 }
@@ -859,4 +862,40 @@ func (p *Pipeline) factCheckQueueHasCapacity(ctx context.Context, logger zerolog
 	}
 
 	return pending < p.cfg.FactCheckQueueMax
+}
+
+func (p *Pipeline) enqueueEnrichment(ctx context.Context, logger zerolog.Logger, item *db.Item) {
+	if !p.enrichmentEnabled(item) {
+		return
+	}
+
+	if !p.enrichmentQueueHasCapacity(ctx, logger) {
+		return
+	}
+
+	if err := p.database.EnqueueEnrichment(ctx, item.ID, item.Summary); err != nil {
+		logger.Warn().Err(err).Str(LogFieldItemID, item.ID).Msg("failed to enqueue enrichment")
+	}
+}
+
+func (p *Pipeline) enrichmentEnabled(item *db.Item) bool {
+	if !p.cfg.EnrichmentEnabled {
+		return false
+	}
+
+	return item.Status == StatusReady && item.Summary != ""
+}
+
+func (p *Pipeline) enrichmentQueueHasCapacity(ctx context.Context, logger zerolog.Logger) bool {
+	if p.cfg.EnrichmentQueueMax <= 0 {
+		return true
+	}
+
+	pending, err := p.database.CountPendingEnrichments(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to count enrichment queue")
+		return true
+	}
+
+	return pending < p.cfg.EnrichmentQueueMax
 }

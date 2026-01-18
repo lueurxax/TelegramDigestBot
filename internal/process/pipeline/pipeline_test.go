@@ -114,6 +114,14 @@ func (m *mockRepo) CountPendingFactChecks(_ context.Context) (int, error) {
 	return 0, nil
 }
 
+func (m *mockRepo) EnqueueEnrichment(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (m *mockRepo) CountPendingEnrichments(_ context.Context) (int, error) {
+	return 0, nil
+}
+
 func (m *mockRepo) CheckStrictDuplicate(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }

@@ -1056,7 +1056,8 @@ func (s *Scheduler) performClusteringIfEnabled(ctx context.Context, items []db.I
 // renderDigest builds the final digest text
 func (s *Scheduler) renderDigest(ctx context.Context, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, settings digestSettings, logger *zerolog.Logger) (string, []db.Item, []db.ClusterWithItems, *anomalyInfo, error) {
 	factChecks := s.loadFactChecks(ctx, items, logger)
-	rc := s.newRenderContext(ctx, settings, items, clusters, start, end, factChecks, logger)
+	evidence := s.loadEvidence(ctx, items, logger)
+	rc := s.newRenderContext(ctx, settings, items, clusters, start, end, factChecks, evidence, logger)
 
 	var sb strings.Builder
 
@@ -1093,6 +1094,27 @@ func (s *Scheduler) loadFactChecks(ctx context.Context, items []db.Item, logger 
 	}
 
 	return factChecks
+}
+
+func (s *Scheduler) loadEvidence(ctx context.Context, items []db.Item, logger *zerolog.Logger) map[string][]db.ItemEvidenceWithSource {
+	itemIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.ID != "" {
+			itemIDs = append(itemIDs, item.ID)
+		}
+	}
+
+	if len(itemIDs) == 0 {
+		return map[string][]db.ItemEvidenceWithSource{}
+	}
+
+	evidence, err := s.database.GetEvidenceForItems(ctx, itemIDs)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to fetch evidence for items")
+		return map[string][]db.ItemEvidenceWithSource{}
+	}
+
+	return evidence
 }
 
 // renderDetailedItems renders the breaking/notable/also sections

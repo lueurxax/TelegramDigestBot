@@ -79,6 +79,104 @@ spec:
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  name: yacy-seeds
+  namespace: digest
+data:
+  seeds.txt: |
+    reuters.com
+    apnews.com
+    bbc.com
+    aljazeera.com
+    dw.com
+    nature.com
+    sciencemag.org
+    arxiv.org
+    mit.edu
+    wired.com
+    pravda.com.ua
+    suspilne.media
+    unian.net
+    ukrinform.net
+    meduza.io
+    theins.ru
+    novayagazeta.eu
+    who.int
+    un.org
+    europa.eu
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yacy-bootstrap
+  namespace: digest
+data:
+  bootstrap.sh: |
+    #!/bin/sh
+    set -euo pipefail
+
+    YACY_URL="${YACY_URL:-http://yacy:8090}"
+    YACY_USER="${YACY_USER:-}"
+    YACY_PASSWORD="${YACY_PASSWORD:-}"
+
+    auth=""
+    if [ -n "$YACY_USER" ] && [ -n "$YACY_PASSWORD" ]; then
+      auth="-u ${YACY_USER}:${YACY_PASSWORD}"
+    fi
+
+    while IFS= read -r line; do
+      line="$(echo "$line" | sed 's/#.*//' | xargs)"
+      if [ -z "$line" ]; then
+        continue
+      fi
+
+      url="$line"
+      case "$url" in
+        http://*|https://*) ;;
+        *) url="https://$url" ;;
+      esac
+
+      curl -fsS $auth "${YACY_URL}/Crawler_p.html?crawlingstart=${url}&crawlingDepth=2&crawlingMode=url" >/dev/null || true
+    done < /config/seeds.txt
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: yacy-seed-bootstrap
+  namespace: digest
+spec:
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: bootstrap
+            image: curlimages/curl:8.6.0
+            command: ["/bin/sh", "/config/bootstrap.sh"]
+            env:
+            - name: YACY_URL
+              value: "http://yacy:8090"
+            volumeMounts:
+            - name: yacy-seeds
+              mountPath: /config/seeds.txt
+              subPath: seeds.txt
+            - name: yacy-bootstrap
+              mountPath: /config/bootstrap.sh
+              subPath: bootstrap.sh
+          volumes:
+          - name: yacy-seeds
+            configMap:
+              name: yacy-seeds
+          - name: yacy-bootstrap
+            configMap:
+              name: yacy-bootstrap
+              defaultMode: 0755
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
   name: searxng-config
   namespace: digest
 data:
@@ -92,6 +190,14 @@ data:
     search:
       safe_search: 0
     engines:
+    - name: duckduckgo
+      disabled: false
+    - name: wikipedia
+      disabled: false
+    - name: arxiv
+      disabled: false
+    - name: crossref
+      disabled: false
     - name: ahmia
       disabled: true
     - name: torch
@@ -114,12 +220,13 @@ spec:
     spec:
       initContainers:
       - name: searxng-config-init
-        image: busybox:1.36
+        image: searxng/searxng:latest
         command:
         - sh
         - -c
         - |
           cp /config/settings.yml /etc/searxng/settings.yml
+          cp /usr/local/searxng/searx/limiter.toml /etc/searxng/limiter.toml
         volumeMounts:
         - name: searxng-config
           mountPath: /config

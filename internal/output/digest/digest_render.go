@@ -12,7 +12,7 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/schedule"
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
+	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 // digestSettings holds all settings needed for building a digest
@@ -88,10 +88,11 @@ type digestRenderContext struct {
 	displayEnd    time.Time
 	seenSummaries map[string]bool
 	factChecks    map[string]db.FactCheckMatch
+	evidence      map[string][]db.ItemEvidenceWithSource
 	logger        *zerolog.Logger
 }
 
-func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSettings, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, factChecks map[string]db.FactCheckMatch, logger *zerolog.Logger) *digestRenderContext {
+func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSettings, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, factChecks map[string]db.FactCheckMatch, evidence map[string][]db.ItemEvidenceWithSource, logger *zerolog.Logger) *digestRenderContext {
 	displayStart := start
 	displayEnd := end
 
@@ -112,6 +113,7 @@ func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSetting
 		displayEnd:    displayEnd,
 		seenSummaries: make(map[string]bool),
 		factChecks:    factChecks,
+		evidence:      evidence,
 		logger:        logger,
 	}
 }
@@ -474,6 +476,8 @@ func (rc *digestRenderContext) renderConsolidatedSummary(sb *strings.Builder, su
 		sb.WriteString(line)
 	}
 
+	rc.appendEvidenceLine(sb, c.Items)
+
 	sb.WriteString(htmlutils.ItemEnd)
 	sb.WriteString("\n")
 }
@@ -515,6 +519,8 @@ func (rc *digestRenderContext) renderRepresentativeCluster(sb *strings.Builder, 
 		sb.WriteString(line)
 	}
 
+	rc.appendEvidenceLine(sb, c.Items)
+
 	if len(c.Items) > 1 {
 		fmt.Fprintf(sb, " <i>(+%d related)</i>", len(c.Items)-1)
 	}
@@ -523,6 +529,49 @@ func (rc *digestRenderContext) renderRepresentativeCluster(sb *strings.Builder, 
 	sb.WriteString("\n\n")
 
 	return true
+}
+
+func (rc *digestRenderContext) appendEvidenceLine(sb *strings.Builder, items []db.Item) {
+	evidenceList := findEvidenceForItems(items, rc.evidence)
+	if len(evidenceList) == 0 {
+		return
+	}
+
+	// Determine tier from evidence count and average score
+	tier := determineTierFromEvidence(evidenceList)
+	if tier != "" {
+		sb.WriteString(formatConfidenceTier(tier, len(evidenceList)))
+	}
+}
+
+func determineTierFromEvidence(evidenceList []db.ItemEvidenceWithSource) string {
+	if len(evidenceList) == 0 {
+		return ""
+	}
+
+	var totalScore float32
+
+	for _, ev := range evidenceList {
+		totalScore += ev.AgreementScore
+	}
+
+	avgScore := totalScore / float32(len(evidenceList))
+
+	const (
+		highTierMinSources = 2
+		highTierMinScore   = 0.5
+		mediumTierMinScore = 0.3
+	)
+
+	if len(evidenceList) >= highTierMinSources && avgScore >= highTierMinScore {
+		return db.FactCheckTierHigh
+	}
+
+	if avgScore >= mediumTierMinScore {
+		return db.FactCheckTierMedium
+	}
+
+	return db.FactCheckTierLow
 }
 
 func (rc *digestRenderContext) collectSourceLinks(items []db.Item) []string {
@@ -546,4 +595,43 @@ func (rc *digestRenderContext) collectSourceLinks(items []db.Item) []string {
 	}
 
 	return links
+}
+
+func findEvidenceForItems(items []db.Item, evidence map[string][]db.ItemEvidenceWithSource) []db.ItemEvidenceWithSource {
+	if evidence == nil {
+		return nil
+	}
+
+	for _, item := range items {
+		if item.ID == "" {
+			continue
+		}
+
+		if ev, ok := evidence[item.ID]; ok && len(ev) > 0 {
+			return ev
+		}
+	}
+
+	return nil
+}
+
+func formatConfidenceTier(tier string, sourceCount int) string {
+	if tier == "" {
+		return ""
+	}
+
+	var emoji string
+
+	switch tier {
+	case db.FactCheckTierHigh:
+		emoji = "✅"
+	case db.FactCheckTierMedium:
+		emoji = "🔵"
+	case db.FactCheckTierLow:
+		emoji = "⚪"
+	default:
+		return ""
+	}
+
+	return fmt.Sprintf("\n    ↳ <i>%s Corroborated (%d sources)</i>", emoji, sourceCount)
 }

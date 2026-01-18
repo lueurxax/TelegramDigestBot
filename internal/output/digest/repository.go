@@ -33,6 +33,7 @@ type Repository interface {
 	GetItemEmbedding(ctx context.Context, id string) ([]float32, error)
 	GetBacklogCount(ctx context.Context) (int, error)
 	GetFactChecksForItems(ctx context.Context, itemIDs []string) (map[string]db.FactCheckMatch, error)
+	GetEvidenceForItems(ctx context.Context, itemIDs []string) (map[string][]db.ItemEvidenceWithSource, error)
 
 	// Cluster operations
 	GetClustersForWindow(ctx context.Context, start, end time.Time) ([]db.ClusterWithItems, error)
