@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -89,12 +90,62 @@ func (a *App) RunWorker(ctx context.Context) error {
 	resolver := a.newLinkResolver()
 
 	p := pipeline.New(a.cfg, a.database, llmClient, resolver, a.logger)
+	go a.runDiscoveryReconciliation(ctx)
 
 	if err := p.Run(ctx); err != nil {
 		return fmt.Errorf("pipeline run: %w", err)
 	}
 
 	return nil
+}
+
+func (a *App) runDiscoveryReconciliation(ctx context.Context) {
+	const (
+		reconcileInterval = 6 * time.Hour
+		cleanupBatchSize  = 100
+		cleanupBatchLimit = 100
+		systemAdminUserID = int64(0)
+	)
+
+	a.runDiscoveryCleanupOnce(ctx, cleanupBatchSize, cleanupBatchLimit, systemAdminUserID)
+
+	ticker := time.NewTicker(reconcileInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.runDiscoveryCleanupOnce(ctx, cleanupBatchSize, cleanupBatchLimit, systemAdminUserID)
+		}
+	}
+}
+
+func (a *App) runDiscoveryCleanupOnce(ctx context.Context, batchSize int, maxBatches int, adminID int64) {
+	updatedTotal := 0
+
+	for i := 0; i < maxBatches; i++ {
+		if ctx.Err() != nil {
+			return
+		}
+
+		updated, err := a.database.CleanupDiscoveriesBatch(ctx, batchSize, adminID)
+		if err != nil {
+			a.logger.Warn().Err(err).Msg("discovery cleanup batch failed")
+			continue
+		}
+
+		if updated == 0 {
+			break
+		}
+
+		updatedTotal += updated
+	}
+
+	if updatedTotal > 0 {
+		a.logger.Info().Int("updated", updatedTotal).Msg("discovery cleanup complete")
+	}
 }
 
 // RunDigest runs the digest mode.
