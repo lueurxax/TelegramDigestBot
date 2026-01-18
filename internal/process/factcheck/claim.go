@@ -15,6 +15,7 @@ const (
 // BuildClaimFromSummary extracts a short, single-sentence claim from a summary.
 func BuildClaimFromSummary(summary string) string {
 	text := htmlutils.StripHTMLTags(summary)
+	text = strings.ToValidUTF8(text, "")
 	text = strings.TrimSpace(text)
 	text = strings.TrimLeftFunc(text, func(r rune) bool {
 		return unicode.IsSpace(r) || unicode.IsPunct(r)
@@ -34,7 +35,9 @@ func BuildClaimFromSummary(summary string) string {
 
 // NormalizeClaim produces a stable cache key for a claim string.
 func NormalizeClaim(claim string) string {
+	claim = strings.ToValidUTF8(claim, "")
 	fields := strings.Fields(strings.ToLower(claim))
+
 	return strings.Join(fields, " ")
 }
 
