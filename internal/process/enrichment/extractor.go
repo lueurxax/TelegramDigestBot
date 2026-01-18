@@ -129,16 +129,21 @@ func (e *Extractor) Extract(ctx context.Context, result SearchResult, provider P
 	source.PublishedAt = toTimePtr(coalesce2(content.PublishedAt, result.PublishedAt))
 	source.Language = content.Language
 
+	analysisText := content.Content
+	if analysisText == "" {
+		analysisText = content.Description
+	}
+
 	var claims []ExtractedClaim
 	if e.llmClient != nil {
-		claims, err = e.extractClaimsWithLLM(ctx, content.Content)
+		claims, err = e.extractClaimsWithLLM(ctx, analysisText)
 		if err != nil {
 			e.logger.Error().Err(err).Str("url", result.URL).Msg("LLM extraction failed")
 
-			claims = extractClaims(content.Content)
+			claims = extractClaims(analysisText)
 		}
 	} else {
-		claims = extractClaims(content.Content)
+		claims = extractClaims(analysisText)
 	}
 
 	return &ExtractedEvidence{
@@ -148,6 +153,11 @@ func (e *Extractor) Extract(ctx context.Context, result SearchResult, provider P
 }
 
 func (e *Extractor) extractClaimsWithLLM(ctx context.Context, content string) ([]ExtractedClaim, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil, nil
+	}
+
 	prompt := `Extract the most significant factual claims from the following text. 
 Return a JSON array of objects, where each object has:
 - "text": the claim text (single sentence)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"os"
@@ -52,6 +53,11 @@ func main() {
 	}()
 
 	if err := runMode(ctx, application, *mode, *once); err != nil {
+		if errors.Is(err, context.Canceled) {
+			logger.Info().Msg("application stopped")
+			return
+		}
+
 		logger.Fatal().Err(err).Msg("application error")
 	}
 }

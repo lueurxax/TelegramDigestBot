@@ -166,7 +166,7 @@ func (b *Bot) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("bot run context canceled: %w", ctx.Err())
+			return ctx.Err() //nolint:wrapcheck
 		case update := <-updates:
 			if update.CallbackQuery != nil {
 				b.handleCallback(ctx, update.CallbackQuery)

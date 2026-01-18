@@ -119,7 +119,7 @@ func (p *Pipeline) Run(ctx context.Context) error {
 
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("pipeline run: %w", ctx.Err())
+			return ctx.Err() //nolint:wrapcheck
 		case <-time.After(pollInterval):
 		}
 	}

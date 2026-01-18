@@ -102,7 +102,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	for { // select loop immediately follows declarations
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("context canceled: %w", ctx.Err())
+			return ctx.Err() //nolint:wrapcheck
 		case <-ticker.C:
 			s.runOnceWithLock(ctx)
 		case <-autoWeightTicker.C:

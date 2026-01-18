@@ -78,7 +78,7 @@ func (w *Worker) Run(ctx context.Context) error {
 
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("fact check worker: %w", ctx.Err())
+			return ctx.Err() //nolint:wrapcheck
 		case <-time.After(pollInterval):
 		}
 	}

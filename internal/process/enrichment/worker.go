@@ -42,8 +42,6 @@ const (
 	settingEnrichmentDenyDomains  = "enrichment_deny_domains"
 )
 
-const errEnrichmentWorkerFmt = "enrichment worker: %w"
-
 const (
 	costPerEventRegistryRequest = 0.005   // Estimation: $5 per 1k requests
 	costPerNewsAPIRequest       = 0.002   // Estimation: $2 per 1k requests
@@ -228,7 +226,7 @@ func (w *Worker) processNextItem(ctx context.Context) {
 func (w *Worker) wait(ctx context.Context, d time.Duration) error {
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf(errEnrichmentWorkerFmt, ctx.Err())
+		return ctx.Err() //nolint:wrapcheck
 	case <-time.After(d):
 		return nil
 	}

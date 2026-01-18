@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -29,6 +30,8 @@ const (
 	discoveryDenySettingKey          = "discovery_description_deny"
 	discoveryMinSeenDefault          = 2
 	discoveryMinEngagementDefault    = float32(50)
+	msgFactCheckWorkerStopped        = "fact check worker stopped"
+	msgEnrichmentWorkerStopped       = "enrichment worker stopped"
 )
 
 // App holds the application dependencies and provides methods to run different modes.
@@ -115,7 +118,12 @@ func (a *App) RunWorker(ctx context.Context) error {
 func (a *App) runFactCheckWorker(ctx context.Context) {
 	worker := factcheck.NewWorker(a.cfg, a.database, a.logger)
 	if err := worker.Run(ctx); err != nil {
-		a.logger.Warn().Err(err).Msg("fact check worker stopped")
+		if errors.Is(err, context.Canceled) {
+			a.logger.Info().Msg(msgFactCheckWorkerStopped)
+			return
+		}
+
+		a.logger.Warn().Err(err).Msg(msgFactCheckWorkerStopped)
 	}
 }
 
@@ -140,7 +148,12 @@ func (a *App) runEnrichmentWorker(ctx context.Context) {
 	}
 
 	if err := worker.Run(ctx); err != nil {
-		a.logger.Warn().Err(err).Msg("enrichment worker stopped")
+		if errors.Is(err, context.Canceled) {
+			a.logger.Info().Msg(msgEnrichmentWorkerStopped)
+			return
+		}
+
+		a.logger.Warn().Err(err).Msg(msgEnrichmentWorkerStopped)
 	}
 }
 
@@ -198,7 +211,9 @@ func (a *App) runDiscoveryCleanupOnce(ctx context.Context, batchSize int, maxBat
 func (a *App) updateDiscoveryMetrics(ctx context.Context) {
 	stats, err := a.database.GetDiscoveryStats(ctx)
 	if err != nil {
-		a.logger.Warn().Err(err).Msg("failed to fetch discovery stats")
+		if !errors.Is(err, context.Canceled) {
+			a.logger.Warn().Err(err).Msg("failed to fetch discovery stats")
+		}
 
 		return
 	}
@@ -231,7 +246,9 @@ func (a *App) updateDiscoveryMetrics(ctx context.Context) {
 func (a *App) getDiscoveryThresholds(ctx context.Context) (int, float32) {
 	minSeen := discoveryMinSeenDefault
 	if err := a.database.GetSetting(ctx, discoveryMinSeenSettingKey, &minSeen); err != nil {
-		a.logger.Warn().Err(err).Msg("failed to read discovery_min_seen")
+		if !errors.Is(err, context.Canceled) {
+			a.logger.Warn().Err(err).Msg("failed to read discovery_min_seen")
+		}
 	}
 
 	if minSeen < 1 {
@@ -240,7 +257,9 @@ func (a *App) getDiscoveryThresholds(ctx context.Context) (int, float32) {
 
 	minEngagement := discoveryMinEngagementDefault
 	if err := a.database.GetSetting(ctx, discoveryMinEngagementSettingKey, &minEngagement); err != nil {
-		a.logger.Warn().Err(err).Msg("failed to read discovery_min_engagement")
+		if !errors.Is(err, context.Canceled) {
+			a.logger.Warn().Err(err).Msg("failed to read discovery_min_engagement")
+		}
 	}
 
 	if minEngagement < 0 {
@@ -253,12 +272,16 @@ func (a *App) getDiscoveryThresholds(ctx context.Context) (int, float32) {
 func (a *App) getDiscoveryKeywordFilters(ctx context.Context) ([]string, []string) {
 	var allow []string
 	if err := a.database.GetSetting(ctx, discoveryAllowSettingKey, &allow); err != nil {
-		a.logger.Warn().Err(err).Msg("failed to read discovery_description_allow")
+		if !errors.Is(err, context.Canceled) {
+			a.logger.Warn().Err(err).Msg("failed to read discovery_description_allow")
+		}
 	}
 
 	var deny []string
 	if err := a.database.GetSetting(ctx, discoveryDenySettingKey, &deny); err != nil {
-		a.logger.Warn().Err(err).Msg("failed to read discovery_description_deny")
+		if !errors.Is(err, context.Canceled) {
+			a.logger.Warn().Err(err).Msg("failed to read discovery_description_deny")
+		}
 	}
 
 	return db.NormalizeDiscoveryKeywords(allow), db.NormalizeDiscoveryKeywords(deny)
@@ -267,7 +290,9 @@ func (a *App) getDiscoveryKeywordFilters(ctx context.Context) ([]string, []strin
 func (a *App) getDiscoveryKeywordFilterStats(ctx context.Context, minSeen int, minEngagement float32, allow, deny []string) (int, int, int) {
 	candidates, err := a.database.GetPendingDiscoveriesForFiltering(ctx, minSeen, minEngagement)
 	if err != nil {
-		a.logger.Warn().Err(err).Msg("failed to fetch discovery keyword candidates")
+		if !errors.Is(err, context.Canceled) {
+			a.logger.Warn().Err(err).Msg("failed to fetch discovery keyword candidates")
+		}
 
 		return 0, 0, 0
 	}

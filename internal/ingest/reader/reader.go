@@ -172,7 +172,7 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("message ingestion canceled: %w", ctx.Err())
+			return ctx.Err() //nolint:wrapcheck
 		default:
 		}
 
@@ -225,7 +225,7 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 func (r *Reader) wait(ctx context.Context, delay time.Duration) error {
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("wait canceled: %w", ctx.Err())
+		return ctx.Err() //nolint:wrapcheck
 	case <-time.After(delay):
 		return nil
 	}
