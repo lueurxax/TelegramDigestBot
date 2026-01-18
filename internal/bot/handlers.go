@@ -164,11 +164,21 @@ const (
 
 func (b *Bot) handleThreshold(ctx context.Context, msg *tgbotapi.Message, key string) {
 	args := msg.CommandArguments()
+	cmdName := strings.TrimSuffix(key, "_threshold")
+	label := cases.Title(language.English).String(strings.ReplaceAll(key, "_", " "))
+
+	var current float32
+
+	_ = b.database.GetSetting(ctx, key, &current) //nolint:errcheck // best-effort read
 
 	if args == "" {
-		// Derive command name from key (e.g., "relevance_threshold" -> "relevance")
-		cmdName := strings.TrimSuffix(key, "_threshold")
-		b.reply(msg, fmt.Sprintf("Usage: <code>/%s &lt;0.0-1.0&gt;</code>", html.EscapeString(cmdName)))
+		hint := "higher = stricter filtering"
+		b.reply(msg, fmt.Sprintf(`📊 <b>%s</b>
+
+Current value: <code>%.2f</code>
+Range: 0.0 - 1.0 (%s)
+
+Usage: <code>/%s &lt;0.0-1.0&gt;</code>`, html.EscapeString(label), current, hint, html.EscapeString(cmdName)))
 
 		return
 	}
@@ -181,18 +191,18 @@ func (b *Bot) handleThreshold(ctx context.Context, msg *tgbotapi.Message, key st
 		return
 	}
 
-	var current float32
-
-	_ = b.database.GetSetting(ctx, key, &current) //nolint:errcheck // best-effort read
-
 	if err := b.database.SaveSettingWithHistory(ctx, key, float32(val), msg.From.ID); err != nil {
 		b.reply(msg, fmt.Sprintf(ErrSavingFmt, html.EscapeString(key), html.EscapeString(err.Error())))
 
 		return
 	}
 
-	label := cases.Title(language.English).String(strings.ReplaceAll(key, "_", " "))
-	b.reply(msg, fmt.Sprintf("✅ <b>%s</b> updated.\nOld value: <code>%v</code>\nNew value: <code>%v</code>", html.EscapeString(label), current, val))
+	direction := "more items will pass"
+	if val > float64(current) {
+		direction = "fewer items will pass"
+	}
+
+	b.reply(msg, fmt.Sprintf("✅ <b>%s</b> updated: <code>%.2f</code> → <code>%.2f</code>\n\n💡 %s", html.EscapeString(label), current, val, direction))
 }
 
 func (b *Bot) handleStatus(ctx context.Context, msg *tgbotapi.Message) {
@@ -224,7 +234,17 @@ func (b *Bot) handleChannelNamespace(ctx context.Context, msg *tgbotapi.Message)
 	args := strings.Fields(msg.CommandArguments())
 
 	if len(args) == 0 {
-		b.reply(msg, "Usage: <code>/channel &lt;add|remove|list|context|metadata|weight|relevance|stats&gt;</code>")
+		b.reply(msg, `📺 <b>Channel Management</b>
+
+<b>Commands:</b>
+• <code>/channel add @user</code> - Add channel to tracking
+• <code>/channel remove @user</code> - Remove channel
+• <code>/channel list</code> - List tracked channels
+• <code>/channel context @user &lt;text&gt;</code> - Set channel context
+• <code>/channel metadata @user ...</code> - Set category/tone
+• <code>/channel weight @user</code> - View/set importance weight
+• <code>/channel relevance @user</code> - View/set auto-relevance
+• <code>/channel stats</code> - Channel quality metrics`)
 
 		return
 	}
@@ -250,7 +270,7 @@ func (b *Bot) handleChannelNamespace(ctx context.Context, msg *tgbotapi.Message)
 	case CmdRelevance:
 		b.handleChannelRelevance(ctx, &newMsg)
 	default:
-		b.reply(msg, fmt.Sprintf("❓ Unknown channel subcommand: <code>%s</code>", html.EscapeString(subcommand)))
+		b.reply(msg, fmt.Sprintf("❓ Unknown subcommand: <code>%s</code>\n\n💡 Run <code>/channel</code> to see available commands.", html.EscapeString(subcommand)))
 	}
 }
 
@@ -278,7 +298,7 @@ func (b *Bot) handleFilterNamespace(ctx context.Context, msg *tgbotapi.Message) 
 	case "skip_forwards", "skipforwards":
 		b.handleToggleSetting(ctx, &newMsg, "filters_skip_forwards")
 	default:
-		b.reply(msg, fmt.Sprintf("❓ Unknown filter subcommand: <code>%s</code>", html.EscapeString(subcommand)))
+		b.reply(msg, fmt.Sprintf("❓ Unknown subcommand: <code>%s</code>\n\n💡 Run <code>/filter</code> to see current filters, or use <code>add</code>, <code>remove</code>, <code>ads</code>, <code>mode</code>.", html.EscapeString(subcommand)))
 	}
 }
 
@@ -286,7 +306,24 @@ func (b *Bot) handleConfigNamespace(ctx context.Context, msg *tgbotapi.Message) 
 	args := strings.Fields(msg.CommandArguments())
 
 	if len(args) == 0 {
-		b.reply(msg, "Usage: <code>/config &lt;links|max_links|link_cache|target|window|schedule|language|tone|relevance|importance|discovery_min_seen|discovery_min_engagement|reset&gt;</code>")
+		b.reply(msg, `⚙️ <b>Configuration</b>
+
+<b>Output:</b>
+• <code>/config target @channel</code> - Set digest target
+• <code>/config window 6h</code> - Set digest interval
+• <code>/config language en</code> - Set language
+• <code>/config tone casual</code> - Set tone
+
+<b>Thresholds:</b>
+• <code>/config relevance 0.5</code> - Min relevance (0-1, higher = stricter)
+• <code>/config importance 0.3</code> - Min importance (0-1, higher = stricter)
+
+<b>Links:</b>
+• <code>/config links on</code> - Enable link enrichment
+• <code>/config maxlinks 3</code> - Max links per message
+
+<b>Reset:</b>
+• <code>/config reset &lt;key&gt;</code> - Reset setting to default`)
 
 		return
 	}
@@ -295,7 +332,7 @@ func (b *Bot) handleConfigNamespace(ctx context.Context, msg *tgbotapi.Message) 
 	newMsg := prepareSubcommandMessage(msg, subcommand, args)
 
 	if !b.routeConfigSubcommand(ctx, &newMsg, subcommand) {
-		b.reply(msg, fmt.Sprintf("❓ Unknown config subcommand: <code>%s</code>", html.EscapeString(subcommand)))
+		b.reply(msg, fmt.Sprintf("❓ Unknown subcommand: <code>%s</code>\n\n💡 Run <code>/config</code> to see available settings.", html.EscapeString(subcommand)))
 	}
 }
 
@@ -337,7 +374,24 @@ func (b *Bot) handleAINamespace(ctx context.Context, msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 
 	if len(args) == 0 {
-		b.reply(msg, "Usage: <code>/ai &lt;model|smart_model|tone|editor|tiered|vision|consolidated|details|topics|dedup&gt;</code>")
+		b.reply(msg, `🤖 <b>AI Settings</b>
+
+<b>Models:</b>
+• <code>/ai model gpt-4o</code> - Set primary LLM
+• <code>/ai smartmodel gpt-4o</code> - Set routing model
+
+<b>Features (on/off):</b>
+• <code>/ai editor on</code> - Editor-in-chief
+• <code>/ai tiered on</code> - Tiered importance
+• <code>/ai vision on</code> - Vision routing
+• <code>/ai topics on</code> - Topic grouping
+• <code>/ai consolidated on</code> - Cluster consolidation
+• <code>/ai details on</code> - Detailed items
+
+<b>Other:</b>
+• <code>/ai tone casual</code> - Set digest tone
+• <code>/ai dedup semantic</code> - Dedup mode (strict/semantic)
+• <code>/ai prompt list</code> - Manage prompts`)
 
 		return
 	}
@@ -346,7 +400,7 @@ func (b *Bot) handleAINamespace(ctx context.Context, msg *tgbotapi.Message) {
 	newMsg := prepareSubcommandMessage(msg, subcommand, args)
 
 	if !b.routeAISubcommand(ctx, &newMsg, subcommand) {
-		b.reply(msg, fmt.Sprintf("❓ Unknown AI subcommand: <code>%s</code>", html.EscapeString(subcommand)))
+		b.reply(msg, fmt.Sprintf("❓ Unknown subcommand: <code>%s</code>\n\n💡 Run <code>/ai</code> to see available AI settings.", html.EscapeString(subcommand)))
 	}
 }
 
@@ -391,7 +445,15 @@ func (b *Bot) handleSystemNamespace(ctx context.Context, msg *tgbotapi.Message) 
 	args := strings.Fields(msg.CommandArguments())
 
 	if len(args) == 0 {
-		b.reply(msg, "Usage: <code>/system &lt;status|settings|history|errors|retry|scores&gt;</code>")
+		b.reply(msg, `🔧 <b>System Diagnostics</b>
+
+<b>Commands:</b>
+• <code>/system status</code> - System health dashboard
+• <code>/system settings</code> - Show all settings
+• <code>/system history</code> - Recent setting changes
+• <code>/system errors</code> - Recent processing errors
+• <code>/system retry</code> - Retry failed items
+• <code>/system scores</code> - Item importance scores`)
 
 		return
 	}
@@ -413,7 +475,7 @@ func (b *Bot) handleSystemNamespace(ctx context.Context, msg *tgbotapi.Message) 
 	case CmdScores:
 		b.handleScores(ctx, &newMsg)
 	default:
-		b.reply(msg, fmt.Sprintf("❓ Unknown system subcommand: <code>%s</code>", html.EscapeString(subcommand)))
+		b.reply(msg, fmt.Sprintf("❓ Unknown subcommand: <code>%s</code>\n\n💡 Run <code>/system</code> to see available diagnostics.", html.EscapeString(subcommand)))
 	}
 }
 
@@ -557,7 +619,7 @@ func (b *Bot) handleSchedule(ctx context.Context, msg *tgbotapi.Message) {
 	case SubCmdWeekdays, SubCmdWeekends:
 		b.handleScheduleDayGroup(ctx, msg, subcommand, args)
 	default:
-		b.reply(msg, fmt.Sprintf("❓ Unknown schedule subcommand: <code>%s</code>", html.EscapeString(subcommand)))
+		b.reply(msg, fmt.Sprintf("❓ Unknown subcommand: <code>%s</code>\n\n💡 Use <code>/schedule show</code> to see current schedule, or <code>weekdays</code>, <code>weekends</code>, <code>timezone</code>.", html.EscapeString(subcommand)))
 	}
 }
 
@@ -3303,7 +3365,7 @@ func (b *Bot) handleDiscoverNamespace(ctx context.Context, msg *tgbotapi.Message
 		b.handleDiscoverApproveCmd(ctx, msg, args)
 	case SubCmdReject:
 		b.handleDiscoverRejectCmd(ctx, msg, args)
-	case SubCmdRejected:
+	case SubCmdRejected, "rejected":
 		b.handleDiscoverShowRejectedCmd(ctx, msg, args)
 	case SubCmdCleanup:
 		b.handleDiscoverCleanup(ctx, msg)
@@ -3311,12 +3373,20 @@ func (b *Bot) handleDiscoverNamespace(ctx context.Context, msg *tgbotapi.Message
 		b.handleDiscoverStats(ctx, msg)
 	case SubCmdPreview:
 		b.handleDiscoverPreviewCmd(ctx, msg, args)
-	case "min_seen":
+	case "min_seen", "minseen":
 		b.handleDiscoverMinSeen(ctx, msg, args)
-	case "min_engagement":
+	case "min_engagement", "minengagement":
 		b.handleDiscoverMinEngagement(ctx, msg, args)
 	default:
-		b.reply(msg, fmt.Sprintf("❓ Unknown discover subcommand: <code>%s</code>. Use <code>approve</code>, <code>reject</code>, <code>min_seen</code>, <code>min_engagement</code>, <code>show-rejected</code>, <code>preview</code>, <code>cleanup</code>, or <code>stats</code>.", html.EscapeString(subcommand)))
+		b.reply(msg, `❓ Unknown subcommand: <code>`+html.EscapeString(subcommand)+`</code>
+
+<b>Available:</b>
+• <code>approve @user</code> - Add to tracking
+• <code>reject @user</code> - Mark as not useful
+• <code>rejected</code> - Show rejected list
+• <code>preview @user</code> - Why is/isn't actionable
+• <code>stats</code> - Discovery statistics
+• <code>cleanup</code> - Backfill matched channels`)
 	}
 }
 
@@ -3423,12 +3493,12 @@ func (b *Bot) handleDiscoverList(ctx context.Context, msg *tgbotapi.Message) {
 	}
 
 	if len(discoveries) == 0 {
-		b.reply(msg, "📋 No pending channel discoveries. Channels are discovered from forwards, t.me links, and @mentions in tracked channels.")
+		b.reply(msg, fmt.Sprintf("📋 No pending channel discoveries.\n\n<i>Filters: seen ≥ %d, engagement ≥ %.0f</i>\n\n💡 Channels are discovered from forwards, t.me links, and @mentions.", minSeen, minEngagement))
 
 		return
 	}
 
-	text := formatDiscoveryList(discoveries)
+	text := formatDiscoveryListWithThresholds(discoveries, minSeen, minEngagement)
 	rows := buildDiscoveryKeyboard(discoveries)
 
 	reply := tgbotapi.NewMessage(msg.Chat.ID, text)
@@ -3550,8 +3620,16 @@ func (b *Bot) handleDiscoverCleanup(ctx context.Context, msg *tgbotapi.Message) 
 	b.reply(msg, fmt.Sprintf("✅ Cleanup complete. Updated <code>%d</code> discoveries, matched <code>%d</code> to tracked channels.", totalUpdated, totalUpdated))
 }
 
+const discoveryListTip = "💡 <i>Use <code>/discover approve @username</code> or <code>/discover reject @username</code></i>"
+
 func formatDiscoveryList(discoveries []db.DiscoveredChannel) string {
-	return formatDiscoveryListWithTip("🔍 <b>Pending Channel Discoveries</b>", discoveries, "💡 <i>Use <code>/discover approve @username</code> or <code>/discover reject @username</code></i>")
+	return formatDiscoveryListWithTip("🔍 <b>Pending Channel Discoveries</b>", discoveries, discoveryListTip)
+}
+
+func formatDiscoveryListWithThresholds(discoveries []db.DiscoveredChannel, minSeen int, minEngagement float32) string {
+	title := fmt.Sprintf("🔍 <b>Pending Channel Discoveries</b> <i>(seen ≥ %d, engagement ≥ %.0f)</i>", minSeen, minEngagement)
+
+	return formatDiscoveryListWithTip(title, discoveries, discoveryListTip)
 }
 
 func formatDiscoveryListWithTip(title string, discoveries []db.DiscoveredChannel, tip string) string {
