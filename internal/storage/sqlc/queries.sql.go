@@ -1333,11 +1333,21 @@ func (q *Queries) GetLinksForMessage(ctx context.Context, rawMessageID pgtype.UU
 }
 
 const getPendingDiscoveries = `-- name: GetPendingDiscoveries :many
-SELECT id, username, tg_peer_id, invite_link, title, source_type, discovery_count, first_seen_at, last_seen_at, max_views, max_forwards, engagement_score
-FROM discovered_channels
-WHERE status = 'pending'
-  AND username IS NOT NULL AND username != ''
-ORDER BY engagement_score DESC, discovery_count DESC, last_seen_at DESC
+SELECT dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.source_type, dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score
+FROM discovered_channels dc
+WHERE dc.status = 'pending'
+  AND dc.username IS NOT NULL AND dc.username != ''
+  AND NOT EXISTS (
+    SELECT 1
+    FROM channels c
+    WHERE c.is_active = TRUE AND (
+      (c.username = dc.username AND c.username != '') OR
+      ('@' || c.username = dc.username AND c.username != '') OR
+      (c.tg_peer_id = dc.tg_peer_id AND dc.tg_peer_id != 0 AND c.tg_peer_id != 0) OR
+      (c.invite_link = dc.invite_link AND dc.invite_link != '' AND c.invite_link != '')
+    )
+  )
+ORDER BY dc.engagement_score DESC, dc.discovery_count DESC, dc.last_seen_at DESC
 LIMIT $1
 `
 

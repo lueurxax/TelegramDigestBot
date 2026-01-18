@@ -90,12 +90,20 @@ func (db *DB) AddChannel(ctx context.Context, peerID int64, username, title stri
 		return fmt.Errorf("add channel: %w", err)
 	}
 
+	if err := db.markDiscoveryAdded(ctx, username, peerID, ""); err != nil {
+		return fmt.Errorf("mark discovery added: %w", err)
+	}
+
 	return nil
 }
 
 func (db *DB) AddChannelByUsername(ctx context.Context, username string) error {
 	if err := db.Queries.AddChannelByUsername(ctx, toText(normalizeUsername(username))); err != nil {
 		return fmt.Errorf(errAddChannelByUsername, err)
+	}
+
+	if err := db.markDiscoveryAdded(ctx, username, 0, ""); err != nil {
+		return fmt.Errorf("mark discovery added: %w", err)
 	}
 
 	return nil
@@ -106,12 +114,60 @@ func (db *DB) AddChannelByID(ctx context.Context, peerID int64) error {
 		return fmt.Errorf("add channel by id: %w", err)
 	}
 
+	if err := db.markDiscoveryAdded(ctx, "", peerID, ""); err != nil {
+		return fmt.Errorf("mark discovery added: %w", err)
+	}
+
 	return nil
 }
 
 func (db *DB) AddChannelByInviteLink(ctx context.Context, inviteLink string) error {
 	if err := db.Queries.AddChannelByInviteLink(ctx, toText(inviteLink)); err != nil {
 		return fmt.Errorf("add channel by invite link: %w", err)
+	}
+
+	if err := db.markDiscoveryAdded(ctx, "", 0, inviteLink); err != nil {
+		return fmt.Errorf("mark discovery added: %w", err)
+	}
+
+	return nil
+}
+
+func (db *DB) markDiscoveryAdded(ctx context.Context, username string, peerID int64, inviteLink string) error {
+	normalized := normalizeUsername(username)
+	if normalized != "" {
+		if _, err := db.Pool.Exec(ctx, `
+			UPDATE discovered_channels
+			SET status = $2, status_changed_at = now(), status_changed_by = NULL
+			WHERE status = $3
+			  AND (username = $1 OR '@' || username = $1)
+		`, normalized, DiscoveryStatusAdded, DiscoveryStatusPending); err != nil {
+			return fmt.Errorf("update discovery by username: %w", err)
+		}
+	}
+
+	if peerID != 0 {
+		if _, err := db.Pool.Exec(ctx, `
+			UPDATE discovered_channels
+			SET status = $2, status_changed_at = now(), status_changed_by = NULL
+			WHERE status = $3
+			  AND tg_peer_id = $1
+			  AND tg_peer_id != 0
+		`, peerID, DiscoveryStatusAdded, DiscoveryStatusPending); err != nil {
+			return fmt.Errorf("update discovery by peer id: %w", err)
+		}
+	}
+
+	if inviteLink != "" {
+		if _, err := db.Pool.Exec(ctx, `
+			UPDATE discovered_channels
+			SET status = $2, status_changed_at = now(), status_changed_by = NULL
+			WHERE status = $3
+			  AND invite_link = $1
+			  AND invite_link != ''
+		`, inviteLink, DiscoveryStatusAdded, DiscoveryStatusPending); err != nil {
+			return fmt.Errorf("update discovery by invite: %w", err)
+		}
 	}
 
 	return nil
