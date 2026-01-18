@@ -339,7 +339,7 @@ Phase 2:
 6. ✅ Add admin domain management (`/enrichment domains`).
 7. ✅ Add budget controls (daily/monthly limits).
 8. ✅ Add embedding-based claim deduplication.
-9. ⏳ Clustering improvement with evidence embeddings (future enhancement).
+9. ✅ Clustering improvement with evidence embeddings.
 
 ## Testing Strategy
 - Unit tests:

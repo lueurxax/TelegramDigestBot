@@ -32,6 +32,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 		topicIndex:  s.getTopicIndex(items),
 		topicGroups: s.getTopicGroups(items),
 		embeddings:  s.getEmbeddings(ctx, items, logger),
+		evidenceMap: s.getEvidenceMap(ctx, items, cfg, logger),
 		assigned:    make(map[string]bool),
 		allItems:    items,
 		cfg:         cfg,
@@ -50,6 +51,7 @@ type clusterBuildContext struct {
 	topicIndex  map[string]string
 	topicGroups map[string][]db.Item
 	embeddings  map[string][]float32
+	evidenceMap map[string][]db.ItemEvidenceWithSource
 	assigned    map[string]bool
 	allItems    []db.Item
 	cfg         clusteringConfig
@@ -70,7 +72,7 @@ func (s *Scheduler) processTopicGroup(ctx context.Context, topic string, groupIt
 			continue
 		}
 
-		clusterItemsList := s.findClusterItems(itemA, groupItems, bc.allItems, bc.assigned, bc.embeddings, bc.topicIndex, bc.cfg)
+		clusterItemsList := s.findClusterItems(itemA, groupItems, bc.allItems, bc.assigned, bc.embeddings, bc.topicIndex, bc.evidenceMap, bc.cfg)
 		bc.assigned[itemA.ID] = true
 
 		clusterItemsList = s.validateClusterCoherence(clusterItemsList, bc, logger)
@@ -128,21 +130,27 @@ func (s *Scheduler) persistCluster(ctx context.Context, clusterItemsList []db.It
 }
 
 type clusteringConfig struct {
-	similarityThreshold float64
-	crossTopicEnabled   bool
-	crossTopicThreshold float64
-	coherenceThreshold  float32
-	clusterWindow       time.Duration
-	digestLanguage      string
-	smartLLMModel       string
+	similarityThreshold  float64
+	crossTopicEnabled    bool
+	crossTopicThreshold  float64
+	coherenceThreshold   float32
+	clusterWindow        time.Duration
+	digestLanguage       string
+	smartLLMModel        string
+	evidenceEnabled      bool
+	evidenceBoost        float32
+	evidenceMinAgreement float32
 }
 
 func (s *Scheduler) getClusteringConfig(ctx context.Context, logger *zerolog.Logger) clusteringConfig {
 	cfg := clusteringConfig{
-		similarityThreshold: float64(s.cfg.ClusterSimilarityThreshold),
-		crossTopicEnabled:   s.cfg.CrossTopicClusteringEnabled,
-		crossTopicThreshold: float64(s.cfg.CrossTopicSimilarityThreshold),
-		coherenceThreshold:  float32(s.cfg.ClusterCoherenceThreshold),
+		similarityThreshold:  float64(s.cfg.ClusterSimilarityThreshold),
+		crossTopicEnabled:    s.cfg.CrossTopicClusteringEnabled,
+		crossTopicThreshold:  float64(s.cfg.CrossTopicSimilarityThreshold),
+		coherenceThreshold:   float32(s.cfg.ClusterCoherenceThreshold),
+		evidenceEnabled:      s.cfg.EvidenceClusteringEnabled,
+		evidenceBoost:        s.cfg.EvidenceClusteringBoost,
+		evidenceMinAgreement: s.cfg.EvidenceClusteringMinScore,
 	}
 
 	s.loadClusteringConfigFromDB(ctx, logger, &cfg)
@@ -232,7 +240,30 @@ func (s *Scheduler) getEmbeddings(ctx context.Context, items []db.Item, logger *
 	return embeddings
 }
 
-func (s *Scheduler) findClusterItems(itemA db.Item, groupItems, allItems []db.Item, assigned map[string]bool, embeddings map[string][]float32, topicIndex map[string]string, cfg clusteringConfig) []db.Item {
+func (s *Scheduler) getEvidenceMap(ctx context.Context, items []db.Item, cfg clusteringConfig, logger *zerolog.Logger) map[string][]db.ItemEvidenceWithSource {
+	if !cfg.evidenceEnabled {
+		return nil
+	}
+
+	itemIDs := make([]string, len(items))
+	for i, item := range items {
+		itemIDs[i] = item.ID
+	}
+
+	evidenceMap, err := s.database.GetEvidenceForItems(ctx, itemIDs)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to get evidence for items, proceeding without evidence boost")
+		return nil
+	}
+
+	if len(evidenceMap) > 0 {
+		logger.Debug().Int("items_with_evidence", len(evidenceMap)).Msg("loaded evidence for clustering")
+	}
+
+	return evidenceMap
+}
+
+func (s *Scheduler) findClusterItems(itemA db.Item, groupItems, allItems []db.Item, assigned map[string]bool, embeddings map[string][]float32, topicIndex map[string]string, evidenceMap map[string][]db.ItemEvidenceWithSource, cfg clusteringConfig) []db.Item {
 	clusterItemsList := []db.Item{itemA}
 
 	embA, okA := embeddings[itemA.ID]
@@ -248,7 +279,7 @@ func (s *Scheduler) findClusterItems(itemA db.Item, groupItems, allItems []db.It
 	topicA := topicIndex[itemA.ID]
 
 	for _, itemB := range candidateItems {
-		if s.shouldAddToCluster(itemA, itemB, topicA, assigned, embeddings, topicIndex, cfg, embA) {
+		if s.shouldAddToCluster(itemA, itemB, topicA, assigned, embeddings, topicIndex, evidenceMap, cfg, embA) {
 			clusterItemsList = append(clusterItemsList, itemB)
 			assigned[itemB.ID] = true
 		}
@@ -257,32 +288,130 @@ func (s *Scheduler) findClusterItems(itemA db.Item, groupItems, allItems []db.It
 	return clusterItemsList
 }
 
-func (s *Scheduler) shouldAddToCluster(itemA, itemB db.Item, topicA string, assigned map[string]bool, embeddings map[string][]float32, topicIndex map[string]string, cfg clusteringConfig, embA []float32) bool {
-	if itemB.ID == itemA.ID || assigned[itemB.ID] {
+func (s *Scheduler) shouldAddToCluster(itemA, itemB db.Item, topicA string, assigned map[string]bool, embeddings map[string][]float32, topicIndex map[string]string, evidenceMap map[string][]db.ItemEvidenceWithSource, cfg clusteringConfig, embA []float32) bool {
+	embB, topicB, ok := s.validateClusterCandidate(itemA, itemB, topicA, assigned, embeddings, topicIndex, cfg)
+	if !ok {
 		return false
+	}
+
+	threshold := getClusterThreshold(topicA, topicB, cfg)
+	similarity := calculateBoostedSimilarity(itemA.ID, itemB.ID, embA, embB, evidenceMap, cfg)
+
+	return similarity > float32(threshold)
+}
+
+func (s *Scheduler) validateClusterCandidate(itemA, itemB db.Item, topicA string, assigned map[string]bool, embeddings map[string][]float32, topicIndex map[string]string, cfg clusteringConfig) ([]float32, string, bool) {
+	if itemB.ID == itemA.ID || assigned[itemB.ID] {
+		return nil, "", false
 	}
 
 	embB, okB := embeddings[itemB.ID]
 	if !okB {
-		return false
+		return nil, "", false
 	}
 
 	topicB := topicIndex[itemB.ID]
 
 	if !cfg.crossTopicEnabled && topicA != topicB {
-		return false
+		return nil, "", false
 	}
 
 	if cfg.clusterWindow > 0 && !withinClusterWindow(itemA.TGDate, itemB.TGDate, cfg.clusterWindow) {
-		return false
+		return nil, "", false
 	}
 
-	threshold := cfg.similarityThreshold
+	return embB, topicB, true
+}
+
+func getClusterThreshold(topicA, topicB string, cfg clusteringConfig) float64 {
 	if topicA != topicB {
-		threshold = cfg.crossTopicThreshold
+		return cfg.crossTopicThreshold
 	}
 
-	return dedup.CosineSimilarity(embA, embB) > float32(threshold)
+	return cfg.similarityThreshold
+}
+
+func calculateBoostedSimilarity(itemAID, itemBID string, embA, embB []float32, evidenceMap map[string][]db.ItemEvidenceWithSource, cfg clusteringConfig) float32 {
+	similarity := dedup.CosineSimilarity(embA, embB)
+
+	if cfg.evidenceEnabled && evidenceMap != nil {
+		boost := calculateEvidenceBoost(itemAID, itemBID, evidenceMap, cfg)
+		similarity += boost
+	}
+
+	return similarity
+}
+
+// calculateEvidenceBoost calculates a similarity boost when two items share
+// evidence sources with high agreement scores. This helps cluster items that
+// are reporting on the same underlying story from different angles.
+func calculateEvidenceBoost(itemAID, itemBID string, evidenceMap map[string][]db.ItemEvidenceWithSource, cfg clusteringConfig) float32 {
+	evidenceA := evidenceMap[itemAID]
+	evidenceB := evidenceMap[itemBID]
+
+	if len(evidenceA) == 0 || len(evidenceB) == 0 {
+		return 0
+	}
+
+	evidenceAURLs := buildEvidenceURLMap(evidenceA, cfg.evidenceMinAgreement)
+	if len(evidenceAURLs) == 0 {
+		return 0
+	}
+
+	maxAgreement := findMaxSharedAgreement(evidenceB, evidenceAURLs, cfg.evidenceMinAgreement)
+	if maxAgreement == 0 {
+		return 0
+	}
+
+	boost := maxAgreement * cfg.evidenceBoost
+	if boost > cfg.evidenceBoost {
+		boost = cfg.evidenceBoost
+	}
+
+	return boost
+}
+
+// buildEvidenceURLMap creates a map of URLs to agreement scores for evidence
+// that meets the minimum agreement threshold.
+func buildEvidenceURLMap(evidence []db.ItemEvidenceWithSource, minAgreement float32) map[string]float32 {
+	urlMap := make(map[string]float32)
+
+	for _, ev := range evidence {
+		if ev.AgreementScore >= minAgreement {
+			urlMap[ev.Source.URL] = ev.AgreementScore
+		}
+	}
+
+	return urlMap
+}
+
+// findMaxSharedAgreement finds the maximum agreement score among shared evidence
+// sources between two items.
+func findMaxSharedAgreement(evidenceB []db.ItemEvidenceWithSource, evidenceAURLs map[string]float32, minAgreement float32) float32 {
+	var maxAgreement float32
+
+	for _, ev := range evidenceB {
+		if ev.AgreementScore < minAgreement {
+			continue
+		}
+
+		if scoreA, ok := evidenceAURLs[ev.Source.URL]; ok {
+			minScore := minFloat32(scoreA, ev.AgreementScore)
+			if minScore > maxAgreement {
+				maxAgreement = minScore
+			}
+		}
+	}
+
+	return maxAgreement
+}
+
+func minFloat32(a, b float32) float32 {
+	if a < b {
+		return a
+	}
+
+	return b
 }
 
 func (s *Scheduler) sortClusterItems(clusterItemsList []db.Item) {

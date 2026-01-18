@@ -58,6 +58,9 @@ type Config struct {
 	ClusterTimeWindowHours        int     `env:"CLUSTER_TIME_WINDOW_HOURS" envDefault:"36"`
 	CrossTopicClusteringEnabled   bool    `env:"CROSS_TOPIC_CLUSTERING_ENABLED" envDefault:"false"`
 	CrossTopicSimilarityThreshold float32 `env:"CROSS_TOPIC_SIMILARITY_THRESHOLD" envDefault:"0.90"`
+	EvidenceClusteringEnabled     bool    `env:"EVIDENCE_CLUSTERING_ENABLED" envDefault:"true"`
+	EvidenceClusteringBoost       float32 `env:"EVIDENCE_CLUSTERING_BOOST" envDefault:"0.15"`
+	EvidenceClusteringMinScore    float32 `env:"EVIDENCE_CLUSTERING_MIN_SCORE" envDefault:"0.5"`
 	RatingMinSampleChannel        int     `env:"RATING_MIN_SAMPLE_CHANNEL" envDefault:"15"`
 	RatingMinSampleGlobal         int     `env:"RATING_MIN_SAMPLE_GLOBAL" envDefault:"100"`
 	FactCheckGoogleEnabled        bool    `env:"FACTCHECK_GOOGLE_ENABLED" envDefault:"false"`

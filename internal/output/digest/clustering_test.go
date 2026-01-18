@@ -24,6 +24,9 @@ const (
 	testLabelPrivateChannel        = "Private Channel"
 	testSimilarityThresholdHigh    = 0.9
 	testSimilarityThresholdDefault = 0.8
+	testItemID1                    = "testItemID1"
+	testItemID2                    = "testItemID2"
+	testMinAgreementDefault        = 0.5
 )
 
 func TestCalculateCoherence(t *testing.T) {
@@ -429,7 +432,7 @@ func TestFindClusterItems(t *testing.T) {
 			similarityThreshold: testSimilarityThresholdDefault,
 		}
 
-		result := s.findClusterItems(itemA, groupItems, groupItems, assigned, embeddings, topicIndex, cfg)
+		result := s.findClusterItems(itemA, groupItems, groupItems, assigned, embeddings, topicIndex, nil, cfg)
 		if len(result) != 1 {
 			t.Errorf("expected 1 item (only anchor), got %d", len(result))
 		}
@@ -451,7 +454,7 @@ func TestFindClusterItems(t *testing.T) {
 			clusterWindow:       24 * time.Hour,
 		}
 
-		result := s.findClusterItems(itemA, groupItems, groupItems, assigned, embeddings, topicIndex, cfg)
+		result := s.findClusterItems(itemA, groupItems, groupItems, assigned, embeddings, topicIndex, nil, cfg)
 		if len(result) != 2 {
 			t.Errorf("expected 2 items in cluster, got %d", len(result))
 		}
@@ -473,7 +476,7 @@ func TestFindClusterItems(t *testing.T) {
 			clusterWindow:       24 * time.Hour,
 		}
 
-		result := s.findClusterItems(itemA, groupItems, groupItems, assigned, embeddings, topicIndex, cfg)
+		result := s.findClusterItems(itemA, groupItems, groupItems, assigned, embeddings, topicIndex, nil, cfg)
 		if len(result) != 1 {
 			t.Errorf("expected 1 item (dissimilar should not cluster), got %d", len(result))
 		}
@@ -492,7 +495,7 @@ func TestShouldAddToCluster(t *testing.T) {
 		cfg := clusteringConfig{}
 		embA := []float32{1, 0}
 
-		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, cfg, embA)
+		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, nil, cfg, embA)
 		if ok {
 			t.Error("shouldAddToCluster should return false for already assigned items")
 		}
@@ -507,7 +510,7 @@ func TestShouldAddToCluster(t *testing.T) {
 		cfg := clusteringConfig{}
 		embA := []float32{1, 0}
 
-		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, cfg, embA)
+		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, nil, cfg, embA)
 		if ok {
 			t.Error("shouldAddToCluster should return false for same item")
 		}
@@ -525,7 +528,7 @@ func TestShouldAddToCluster(t *testing.T) {
 		cfg := clusteringConfig{similarityThreshold: testSimilarityThresholdDefault}
 		embA := []float32{1, 0}
 
-		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, cfg, embA)
+		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, nil, cfg, embA)
 		if ok {
 			t.Error("shouldAddToCluster should return false without embedding")
 		}
@@ -944,7 +947,7 @@ func TestFindClusterItemsCrossTopicEnabled(t *testing.T) {
 		clusterWindow:       24 * time.Hour,
 	}
 
-	result := s.findClusterItems(itemA, groupItems, allItems, assigned, embeddings, topicIndex, cfg)
+	result := s.findClusterItems(itemA, groupItems, allItems, assigned, embeddings, topicIndex, nil, cfg)
 
 	// Should include item 2 despite different topic because similarity > crossTopicThreshold
 	if len(result) != 2 {
@@ -975,7 +978,7 @@ func TestFindClusterItemsCrossTopicDisabled(t *testing.T) {
 		clusterWindow:       24 * time.Hour,
 	}
 
-	result := s.findClusterItems(itemA, groupItems, groupItems, assigned, embeddings, topicIndex, cfg)
+	result := s.findClusterItems(itemA, groupItems, groupItems, assigned, embeddings, topicIndex, nil, cfg)
 
 	// Should only include item 1 because cross-topic is disabled
 	if len(result) != 1 {
@@ -1003,7 +1006,7 @@ func TestShouldAddToClusterTimeWindow(t *testing.T) {
 			clusterWindow:       5 * time.Hour,
 		}
 
-		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, cfg, embA)
+		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, nil, cfg, embA)
 		if !ok {
 			t.Error("should add item within time window")
 		}
@@ -1015,7 +1018,7 @@ func TestShouldAddToClusterTimeWindow(t *testing.T) {
 			clusterWindow:       1 * time.Hour,
 		}
 
-		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, cfg, embA)
+		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, nil, cfg, embA)
 		if ok {
 			t.Error("should not add item outside time window")
 		}
@@ -1027,7 +1030,7 @@ func TestShouldAddToClusterTimeWindow(t *testing.T) {
 			clusterWindow:       0,
 		}
 
-		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, cfg, embA)
+		ok := s.shouldAddToCluster(itemA, itemB, testTopicTech, assigned, embeddings, topicIndex, nil, cfg, embA)
 		if !ok {
 			t.Error("should add item when time window is 0")
 		}
@@ -1133,4 +1136,135 @@ func TestCollectSourceLinksVariedChannels(t *testing.T) {
 	if !strings.Contains(links[2], DefaultSourceLabel) {
 		t.Errorf("third link should contain default label, got %q", links[2])
 	}
+}
+
+func TestCalculateEvidenceBoost(t *testing.T) {
+	cfg := clusteringConfig{
+		evidenceEnabled:      true,
+		evidenceBoost:        0.15,
+		evidenceMinAgreement: testMinAgreementDefault,
+	}
+
+	t.Run("no evidence for either item", func(t *testing.T) {
+		evidenceMap := map[string][]db.ItemEvidenceWithSource{}
+
+		boost := calculateEvidenceBoost(testItemID1, testItemID2, evidenceMap, cfg)
+		if boost != 0 {
+			t.Errorf("expected 0 boost for empty evidence, got %f", boost)
+		}
+	})
+
+	t.Run("no shared evidence", func(t *testing.T) {
+		evidenceMap := map[string][]db.ItemEvidenceWithSource{
+			testItemID1: {
+				{ItemEvidence: db.ItemEvidence{AgreementScore: 0.7}, Source: db.EvidenceSource{URL: "http://a.com"}},
+			},
+			testItemID2: {
+				{ItemEvidence: db.ItemEvidence{AgreementScore: 0.8}, Source: db.EvidenceSource{URL: "http://b.com"}},
+			},
+		}
+
+		boost := calculateEvidenceBoost(testItemID1, testItemID2, evidenceMap, cfg)
+		if boost != 0 {
+			t.Errorf("expected 0 boost for no shared evidence, got %f", boost)
+		}
+	})
+
+	t.Run("shared evidence with high agreement", func(t *testing.T) {
+		evidenceMap := map[string][]db.ItemEvidenceWithSource{
+			testItemID1: {
+				{ItemEvidence: db.ItemEvidence{AgreementScore: 0.8}, Source: db.EvidenceSource{URL: "http://shared.com"}},
+			},
+			testItemID2: {
+				{ItemEvidence: db.ItemEvidence{AgreementScore: 0.9}, Source: db.EvidenceSource{URL: "http://shared.com"}},
+			},
+		}
+
+		boost := calculateEvidenceBoost(testItemID1, testItemID2, evidenceMap, cfg)
+
+		// Min agreement is 0.8, boost is 0.8 * 0.15 = 0.12
+		expectedBoost := float32(0.8 * 0.15)
+		tolerance := float32(0.001)
+
+		if boost < expectedBoost-tolerance || boost > expectedBoost+tolerance {
+			t.Errorf("expected boost ~%f, got %f", expectedBoost, boost)
+		}
+	})
+
+	t.Run("evidence below min agreement threshold", func(t *testing.T) {
+		evidenceMap := map[string][]db.ItemEvidenceWithSource{
+			testItemID1: {
+				{ItemEvidence: db.ItemEvidence{AgreementScore: 0.3}, Source: db.EvidenceSource{URL: "http://shared.com"}},
+			},
+			testItemID2: {
+				{ItemEvidence: db.ItemEvidence{AgreementScore: 0.4}, Source: db.EvidenceSource{URL: "http://shared.com"}},
+			},
+		}
+
+		boost := calculateEvidenceBoost(testItemID1, testItemID2, evidenceMap, cfg)
+		if boost != 0 {
+			t.Errorf("expected 0 boost for low agreement evidence, got %f", boost)
+		}
+	})
+}
+
+func TestBuildEvidenceURLMap(t *testing.T) {
+	minAgreement := float32(testMinAgreementDefault)
+
+	t.Run("filters by min agreement", func(t *testing.T) {
+		evidence := []db.ItemEvidenceWithSource{
+			{ItemEvidence: db.ItemEvidence{AgreementScore: 0.3}, Source: db.EvidenceSource{URL: "http://low.com"}},
+			{ItemEvidence: db.ItemEvidence{AgreementScore: 0.7}, Source: db.EvidenceSource{URL: "http://high.com"}},
+		}
+
+		urlMap := buildEvidenceURLMap(evidence, minAgreement)
+
+		if len(urlMap) != 1 {
+			t.Errorf("expected 1 URL, got %d", len(urlMap))
+		}
+
+		if _, ok := urlMap["http://high.com"]; !ok {
+			t.Error("expected http://high.com in URL map")
+		}
+	})
+}
+
+func TestCalculateBoostedSimilarity(t *testing.T) {
+	cfg := clusteringConfig{
+		evidenceEnabled:      true,
+		evidenceBoost:        0.15,
+		evidenceMinAgreement: testMinAgreementDefault,
+	}
+
+	t.Run("no evidence returns base similarity", func(t *testing.T) {
+		embA := []float32{1, 0, 0}
+		embB := []float32{1, 0, 0}
+
+		similarity := calculateBoostedSimilarity(testItemID1, testItemID2, embA, embB, nil, cfg)
+
+		// Identical embeddings should have similarity 1.0
+		if similarity != 1.0 {
+			t.Errorf("expected similarity 1.0 for identical embeddings, got %f", similarity)
+		}
+	})
+
+	t.Run("with shared evidence adds boost", func(t *testing.T) {
+		embA := []float32{1, 0, 0}
+		embB := []float32{0.8, 0.6, 0} // ~0.8 cosine similarity
+		evidenceMap := map[string][]db.ItemEvidenceWithSource{
+			testItemID1: {
+				{ItemEvidence: db.ItemEvidence{AgreementScore: 0.8}, Source: db.EvidenceSource{URL: "http://shared.com"}},
+			},
+			testItemID2: {
+				{ItemEvidence: db.ItemEvidence{AgreementScore: 0.8}, Source: db.EvidenceSource{URL: "http://shared.com"}},
+			},
+		}
+
+		similarity := calculateBoostedSimilarity(testItemID1, testItemID2, embA, embB, evidenceMap, cfg)
+
+		// Base similarity is ~0.8, boost is 0.8 * 0.15 = 0.12
+		if similarity <= 0.8 {
+			t.Errorf("expected boosted similarity > 0.8, got %f", similarity)
+		}
+	})
 }
