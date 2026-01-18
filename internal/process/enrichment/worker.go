@@ -390,6 +390,8 @@ func registerProvider(cfg *config.Config, registry *ProviderRegistry, name Provi
 		registerEventRegistry(cfg, registry)
 	case ProviderNewsAPI:
 		registerNewsAPI(cfg, registry)
+	case ProviderOpenSearch:
+		registerOpenSearch(cfg, registry)
 	}
 }
 
@@ -451,14 +453,28 @@ func registerNewsAPI(cfg *config.Config, registry *ProviderRegistry) {
 	}
 }
 
+func registerOpenSearch(cfg *config.Config, registry *ProviderRegistry) {
+	if cfg.OpenSearchEnabled && cfg.OpenSearchBaseURL != "" {
+		opensearch := NewOpenSearchProvider(OpenSearchConfig{
+			Enabled:        true,
+			BaseURL:        cfg.OpenSearchBaseURL,
+			Index:          cfg.OpenSearchIndex,
+			RequestsPerMin: cfg.OpenSearchRequestsPerMin,
+			Timeout:        cfg.OpenSearchTimeout,
+		})
+		registry.Register(opensearch)
+	}
+}
+
 // defaultProviderOrder is the fallback order per the proposal:
-// YaCy → GDELT → Event Registry → NewsAPI → SearxNG
+// YaCy → GDELT → Event Registry → NewsAPI → SearxNG → OpenSearch
 var defaultProviderOrder = []ProviderName{
 	ProviderYaCy,
 	ProviderGDELT,
 	ProviderEventRegistry,
 	ProviderNewsAPI,
 	ProviderSearxNG,
+	ProviderOpenSearch,
 }
 
 func providerOrder(raw string) []ProviderName {
@@ -476,7 +492,7 @@ func providerOrder(raw string) []ProviderName {
 		}
 
 		switch name {
-		case ProviderYaCy, ProviderGDELT, ProviderSearxNG, ProviderEventRegistry, ProviderNewsAPI:
+		case ProviderYaCy, ProviderGDELT, ProviderSearxNG, ProviderEventRegistry, ProviderNewsAPI, ProviderOpenSearch:
 			if seen[name] {
 				continue
 			}

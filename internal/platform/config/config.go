@@ -93,8 +93,6 @@ type Config struct {
 	EnrichmentQueryTranslate   bool          `env:"ENRICHMENT_QUERY_TRANSLATE" envDefault:"true"`
 	EnrichmentDailyBudgetUSD   float64       `env:"ENRICHMENT_DAILY_BUDGET_USD" envDefault:"0"`
 	EnrichmentMonthlyCapUSD    float64       `env:"ENRICHMENT_MONTHLY_CAP_USD" envDefault:"0"`
-	EnrichmentOpensearchURL    string        `env:"ENRICHMENT_OPENSEARCH_URL" envDefault:""`
-	EnrichmentOpensearchRPM    int           `env:"ENRICHMENT_OPENSEARCH_RPM" envDefault:"0"`
 	EnrichmentEventRegistryRPM int           `env:"ENRICHMENT_EVENTREGISTRY_RPM" envDefault:"0"`
 	EnrichmentNewsAPIRPM       int           `env:"ENRICHMENT_NEWSAPI_RPM" envDefault:"0"`
 	EnrichmentDailyLimit       int           `env:"ENRICHMENT_DAILY_LIMIT" envDefault:"0"`
@@ -127,6 +125,13 @@ type Config struct {
 	NewsAPIKey            string        `env:"ENRICHMENT_NEWSAPI_KEY" envDefault:""`
 	NewsAPIRequestsPerMin int           `env:"ENRICHMENT_NEWSAPI_RPM" envDefault:"100"`
 	NewsAPITimeout        time.Duration `env:"ENRICHMENT_NEWSAPI_TIMEOUT" envDefault:"30s"`
+
+	// OpenSearch provider
+	OpenSearchEnabled        bool          `env:"ENRICHMENT_OPENSEARCH_ENABLED" envDefault:"false"`
+	OpenSearchBaseURL        string        `env:"ENRICHMENT_OPENSEARCH_URL" envDefault:""`
+	OpenSearchIndex          string        `env:"ENRICHMENT_OPENSEARCH_INDEX" envDefault:"news"`
+	OpenSearchRequestsPerMin int           `env:"ENRICHMENT_OPENSEARCH_RPM" envDefault:"60"`
+	OpenSearchTimeout        time.Duration `env:"ENRICHMENT_OPENSEARCH_TIMEOUT" envDefault:"30s"`
 }
 
 func Load() (*Config, error) {

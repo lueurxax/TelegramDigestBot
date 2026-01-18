@@ -52,16 +52,16 @@ spec:
         - containerPort: 8090
         env:
         - name: JAVA_TOOL_OPTIONS
-          value: "-Xms512m -Xmx1024m"
+          value: "-Xms512m -Xmx1536m"
         volumeMounts:
         - name: yacy-data
           mountPath: /opt/yacy_search_server/DATA
         resources:
           requests:
-            memory: "1Gi"
+            memory: "1536Mi"
             cpu: "250m"
           limits:
-            memory: "2Gi"
+            memory: "3Gi"
             cpu: "1000m"
         livenessProbe:
           httpGet:

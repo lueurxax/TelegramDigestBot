@@ -214,6 +214,13 @@ NewsAPI-specific:
 - `ENRICHMENT_NEWSAPI_RPM=100`
 - `ENRICHMENT_NEWSAPI_TIMEOUT=30s`
 
+OpenSearch-specific:
+- `ENRICHMENT_OPENSEARCH_ENABLED=true`
+- `ENRICHMENT_OPENSEARCH_URL=http://localhost:9200`
+- `ENRICHMENT_OPENSEARCH_INDEX=news`
+- `ENRICHMENT_OPENSEARCH_RPM=60`
+- `ENRICHMENT_OPENSEARCH_TIMEOUT=30s`
+
 Evidence management:
 - `ENRICHMENT_EVIDENCE_TTL_DAYS=30`
 - `ENRICHMENT_EVIDENCE_DEDUP_SIM=0.98`
@@ -228,6 +235,7 @@ Providers (query APIs):
 - ✅ **Event Registry** - commercial news API with global coverage
 - ✅ **NewsAPI** - news aggregation API
 - ✅ **SearxNG** (self-hosted metasearch) - aggregates multiple search engines
+- ✅ **OpenSearch** (self-hosted) - Elasticsearch-compatible search engine for custom news index
 
 ### YaCy Integration
 YaCy is a self-hosted, decentralized search engine that can be configured to crawl trusted news domains.
@@ -312,9 +320,9 @@ Logging:
 - `ENRICHMENT_YACY_TIMEOUT` (no RPM needed - self-hosted)
 - `ENRICHMENT_GDELT_RPM`, `ENRICHMENT_EVENTREGISTRY_RPM`, `ENRICHMENT_NEWSAPI_RPM`
 - `ENRICHMENT_PROVIDER_COOLDOWN=10m`
-- Fallback order (Phase 2): **YaCy → GDELT → Event Registry → NewsAPI → SearxNG**
+- Fallback order (Phase 2): **YaCy → GDELT → Event Registry → NewsAPI → SearxNG → OpenSearch**
 
-YaCy is first because it's self-hosted (no cost, no rate limits). External APIs are fallbacks with rate limiting.
+YaCy is first because it's self-hosted (no cost, no rate limits). External APIs are fallbacks with rate limiting. OpenSearch is last as it requires a pre-populated index.
 
 ## Rollout Plan
 Phase 1:
@@ -326,7 +334,7 @@ Phase 2:
 1. ✅ Implement storage + retrieval behind `ENRICHMENT_ENABLED`.
 2. ✅ Add evidence extraction + scoring, log metrics.
 3. ✅ Integrate into summarization prompts.
-4. ✅ Implement multi-provider support (YaCy, GDELT, SearxNG).
+4. ✅ Implement multi-provider support (YaCy, GDELT, Event Registry, NewsAPI, SearxNG, OpenSearch).
 5. ✅ Add language detection and query translation.
 6. ✅ Add admin domain management (`/enrichment domains`).
 7. ✅ Add budget controls (daily/monthly limits).
@@ -340,6 +348,8 @@ Phase 2:
   - Entity normalization and overlap ratio.
   - Evidence extraction from HTML/RSS fixtures.
   - YaCy JSON response parsing.
+  - OpenSearch JSON response parsing.
+  - SearxNG JSON response parsing.
 - Integration tests:
   - Mock Google Fact Check API.
   - Mock YaCy `/yacysearch.json` endpoint.

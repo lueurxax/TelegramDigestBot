@@ -16,6 +16,7 @@ const (
 	ProviderSearxNG       ProviderName = "searxng"
 	ProviderEventRegistry ProviderName = "eventregistry"
 	ProviderNewsAPI       ProviderName = "newsapi"
+	ProviderOpenSearch    ProviderName = "opensearch"
 )
 
 var (

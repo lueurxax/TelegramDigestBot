@@ -12,15 +12,14 @@ import (
 )
 
 const (
-	testBaseURL       = "http://localhost:8888"
-	testArticleURL1   = "https://example.com/article1"
-	testArticleURL2   = "https://example.org/article2"
-	testDomain        = "example.com"
-	testQuery         = "test"
-	testQueryFull     = "test query"
-	testTitle1        = "Test Article 1"
-	testDescription1  = "Description of article 1"
-	httpHeaderContent = "Content-Type"
+	testBaseURL      = "http://localhost:8888"
+	testArticleURL1  = "https://example.com/article1"
+	testArticleURL2  = "https://example.org/article2"
+	testDomain       = "example.com"
+	testQuery        = "test"
+	testQueryFull    = "test query"
+	testTitle1       = "Test Article 1"
+	testDescription1 = "Description of article 1"
 )
 
 func TestNewSearxNGProvider(t *testing.T) {

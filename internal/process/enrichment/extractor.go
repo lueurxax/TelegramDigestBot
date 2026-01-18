@@ -30,6 +30,7 @@ const (
 	entityTypePercent = "PERCENT"
 
 	errWrapFmtWithCode = "%w: %d"
+	httpHeaderContent  = "Content-Type"
 )
 
 var errUnexpectedStatus = errors.New("unexpected http status")
