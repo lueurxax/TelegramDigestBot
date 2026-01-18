@@ -48,7 +48,7 @@ type Querier interface {
 	GetClustersForWindow(ctx context.Context, arg GetClustersForWindowParams) ([]GetClustersForWindowRow, error)
 	GetDigestCoverImage(ctx context.Context, arg GetDigestCoverImageParams) ([]byte, error)
 	GetDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetDiscoveriesNeedingResolutionRow, error)
-	GetDiscoveryByUsername(ctx context.Context, username pgtype.Text) (GetDiscoveryByUsernameRow, error)
+	GetDiscoveryByUsername(ctx context.Context, lower string) (GetDiscoveryByUsernameRow, error)
 	GetDiscoveryFilterStats(ctx context.Context, arg GetDiscoveryFilterStatsParams) (GetDiscoveryFilterStatsRow, error)
 	GetDiscoveryStats(ctx context.Context) (GetDiscoveryStatsRow, error)
 	GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetInviteLinkDiscoveriesNeedingResolutionRow, error)
@@ -63,6 +63,8 @@ type Querier interface {
 	// Only return actionable discoveries (with username for approve/reject)
 	// Uses DISTINCT ON to deduplicate multiple rows for the same channel (discovered via different identifiers)
 	GetPendingDiscoveries(ctx context.Context, arg GetPendingDiscoveriesParams) ([]GetPendingDiscoveriesRow, error)
+	// Same as GetPendingDiscoveries but without a limit, used for keyword filtering stats.
+	GetPendingDiscoveriesForFiltering(ctx context.Context, arg GetPendingDiscoveriesForFilteringParams) ([]GetPendingDiscoveriesForFilteringRow, error)
 	GetRecentErrors(ctx context.Context, limit int32) ([]GetRecentErrorsRow, error)
 	GetRecentMessagesForChannel(ctx context.Context, arg GetRecentMessagesForChannelParams) ([]GetRecentMessagesForChannelRow, error)
 	GetRecentSettingHistory(ctx context.Context, limit int32) ([]GetRecentSettingHistoryRow, error)

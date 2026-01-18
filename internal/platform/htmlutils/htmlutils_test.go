@@ -90,9 +90,19 @@ func TestSanitizeHTML(t *testing.T) {
 			expected: "<b><i>Bold Italic</i></b>",
 		},
 		{
-			name:     "unclosed tags",
+			name:     "unclosed tags are closed",
 			input:    "<b>Bold",
-			expected: "<b>Bold",
+			expected: "<b>Bold</b>",
+		},
+		{
+			name:     "multiple unclosed tags closed in order",
+			input:    "<b><i>Bold and italic",
+			expected: "<b><i>Bold and italic</i></b>",
+		},
+		{
+			name:     "extra closing tag ignored",
+			input:    "Text</b> more",
+			expected: "Text more",
 		},
 		{
 			name:     "malformed tags",

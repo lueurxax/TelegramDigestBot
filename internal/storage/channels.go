@@ -140,7 +140,7 @@ func (db *DB) AddChannelByInviteLink(ctx context.Context, inviteLink string) err
 // IsChannelTracked returns true when the channel is already active.
 func (db *DB) IsChannelTracked(ctx context.Context, username string, peerID int64, inviteLink string) (bool, error) {
 	tracked, err := db.Queries.IsChannelTracked(ctx, sqlc.IsChannelTrackedParams{
-		Username:   toText(normalizeUsername(username)),
+		Lower:      normalizeUsername(username),
 		TgPeerID:   peerID,
 		InviteLink: toText(inviteLink),
 	})
@@ -166,7 +166,7 @@ func (db *DB) markDiscoveryAdded(ctx context.Context, username string, peerID in
 		  AND dc.matched_channel_id IS NULL
 		  AND dc.status = ANY($3)
 		  AND (
-			($1 != '' AND dc.username = $1 AND c.username = $1) OR
+			($1 != '' AND c.username != '' AND dc.username != '' AND lower(dc.username) = lower($1) AND lower(c.username) = lower($1)) OR
 			($4 != 0 AND dc.tg_peer_id = $4 AND c.tg_peer_id = $4) OR
 			($5 != '' AND dc.invite_link = $5 AND c.invite_link = $5)
 		  )

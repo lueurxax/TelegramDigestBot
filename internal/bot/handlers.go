@@ -16,6 +16,7 @@ import (
 
 	"github.com/lueurxax/telegram-digest-bot/internal/output/digest"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/schedule"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
@@ -92,6 +93,8 @@ const (
 	SettingFiltersAds         = "filters_ads"
 	SettingDiscoveryMinSeen   = "discovery_min_seen"
 	SettingDiscoveryMinScore  = "discovery_min_engagement"
+	SettingDiscoveryAllow     = "discovery_description_allow"
+	SettingDiscoveryDeny      = "discovery_description_deny"
 )
 
 // Date/time formats.
@@ -160,6 +163,24 @@ const (
 // Help messages.
 const (
 	TipSettingsReset = "\n💡 <i>Use <code>/settings reset &lt;key&gt;</code> to return a setting to its default environment value.</i>"
+)
+
+// Discovery keyword filter messages.
+const (
+	errKeywordAlreadyExists = "❌ Keyword already exists."
+	errKeywordNotFound      = "❌ Keyword not found."
+)
+
+// Discovery filter subcommand names.
+const (
+	filterTypeAllow = "allow"
+	filterTypeDeny  = "deny"
+)
+
+// Preview field constants.
+const (
+	previewYes = "yes"
+	previewNo  = "no"
 )
 
 func (b *Bot) handleThreshold(ctx context.Context, msg *tgbotapi.Message, key string) {
@@ -1101,7 +1122,7 @@ func (b *Bot) addAdsKeyword(msg *tgbotapi.Message, args []string, keywords []str
 
 	for _, k := range keywords {
 		if k == word {
-			b.reply(msg, "❌ Keyword already exists.")
+			b.reply(msg, errKeywordAlreadyExists)
 
 			return nil, false
 		}
@@ -1130,7 +1151,7 @@ func (b *Bot) removeAdsKeyword(msg *tgbotapi.Message, args []string, keywords []
 	}
 
 	if !found {
-		b.reply(msg, "❌ Keyword not found.")
+		b.reply(msg, errKeywordNotFound)
 
 		return nil, false
 	}
@@ -2973,6 +2994,8 @@ func (b *Bot) handleSettings(ctx context.Context, msg *tgbotapi.Message) {
 		{SettingFiltersAdsKeywords, "Ads Keywords Count", 0},
 		{SettingDiscoveryMinSeen, "Discovery Min Seen", DefaultDiscoveryMinSeen},
 		{SettingDiscoveryMinScore, "Discovery Min Engagement", DefaultDiscoveryMinEngagement},
+		{SettingDiscoveryAllow, "Discovery Allow Keywords Count", 0},
+		{SettingDiscoveryDeny, "Discovery Deny Keywords Count", 0},
 		{SettingDigestCoverImage, "Cover Image", true},
 		{SettingDigestAICover, "AI Cover (DALL-E)", false},
 		{SettingDigestInlineImages, "Inline Images", false},
@@ -2980,19 +3003,7 @@ func (b *Bot) handleSettings(ctx context.Context, msg *tgbotapi.Message) {
 	}
 
 	for _, s := range settings {
-		val, ok := dbSettings[s.key]
-		if !ok {
-			val = s.def
-		}
-
-		if s.key == SettingFiltersAdsKeywords {
-			if kwArr, ok := val.([]interface{}); ok {
-				val = len(kwArr)
-			} else if kwArr, ok := val.([]string); ok {
-				val = len(kwArr)
-			}
-		}
-
+		val := getSettingDisplayValue(s.key, s.def, dbSettings)
 		sb.WriteString(fmt.Sprintf("• <b>%s:</b> <code>%v</code>\n", s.title, html.EscapeString(fmt.Sprintf("%v", val))))
 	}
 
@@ -3000,6 +3011,36 @@ func (b *Bot) handleSettings(ctx context.Context, msg *tgbotapi.Message) {
 	sb.WriteString(TipSettingsReset)
 
 	b.reply(msg, sb.String())
+}
+
+// getSettingDisplayValue returns the display value for a setting, handling keyword arrays.
+func getSettingDisplayValue(key string, def interface{}, dbSettings map[string]interface{}) interface{} {
+	val, ok := dbSettings[key]
+	if !ok {
+		return def
+	}
+
+	if !isKeywordCountSetting(key) {
+		return val
+	}
+
+	return countKeywordArray(val)
+}
+
+func isKeywordCountSetting(key string) bool {
+	return key == SettingFiltersAdsKeywords || key == SettingDiscoveryAllow || key == SettingDiscoveryDeny
+}
+
+func countKeywordArray(val interface{}) int {
+	if kwArr, ok := val.([]interface{}); ok {
+		return len(kwArr)
+	}
+
+	if kwArr, ok := val.([]string); ok {
+		return len(kwArr)
+	}
+
+	return 0
 }
 
 func (b *Bot) handleSettingsReset(ctx context.Context, msg *tgbotapi.Message, args []string) {
@@ -3108,6 +3149,8 @@ func helpDiscoverMessage() string {
 		"• <code>/discover preview &lt;@username&gt;</code> - Explain why it is (not) actionable\n" +
 		"• <code>/discover approve &lt;@username&gt;</code>\n" +
 		"• <code>/discover reject &lt;@username&gt;</code>\n" +
+		"• <code>/discover allow [add|remove|clear] &lt;word&gt;</code>\n" +
+		"• <code>/discover deny [add|remove|clear] &lt;word&gt;</code>\n" +
 		"• <code>/discover min_seen &lt;n&gt;</code> - Min count for discovery\n" +
 		"• <code>/discover min_engagement &lt;n&gt;</code> - Min engagement score\n" +
 		"• <code>/discover show-rejected [limit]</code>\n" +
@@ -3360,34 +3403,94 @@ func (b *Bot) handleDiscoverNamespace(ctx context.Context, msg *tgbotapi.Message
 
 	subcommand := args[0]
 
-	switch subcommand {
-	case SubCmdApprove:
-		b.handleDiscoverApproveCmd(ctx, msg, args)
-	case SubCmdReject:
-		b.handleDiscoverRejectCmd(ctx, msg, args)
-	case SubCmdRejected, "rejected":
-		b.handleDiscoverShowRejectedCmd(ctx, msg, args)
+	if b.dispatchDiscoverSubcommand(ctx, msg, args, subcommand) {
+		return
+	}
+
+	b.reply(msg, discoverUnknownSubcommandMsg(subcommand))
+}
+
+func (b *Bot) dispatchDiscoverSubcommand(ctx context.Context, msg *tgbotapi.Message, args []string, subcommand string) bool {
+	// Normalize aliases to canonical commands
+	canonical := normalizeDiscoverSubcommand(subcommand)
+
+	return b.executeDiscoverSubcommand(ctx, msg, args, canonical)
+}
+
+func normalizeDiscoverSubcommand(subcommand string) string {
+	aliases := map[string]string{
+		"ignore":        SubCmdReject,
+		"rejected":      SubCmdRejected,
+		"minseen":       "min_seen",
+		"minengagement": "min_engagement",
+	}
+
+	if canonical, ok := aliases[subcommand]; ok {
+		return canonical
+	}
+
+	return subcommand
+}
+
+func (b *Bot) executeDiscoverSubcommand(ctx context.Context, msg *tgbotapi.Message, args []string, cmd string) bool {
+	if b.executeDiscoverSimpleCmd(ctx, msg, cmd) {
+		return true
+	}
+
+	return b.executeDiscoverArgsCmd(ctx, msg, args, cmd)
+}
+
+func (b *Bot) executeDiscoverSimpleCmd(ctx context.Context, msg *tgbotapi.Message, cmd string) bool {
+	switch cmd {
 	case SubCmdCleanup:
 		b.handleDiscoverCleanup(ctx, msg)
 	case SubCmdStats:
 		b.handleDiscoverStats(ctx, msg)
+	default:
+		return false
+	}
+
+	return true
+}
+
+func (b *Bot) executeDiscoverArgsCmd(ctx context.Context, msg *tgbotapi.Message, args []string, cmd string) bool {
+	switch cmd {
+	case SubCmdApprove:
+		b.handleDiscoverApproveCmd(ctx, msg, args)
+	case SubCmdReject:
+		b.handleDiscoverRejectCmd(ctx, msg, args)
+	case SubCmdRejected:
+		b.handleDiscoverShowRejectedCmd(ctx, msg, args)
 	case SubCmdPreview:
 		b.handleDiscoverPreviewCmd(ctx, msg, args)
-	case "min_seen", "minseen":
+	case "min_seen":
 		b.handleDiscoverMinSeen(ctx, msg, args)
-	case "min_engagement", "minengagement":
+	case "min_engagement":
 		b.handleDiscoverMinEngagement(ctx, msg, args)
+	case filterTypeAllow:
+		b.handleDiscoverKeywordCmd(ctx, msg, args, SettingDiscoveryAllow, filterTypeAllow)
+	case filterTypeDeny:
+		b.handleDiscoverKeywordCmd(ctx, msg, args, SettingDiscoveryDeny, filterTypeDeny)
 	default:
-		b.reply(msg, `❓ Unknown subcommand: <code>`+html.EscapeString(subcommand)+`</code>
+		return false
+	}
+
+	return true
+}
+
+func discoverUnknownSubcommandMsg(subcommand string) string {
+	return `❓ Unknown subcommand: <code>` + html.EscapeString(subcommand) + `</code>
 
 <b>Available:</b>
 • <code>approve @user</code> - Add to tracking
 • <code>reject @user</code> - Mark as not useful
+• <code>ignore @user</code> - Alias for reject
 • <code>rejected</code> - Show rejected list
 • <code>preview @user</code> - Why is/isn't actionable
+• <code>allow</code> - Manage allow keywords
+• <code>deny</code> - Manage deny keywords
 • <code>stats</code> - Discovery statistics
-• <code>cleanup</code> - Backfill matched channels`)
-	}
+• <code>cleanup</code> - Backfill matched channels`
 }
 
 func (b *Bot) handleDiscoverMinSeen(ctx context.Context, msg *tgbotapi.Message, args []string) {
@@ -3434,6 +3537,107 @@ func (b *Bot) handleDiscoverMinEngagement(ctx context.Context, msg *tgbotapi.Mes
 	}
 
 	b.reply(msg, fmt.Sprintf("✅ Discovery minimum engagement updated to <code>%v</code>.", val))
+}
+
+func (b *Bot) handleDiscoverKeywordCmd(ctx context.Context, msg *tgbotapi.Message, args []string, settingKey, label string) {
+	keywords, err := b.getDiscoveryKeywordList(ctx, settingKey)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error fetching discovery %s keywords: %s", html.EscapeString(label), html.EscapeString(err.Error())))
+
+		return
+	}
+
+	if len(args) < 2 {
+		if len(keywords) == 0 {
+			b.reply(msg, fmt.Sprintf("📋 No discovery %s keywords configured.", html.EscapeString(label)))
+
+			return
+		}
+
+		b.reply(msg, fmt.Sprintf("📋 <b>Discovery %s keywords:</b>\n<code>%s</code>\n\nUsage: <code>/discover %s add &lt;word&gt;</code> | <code>/discover %s remove &lt;word&gt;</code> | <code>/discover %s clear</code>", html.EscapeString(label), html.EscapeString(strings.Join(keywords, ", ")), html.EscapeString(label), html.EscapeString(label), html.EscapeString(label)))
+
+		return
+	}
+
+	action := strings.ToLower(args[1])
+
+	updated, ok := b.processDiscoveryKeywordAction(msg, label, action, args[2:], keywords)
+	if !ok {
+		return
+	}
+
+	updated = db.NormalizeDiscoveryKeywords(updated)
+
+	if err := b.database.SaveSettingWithHistory(ctx, settingKey, updated, msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error saving discovery %s keywords: %s", html.EscapeString(label), html.EscapeString(err.Error())))
+
+		return
+	}
+
+	b.reply(msg, fmt.Sprintf("✅ Discovery %s keywords updated. Total: <code>%d</code>.", html.EscapeString(label), len(updated)))
+}
+
+func (b *Bot) processDiscoveryKeywordAction(msg *tgbotapi.Message, label, action string, args []string, keywords []string) ([]string, bool) {
+	switch action {
+	case CmdAdd:
+		return b.addDiscoveryKeyword(msg, label, args, keywords)
+	case CmdRemove:
+		return b.removeDiscoveryKeyword(msg, label, args, keywords)
+	case SubCmdClear:
+		return []string{}, true
+	default:
+		b.reply(msg, fmt.Sprintf("❓ Unknown %s keyword command. Use <code>add</code>, <code>remove</code>, <code>clear</code> or no arguments to list.", html.EscapeString(label)))
+
+		return nil, false
+	}
+}
+
+func (b *Bot) addDiscoveryKeyword(msg *tgbotapi.Message, label string, args []string, keywords []string) ([]string, bool) {
+	keyword := strings.TrimSpace(strings.ToLower(strings.Join(args, " ")))
+	if keyword == "" {
+		b.reply(msg, fmt.Sprintf("Usage: <code>/discover %s add &lt;word&gt;</code>", html.EscapeString(label)))
+
+		return nil, false
+	}
+
+	for _, existing := range keywords {
+		if existing == keyword {
+			b.reply(msg, errKeywordAlreadyExists)
+
+			return nil, false
+		}
+	}
+
+	return append(keywords, keyword), true
+}
+
+func (b *Bot) removeDiscoveryKeyword(msg *tgbotapi.Message, label string, args []string, keywords []string) ([]string, bool) {
+	keyword := strings.TrimSpace(strings.ToLower(strings.Join(args, " ")))
+	if keyword == "" {
+		b.reply(msg, fmt.Sprintf("Usage: <code>/discover %s remove &lt;word&gt;</code>", html.EscapeString(label)))
+
+		return nil, false
+	}
+
+	updated := make([]string, 0, len(keywords))
+	found := false
+
+	for _, existing := range keywords {
+		if existing == keyword {
+			found = true
+			continue
+		}
+
+		updated = append(updated, existing)
+	}
+
+	if !found {
+		b.reply(msg, errKeywordNotFound)
+
+		return nil, false
+	}
+
+	return updated, true
 }
 
 func (b *Bot) handleDiscoverApproveCmd(ctx context.Context, msg *tgbotapi.Message, args []string) {
@@ -3492,14 +3696,24 @@ func (b *Bot) handleDiscoverList(ctx context.Context, msg *tgbotapi.Message) {
 		return
 	}
 
-	if len(discoveries) == 0 {
-		b.reply(msg, fmt.Sprintf("📋 No pending channel discoveries.\n\n<i>Filters: seen ≥ %d, engagement ≥ %.0f</i>\n\n💡 Channels are discovered from forwards, t.me links, and @mentions.", minSeen, minEngagement))
+	allow, deny := b.getDiscoveryKeywordFilters(ctx)
+	filtered, allowMiss, denyHit := db.FilterDiscoveriesByKeywords(discoveries, allow, deny)
+	filterNote := formatDiscoveryFilterNote(minSeen, minEngagement, allow, deny, allowMiss, denyHit)
+
+	if len(filtered) == 0 {
+		noPending := "📋 No pending channel discoveries.\n\n" + filterNote + "\n\n💡 Channels are discovered from forwards, t.me links, and @mentions."
+		b.reply(msg, noPending)
 
 		return
 	}
 
-	text := formatDiscoveryListWithThresholds(discoveries, minSeen, minEngagement)
-	rows := buildDiscoveryKeyboard(discoveries)
+	tip := discoveryListTip
+	if filterNote != "" {
+		tip = tip + "\n\n" + filterNote
+	}
+
+	text := formatDiscoveryListWithTip(formatDiscoveryListTitle(minSeen, minEngagement), filtered, tip)
+	rows := buildDiscoveryKeyboard(filtered)
 
 	reply := tgbotapi.NewMessage(msg.Chat.ID, text)
 	reply.ParseMode = tgbotapi.ModeHTML
@@ -3535,6 +3749,51 @@ func (b *Bot) getDiscoveryThresholds(ctx context.Context) (int, float32) {
 	return minSeen, minEngagement
 }
 
+func (b *Bot) getDiscoveryKeywordList(ctx context.Context, key string) ([]string, error) {
+	var keywords []string
+
+	if err := b.database.GetSetting(ctx, key, &keywords); err != nil {
+		return nil, fmt.Errorf("get discovery keyword list %s: %w", key, err)
+	}
+
+	return db.NormalizeDiscoveryKeywords(keywords), nil
+}
+
+func (b *Bot) getDiscoveryKeywordFilters(ctx context.Context) ([]string, []string) {
+	allow, err := b.getDiscoveryKeywordList(ctx, SettingDiscoveryAllow)
+	if err != nil {
+		b.logger.Warn().Err(err).Msg("failed to read discovery_description_allow")
+
+		allow = nil
+	}
+
+	deny, err := b.getDiscoveryKeywordList(ctx, SettingDiscoveryDeny)
+	if err != nil {
+		b.logger.Warn().Err(err).Msg("failed to read discovery_description_deny")
+
+		deny = nil
+	}
+
+	return allow, deny
+}
+
+func (b *Bot) getDiscoveryKeywordFilterStats(ctx context.Context, minSeen int, minEngagement float32, allow, deny []string) (int, int, int) {
+	candidates, err := b.database.GetPendingDiscoveriesForFiltering(ctx, minSeen, minEngagement)
+	if err != nil {
+		b.logger.Warn().Err(err).Msg("failed to fetch discovery keyword candidates")
+
+		return 0, 0, 0
+	}
+
+	if len(allow) == 0 && len(deny) == 0 {
+		return len(candidates), 0, 0
+	}
+
+	_, allowMiss, denyHit := db.FilterDiscoveriesByKeywords(candidates, allow, deny)
+
+	return len(candidates), allowMiss, denyHit
+}
+
 func (b *Bot) handleDiscoverPreview(ctx context.Context, msg *tgbotapi.Message, identifier string) {
 	username := strings.ToLower(strings.TrimPrefix(identifier, "@"))
 	if username == "" {
@@ -3557,6 +3816,7 @@ func (b *Bot) handleDiscoverPreview(ctx context.Context, msg *tgbotapi.Message, 
 	}
 
 	minSeen, minEngagement := b.getDiscoveryThresholds(ctx)
+	allow, deny := b.getDiscoveryKeywordFilters(ctx)
 
 	alreadyTracked, err := b.database.IsChannelTracked(ctx, discovery.Username, discovery.TGPeerID, discovery.InviteLink)
 	if err != nil {
@@ -3565,9 +3825,13 @@ func (b *Bot) handleDiscoverPreview(ctx context.Context, msg *tgbotapi.Message, 
 		return
 	}
 
-	actionable, reasons := buildDiscoveryActionability(*discovery, minSeen, minEngagement, alreadyTracked)
+	allowMatch, denyMatch, _ := db.EvaluateDiscoveryKeywords(*discovery, allow, deny)
+	allowMiss := len(allow) > 0 && !allowMatch
+	denyHit := denyMatch
 
-	b.reply(msg, formatDiscoveryPreview(*discovery, minSeen, minEngagement, alreadyTracked, actionable, reasons))
+	actionable, reasons := buildDiscoveryActionability(*discovery, minSeen, minEngagement, alreadyTracked, allowMiss, denyHit)
+
+	b.reply(msg, formatDiscoveryPreview(*discovery, minSeen, minEngagement, allow, deny, allowMatch, denyMatch, alreadyTracked, actionable, reasons))
 }
 
 func (b *Bot) handleDiscoverShowRejected(ctx context.Context, msg *tgbotapi.Message, limit int) {
@@ -3626,10 +3890,8 @@ func formatDiscoveryList(discoveries []db.DiscoveredChannel) string {
 	return formatDiscoveryListWithTip("🔍 <b>Pending Channel Discoveries</b>", discoveries, discoveryListTip)
 }
 
-func formatDiscoveryListWithThresholds(discoveries []db.DiscoveredChannel, minSeen int, minEngagement float32) string {
-	title := fmt.Sprintf("🔍 <b>Pending Channel Discoveries</b> <i>(seen ≥ %d, engagement ≥ %.0f)</i>", minSeen, minEngagement)
-
-	return formatDiscoveryListWithTip(title, discoveries, discoveryListTip)
+func formatDiscoveryListTitle(minSeen int, minEngagement float32) string {
+	return fmt.Sprintf("🔍 <b>Pending Channel Discoveries</b> <i>(seen ≥ %d, engagement ≥ %.0f)</i>", minSeen, minEngagement)
 }
 
 func formatDiscoveryListWithTip(title string, discoveries []db.DiscoveredChannel, tip string) string {
@@ -3648,6 +3910,22 @@ func formatDiscoveryListWithTip(title string, discoveries []db.DiscoveredChannel
 	}
 
 	return sb.String()
+}
+
+func formatDiscoveryFilterNote(minSeen int, minEngagement float32, allow, deny []string, allowMiss, denyHit int) string {
+	note := fmt.Sprintf("<i>Filters: seen ≥ %d, engagement ≥ %.0f</i>", minSeen, minEngagement)
+
+	if len(allow) > 0 || len(deny) > 0 {
+		note = fmt.Sprintf("%s\n<i>Keyword filters: allow %d, deny %d", note, len(allow), len(deny))
+
+		if allowMiss > 0 || denyHit > 0 {
+			note += fmt.Sprintf(" (hidden: allow miss %d, deny hit %d)", allowMiss, denyHit)
+		}
+
+		note += htmlItalicClose
+	}
+
+	return note
 }
 
 func formatDiscoveryItem(d db.DiscoveredChannel) string {
@@ -3689,7 +3967,7 @@ func formatDiscoveryIdentifier(d db.DiscoveredChannel) string {
 	return ""
 }
 
-func buildDiscoveryActionability(d db.DiscoveredChannel, minSeen int, minEngagement float32, alreadyTracked bool) (bool, []string) {
+func buildDiscoveryActionability(d db.DiscoveredChannel, minSeen int, minEngagement float32, alreadyTracked, allowMiss, denyHit bool) (bool, []string) {
 	status := d.Status
 	if status == "" {
 		status = discoveryUnknownLC
@@ -3719,10 +3997,20 @@ func buildDiscoveryActionability(d db.DiscoveredChannel, minSeen int, minEngagem
 		actionable = false
 	}
 
+	if denyHit {
+		reasons = append(reasons, "deny keyword hit")
+		actionable = false
+	}
+
+	if allowMiss {
+		reasons = append(reasons, "allow keywords missing")
+		actionable = false
+	}
+
 	return actionable, reasons
 }
 
-func formatDiscoveryPreview(d db.DiscoveredChannel, minSeen int, minEngagement float32, alreadyTracked, actionable bool, reasons []string) string {
+func formatDiscoveryPreview(d db.DiscoveredChannel, minSeen int, minEngagement float32, allow, deny []string, allowMatch, denyMatch, alreadyTracked, actionable bool, reasons []string) string {
 	title, identifier, status := extractDiscoveryFields(d)
 
 	var sb strings.Builder
@@ -3731,7 +4019,7 @@ func formatDiscoveryPreview(d db.DiscoveredChannel, minSeen int, minEngagement f
 	sb.WriteString(fmt.Sprintf(discoveryTitleIdentFmt, html.EscapeString(title), html.EscapeString(identifier)))
 	sb.WriteString(fmt.Sprintf("  Status: <code>%s</code>\n", html.EscapeString(status)))
 
-	writeDiscoveryPreviewDetails(&sb, d, minSeen, minEngagement, alreadyTracked)
+	writeDiscoveryPreviewDetails(&sb, d, minSeen, minEngagement, allow, deny, allowMatch, denyMatch, alreadyTracked)
 	writeActionabilityLine(&sb, actionable, reasons)
 
 	return sb.String()
@@ -3756,7 +4044,14 @@ func extractDiscoveryFields(d db.DiscoveredChannel) (title, identifier, status s
 	return title, identifier, status
 }
 
-func writeDiscoveryPreviewDetails(sb *strings.Builder, d db.DiscoveredChannel, minSeen int, minEngagement float32, alreadyTracked bool) {
+func writeDiscoveryPreviewDetails(sb *strings.Builder, d db.DiscoveredChannel, minSeen int, minEngagement float32, allow, deny []string, allowMatch, denyMatch, alreadyTracked bool) {
+	writeDiscoverySourceAndStats(sb, d, minSeen, minEngagement)
+	writeDiscoveryMatchStatus(sb, d, alreadyTracked)
+	writeDiscoveryKeywordStatus(sb, allow, deny, allowMatch, denyMatch)
+	sb.WriteString("\n")
+}
+
+func writeDiscoverySourceAndStats(sb *strings.Builder, d db.DiscoveredChannel, minSeen int, minEngagement float32) {
 	if d.SourceType != "" {
 		fmt.Fprintf(sb, "  Source: <code>%s</code>\n", html.EscapeString(d.SourceType))
 	}
@@ -3772,20 +4067,41 @@ func writeDiscoveryPreviewDetails(sb *strings.Builder, d db.DiscoveredChannel, m
 	if !d.LastSeenAt.IsZero() {
 		fmt.Fprintf(sb, "  Last seen: <code>%s</code>\n", d.LastSeenAt.Format(discoveryLastSeenFormat))
 	}
+}
 
+func writeDiscoveryMatchStatus(sb *strings.Builder, d db.DiscoveredChannel, alreadyTracked bool) {
 	if d.MatchedChannelID != "" {
 		fmt.Fprintf(sb, "  Matched channel: <code>yes</code> (<code>%s</code>)\n", html.EscapeString(d.MatchedChannelID))
 	} else {
 		sb.WriteString("  Matched channel: <code>no</code>\n")
 	}
 
-	trackedLine := "no"
+	trackedLine := previewNo
 	if alreadyTracked {
-		trackedLine = "yes"
+		trackedLine = previewYes
 	}
 
 	fmt.Fprintf(sb, "  Already tracked: <code>%s</code>\n", trackedLine)
-	sb.WriteString("\n")
+}
+
+func writeDiscoveryKeywordStatus(sb *strings.Builder, allow, deny []string, allowMatch, denyMatch bool) {
+	if len(allow) > 0 {
+		matchLine := previewNo
+		if allowMatch {
+			matchLine = previewYes
+		}
+
+		fmt.Fprintf(sb, "  Allow keywords: <code>%d</code> (match <code>%s</code>)\n", len(allow), matchLine)
+	}
+
+	if len(deny) > 0 {
+		hitLine := previewNo
+		if denyMatch {
+			hitLine = previewYes
+		}
+
+		fmt.Fprintf(sb, "  Deny keywords: <code>%d</code> (hit <code>%s</code>)\n", len(deny), hitLine)
+	}
 }
 
 func writeActionabilityLine(sb *strings.Builder, actionable bool, reasons []string) {
@@ -3829,6 +4145,7 @@ func (b *Bot) handleDiscoverApprove(ctx context.Context, msg *tgbotapi.Message, 
 		return
 	}
 
+	observability.DiscoveryApprovedTotal.Inc()
 	b.reply(msg, fmt.Sprintf("✅ Channel <code>@%s</code> approved and added to active tracking.", html.EscapeString(username)))
 }
 
@@ -3845,6 +4162,7 @@ func (b *Bot) handleDiscoverReject(ctx context.Context, msg *tgbotapi.Message, u
 	}
 
 	b.logger.Info().Str(LogFieldUsername, username).Msg("discovery rejected successfully")
+	observability.DiscoveryRejectedTotal.Inc()
 	b.reply(msg, fmt.Sprintf("✅ Channel <code>@%s</code> rejected. It will not appear in discoveries again.", html.EscapeString(username)))
 }
 
@@ -3881,7 +4199,10 @@ func (b *Bot) handleDiscoverStats(ctx context.Context, msg *tgbotapi.Message) {
 	sb.WriteString(fmt.Sprintf("• <b>Thresholds:</b> seen ≥ <code>%d</code>, engagement ≥ <code>%.0f</code>\n", minSeen, minEngagement))
 
 	if filterStats != nil {
-		actionable := stats.PendingCount - filterStats.MatchedChannelIDCount - filterStats.BelowThresholdCount - filterStats.AlreadyTrackedCount
+		allow, deny := b.getDiscoveryKeywordFilters(ctx)
+		candidateCount, allowMiss, denyHit := b.getDiscoveryKeywordFilterStats(ctx, minSeen, minEngagement, allow, deny)
+
+		actionable := int64(candidateCount - allowMiss - denyHit)
 		if actionable < 0 {
 			actionable = 0
 		}
@@ -3891,8 +4212,8 @@ func (b *Bot) handleDiscoverStats(ctx context.Context, msg *tgbotapi.Message) {
 		sb.WriteString(fmt.Sprintf("• <b>Matched channel:</b> <code>%d</code>\n", filterStats.MatchedChannelIDCount))
 		sb.WriteString(fmt.Sprintf("• <b>Below thresholds:</b> <code>%d</code>\n", filterStats.BelowThresholdCount))
 		sb.WriteString(fmt.Sprintf("• <b>Already tracked:</b> <code>%d</code>\n", filterStats.AlreadyTrackedCount))
-		sb.WriteString("• <b>Allow miss:</b> <code>0</code> <i>(v2)</i>\n")
-		sb.WriteString("• <b>Deny hit:</b> <code>0</code> <i>(v2)</i>\n")
+		sb.WriteString(fmt.Sprintf("• <b>Allow miss:</b> <code>%d</code>\n", allowMiss))
+		sb.WriteString(fmt.Sprintf("• <b>Deny hit:</b> <code>%d</code>\n", denyHit))
 	}
 
 	b.reply(msg, sb.String())
@@ -3919,12 +4240,16 @@ func (b *Bot) handleDiscoverCallback(ctx context.Context, query *tgbotapi.Callba
 		err = b.database.ApproveDiscovery(ctx, username, query.From.ID)
 		if err == nil {
 			callbackText = fmt.Sprintf("✅ @%s approved and added to tracking", username)
+
+			observability.DiscoveryApprovedTotal.Inc()
 			b.logger.Info().Str(LogFieldUsername, username).Msg("discovery approved via callback")
 		}
 	case SubCmdReject:
 		err = b.database.RejectDiscovery(ctx, username, query.From.ID)
 		if err == nil {
 			callbackText = fmt.Sprintf("❌ @%s rejected", username)
+
+			observability.DiscoveryRejectedTotal.Inc()
 			b.logger.Info().Str(LogFieldUsername, username).Msg("discovery rejected via callback")
 		}
 	default:

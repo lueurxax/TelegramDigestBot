@@ -62,8 +62,11 @@ var dangerousProtocols = []string{
 
 // SanitizeHTML ensures only Telegram-supported HTML tags are kept and text is properly escaped.
 // For <a> tags, only safe href attributes are preserved. All other tags have attributes stripped.
+// Unclosed tags are automatically closed at the end to prevent HTML parse errors.
 func SanitizeHTML(text string) string {
 	var sb strings.Builder
+
+	var openTags []string
 
 	indices := tagRegex.FindAllStringIndex(text, -1)
 	lastPos := 0
@@ -74,29 +77,7 @@ func SanitizeHTML(text string) string {
 		}
 
 		tag := text[idx[0]:idx[1]]
-		matches := tagRegex.FindStringSubmatch(tag)
-
-		if len(matches) >= 3 {
-			isClosing := matches[1] == "/"
-			tagName := strings.ToLower(matches[2])
-
-			if allowedTags[tagName] {
-				if tagName == "a" && !isClosing {
-					// Sanitize <a> tag - only allow safe href
-					sanitizedTag := sanitizeAnchorTag(tag)
-					sb.WriteString(sanitizedTag)
-				} else {
-					// Strip all attributes from non-<a> tags (Telegram doesn't support them)
-					if isClosing {
-						sb.WriteString("</" + tagName + ">")
-					} else {
-						sb.WriteString("<" + tagName + ">")
-					}
-				}
-			}
-			// Strip unsupported tags but keep content
-		}
-
+		openTags = processHTMLTag(&sb, tag, openTags)
 		lastPos = idx[1]
 	}
 
@@ -104,7 +85,74 @@ func SanitizeHTML(text string) string {
 		sb.WriteString(html.EscapeString(text[lastPos:]))
 	}
 
+	closeUnclosedTags(&sb, openTags)
+
 	return sb.String()
+}
+
+// processHTMLTag processes a single HTML tag and updates the open tags stack.
+func processHTMLTag(sb *strings.Builder, tag string, openTags []string) []string {
+	matches := tagRegex.FindStringSubmatch(tag)
+	if len(matches) < 3 {
+		return openTags
+	}
+
+	isClosing := matches[1] == "/"
+	tagName := strings.ToLower(matches[2])
+
+	if !allowedTags[tagName] {
+		return openTags
+	}
+
+	return writeAllowedTag(sb, tag, tagName, isClosing, openTags)
+}
+
+// writeAllowedTag writes an allowed tag to the builder and updates open tags.
+func writeAllowedTag(sb *strings.Builder, tag, tagName string, isClosing bool, openTags []string) []string {
+	if tagName == "a" && !isClosing {
+		sanitizedTag := sanitizeAnchorTag(tag)
+		sb.WriteString(sanitizedTag)
+
+		return append(openTags, tagName)
+	}
+
+	if isClosing {
+		return writeClosingTag(sb, tagName, openTags)
+	}
+
+	sb.WriteString("<" + tagName + ">")
+
+	return append(openTags, tagName)
+}
+
+// writeClosingTag writes a closing tag only if there's a matching open tag.
+func writeClosingTag(sb *strings.Builder, tagName string, openTags []string) []string {
+	idx := findLastOpenTag(openTags, tagName)
+	if idx < 0 {
+		return openTags
+	}
+
+	sb.WriteString("</" + tagName + ">")
+
+	return openTags[:idx]
+}
+
+// closeUnclosedTags closes any unclosed tags in reverse order.
+func closeUnclosedTags(sb *strings.Builder, openTags []string) {
+	for i := len(openTags) - 1; i >= 0; i-- {
+		sb.WriteString("</" + openTags[i] + ">")
+	}
+}
+
+// findLastOpenTag finds the last occurrence of a tag name in the open tags stack.
+func findLastOpenTag(openTags []string, tagName string) int {
+	for i := len(openTags) - 1; i >= 0; i-- {
+		if openTags[i] == tagName {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // sanitizeAnchorTag sanitizes an <a> tag to only include safe href

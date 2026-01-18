@@ -31,4 +31,29 @@ var (
 		Name: "digest_posts_total",
 		Help: "The total number of digests posted",
 	}, []string{"status"})
+
+	DiscoveryPending = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "digest_discovery_pending",
+		Help: "Current number of pending channel discoveries",
+	})
+
+	DiscoveryActionable = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "digest_discovery_actionable",
+		Help: "Current number of actionable channel discoveries",
+	})
+
+	DiscoveryApprovalRate = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "digest_discovery_approval_rate",
+		Help: "Approval rate for discoveries (added / (added + rejected))",
+	})
+
+	DiscoveryApprovedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_discovery_approved_total",
+		Help: "Total number of approved discoveries",
+	})
+
+	DiscoveryRejectedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_discovery_rejected_total",
+		Help: "Total number of rejected discoveries",
+	})
 )

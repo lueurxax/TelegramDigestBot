@@ -419,8 +419,8 @@ SELECT * FROM (
       SELECT 1
       FROM channels c
       WHERE c.is_active = TRUE AND (
-        (c.username = dc.username AND c.username != '') OR
-        ('@' || c.username = dc.username AND c.username != '') OR
+        (c.username != '' AND lower(c.username) = lower(dc.username)) OR
+        (c.username != '' AND lower('@' || c.username) = lower(dc.username)) OR
         (c.tg_peer_id = dc.tg_peer_id AND dc.tg_peer_id != 0 AND c.tg_peer_id != 0) OR
         (c.invite_link = dc.invite_link AND dc.invite_link != '' AND c.invite_link != '')
       )
@@ -429,6 +429,32 @@ SELECT * FROM (
 ) deduped
 ORDER BY engagement_score DESC, discovery_count DESC, last_seen_at DESC
 LIMIT $3;
+
+-- name: GetPendingDiscoveriesForFiltering :many
+-- Same as GetPendingDiscoveries but without a limit, used for keyword filtering stats.
+SELECT * FROM (
+  SELECT DISTINCT ON (dc.username)
+    dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.description, dc.source_type,
+    dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score
+  FROM discovered_channels dc
+  WHERE dc.status = 'pending'
+    AND dc.username IS NOT NULL AND dc.username != ''
+    AND dc.matched_channel_id IS NULL
+    AND dc.discovery_count >= $1
+    AND dc.engagement_score >= $2
+    AND NOT EXISTS (
+      SELECT 1
+      FROM channels c
+      WHERE c.is_active = TRUE AND (
+        (c.username != '' AND lower(c.username) = lower(dc.username)) OR
+        (c.username != '' AND lower('@' || c.username) = lower(dc.username)) OR
+        (c.tg_peer_id = dc.tg_peer_id AND dc.tg_peer_id != 0 AND c.tg_peer_id != 0) OR
+        (c.invite_link = dc.invite_link AND dc.invite_link != '' AND c.invite_link != '')
+      )
+    )
+  ORDER BY dc.username, dc.engagement_score DESC
+) deduped
+ORDER BY engagement_score DESC, discovery_count DESC, last_seen_at DESC;
 
 -- name: GetRejectedDiscoveries :many
 SELECT dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.description, dc.source_type,
@@ -443,7 +469,7 @@ SELECT dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.descripti
        dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score,
        dc.status, dc.matched_channel_id
 FROM discovered_channels dc
-WHERE dc.username = $1 OR '@' || dc.username = $1
+WHERE lower(dc.username) = lower($1) OR lower('@' || dc.username) = lower($1)
 ORDER BY dc.last_seen_at DESC
 LIMIT 1;
 
@@ -458,13 +484,13 @@ WHERE id = $1;
 WITH target AS (
     SELECT src.username AS t_username, src.tg_peer_id AS t_peer_id, src.invite_link AS t_invite
     FROM discovered_channels src
-    WHERE src.username = $1 OR '@' || src.username = $1
+    WHERE lower(src.username) = lower($1) OR lower('@' || src.username) = lower($1)
     LIMIT 1
 )
 UPDATE discovered_channels dc
 SET status = $2, status_changed_at = now(), status_changed_by = $3
 FROM target
-WHERE (dc.username = target.t_username AND dc.username != '')
+WHERE (dc.username != '' AND target.t_username != '' AND lower(dc.username) = lower(target.t_username))
    OR (dc.tg_peer_id = target.t_peer_id AND dc.tg_peer_id != 0 AND target.t_peer_id != 0)
    OR (dc.invite_link = target.t_invite AND dc.invite_link != '' AND target.t_invite != '');
 
@@ -501,8 +527,8 @@ SELECT
             SELECT 1
             FROM channels c
             WHERE c.is_active = TRUE AND (
-              (c.username = discovered_channels.username AND c.username != '') OR
-              ('@' || c.username = discovered_channels.username AND c.username != '') OR
+              (c.username != '' AND lower(c.username) = lower(discovered_channels.username)) OR
+              (c.username != '' AND lower('@' || c.username) = lower(discovered_channels.username)) OR
               (c.tg_peer_id = discovered_channels.tg_peer_id AND discovered_channels.tg_peer_id != 0 AND c.tg_peer_id != 0) OR
               (c.invite_link = discovered_channels.invite_link AND discovered_channels.invite_link != '' AND c.invite_link != '')
             )
@@ -514,7 +540,7 @@ FROM discovered_channels;
 SELECT EXISTS(
     SELECT 1 FROM channels
     WHERE is_active = TRUE AND (
-        (username = $1 AND username != '') OR
+        (username != '' AND lower(username) = lower($1)) OR
         (tg_peer_id = $2 AND tg_peer_id != 0) OR
         (invite_link = $3 AND invite_link != '')
     )
@@ -524,7 +550,7 @@ SELECT EXISTS(
 SELECT EXISTS(
     SELECT 1 FROM discovered_channels
     WHERE status = 'rejected' AND (
-        (username = $1 AND username != '') OR
+        (username != '' AND lower(username) = lower($1)) OR
         (tg_peer_id = $2 AND tg_peer_id != 0) OR
         (invite_link = $3 AND invite_link != '')
     )

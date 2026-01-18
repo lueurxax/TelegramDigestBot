@@ -1,5 +1,28 @@
 # Discovery Filtering Improvements
 
+> **Status: Complete** (January 2026)
+>
+> See [docs/features/discovery.md](../features/discovery.md) for user-facing documentation.
+
+## Implementation Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| 1) Canonical identity matching | Done | `matched_channel_id` column, `markDiscoveryAdded` sets it |
+| 2) Duplicate row handling | Done | Backfill via `/discover cleanup`, DISTINCT ON deduplication |
+| 3) Signal thresholds | Done | `discovery_min_seen`, `discovery_min_engagement` settings |
+| 4) Description keyword filters | Done | `discovery_description_allow`, `discovery_description_deny` settings |
+| 5) Source hygiene | Done | Inactive source filtering, self-discovery prevention |
+| 6) Admin controls | Done | `/discover reject`, `show-rejected`, `cleanup` |
+| Reconciliation job | Done | Runs at startup + every 6 hours |
+| Schema changes | Done | `matched_channel_id`, `description` columns with indexes |
+| Filter summary in `/discover` | Done | Shows applied thresholds |
+| `/discover preview` | Done | Includes keyword filter reasons |
+| Time-series metrics | Done | Pending/actionable gauges + approval counters |
+| Unit tests for keyword matching | Done | `discovery_filters_test.go` |
+
+---
+
 ## Problem
 The `/discover` list still contains entries that are already tracked or low quality. This creates noise and slows approvals. Current filtering only checks status and username presence, so discoveries created via a different identifier (peer ID, invite link, casing) can slip through.
 
@@ -28,11 +51,16 @@ The `/discover` list still contains entries that are already tracked or low qual
   - `discovery_min_engagement` (default: 50)
 - `/discover` excludes entries below these thresholds, but `/discover stats` still counts them in totals.
 
-4) Description keyword filters (v2)
-- Defer to v2 unless noise remains high after identity matching + thresholds.
+Engagement score definition
+- `max_views` and `max_forwards` are the highest values seen across discovery events for the channel.
+- The score uses a log scale to keep large channels from dominating:
+  - `engagement_score = 0.3 * ln(1 + max_views) + 0.5 * ln(1 + max_forwards) + 0.2 * ln(1 + discovery_count)`
+
+4) Description keyword filters
 - If enabled later, use settings:
   - `discovery_description_allow` (JSON array of strings, optional)
   - `discovery_description_deny` (JSON array of strings, optional)
+- Manage via <code>/discover allow|deny</code> commands (add/remove/clear).
 - Apply filters to a normalized text built from `title` + `description` (lowercased).
 - Matching is case-insensitive substring match.
 - If allow list is set, at least one keyword must match; if text is empty, exclude.
@@ -166,7 +194,14 @@ discoveries := filterDiscoveriesByKeywords(rows, allow, deny)
 - Monitor `/discover stats` for changes in actionable count.
 
 ## Implementation Checklist
-- Migration: add `description` and `matched_channel_id` columns with index and ON DELETE SET NULL.
-- Update discovery resolution to store `description` (channel about text).
-- Update `markDiscoveryAdded` to set `matched_channel_id`.
-- Add `GetRejectedDiscoveries` query for `/discover show-rejected`.
+- [x] Migration: add `description` and `matched_channel_id` columns with index and ON DELETE SET NULL.
+- [x] Update discovery resolution to store `description` (channel about text).
+- [x] Update `markDiscoveryAdded` to set `matched_channel_id`.
+- [x] Add `GetRejectedDiscoveries` query for `/discover show-rejected`.
+- [x] Add signal thresholds (`discovery_min_seen`, `discovery_min_engagement`).
+- [x] Add source hygiene (inactive source filtering, self-discovery prevention).
+- [x] Add `/discover cleanup` command.
+- [x] Add reconciliation job (startup + every 6 hours).
+- [x] Add `/discover preview` filter reason display.
+- [x] Add time-series metrics tracking.
+- [x] Add description keyword filters.

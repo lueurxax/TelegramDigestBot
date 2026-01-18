@@ -939,7 +939,7 @@ SELECT dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.descripti
        dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score,
        dc.status, dc.matched_channel_id
 FROM discovered_channels dc
-WHERE dc.username = $1 OR '@' || dc.username = $1
+WHERE lower(dc.username) = lower($1) OR lower('@' || dc.username) = lower($1)
 ORDER BY dc.last_seen_at DESC
 LIMIT 1
 `
@@ -962,8 +962,8 @@ type GetDiscoveryByUsernameRow struct {
 	MatchedChannelID pgtype.UUID        `json:"matched_channel_id"`
 }
 
-func (q *Queries) GetDiscoveryByUsername(ctx context.Context, username pgtype.Text) (GetDiscoveryByUsernameRow, error) {
-	row := q.db.QueryRow(ctx, getDiscoveryByUsername, username)
+func (q *Queries) GetDiscoveryByUsername(ctx context.Context, lower string) (GetDiscoveryByUsernameRow, error) {
+	row := q.db.QueryRow(ctx, getDiscoveryByUsername, lower)
 	var i GetDiscoveryByUsernameRow
 	err := row.Scan(
 		&i.ID,
@@ -1007,8 +1007,8 @@ SELECT
             SELECT 1
             FROM channels c
             WHERE c.is_active = TRUE AND (
-              (c.username = discovered_channels.username AND c.username != '') OR
-              ('@' || c.username = discovered_channels.username AND c.username != '') OR
+              (c.username != '' AND lower(c.username) = lower(discovered_channels.username)) OR
+              (c.username != '' AND lower('@' || c.username) = lower(discovered_channels.username)) OR
               (c.tg_peer_id = discovered_channels.tg_peer_id AND discovered_channels.tg_peer_id != 0 AND c.tg_peer_id != 0) OR
               (c.invite_link = discovered_channels.invite_link AND discovered_channels.invite_link != '' AND c.invite_link != '')
             )
@@ -1473,8 +1473,8 @@ SELECT id, username, tg_peer_id, invite_link, title, description, source_type, d
       SELECT 1
       FROM channels c
       WHERE c.is_active = TRUE AND (
-        (c.username = dc.username AND c.username != '') OR
-        ('@' || c.username = dc.username AND c.username != '') OR
+        (c.username != '' AND lower(c.username) = lower(dc.username)) OR
+        (c.username != '' AND lower('@' || c.username) = lower(dc.username)) OR
         (c.tg_peer_id = dc.tg_peer_id AND dc.tg_peer_id != 0 AND c.tg_peer_id != 0) OR
         (c.invite_link = dc.invite_link AND dc.invite_link != '' AND c.invite_link != '')
       )
@@ -1518,6 +1518,88 @@ func (q *Queries) GetPendingDiscoveries(ctx context.Context, arg GetPendingDisco
 	var items []GetPendingDiscoveriesRow
 	for rows.Next() {
 		var i GetPendingDiscoveriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.TgPeerID,
+			&i.InviteLink,
+			&i.Title,
+			&i.Description,
+			&i.SourceType,
+			&i.DiscoveryCount,
+			&i.FirstSeenAt,
+			&i.LastSeenAt,
+			&i.MaxViews,
+			&i.MaxForwards,
+			&i.EngagementScore,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getPendingDiscoveriesForFiltering = `-- name: GetPendingDiscoveriesForFiltering :many
+SELECT id, username, tg_peer_id, invite_link, title, description, source_type, discovery_count, first_seen_at, last_seen_at, max_views, max_forwards, engagement_score FROM (
+  SELECT DISTINCT ON (dc.username)
+    dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.description, dc.source_type,
+    dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score
+  FROM discovered_channels dc
+  WHERE dc.status = 'pending'
+    AND dc.username IS NOT NULL AND dc.username != ''
+    AND dc.matched_channel_id IS NULL
+    AND dc.discovery_count >= $1
+    AND dc.engagement_score >= $2
+    AND NOT EXISTS (
+      SELECT 1
+      FROM channels c
+      WHERE c.is_active = TRUE AND (
+        (c.username != '' AND lower(c.username) = lower(dc.username)) OR
+        (c.username != '' AND lower('@' || c.username) = lower(dc.username)) OR
+        (c.tg_peer_id = dc.tg_peer_id AND dc.tg_peer_id != 0 AND c.tg_peer_id != 0) OR
+        (c.invite_link = dc.invite_link AND dc.invite_link != '' AND c.invite_link != '')
+      )
+    )
+  ORDER BY dc.username, dc.engagement_score DESC
+) deduped
+ORDER BY engagement_score DESC, discovery_count DESC, last_seen_at DESC
+`
+
+type GetPendingDiscoveriesForFilteringParams struct {
+	DiscoveryCount  int32         `json:"discovery_count"`
+	EngagementScore pgtype.Float4 `json:"engagement_score"`
+}
+
+type GetPendingDiscoveriesForFilteringRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	Username        pgtype.Text        `json:"username"`
+	TgPeerID        pgtype.Int8        `json:"tg_peer_id"`
+	InviteLink      pgtype.Text        `json:"invite_link"`
+	Title           pgtype.Text        `json:"title"`
+	Description     pgtype.Text        `json:"description"`
+	SourceType      string             `json:"source_type"`
+	DiscoveryCount  int32              `json:"discovery_count"`
+	FirstSeenAt     pgtype.Timestamptz `json:"first_seen_at"`
+	LastSeenAt      pgtype.Timestamptz `json:"last_seen_at"`
+	MaxViews        pgtype.Int4        `json:"max_views"`
+	MaxForwards     pgtype.Int4        `json:"max_forwards"`
+	EngagementScore pgtype.Float4      `json:"engagement_score"`
+}
+
+// Same as GetPendingDiscoveries but without a limit, used for keyword filtering stats.
+func (q *Queries) GetPendingDiscoveriesForFiltering(ctx context.Context, arg GetPendingDiscoveriesForFilteringParams) ([]GetPendingDiscoveriesForFilteringRow, error) {
+	rows, err := q.db.Query(ctx, getPendingDiscoveriesForFiltering, arg.DiscoveryCount, arg.EngagementScore)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPendingDiscoveriesForFilteringRow
+	for rows.Next() {
+		var i GetPendingDiscoveriesForFilteringRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Username,
@@ -1838,7 +1920,7 @@ const isChannelDiscoveredRejected = `-- name: IsChannelDiscoveredRejected :one
 SELECT EXISTS(
     SELECT 1 FROM discovered_channels
     WHERE status = 'rejected' AND (
-        (username = $1 AND username != '') OR
+        (username != '' AND lower(username) = lower($1)) OR
         (tg_peer_id = $2 AND tg_peer_id != 0) OR
         (invite_link = $3 AND invite_link != '')
     )
@@ -1846,13 +1928,13 @@ SELECT EXISTS(
 `
 
 type IsChannelDiscoveredRejectedParams struct {
-	Username   pgtype.Text `json:"username"`
+	Lower      string      `json:"lower"`
 	TgPeerID   pgtype.Int8 `json:"tg_peer_id"`
 	InviteLink pgtype.Text `json:"invite_link"`
 }
 
 func (q *Queries) IsChannelDiscoveredRejected(ctx context.Context, arg IsChannelDiscoveredRejectedParams) (bool, error) {
-	row := q.db.QueryRow(ctx, isChannelDiscoveredRejected, arg.Username, arg.TgPeerID, arg.InviteLink)
+	row := q.db.QueryRow(ctx, isChannelDiscoveredRejected, arg.Lower, arg.TgPeerID, arg.InviteLink)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
@@ -1862,7 +1944,7 @@ const isChannelTracked = `-- name: IsChannelTracked :one
 SELECT EXISTS(
     SELECT 1 FROM channels
     WHERE is_active = TRUE AND (
-        (username = $1 AND username != '') OR
+        (username != '' AND lower(username) = lower($1)) OR
         (tg_peer_id = $2 AND tg_peer_id != 0) OR
         (invite_link = $3 AND invite_link != '')
     )
@@ -1870,13 +1952,13 @@ SELECT EXISTS(
 `
 
 type IsChannelTrackedParams struct {
-	Username   pgtype.Text `json:"username"`
+	Lower      string      `json:"lower"`
 	TgPeerID   int64       `json:"tg_peer_id"`
 	InviteLink pgtype.Text `json:"invite_link"`
 }
 
 func (q *Queries) IsChannelTracked(ctx context.Context, arg IsChannelTrackedParams) (bool, error) {
-	row := q.db.QueryRow(ctx, isChannelTracked, arg.Username, arg.TgPeerID, arg.InviteLink)
+	row := q.db.QueryRow(ctx, isChannelTracked, arg.Lower, arg.TgPeerID, arg.InviteLink)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
@@ -2531,19 +2613,19 @@ const updateDiscoveryStatusByUsername = `-- name: UpdateDiscoveryStatusByUsernam
 WITH target AS (
     SELECT src.username AS t_username, src.tg_peer_id AS t_peer_id, src.invite_link AS t_invite
     FROM discovered_channels src
-    WHERE src.username = $1 OR '@' || src.username = $1
+    WHERE lower(src.username) = lower($1) OR lower('@' || src.username) = lower($1)
     LIMIT 1
 )
 UPDATE discovered_channels dc
 SET status = $2, status_changed_at = now(), status_changed_by = $3
 FROM target
-WHERE (dc.username = target.t_username AND dc.username != '')
+WHERE (dc.username != '' AND target.t_username != '' AND lower(dc.username) = lower(target.t_username))
    OR (dc.tg_peer_id = target.t_peer_id AND dc.tg_peer_id != 0 AND target.t_peer_id != 0)
    OR (dc.invite_link = target.t_invite AND dc.invite_link != '' AND target.t_invite != '')
 `
 
 type UpdateDiscoveryStatusByUsernameParams struct {
-	Username        pgtype.Text `json:"username"`
+	Lower           string      `json:"lower"`
 	Status          string      `json:"status"`
 	StatusChangedBy pgtype.Int8 `json:"status_changed_by"`
 }
@@ -2551,7 +2633,7 @@ type UpdateDiscoveryStatusByUsernameParams struct {
 // Rejects the target row AND any related rows that share peer_id or invite_link
 // This prevents the same channel from reappearing via different discovery paths
 func (q *Queries) UpdateDiscoveryStatusByUsername(ctx context.Context, arg UpdateDiscoveryStatusByUsernameParams) error {
-	_, err := q.db.Exec(ctx, updateDiscoveryStatusByUsername, arg.Username, arg.Status, arg.StatusChangedBy)
+	_, err := q.db.Exec(ctx, updateDiscoveryStatusByUsername, arg.Lower, arg.Status, arg.StatusChangedBy)
 	return err
 }
 

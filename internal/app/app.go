@@ -20,6 +20,15 @@ import (
 
 const errBotInit = "bot initialization failed: %w"
 
+const (
+	discoveryMinSeenSettingKey       = "discovery_min_seen"
+	discoveryMinEngagementSettingKey = "discovery_min_engagement"
+	discoveryAllowSettingKey         = "discovery_description_allow"
+	discoveryDenySettingKey          = "discovery_description_deny"
+	discoveryMinSeenDefault          = 2
+	discoveryMinEngagementDefault    = float32(50)
+)
+
 // App holds the application dependencies and provides methods to run different modes.
 type App struct {
 	cfg      *config.Config
@@ -146,6 +155,94 @@ func (a *App) runDiscoveryCleanupOnce(ctx context.Context, batchSize int, maxBat
 	if updatedTotal > 0 {
 		a.logger.Info().Int("updated", updatedTotal).Msg("discovery cleanup complete")
 	}
+
+	a.updateDiscoveryMetrics(ctx)
+}
+
+func (a *App) updateDiscoveryMetrics(ctx context.Context) {
+	stats, err := a.database.GetDiscoveryStats(ctx)
+	if err != nil {
+		a.logger.Warn().Err(err).Msg("failed to fetch discovery stats")
+
+		return
+	}
+
+	minSeen, minEngagement := a.getDiscoveryThresholds(ctx)
+
+	allow, deny := a.getDiscoveryKeywordFilters(ctx)
+	candidateCount, allowMiss, denyHit := a.getDiscoveryKeywordFilterStats(ctx, minSeen, minEngagement, allow, deny)
+
+	pending := stats.PendingCount
+
+	actionable := int64(candidateCount - allowMiss - denyHit)
+	if actionable < 0 {
+		actionable = 0
+	}
+
+	observability.DiscoveryPending.Set(float64(pending))
+	observability.DiscoveryActionable.Set(float64(actionable))
+
+	approvalRate := 0.0
+
+	denom := stats.AddedCount + stats.RejectedCount
+	if denom > 0 {
+		approvalRate = float64(stats.AddedCount) / float64(denom)
+	}
+
+	observability.DiscoveryApprovalRate.Set(approvalRate)
+}
+
+func (a *App) getDiscoveryThresholds(ctx context.Context) (int, float32) {
+	minSeen := discoveryMinSeenDefault
+	if err := a.database.GetSetting(ctx, discoveryMinSeenSettingKey, &minSeen); err != nil {
+		a.logger.Warn().Err(err).Msg("failed to read discovery_min_seen")
+	}
+
+	if minSeen < 1 {
+		minSeen = discoveryMinSeenDefault
+	}
+
+	minEngagement := discoveryMinEngagementDefault
+	if err := a.database.GetSetting(ctx, discoveryMinEngagementSettingKey, &minEngagement); err != nil {
+		a.logger.Warn().Err(err).Msg("failed to read discovery_min_engagement")
+	}
+
+	if minEngagement < 0 {
+		minEngagement = discoveryMinEngagementDefault
+	}
+
+	return minSeen, minEngagement
+}
+
+func (a *App) getDiscoveryKeywordFilters(ctx context.Context) ([]string, []string) {
+	var allow []string
+	if err := a.database.GetSetting(ctx, discoveryAllowSettingKey, &allow); err != nil {
+		a.logger.Warn().Err(err).Msg("failed to read discovery_description_allow")
+	}
+
+	var deny []string
+	if err := a.database.GetSetting(ctx, discoveryDenySettingKey, &deny); err != nil {
+		a.logger.Warn().Err(err).Msg("failed to read discovery_description_deny")
+	}
+
+	return db.NormalizeDiscoveryKeywords(allow), db.NormalizeDiscoveryKeywords(deny)
+}
+
+func (a *App) getDiscoveryKeywordFilterStats(ctx context.Context, minSeen int, minEngagement float32, allow, deny []string) (int, int, int) {
+	candidates, err := a.database.GetPendingDiscoveriesForFiltering(ctx, minSeen, minEngagement)
+	if err != nil {
+		a.logger.Warn().Err(err).Msg("failed to fetch discovery keyword candidates")
+
+		return 0, 0, 0
+	}
+
+	if len(allow) == 0 && len(deny) == 0 {
+		return len(candidates), 0, 0
+	}
+
+	_, allowMiss, denyHit := db.FilterDiscoveriesByKeywords(candidates, allow, deny)
+
+	return len(candidates), allowMiss, denyHit
 }
 
 // RunDigest runs the digest mode.

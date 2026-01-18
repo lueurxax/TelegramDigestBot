@@ -72,6 +72,7 @@ type Repository interface {
 
 	// Discovery operations
 	GetPendingDiscoveries(ctx context.Context, limit int, minSeen int, minEngagement float32) ([]db.DiscoveredChannel, error)
+	GetPendingDiscoveriesForFiltering(ctx context.Context, minSeen int, minEngagement float32) ([]db.DiscoveredChannel, error)
 	GetRejectedDiscoveries(ctx context.Context, limit int) ([]db.DiscoveredChannel, error)
 	GetDiscoveryByUsername(ctx context.Context, username string) (*db.DiscoveredChannel, error)
 	CleanupDiscoveriesBatch(ctx context.Context, limit int, adminID int64) (int, error)

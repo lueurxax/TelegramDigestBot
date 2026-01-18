@@ -83,7 +83,7 @@ func (db *DB) RecordDiscovery(ctx context.Context, d Discovery) error {
 // shouldSkipDiscovery checks if the discovery should be skipped (already tracked or rejected)
 func (db *DB) shouldSkipDiscovery(ctx context.Context, normalizedUsername string, d Discovery) (bool, error) {
 	tracked, err := db.Queries.IsChannelTracked(ctx, sqlc.IsChannelTrackedParams{
-		Username:   toText(normalizedUsername),
+		Lower:      normalizedUsername,
 		TgPeerID:   d.TGPeerID,
 		InviteLink: toText(d.InviteLink),
 	})
@@ -105,7 +105,7 @@ func (db *DB) shouldSkipDiscovery(ctx context.Context, normalizedUsername string
 	}
 
 	rejected, err := db.Queries.IsChannelDiscoveredRejected(ctx, sqlc.IsChannelDiscoveredRejectedParams{
-		Username:   toText(normalizedUsername),
+		Lower:      normalizedUsername,
 		TgPeerID:   toInt8(d.TGPeerID),
 		InviteLink: toText(d.InviteLink),
 	})
@@ -246,6 +246,38 @@ func (db *DB) GetPendingDiscoveries(ctx context.Context, limit int, minSeen int,
 	return result, nil
 }
 
+// GetPendingDiscoveriesForFiltering returns pending discoveries without a limit, for keyword filters.
+func (db *DB) GetPendingDiscoveriesForFiltering(ctx context.Context, minSeen int, minEngagement float32) ([]DiscoveredChannel, error) {
+	rows, err := db.Queries.GetPendingDiscoveriesForFiltering(ctx, sqlc.GetPendingDiscoveriesForFilteringParams{
+		DiscoveryCount:  safeIntToInt32(minSeen),
+		EngagementScore: pgtype.Float4{Float32: minEngagement, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get pending discoveries for filtering: %w", err)
+	}
+
+	result := make([]DiscoveredChannel, len(rows))
+	for i, r := range rows {
+		result[i] = DiscoveredChannel{
+			ID:              fromUUID(r.ID),
+			Username:        r.Username.String,
+			TGPeerID:        r.TgPeerID.Int64,
+			InviteLink:      r.InviteLink.String,
+			Title:           r.Title.String,
+			Description:     r.Description.String,
+			SourceType:      r.SourceType,
+			DiscoveryCount:  int(r.DiscoveryCount),
+			FirstSeenAt:     r.FirstSeenAt.Time,
+			LastSeenAt:      r.LastSeenAt.Time,
+			MaxViews:        int(r.MaxViews.Int32),
+			MaxForwards:     int(r.MaxForwards.Int32),
+			EngagementScore: float64(r.EngagementScore.Float32),
+		}
+	}
+
+	return result, nil
+}
+
 // GetRejectedDiscoveries returns rejected discoveries sorted by last seen time.
 func (db *DB) GetRejectedDiscoveries(ctx context.Context, limit int) ([]DiscoveredChannel, error) {
 	rows, err := db.Queries.GetRejectedDiscoveries(ctx, safeIntToInt32(limit))
@@ -280,7 +312,7 @@ func (db *DB) GetRejectedDiscoveries(ctx context.Context, limit int) ([]Discover
 func (db *DB) GetDiscoveryByUsername(ctx context.Context, username string) (*DiscoveredChannel, error) {
 	normalized := normalizeUsername(username)
 
-	row, err := db.Queries.GetDiscoveryByUsername(ctx, toText(normalized))
+	row, err := db.Queries.GetDiscoveryByUsername(ctx, normalized)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrDiscoveryNotFound
 	}
@@ -321,7 +353,7 @@ func (db *DB) ApproveDiscovery(ctx context.Context, username string, adminID int
 
 	// Update status to added (not just approved)
 	if err := db.Queries.UpdateDiscoveryStatusByUsername(ctx, sqlc.UpdateDiscoveryStatusByUsernameParams{
-		Username:        toText(normalizedUsername),
+		Lower:           normalizedUsername,
 		Status:          DiscoveryStatusAdded,
 		StatusChangedBy: toInt8(adminID),
 	}); err != nil {
@@ -334,7 +366,7 @@ func (db *DB) ApproveDiscovery(ctx context.Context, username string, adminID int
 // RejectDiscovery marks a discovery as rejected
 func (db *DB) RejectDiscovery(ctx context.Context, username string, adminID int64) error {
 	if err := db.Queries.UpdateDiscoveryStatusByUsername(ctx, sqlc.UpdateDiscoveryStatusByUsernameParams{
-		Username:        toText(normalizeUsername(username)),
+		Lower:           normalizeUsername(username),
 		Status:          DiscoveryStatusRejected,
 		StatusChangedBy: toInt8(adminID),
 	}); err != nil {
@@ -489,7 +521,7 @@ func (db *DB) CleanupDiscoveriesBatch(ctx context.Context, limit int, adminID in
 				c.id AS channel_id
 			FROM discovered_channels dc
 			JOIN channels c ON c.is_active = TRUE AND (
-				(dc.username != '' AND c.username = dc.username) OR
+				(dc.username != '' AND c.username != '' AND lower(c.username) = lower(dc.username)) OR
 				(dc.tg_peer_id != 0 AND c.tg_peer_id = dc.tg_peer_id) OR
 				(dc.invite_link != '' AND c.invite_link = dc.invite_link)
 			)

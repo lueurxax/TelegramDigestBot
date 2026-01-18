@@ -119,6 +119,11 @@ const (
 	ButtonNotUseful = "👎 Not useful"
 )
 
+// HTML tag constants.
+const (
+	htmlItalicClose = "</i>"
+)
+
 // Error message formats.
 const (
 	ErrSendDigestPart   = "failed to send digest part %d to chat %d: %w"
@@ -541,7 +546,7 @@ func formatDigestItemCaption(item digest.RichDigestItem) string {
 			sb.WriteString(item.Channel)
 		}
 
-		sb.WriteString("</i>")
+		sb.WriteString(htmlItalicClose)
 	}
 
 	return sb.String()

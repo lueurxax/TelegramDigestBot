@@ -2631,6 +2631,8 @@ func TestHelpDiscoverMessage(t *testing.T) {
 		"/discover preview",
 		"/discover approve",
 		"/discover reject",
+		"/discover allow",
+		"/discover deny",
 		"/discover min_seen",
 		"/discover min_engagement",
 		"/discover show-rejected",
