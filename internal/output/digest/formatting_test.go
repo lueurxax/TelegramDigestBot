@@ -2530,7 +2530,7 @@ func TestSchedulerFormatItems(t *testing.T) {
 			{ID: "2", Summary: "Summary two", SourceChannel: "ch2", SourceMsgID: 2, ImportanceScore: 0.65},
 		}
 
-		got := s.formatItems(items, false, make(map[string]bool))
+		got := s.formatItems(items, false, make(map[string]bool), nil)
 
 		if !strings.Contains(got, "Summary one") {
 			t.Errorf("formatItems() should contain first summary, got %q", got)
@@ -2549,7 +2549,7 @@ func TestSchedulerFormatItems(t *testing.T) {
 
 		seen := map[string]bool{"Already seen": true}
 
-		got := s.formatItems(items, false, seen)
+		got := s.formatItems(items, false, seen, nil)
 
 		if strings.Contains(got, "Already seen") {
 			t.Errorf("formatItems() should skip seen summary, got %q", got)
@@ -2561,7 +2561,7 @@ func TestSchedulerFormatItems(t *testing.T) {
 	})
 
 	t.Run(testNameEmptyItems, func(t *testing.T) {
-		got := s.formatItems([]db.Item{}, false, make(map[string]bool))
+		got := s.formatItems([]db.Item{}, false, make(map[string]bool), nil)
 
 		if got != "" {
 			t.Errorf("formatItems() with empty items = %q, want empty", got)
@@ -2576,7 +2576,7 @@ func TestSchedulerFormatItems(t *testing.T) {
 
 		seen := make(map[string]bool)
 
-		got := s.formatItems(items, false, seen)
+		got := s.formatItems(items, false, seen, nil)
 
 		// Should only show the summary once
 
@@ -2597,7 +2597,7 @@ func TestSchedulerFormatItems(t *testing.T) {
 			{ID: "1", Summary: "Tech news", SourceChannel: "ch1", SourceMsgID: 1, Topic: "Technology"},
 		}
 
-		got := s.formatItems(items, true, make(map[string]bool))
+		got := s.formatItems(items, true, make(map[string]bool), nil)
 
 		if !strings.Contains(got, testTopicTechnology) {
 			t.Errorf("formatItems() with includeTopic=true should show topic, got %q", got)
@@ -2619,7 +2619,7 @@ func TestFormatSummaryGroupWithMultipleSources(t *testing.T) {
 	}
 
 	var sb strings.Builder
-	s.formatSummaryGroup(&sb, group, false)
+	s.formatSummaryGroup(&sb, group, false, nil)
 
 	got := sb.String()
 

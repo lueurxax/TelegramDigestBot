@@ -79,6 +79,7 @@ const (
 	CmdRetry              = "retry"
 	CmdChannel            = "channel"
 	CmdScores             = "scores"
+	CmdFactCheck          = "factcheck"
 	CmdRatings            = "ratings"
 	CmdCoverImage         = "cover_image"
 	CmdCoverImageAlt      = "coverimage"

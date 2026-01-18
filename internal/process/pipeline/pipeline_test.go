@@ -106,6 +106,14 @@ func (m *mockRepo) SaveEmbedding(_ context.Context, _ string, _ []float32) error
 	return nil
 }
 
+func (m *mockRepo) EnqueueFactCheck(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
+func (m *mockRepo) CountPendingFactChecks(_ context.Context) (int, error) {
+	return 0, nil
+}
+
 func (m *mockRepo) CheckStrictDuplicate(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }

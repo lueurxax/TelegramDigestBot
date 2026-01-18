@@ -56,4 +56,30 @@ var (
 		Name: "digest_discovery_rejected_total",
 		Help: "Total number of rejected discoveries",
 	})
+
+	FactCheckRequestDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "digest_factcheck_request_duration_seconds",
+		Help:    "Duration of fact check API requests",
+		Buckets: prometheus.DefBuckets,
+	})
+
+	FactCheckRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_factcheck_requests_total",
+		Help: "Total number of fact check requests",
+	}, []string{"result"})
+
+	FactCheckMatches = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_factcheck_matches_total",
+		Help: "Total number of items with fact check matches",
+	})
+
+	FactCheckCacheHits = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_factcheck_cache_hits_total",
+		Help: "Total number of fact check cache hits",
+	})
+
+	FactCheckCacheMisses = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_factcheck_cache_misses_total",
+		Help: "Total number of fact check cache misses",
+	})
 )

@@ -30,3 +30,4 @@ data:
   # Scheduler settings
   SCHEDULER_TICK_INTERVAL: "10m"
   SCHEDULER_CATCHUP_WINDOW: "24h"
+  FACTCHECK_GOOGLE_ENABLED: "true"

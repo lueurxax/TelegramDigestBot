@@ -55,6 +55,13 @@ type Config struct {
 	CrossTopicSimilarityThreshold float32 `env:"CROSS_TOPIC_SIMILARITY_THRESHOLD" envDefault:"0.90"`
 	RatingMinSampleChannel        int     `env:"RATING_MIN_SAMPLE_CHANNEL" envDefault:"15"`
 	RatingMinSampleGlobal         int     `env:"RATING_MIN_SAMPLE_GLOBAL" envDefault:"100"`
+	FactCheckGoogleEnabled        bool    `env:"FACTCHECK_GOOGLE_ENABLED" envDefault:"false"`
+	FactCheckGoogleAPIKey         string  `env:"FACTCHECK_GOOGLE_API_KEY"`
+	FactCheckGoogleMaxResults     int     `env:"FACTCHECK_GOOGLE_MAX_RESULTS" envDefault:"3"`
+	FactCheckCacheTTLHours        int     `env:"FACTCHECK_CACHE_TTL_HOURS" envDefault:"48"`
+	FactCheckGoogleRPM            int     `env:"FACTCHECK_GOOGLE_RPM" envDefault:"60"`
+	FactCheckMinClaimLength       int     `env:"FACTCHECK_MIN_CLAIM_LENGTH" envDefault:"40"`
+	FactCheckQueueMax             int     `env:"FACTCHECK_QUEUE_MAX" envDefault:"5000"`
 
 	// Link enrichment
 	LinkEnrichmentEnabled bool          `env:"LINK_ENRICHMENT_ENABLED" envDefault:"false"`

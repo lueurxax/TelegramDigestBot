@@ -32,6 +32,7 @@ type Repository interface {
 	MarkItemsAsDigested(ctx context.Context, ids []string) error
 	GetItemEmbedding(ctx context.Context, id string) ([]float32, error)
 	GetBacklogCount(ctx context.Context) (int, error)
+	GetFactChecksForItems(ctx context.Context, itemIDs []string) (map[string]db.FactCheckMatch, error)
 
 	// Cluster operations
 	GetClustersForWindow(ctx context.Context, start, end time.Time) ([]db.ClusterWithItems, error)

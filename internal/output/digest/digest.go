@@ -1055,7 +1055,8 @@ func (s *Scheduler) performClusteringIfEnabled(ctx context.Context, items []db.I
 
 // renderDigest builds the final digest text
 func (s *Scheduler) renderDigest(ctx context.Context, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, settings digestSettings, logger *zerolog.Logger) (string, []db.Item, []db.ClusterWithItems, *anomalyInfo, error) {
-	rc := s.newRenderContext(ctx, settings, items, clusters, start, end, logger)
+	factChecks := s.loadFactChecks(ctx, items, logger)
+	rc := s.newRenderContext(ctx, settings, items, clusters, start, end, factChecks, logger)
 
 	var sb strings.Builder
 
@@ -1071,6 +1072,27 @@ func (s *Scheduler) renderDigest(ctx context.Context, items []db.Item, clusters 
 	sb.WriteString("\n" + DigestSeparatorLine)
 
 	return sb.String(), items, clusters, nil, nil
+}
+
+func (s *Scheduler) loadFactChecks(ctx context.Context, items []db.Item, logger *zerolog.Logger) map[string]db.FactCheckMatch {
+	itemIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.ID != "" {
+			itemIDs = append(itemIDs, item.ID)
+		}
+	}
+
+	if len(itemIDs) == 0 {
+		return map[string]db.FactCheckMatch{}
+	}
+
+	factChecks, err := s.database.GetFactChecksForItems(ctx, itemIDs)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to fetch fact check matches")
+		return map[string]db.FactCheckMatch{}
+	}
+
+	return factChecks
 }
 
 // renderDetailedItems renders the breaking/notable/also sections
@@ -1156,7 +1178,7 @@ type summaryGroup struct {
 	importanceScore float32
 }
 
-func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummaries map[string]bool) string {
+func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummaries map[string]bool, factChecks map[string]db.FactCheckMatch) string {
 	if len(items) == 0 {
 		return ""
 	}
@@ -1167,7 +1189,7 @@ func (s *Scheduler) formatItems(items []db.Item, includeTopic bool, seenSummarie
 
 	for _, g := range groups {
 		seenSummaries[g.summary] = true
-		s.formatSummaryGroup(&sb, g, includeTopic)
+		s.formatSummaryGroup(&sb, g, includeTopic, factChecks)
 	}
 
 	return sb.String()
@@ -1202,13 +1224,26 @@ func groupItemsBySummary(items []db.Item, seenSummaries map[string]bool) []summa
 	return groups
 }
 
-func (s *Scheduler) formatSummaryGroup(sb *strings.Builder, g summaryGroup, includeTopic bool) {
+func (s *Scheduler) formatSummaryGroup(sb *strings.Builder, g summaryGroup, includeTopic bool, factChecks map[string]db.FactCheckMatch) {
 	sanitizedSummary := htmlutils.SanitizeHTML(g.summary)
 	prefix := getImportancePrefix(g.importanceScore)
 
 	sb.WriteString(htmlutils.ItemStart)
 	sb.WriteString(formatSummaryLine(g, includeTopic, prefix, sanitizedSummary))
 	fmt.Fprintf(sb, DigestSourceVia, strings.Join(s.formatItemLinks(g.items), DigestSourceSeparator))
+
+	if factChecks != nil {
+		if match, ok := findFactCheckMatch(g.items, factChecks); ok {
+			sb.WriteString(formatFactCheckLine(match))
+		}
+	}
+
+	if len(g.items) > 0 {
+		if line := s.buildCorroborationLine(g.items, g.items[0]); line != "" {
+			sb.WriteString(line)
+		}
+	}
+
 	sb.WriteString(htmlutils.ItemEnd)
 	sb.WriteString("\n")
 }
@@ -1226,6 +1261,34 @@ func formatSummaryLine(g summaryGroup, includeTopic bool, prefix, sanitizedSumma
 	}
 
 	return fmt.Sprintf("%s %s <b>%s</b>: %s", prefix, emoji, html.EscapeString(g.items[0].Topic), sanitizedSummary)
+}
+
+func findFactCheckMatch(items []db.Item, factChecks map[string]db.FactCheckMatch) (db.FactCheckMatch, bool) {
+	for _, item := range items {
+		if item.ID == "" {
+			continue
+		}
+
+		match, ok := factChecks[item.ID]
+		if ok {
+			return match, true
+		}
+	}
+
+	return db.FactCheckMatch{}, false
+}
+
+func formatFactCheckLine(match db.FactCheckMatch) string {
+	if match.URL == "" {
+		return ""
+	}
+
+	label := "Fact-check"
+	if match.Publisher != "" {
+		label = match.Publisher
+	}
+
+	return fmt.Sprintf("\n    ↳ <i>Related fact-check: <a href=\"%s\">%s</a></i>", html.EscapeString(match.URL), html.EscapeString(label))
 }
 
 func (s *Scheduler) formatItemLinks(items []db.Item) []string {

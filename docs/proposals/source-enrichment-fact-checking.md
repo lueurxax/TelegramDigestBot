@@ -1,13 +1,14 @@
 # Source Enrichment & Fact-Checking Pipeline
 
-> **Status: Proposal** (not yet implemented)
+> **Status: Phase 1 Implemented** (January 2026)
 >
-> This document describes a future enhancement. Implementation has not started.
+> Phase 1 is complete. See [docs/features/corroboration.md](../features/corroboration.md) for user-facing documentation.
+> Phase 2 remains a proposal, gated by Phase 1 metrics.
 
 ## Summary
 Two-phase rollout:
-1. **Phase 1** adds immediate corroboration signals using existing clustering and the Google Fact Check API.
-2. **Phase 2** adds full evidence retrieval, extraction, and agreement scoring for deeper context.
+1. **Phase 1** ✅ Channel corroboration + Google Fact Check API (implemented)
+2. **Phase 2** ⏳ Full evidence retrieval, extraction, and agreement scoring (proposal)
 
 ## Goals
 - Improve factual accuracy and context with measurable outcomes.
@@ -187,7 +188,13 @@ Phase 2:
 - `ENRICHMENT_MIN_AGREEMENT=0.65`
 - `ENRICHMENT_ALLOWLIST_DOMAINS` / `ENRICHMENT_DENYLIST_DOMAINS`
 - `ENRICHMENT_QUERY_TRANSLATE=true`
-- `ENRICHMENT_PROVIDERS=gdelt,eventregistry,newsapi,opensearch`
+- `ENRICHMENT_PROVIDERS=yacy,gdelt,eventregistry,newsapi,opensearch`
+
+YaCy-specific:
+- `ENRICHMENT_YACY_ENABLED=true`
+- `ENRICHMENT_YACY_URL=http://localhost:8090`
+- `ENRICHMENT_YACY_TIMEOUT=10s`
+- `ENRICHMENT_YACY_MAX_RESULTS=10`
 - `ENRICHMENT_EVIDENCE_TTL_DAYS=30`
 - `ENRICHMENT_EVIDENCE_DEDUP_SIM=0.98`
 - `ENRICHMENT_EVIDENCE_MAX_PER_ITEM=5`
@@ -196,10 +203,27 @@ Phase 2:
 
 ## Source Catalog (Phase 2)
 Providers (query APIs):
+- **YaCy** (self-hosted, recommended primary) - decentralized P2P search engine with JSON API
 - GDELT 2.1 Events + GDELT DOC 2.1
 - Event Registry
 - NewsAPI (if licensing allows)
 - OpenSearch providers (Brave Search, SerpAPI, or self-hosted SearxNG)
+
+### YaCy Integration
+YaCy is a self-hosted, decentralized search engine that can be configured to crawl trusted news domains.
+
+**Benefits:**
+- Zero API cost (self-hosted)
+- No rate limits (limited only by hardware)
+- Custom index (crawl only allowlist domains)
+- Privacy (queries stay local)
+- Offline capable (works if external APIs fail)
+
+**API endpoint:** `GET /yacysearch.json?query=<query>&count=10`
+
+**Deployment:** Docker recommended (`yacy/yacy_search_server`)
+
+**Crawl strategy:** Configure YaCy to crawl allowlist domains (Reuters, AP, BBC, etc.) on a schedule. This pre-indexes trusted sources for fast local queries.
 
 Default allowlist domains (seed list, extendable):
 - Global: `reuters.com`, `apnews.com`, `bbc.com`, `aljazeera.com`, `dw.com`
@@ -265,15 +289,18 @@ Logging:
 
 ## Provider Resilience
 - `FACTCHECK_GOOGLE_RPM`
+- `ENRICHMENT_YACY_TIMEOUT` (no RPM needed - self-hosted)
 - `ENRICHMENT_GDELT_RPM`, `ENRICHMENT_EVENTREGISTRY_RPM`, `ENRICHMENT_NEWSAPI_RPM`
 - `ENRICHMENT_PROVIDER_COOLDOWN=10m`
-- Fallback order (Phase 2): OpenSearch → GDELT → Event Registry → NewsAPI.
+- Fallback order (Phase 2): **YaCy → GDELT → Event Registry → NewsAPI → OpenSearch**
+
+YaCy is first because it's self-hosted (no cost, no rate limits). External APIs are fallbacks.
 
 ## Rollout Plan
 Phase 1:
-1. Add “also reported by” using clustering output.
-2. Integrate Google Fact Check API and store matches.
-3. Add digest output lines and Phase 1 metrics.
+1. ✅ Add "also reported by" using clustering output.
+2. ✅ Integrate Google Fact Check API and store matches.
+3. ✅ Add digest output lines and Phase 1 metrics.
 
 Phase 2:
 1. Implement storage + retrieval behind `ENRICHMENT_ENABLED`.
@@ -287,8 +314,10 @@ Phase 2:
   - Query generation fallback behavior.
   - Entity normalization and overlap ratio.
   - Evidence extraction from HTML/RSS fixtures.
+  - YaCy JSON response parsing.
 - Integration tests:
   - Mock Google Fact Check API.
+  - Mock YaCy `/yacysearch.json` endpoint.
   - Mock provider responses for search + fetch.
   - Verify queue processing + timeout handling.
 - Offline evaluation:
@@ -334,3 +363,6 @@ Proceed to Phase 2 only if at least one is true after Phase 1:
 - SAGE Emerging Media (2024) https://doi.org/10.1177/27523543241280195
 - GDELT Project https://www.gdeltproject.org/
 - Rutgers RUcore (Corroborating information) https://rucore.libraries.rutgers.edu/rutgers-lib/51498/
+- YaCy Decentralized Search Engine https://yacy.net/
+- YaCy API Documentation https://wiki.yacy.net/index.php/Dev:API
+- YaCy GitHub https://github.com/yacy/yacy_search_server

@@ -31,6 +31,12 @@ const (
 	DefaultScoresHours = 24
 	// DefaultScoresLimit is the default limit for item scores results.
 	DefaultScoresLimit = 10
+	// DefaultFactCheckLimit is the default limit for recent fact check matches.
+	DefaultFactCheckLimit = 5
+	// DefaultFactCheckRecentHours is the default lookback for match counts.
+	DefaultFactCheckRecentHours = 24
+	// FactCheckClaimLimit is the max length for displaying fact check claims.
+	FactCheckClaimLimit = 160
 	// RecentErrorsLimit is the limit for fetching recent errors.
 	RecentErrorsLimit = 10
 	// SettingHistoryLimit is the limit for fetching setting history.
@@ -138,6 +144,7 @@ var promptBases = []string{"summarize", "narrative", "cluster_summary", "cluster
 const (
 	ErrSavingFmt                      = "❌ Error saving %s: %s"
 	ErrFetchingChannelsFmt            = "❌ Error fetching channels: %s"
+	ErrFetchingFactCheckMatchesFmt    = "❌ Error fetching recent fact check matches: %s"
 	ErrFetchingAdsKeywords            = "❌ Error fetching ads keywords."
 	ErrUnknownBaseFmt                 = "Unknown base. Use: <code>%s</code>"
 	ErrChannelNotFoundFmt             = "Channel <code>%s</code> not found."
@@ -475,7 +482,8 @@ func (b *Bot) handleSystemNamespace(ctx context.Context, msg *tgbotapi.Message) 
 • <code>/system history</code> - Recent setting changes
 • <code>/system errors</code> - Recent processing errors
 • <code>/system retry</code> - Retry failed items
-• <code>/system scores</code> - Item importance scores`)
+• <code>/system scores</code> - Item importance scores
+• <code>/system factcheck</code> - Fact check status`)
 
 		return
 	}
@@ -496,6 +504,8 @@ func (b *Bot) handleSystemNamespace(ctx context.Context, msg *tgbotapi.Message) 
 		b.handleRetry(ctx, &newMsg)
 	case CmdScores:
 		b.handleScores(ctx, &newMsg)
+	case CmdFactCheck:
+		b.handleFactCheck(ctx, &newMsg)
 	default:
 		b.reply(msg, fmt.Sprintf("❓ Unknown subcommand: <code>%s</code>\n\n💡 Run <code>/system</code> to see available diagnostics.", html.EscapeString(subcommand)))
 	}
@@ -3083,6 +3093,7 @@ func (b *Bot) handleHelp(_ context.Context, msg *tgbotapi.Message) {
 		"ai":          helpAIMessage(),
 		"system":      helpSystemMessage(),
 		"scores":      helpScoresMessage(),
+		"factcheck":   helpFactCheckMessage(),
 		"ratings":     helpRatingsMessage(),
 		"annotate":    helpAnnotateMessage(),
 		"annotations": helpAnnotateMessage(),
@@ -3115,8 +3126,8 @@ func helpSummaryMessage() string {
 		"• <code>/ai</code> - AI features\n" +
 		"• <code>/system</code> - Diagnostics\n\n" +
 		"Data & feedback:\n" +
-		"• <code>/scores</code> <code>/ratings</code> <code>/annotate</code> <code>/feedback</code>\n\n" +
-		"More: <code>/help &lt;topic&gt;</code> (channels, discover, filters, schedule, config, ai, system, scores, ratings, annotate)\n" +
+		"• <code>/scores</code> <code>/factcheck</code> <code>/ratings</code> <code>/annotate</code> <code>/feedback</code>\n\n" +
+		"More: <code>/help &lt;topic&gt;</code> (channels, discover, filters, schedule, config, ai, system, scores, factcheck, ratings, annotate)\n" +
 		"Full list: <code>/help all</code>\n" +
 		"BotFather list: <code>/help botfather</code>"
 }
@@ -3204,7 +3215,8 @@ func helpSystemMessage() string {
 		"• <code>/system status</code>\n" +
 		"• <code>/system settings</code>\n" +
 		"• <code>/system errors</code>\n" +
-		"• <code>/system retry</code>"
+		"• <code>/system retry</code>\n" +
+		"• <code>/system factcheck</code>"
 }
 
 func helpScoresMessage() string {
@@ -3212,6 +3224,11 @@ func helpScoresMessage() string {
 		"• <code>/scores [hours] [limit]</code>\n" +
 		"• <code>/scores debug [hours]</code>\n" +
 		"• <code>/scores debug reasons [hours]</code>"
+}
+
+func helpFactCheckMessage() string {
+	return "🔎 <b>Fact Check</b>\n" +
+		"• <code>/factcheck [limit]</code> - Queue, cache, and match stats"
 }
 
 func helpRatingsMessage() string {
@@ -3235,6 +3252,7 @@ func helpAllMessage() string {
 		helpAIMessage() + "\n\n" +
 		helpSystemMessage() + "\n\n" +
 		helpScoresMessage() + "\n\n" +
+		helpFactCheckMessage() + "\n\n" +
 		helpRatingsMessage() + "\n\n" +
 		helpAnnotateMessage()
 }
@@ -3254,6 +3272,7 @@ func botFatherCommandsMessage() string {
 		"ai - AI features\n" +
 		"system - System tools\n" +
 		"scores - Score stats\n" +
+		"factcheck - Fact check status\n" +
 		"ratings - Rating stats\n" +
 		"annotate - Annotation queue\n" +
 		"discover - Channel discovery\n" +

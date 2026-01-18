@@ -43,6 +43,28 @@ Feature documentation is available in `docs/features/`:
 - [Editor Mode](docs/features/editor-mode.md) - Narrative rendering, tiered importance, consolidated clusters
 - [Vision & Images](docs/features/vision-images.md) - Vision routing, cover images, AI covers
 - [Annotations](docs/features/annotations.md) - Item labeling for quality evaluation and threshold tuning
+- [Corroboration](docs/features/corroboration.md) - Channel corroboration and fact-check links
+
+## Fact Check (Phase 1)
+
+This project can optionally query the Google Fact Check Tools API to attach a “Related fact-check” link to digest items.
+
+### Enable and Configure
+1. Create a Google Cloud project and enable **Fact Check Tools API**.
+2. Create an API key and (recommended) restrict it by IP or referrer.
+3. Set the following in your `.env` or Kubernetes config:
+   - `FACTCHECK_GOOGLE_ENABLED=true`
+   - `FACTCHECK_GOOGLE_API_KEY=...`
+   - `FACTCHECK_GOOGLE_RPM=60` (match your quota)
+   - `FACTCHECK_GOOGLE_MAX_RESULTS=3`
+   - `FACTCHECK_CACHE_TTL_HOURS=48`
+   - `FACTCHECK_MIN_CLAIM_LENGTH=40`
+   - `FACTCHECK_QUEUE_MAX=5000` (backpressure limit)
+
+### Quotas and Limits
+Check your quota in Google Cloud Console:
+**APIs & Services → Fact Check Tools API → Quotas**.  
+Set `FACTCHECK_GOOGLE_RPM` to stay below that limit.
 
 ## Prerequisites
 - Docker and Docker Compose

@@ -14,6 +14,7 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/output/digest"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
+	"github.com/lueurxax/telegram-digest-bot/internal/process/factcheck"
 	"github.com/lueurxax/telegram-digest-bot/internal/process/pipeline"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
@@ -100,12 +101,20 @@ func (a *App) RunWorker(ctx context.Context) error {
 
 	p := pipeline.New(a.cfg, a.database, llmClient, resolver, a.logger)
 	go a.runDiscoveryReconciliation(ctx)
+	go a.runFactCheckWorker(ctx)
 
 	if err := p.Run(ctx); err != nil {
 		return fmt.Errorf("pipeline run: %w", err)
 	}
 
 	return nil
+}
+
+func (a *App) runFactCheckWorker(ctx context.Context) {
+	worker := factcheck.NewWorker(a.cfg, a.database, a.logger)
+	if err := worker.Run(ctx); err != nil {
+		a.logger.Warn().Err(err).Msg("fact check worker stopped")
+	}
 }
 
 func (a *App) runDiscoveryReconciliation(ctx context.Context) {

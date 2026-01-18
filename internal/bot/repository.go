@@ -63,6 +63,13 @@ type Repository interface {
 	GetItemStatusStats(ctx context.Context, since time.Time) (db.ItemStatusStats, error)
 	GetDropReasonStats(ctx context.Context, since time.Time, limit int) ([]db.DropReasonStat, error)
 
+	// Fact check operations
+	GetFactCheckQueueStats(ctx context.Context) ([]db.FactCheckQueueStat, error)
+	GetFactCheckCacheCount(ctx context.Context) (int, error)
+	CountFactCheckMatches(ctx context.Context) (int, error)
+	CountFactCheckMatchesSince(ctx context.Context, since time.Time) (int, error)
+	GetRecentFactCheckMatches(ctx context.Context, limit int) ([]db.FactCheckMatch, error)
+
 	// Digest operations
 	GetLastPostedDigest(ctx context.Context) (*db.LastDigestInfo, error)
 	GetRecentErrors(ctx context.Context, limit int) ([]db.Item, error)

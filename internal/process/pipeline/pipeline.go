@@ -11,13 +11,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
-	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
-	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
-	"github.com/lueurxax/telegram-digest-bot/internal/process/dedup"
-	"github.com/lueurxax/telegram-digest-bot/internal/process/filters"
 	links "github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
+	"github.com/lueurxax/telegram-digest-bot/internal/process/dedup"
+	"github.com/lueurxax/telegram-digest-bot/internal/process/factcheck"
+	"github.com/lueurxax/telegram-digest-bot/internal/process/filters"
+	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 type Repository interface {
@@ -33,6 +34,8 @@ type Repository interface {
 	SaveRelevanceGateLog(ctx context.Context, rawMsgID string, decision string, confidence *float32, reason, model, gateVersion string) error
 	SaveRawMessageDropLog(ctx context.Context, rawMsgID, reason, detail string) error
 	SaveEmbedding(ctx context.Context, itemID string, embedding []float32) error
+	EnqueueFactCheck(ctx context.Context, itemID, claim, normalizedClaim string) error
+	CountPendingFactChecks(ctx context.Context) (int, error)
 	CheckStrictDuplicate(ctx context.Context, hash string, id string) (bool, error)
 	FindSimilarItem(ctx context.Context, embedding []float32, threshold float32) (string, error)
 	LinkMessageToLink(ctx context.Context, rawMsgID, linkCacheID string, position int) error
@@ -785,7 +788,7 @@ func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logg
 	emb := embeddings[c.ID]
 	if len(emb) > 0 {
 		if err := p.database.SaveEmbedding(ctx, item.ID, emb); err != nil {
-			logger.Error().Str("item_id", item.ID).Err(err).Msg("failed to save embedding")
+			logger.Error().Str(LogFieldItemID, item.ID).Err(err).Msg("failed to save embedding")
 		}
 	}
 
@@ -793,5 +796,67 @@ func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logg
 		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg(LogMsgFailedToMarkProcessed)
 	}
 
+	p.enqueueFactCheck(ctx, logger, item)
+
 	return true
+}
+
+func (p *Pipeline) enqueueFactCheck(ctx context.Context, logger zerolog.Logger, item *db.Item) {
+	if !p.factCheckEnabled(item) {
+		return
+	}
+
+	claim, normalized, ok := p.buildFactCheckClaim(item)
+	if !ok {
+		return
+	}
+
+	if !p.factCheckQueueHasCapacity(ctx, logger) {
+		return
+	}
+
+	if err := p.database.EnqueueFactCheck(ctx, item.ID, claim, normalized); err != nil {
+		logger.Warn().Err(err).Str(LogFieldItemID, item.ID).Msg("failed to enqueue fact check")
+	}
+}
+
+func (p *Pipeline) factCheckEnabled(item *db.Item) bool {
+	if !p.cfg.FactCheckGoogleEnabled || p.cfg.FactCheckGoogleAPIKey == "" {
+		return false
+	}
+
+	return item.Status == StatusReady
+}
+
+func (p *Pipeline) buildFactCheckClaim(item *db.Item) (string, string, bool) {
+	minLen := p.cfg.FactCheckMinClaimLength
+	if minLen <= 0 {
+		minLen = factcheck.DefaultMinClaimLength
+	}
+
+	claim := factcheck.BuildClaimFromSummary(item.Summary)
+	if len(claim) < minLen {
+		return "", "", false
+	}
+
+	normalized := factcheck.NormalizeClaim(claim)
+	if normalized == "" {
+		return "", "", false
+	}
+
+	return claim, normalized, true
+}
+
+func (p *Pipeline) factCheckQueueHasCapacity(ctx context.Context, logger zerolog.Logger) bool {
+	if p.cfg.FactCheckQueueMax <= 0 {
+		return true
+	}
+
+	pending, err := p.database.CountPendingFactChecks(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to count fact check queue")
+		return true
+	}
+
+	return pending < p.cfg.FactCheckQueueMax
 }

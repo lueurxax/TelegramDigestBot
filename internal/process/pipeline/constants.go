@@ -41,6 +41,7 @@ const (
 	LogFieldDuplicateID   = "duplicate_id"
 	LogFieldCount         = "count"
 	LogFieldModel         = "model"
+	LogFieldItemID        = "item_id"
 )
 
 // Log message constants

@@ -87,10 +87,11 @@ type digestRenderContext struct {
 	displayStart  time.Time
 	displayEnd    time.Time
 	seenSummaries map[string]bool
+	factChecks    map[string]db.FactCheckMatch
 	logger        *zerolog.Logger
 }
 
-func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSettings, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, logger *zerolog.Logger) *digestRenderContext {
+func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSettings, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, factChecks map[string]db.FactCheckMatch, logger *zerolog.Logger) *digestRenderContext {
 	displayStart := start
 	displayEnd := end
 
@@ -110,6 +111,7 @@ func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSetting
 		displayStart:  displayStart,
 		displayEnd:    displayEnd,
 		seenSummaries: make(map[string]bool),
+		factChecks:    factChecks,
 		logger:        logger,
 	}
 }
@@ -309,7 +311,7 @@ func (rc *digestRenderContext) renderGroup(ctx context.Context, sb *strings.Buil
 					hasContent = true
 				}
 			} else {
-				formatted := rc.scheduler.formatItems(c.Items, true, rc.seenSummaries)
+				formatted := rc.scheduler.formatItems(c.Items, true, rc.seenSummaries, rc.factChecks)
 				if formatted != "" {
 					hasContent = true
 
@@ -318,7 +320,7 @@ func (rc *digestRenderContext) renderGroup(ctx context.Context, sb *strings.Buil
 			}
 		}
 	} else {
-		formatted := rc.scheduler.formatItems(group.items, true, rc.seenSummaries)
+		formatted := rc.scheduler.formatItems(group.items, true, rc.seenSummaries, rc.factChecks)
 		if formatted != "" {
 			hasContent = true
 
@@ -334,18 +336,54 @@ func (rc *digestRenderContext) renderGroup(ctx context.Context, sb *strings.Buil
 
 // renderOthersAsNarrative generates an LLM narrative summary for the "others" section instead of listing items individually.
 func (rc *digestRenderContext) renderOthersAsNarrative(ctx context.Context, sb *strings.Builder, group clusterGroup, emoji, title string) bool {
-	// Calculate total items for preallocation
-	totalItems := len(group.items)
+	allItems := collectAllItems(group)
+	if len(allItems) == 0 {
+		return false
+	}
 
+	model := rc.getNarrativeModel()
+	if model == "" {
+		rc.renderGroup(ctx, sb, group, emoji, title)
+
+		return true
+	}
+
+	// Generate narrative for "others" items
+	narrative, err := rc.llmClient.SummarizeCluster(ctx, allItems, rc.settings.digestLanguage, model, rc.settings.digestTone)
+	if err != nil || narrative == "" {
+		if err != nil {
+			rc.logger.Warn().Err(err).Msg("failed to generate others narrative, falling back to detailed list")
+		}
+
+		rc.renderGroup(ctx, sb, group, emoji, title)
+
+		return true
+	}
+
+	rc.renderNarrativeSection(sb, narrative, emoji, title, allItems)
+
+	return true
+}
+
+func (rc *digestRenderContext) getNarrativeModel() string {
+	model := rc.settings.smartLLMModel
+	if model == "" {
+		model = rc.scheduler.cfg.LLMModel
+	}
+
+	return model
+}
+
+func collectAllItems(group clusterGroup) []db.Item {
+	totalItems := len(group.items)
 	for _, c := range group.clusters {
 		totalItems += len(c.Items)
 	}
 
 	if totalItems == 0 {
-		return false
+		return nil
 	}
 
-	// Collect all items from the group
 	allItems := make([]db.Item, 0, totalItems)
 
 	for _, c := range group.clusters {
@@ -354,39 +392,23 @@ func (rc *digestRenderContext) renderOthersAsNarrative(ctx context.Context, sb *
 
 	allItems = append(allItems, group.items...)
 
-	model := rc.settings.smartLLMModel
-	if model == "" {
-		model = rc.scheduler.cfg.LLMModel
-	}
+	return allItems
+}
 
-	if model == "" {
-		// No LLM model configured, fall back to regular rendering
-		rc.renderGroup(ctx, sb, group, emoji, title)
-
-		return true
-	}
-
-	// Generate narrative for "others" items
-	narrative, err := rc.llmClient.SummarizeCluster(ctx, allItems, rc.settings.digestLanguage, model, rc.settings.digestTone)
-	if err != nil {
-		rc.logger.Warn().Err(err).Msg("failed to generate others narrative, falling back to detailed list")
-		rc.renderGroup(ctx, sb, group, emoji, title)
-
-		return true
-	}
-
-	if narrative == "" {
-		rc.renderGroup(ctx, sb, group, emoji, title)
-
-		return true
-	}
-
-	// Render the narrative summary
+func (rc *digestRenderContext) renderNarrativeSection(sb *strings.Builder, narrative, emoji, title string, allItems []db.Item) {
 	fmt.Fprintf(sb, FormatSectionHeader, emoji, title)
 	sb.WriteString(htmlutils.SanitizeHTML(narrative))
 	sb.WriteString("\n")
 
-	return true
+	if rc.factChecks != nil {
+		if match, ok := findFactCheckMatch(allItems, rc.factChecks); ok {
+			sb.WriteString(formatFactCheckLine(match))
+		}
+	}
+
+	if line := rc.scheduler.buildCorroborationLine(allItems, allItems[0]); line != "" {
+		sb.WriteString(line)
+	}
 }
 
 func (rc *digestRenderContext) renderMultiItemCluster(ctx context.Context, sb *strings.Builder, c db.ClusterWithItems) bool {
@@ -398,18 +420,14 @@ func (rc *digestRenderContext) renderMultiItemCluster(ctx context.Context, sb *s
 }
 
 func (rc *digestRenderContext) renderConsolidatedCluster(ctx context.Context, sb *strings.Builder, c db.ClusterWithItems) bool {
-	model := rc.settings.smartLLMModel
-	if model == "" {
-		model = rc.scheduler.cfg.LLMModel
-	}
+	model := rc.getNarrativeModel()
 
 	summary, err := rc.llmClient.SummarizeCluster(ctx, c.Items, rc.settings.digestLanguage, model, rc.settings.digestTone)
-	if err != nil {
-		rc.logger.Warn().Err(err).Str("cluster", c.Topic).Msg("failed to summarize cluster, falling back to detailed list")
-		return rc.renderRepresentativeCluster(sb, c)
-	}
+	if err != nil || summary == "" {
+		if err != nil {
+			rc.logger.Warn().Err(err).Str("cluster", c.Topic).Msg("failed to summarize cluster, falling back to detailed list")
+		}
 
-	if summary == "" {
 		return rc.renderRepresentativeCluster(sb, c)
 	}
 
@@ -420,6 +438,12 @@ func (rc *digestRenderContext) renderConsolidatedCluster(ctx context.Context, sb
 
 	rc.seenSummaries[summary] = true
 
+	rc.renderConsolidatedSummary(sb, summary, c)
+
+	return true
+}
+
+func (rc *digestRenderContext) renderConsolidatedSummary(sb *strings.Builder, summary string, c db.ClusterWithItems) {
 	sb.WriteString(htmlutils.ItemStart)
 
 	if c.Topic != "" {
@@ -440,10 +464,18 @@ func (rc *digestRenderContext) renderConsolidatedCluster(ctx context.Context, sb
 		fmt.Fprintf(sb, " <i>via %s</i>", strings.Join(links, DigestSourceSeparator))
 	}
 
+	if rc.factChecks != nil {
+		if match, ok := findFactCheckMatch(c.Items, rc.factChecks); ok {
+			sb.WriteString(formatFactCheckLine(match))
+		}
+	}
+
+	if line := rc.scheduler.buildCorroborationLine(c.Items, c.Items[0]); line != "" {
+		sb.WriteString(line)
+	}
+
 	sb.WriteString(htmlutils.ItemEnd)
 	sb.WriteString("\n")
-
-	return true
 }
 
 func (rc *digestRenderContext) renderRepresentativeCluster(sb *strings.Builder, c db.ClusterWithItems) bool {
@@ -471,6 +503,16 @@ func (rc *digestRenderContext) renderRepresentativeCluster(sb *strings.Builder, 
 	links := rc.collectSourceLinks(c.Items)
 	if len(links) > 0 {
 		fmt.Fprintf(sb, DigestSourceVia, strings.Join(links, DigestSourceSeparator))
+	}
+
+	if rc.factChecks != nil {
+		if match, ok := findFactCheckMatch(c.Items, rc.factChecks); ok {
+			sb.WriteString(formatFactCheckLine(match))
+		}
+	}
+
+	if line := rc.scheduler.buildCorroborationLine(c.Items, representative); line != "" {
+		sb.WriteString(line)
 	}
 
 	if len(c.Items) > 1 {
