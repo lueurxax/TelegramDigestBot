@@ -109,6 +109,24 @@ type Config struct {
 	GDELTEnabled        bool          `env:"GDELT_ENABLED" envDefault:"false"`
 	GDELTRequestsPerMin int           `env:"GDELT_RPM" envDefault:"60"`
 	GDELTTimeout        time.Duration `env:"GDELT_TIMEOUT" envDefault:"30s"`
+
+	// SearxNG provider
+	SearxNGEnabled bool          `env:"SEARXNG_ENABLED" envDefault:"false"`
+	SearxNGBaseURL string        `env:"SEARXNG_BASE_URL" envDefault:"http://localhost:8888"`
+	SearxNGTimeout time.Duration `env:"SEARXNG_TIMEOUT" envDefault:"30s"`
+	SearxNGEngines string        `env:"SEARXNG_ENGINES" envDefault:""` // comma-separated, e.g. "google,duckduckgo"
+
+	// Event Registry provider
+	EventRegistryEnabled        bool          `env:"ENRICHMENT_EVENTREGISTRY_ENABLED" envDefault:"false"`
+	EventRegistryAPIKey         string        `env:"ENRICHMENT_EVENTREGISTRY_API_KEY" envDefault:""`
+	EventRegistryRequestsPerMin int           `env:"ENRICHMENT_EVENTREGISTRY_RPM" envDefault:"30"`
+	EventRegistryTimeout        time.Duration `env:"ENRICHMENT_EVENTREGISTRY_TIMEOUT" envDefault:"30s"`
+
+	// NewsAPI provider
+	NewsAPIEnabled        bool          `env:"ENRICHMENT_NEWSAPI_ENABLED" envDefault:"false"`
+	NewsAPIKey            string        `env:"ENRICHMENT_NEWSAPI_KEY" envDefault:""`
+	NewsAPIRequestsPerMin int           `env:"ENRICHMENT_NEWSAPI_RPM" envDefault:"100"`
+	NewsAPITimeout        time.Duration `env:"ENRICHMENT_NEWSAPI_TIMEOUT" envDefault:"30s"`
 }
 
 func Load() (*Config, error) {
@@ -125,6 +143,13 @@ func Load() (*Config, error) {
 }
 
 func applyEnrichmentAliases(cfg *Config) {
+	applyGeneralEnrichmentAliases(cfg)
+	applyYaCyAliases(cfg)
+	applyGDELTAliases(cfg)
+	applySearxNGAliases(cfg)
+}
+
+func applyGeneralEnrichmentAliases(cfg *Config) {
 	if !hasEnv("ENRICHMENT_MAX_RESULTS") {
 		setIntFromEnv("ENRICHMENT_MAX_SOURCES", &cfg.EnrichmentMaxResults)
 	}
@@ -140,7 +165,9 @@ func applyEnrichmentAliases(cfg *Config) {
 	if !hasEnv("ENRICHMENT_MAX_EVIDENCE_PER_ITEM") {
 		setIntFromEnv("ENRICHMENT_EVIDENCE_MAX_PER_ITEM", &cfg.EnrichmentMaxEvidenceItem)
 	}
+}
 
+func applyYaCyAliases(cfg *Config) {
 	if !hasEnv("YACY_ENABLED") {
 		setBoolFromEnv("ENRICHMENT_YACY_ENABLED", &cfg.YaCyEnabled)
 	}
@@ -152,13 +179,33 @@ func applyEnrichmentAliases(cfg *Config) {
 	if !hasEnv("YACY_TIMEOUT") {
 		setDurationFromEnv("ENRICHMENT_YACY_TIMEOUT", &cfg.YaCyTimeout)
 	}
+}
 
+func applyGDELTAliases(cfg *Config) {
 	if !hasEnv("GDELT_RPM") {
 		setIntFromEnv("ENRICHMENT_GDELT_RPM", &cfg.GDELTRequestsPerMin)
 	}
 
 	if !hasEnv("GDELT_TIMEOUT") {
 		setDurationFromEnv("ENRICHMENT_GDELT_TIMEOUT", &cfg.GDELTTimeout)
+	}
+}
+
+func applySearxNGAliases(cfg *Config) {
+	if !hasEnv("SEARXNG_ENABLED") {
+		setBoolFromEnv("ENRICHMENT_SEARXNG_ENABLED", &cfg.SearxNGEnabled)
+	}
+
+	if !hasEnv("SEARXNG_BASE_URL") {
+		setStringFromEnv("ENRICHMENT_SEARXNG_URL", &cfg.SearxNGBaseURL)
+	}
+
+	if !hasEnv("SEARXNG_TIMEOUT") {
+		setDurationFromEnv("ENRICHMENT_SEARXNG_TIMEOUT", &cfg.SearxNGTimeout)
+	}
+
+	if !hasEnv("SEARXNG_ENGINES") {
+		setStringFromEnv("ENRICHMENT_SEARXNG_ENGINES", &cfg.SearxNGEngines)
 	}
 }
 

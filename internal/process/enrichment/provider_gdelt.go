@@ -14,11 +14,12 @@ import (
 )
 
 const (
-	gdeltBaseURL        = "https://api.gdeltproject.org/api/v2/doc/doc"
-	gdeltDefaultTimeout = 30 * time.Second
-	gdeltDefaultRPM     = 60
-	secondsPerMinute    = 60.0
-	searchParamKeyQuery = "query"
+	gdeltBaseURL         = "https://api.gdeltproject.org/api/v2/doc/doc"
+	gdeltDefaultTimeout  = 30 * time.Second
+	gdeltDefaultRPM      = 60
+	secondsPerMinute     = 60.0
+	searchParamKeyQuery  = "query"
+	searchParamKeyFormat = "format"
 )
 
 var errGDELTUnexpectedStatus = errors.New("gdelt unexpected status")
@@ -107,7 +108,7 @@ func buildGDELTURL(query string, maxResults int) string {
 	params.Set(searchParamKeyQuery, query)
 	params.Set("mode", "ArtList")
 	params.Set("maxrecords", fmt.Sprintf("%d", maxResults))
-	params.Set("format", "json")
+	params.Set(searchParamKeyFormat, "json")
 	params.Set("sort", "DateDesc")
 
 	return gdeltBaseURL + "?" + params.Encode()

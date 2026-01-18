@@ -1,14 +1,14 @@
 # Source Enrichment & Fact-Checking Pipeline
 
-> **Status: Phase 1 Implemented** (January 2026)
+> **Status: Phase 2 Implemented** (January 2026)
 >
-> Phase 1 is complete. See [docs/features/corroboration.md](../features/corroboration.md) for user-facing documentation.
-> Phase 2 remains a proposal, gated by Phase 1 metrics.
+> Both phases are complete. See [docs/features/corroboration.md](../features/corroboration.md) for user-facing documentation.
+> Phase 2 is enabled via `ENRICHMENT_ENABLED=true`.
 
 ## Summary
 Two-phase rollout:
 1. **Phase 1** ✅ Channel corroboration + Google Fact Check API (implemented)
-2. **Phase 2** ⏳ Full evidence retrieval, extraction, and agreement scoring (proposal)
+2. **Phase 2** ✅ Full evidence retrieval, extraction, and agreement scoring (implemented)
 
 ## Goals
 - Improve factual accuracy and context with measurable outcomes.
@@ -188,26 +188,46 @@ Phase 2:
 - `ENRICHMENT_MIN_AGREEMENT=0.65`
 - `ENRICHMENT_ALLOWLIST_DOMAINS` / `ENRICHMENT_DENYLIST_DOMAINS`
 - `ENRICHMENT_QUERY_TRANSLATE=true`
-- `ENRICHMENT_PROVIDERS=yacy,gdelt,eventregistry,newsapi,opensearch`
+- `ENRICHMENT_PROVIDERS=yacy,gdelt,searxng`
 
 YaCy-specific:
 - `ENRICHMENT_YACY_ENABLED=true`
 - `ENRICHMENT_YACY_URL=http://localhost:8090`
 - `ENRICHMENT_YACY_TIMEOUT=10s`
 - `ENRICHMENT_YACY_MAX_RESULTS=10`
+
+SearxNG-specific:
+- `SEARXNG_ENABLED=true`
+- `SEARXNG_BASE_URL=http://localhost:8888`
+- `SEARXNG_TIMEOUT=30s`
+- `SEARXNG_ENGINES=google,duckduckgo` (optional)
+
+Event Registry-specific:
+- `ENRICHMENT_EVENTREGISTRY_ENABLED=true`
+- `ENRICHMENT_EVENTREGISTRY_API_KEY=...`
+- `ENRICHMENT_EVENTREGISTRY_RPM=30`
+- `ENRICHMENT_EVENTREGISTRY_TIMEOUT=30s`
+
+NewsAPI-specific:
+- `ENRICHMENT_NEWSAPI_ENABLED=true`
+- `ENRICHMENT_NEWSAPI_KEY=...`
+- `ENRICHMENT_NEWSAPI_RPM=100`
+- `ENRICHMENT_NEWSAPI_TIMEOUT=30s`
+
+Evidence management:
 - `ENRICHMENT_EVIDENCE_TTL_DAYS=30`
 - `ENRICHMENT_EVIDENCE_DEDUP_SIM=0.98`
 - `ENRICHMENT_EVIDENCE_MAX_PER_ITEM=5`
-- `ENRICHMENT_DAILY_BUDGET_USD=100` (warning)
-- `ENRICHMENT_MONTHLY_CAP_USD=2000` (hard stop)
+- `ENRICHMENT_DAILY_LIMIT=1000`
+- `ENRICHMENT_MONTHLY_LIMIT=20000`
 
 ## Source Catalog (Phase 2)
 Providers (query APIs):
-- **YaCy** (self-hosted, recommended primary) - decentralized P2P search engine with JSON API
-- GDELT 2.1 Events + GDELT DOC 2.1
-- Event Registry
-- NewsAPI (if licensing allows)
-- OpenSearch providers (Brave Search, SerpAPI, or self-hosted SearxNG)
+- ✅ **YaCy** (self-hosted, recommended primary) - decentralized P2P search engine with JSON API
+- ✅ **GDELT** 2.1 Events + GDELT DOC 2.1
+- ✅ **Event Registry** - commercial news API with global coverage
+- ✅ **NewsAPI** - news aggregation API
+- ✅ **SearxNG** (self-hosted metasearch) - aggregates multiple search engines
 
 ### YaCy Integration
 YaCy is a self-hosted, decentralized search engine that can be configured to crawl trusted news domains.
@@ -292,9 +312,9 @@ Logging:
 - `ENRICHMENT_YACY_TIMEOUT` (no RPM needed - self-hosted)
 - `ENRICHMENT_GDELT_RPM`, `ENRICHMENT_EVENTREGISTRY_RPM`, `ENRICHMENT_NEWSAPI_RPM`
 - `ENRICHMENT_PROVIDER_COOLDOWN=10m`
-- Fallback order (Phase 2): **YaCy → GDELT → Event Registry → NewsAPI → OpenSearch**
+- Fallback order (Phase 2): **YaCy → GDELT → Event Registry → NewsAPI → SearxNG**
 
-YaCy is first because it's self-hosted (no cost, no rate limits). External APIs are fallbacks.
+YaCy is first because it's self-hosted (no cost, no rate limits). External APIs are fallbacks with rate limiting.
 
 ## Rollout Plan
 Phase 1:
@@ -303,10 +323,15 @@ Phase 1:
 3. ✅ Add digest output lines and Phase 1 metrics.
 
 Phase 2:
-1. Implement storage + retrieval behind `ENRICHMENT_ENABLED`.
-2. Add evidence extraction + scoring, log metrics.
-3. Integrate into clustering and summarization prompts.
-4. Enable by default once metrics stabilize.
+1. ✅ Implement storage + retrieval behind `ENRICHMENT_ENABLED`.
+2. ✅ Add evidence extraction + scoring, log metrics.
+3. ✅ Integrate into summarization prompts.
+4. ✅ Implement multi-provider support (YaCy, GDELT, SearxNG).
+5. ✅ Add language detection and query translation.
+6. ✅ Add admin domain management (`/enrichment domains`).
+7. ✅ Add budget controls (daily/monthly limits).
+8. ✅ Add embedding-based claim deduplication.
+9. ⏳ Clustering improvement with evidence embeddings (future enhancement).
 
 ## Testing Strategy
 - Unit tests:

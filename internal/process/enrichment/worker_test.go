@@ -117,6 +117,10 @@ func (m *mockRepository) IncrementEnrichmentUsage(_ context.Context, _ string) e
 	return nil
 }
 
+func (m *mockRepository) GetSetting(_ context.Context, _ string, _ interface{}) error {
+	return errNotImplemented
+}
+
 func TestWorker_generateClaimEmbedding(t *testing.T) {
 	logger := zerolog.Nop()
 

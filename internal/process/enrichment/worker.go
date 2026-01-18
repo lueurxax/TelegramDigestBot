@@ -25,12 +25,18 @@ const (
 	defaultDedupSimilarity           = 0.98
 	maxLogClaimLen                   = 100
 	budgetCheckInterval              = 5 * time.Minute
+	domainFilterReloadInterval       = 5 * time.Minute
 
 	// Log field keys
-	logKeyItemID  = "item_id"
-	logKeyQuery   = "query"
-	logKeyURL     = "url"
-	logKeyDeleted = "deleted"
+	logKeyItemID   = "item_id"
+	logKeyQuery    = "query"
+	logKeyURL      = "url"
+	logKeyDeleted  = "deleted"
+	logKeyLanguage = "language"
+
+	// Settings keys for domain lists
+	settingEnrichmentAllowDomains = "enrichment_allow_domains"
+	settingEnrichmentDenyDomains  = "enrichment_deny_domains"
 )
 
 const errEnrichmentWorkerFmt = "enrichment worker: %w"
@@ -51,6 +57,8 @@ type Repository interface {
 	GetDailyEnrichmentCount(ctx context.Context) (int, error)
 	GetMonthlyEnrichmentCount(ctx context.Context) (int, error)
 	IncrementEnrichmentUsage(ctx context.Context, provider string) error
+	// Settings access for domain lists
+	GetSetting(ctx context.Context, key string, target interface{}) error
 }
 
 // EmbeddingClient provides embedding generation for semantic deduplication.
@@ -58,16 +66,23 @@ type EmbeddingClient interface {
 	GetEmbedding(ctx context.Context, text string) ([]float32, error)
 }
 
+// TranslationClient provides query translation for non-EN/RU languages.
+type TranslationClient interface {
+	TranslateToEnglish(ctx context.Context, text string) (string, error)
+}
+
 type Worker struct {
-	cfg             *config.Config
-	db              Repository
-	embeddingClient EmbeddingClient
-	registry        *ProviderRegistry
-	extractor       *Extractor
-	scorer          *Scorer
-	queryGenerator  *QueryGenerator
-	domainFilter    *DomainFilter
-	logger          *zerolog.Logger
+	cfg               *config.Config
+	db                Repository
+	embeddingClient   EmbeddingClient
+	translationClient TranslationClient
+	registry          *ProviderRegistry
+	extractor         *Extractor
+	scorer            *Scorer
+	queryGenerator    *QueryGenerator
+	domainFilter      *DomainFilter
+	lastDomainReload  time.Time
+	logger            *zerolog.Logger
 }
 
 func NewWorker(cfg *config.Config, database Repository, embeddingClient EmbeddingClient, logger *zerolog.Logger) *Worker {
@@ -85,6 +100,11 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 		domainFilter:    NewDomainFilter(cfg.EnrichmentAllowlistDomains, cfg.EnrichmentDenylistDomains),
 		logger:          logger,
 	}
+}
+
+// SetTranslationClient sets the translation client for query translation.
+func (w *Worker) SetTranslationClient(client TranslationClient) {
+	w.translationClient = client
 }
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -109,6 +129,9 @@ func (w *Worker) runLoop(ctx context.Context) error {
 	lastCleanup := time.Now()
 	lastBudgetCheck := time.Time{}
 
+	// Initial domain filter reload from settings
+	w.reloadDomainFilter(ctx)
+
 	for {
 		paused, err := w.handleBudget(ctx, &lastBudgetCheck)
 		if err != nil {
@@ -117,6 +140,11 @@ func (w *Worker) runLoop(ctx context.Context) error {
 
 		if paused {
 			continue
+		}
+
+		// Reload domain filter periodically
+		if time.Since(w.lastDomainReload) >= domainFilterReloadInterval {
+			w.reloadDomainFilter(ctx)
 		}
 
 		w.processNextItem(ctx)
@@ -210,6 +238,9 @@ func (w *Worker) processWithProviders(ctx context.Context, item *db.EnrichmentQu
 	maxResults := w.getMaxResults()
 	queries := w.generateQueries(item)
 
+	// Translate queries if enabled and language is not EN/RU
+	queries = w.translateQueriesIfNeeded(ctx, queries)
+
 	w.logger.Debug().
 		Str(logKeyItemID, item.ItemID).
 		Int("query_count", len(queries)).
@@ -235,10 +266,51 @@ func (w *Worker) getMaxResults() int {
 func (w *Worker) generateQueries(item *db.EnrichmentQueueItem) []GeneratedQuery {
 	queries := w.queryGenerator.Generate(item.Summary, item.Topic)
 	if len(queries) == 0 {
-		return []GeneratedQuery{{Query: item.Summary, Strategy: "fallback"}}
+		lang := w.queryGenerator.DetectLanguage(item.Summary)
+
+		return []GeneratedQuery{{Query: item.Summary, Strategy: "fallback", Language: lang}}
 	}
 
 	return queries
+}
+
+// translateQueriesIfNeeded translates queries if translation is enabled and language is not EN/RU.
+func (w *Worker) translateQueriesIfNeeded(ctx context.Context, queries []GeneratedQuery) []GeneratedQuery {
+	if !w.cfg.EnrichmentQueryTranslate || w.translationClient == nil {
+		return queries
+	}
+
+	// Capacity for original + potentially translated queries
+	result := make([]GeneratedQuery, 0, len(queries)+len(queries))
+
+	for _, q := range queries {
+		// Always include original query
+		result = append(result, q)
+
+		// For non-EN/RU queries, also add English translation
+		if !IsEnglishOrRussian(q.Language) && q.Language != "" {
+			translated, err := w.translationClient.TranslateToEnglish(ctx, q.Query)
+			if err != nil {
+				w.logger.Debug().
+					Err(err).
+					Str("query", q.Query).
+					Str(logKeyLanguage, q.Language).
+					Msg("failed to translate query")
+
+				continue
+			}
+
+			if translated != "" && translated != q.Query {
+				result = append(result, GeneratedQuery{
+					Query:    translated,
+					Strategy: q.Strategy + "_translated",
+					Language: "en",
+				})
+			}
+		}
+	}
+
+	return result
 }
 
 func (w *Worker) executeQueries(ctx context.Context, queries []GeneratedQuery, maxResults int) *searchState {
@@ -302,32 +374,96 @@ func (w *Worker) collectResults(results []SearchResult, state *searchState) {
 
 func registerProviders(cfg *config.Config, registry *ProviderRegistry) {
 	for _, name := range providerOrder(cfg.EnrichmentProviders) {
-		switch name {
-		case ProviderYaCy:
-			if cfg.YaCyEnabled && cfg.YaCyBaseURL != "" {
-				yacy := NewYaCyProvider(YaCyConfig{
-					Enabled: true,
-					BaseURL: cfg.YaCyBaseURL,
-					Timeout: cfg.YaCyTimeout,
-				})
-				registry.Register(yacy)
-			}
-		case ProviderGDELT:
-			if cfg.GDELTEnabled {
-				gdelt := NewGDELTProvider(GDELTConfig{
-					Enabled:        true,
-					RequestsPerMin: cfg.GDELTRequestsPerMin,
-					Timeout:        cfg.GDELTTimeout,
-				})
-				registry.Register(gdelt)
-			}
-		}
+		registerProvider(cfg, registry, name)
 	}
+}
+
+func registerProvider(cfg *config.Config, registry *ProviderRegistry, name ProviderName) {
+	switch name {
+	case ProviderYaCy:
+		registerYaCy(cfg, registry)
+	case ProviderGDELT:
+		registerGDELT(cfg, registry)
+	case ProviderSearxNG:
+		registerSearxNG(cfg, registry)
+	case ProviderEventRegistry:
+		registerEventRegistry(cfg, registry)
+	case ProviderNewsAPI:
+		registerNewsAPI(cfg, registry)
+	}
+}
+
+func registerYaCy(cfg *config.Config, registry *ProviderRegistry) {
+	if cfg.YaCyEnabled && cfg.YaCyBaseURL != "" {
+		yacy := NewYaCyProvider(YaCyConfig{
+			Enabled: true,
+			BaseURL: cfg.YaCyBaseURL,
+			Timeout: cfg.YaCyTimeout,
+		})
+		registry.Register(yacy)
+	}
+}
+
+func registerGDELT(cfg *config.Config, registry *ProviderRegistry) {
+	if cfg.GDELTEnabled {
+		gdelt := NewGDELTProvider(GDELTConfig{
+			Enabled:        true,
+			RequestsPerMin: cfg.GDELTRequestsPerMin,
+			Timeout:        cfg.GDELTTimeout,
+		})
+		registry.Register(gdelt)
+	}
+}
+
+func registerSearxNG(cfg *config.Config, registry *ProviderRegistry) {
+	if cfg.SearxNGEnabled && cfg.SearxNGBaseURL != "" {
+		searxng := NewSearxNGProvider(SearxNGConfig{
+			Enabled: true,
+			BaseURL: cfg.SearxNGBaseURL,
+			Timeout: cfg.SearxNGTimeout,
+			Engines: parseEngineList(cfg.SearxNGEngines),
+		})
+		registry.Register(searxng)
+	}
+}
+
+func registerEventRegistry(cfg *config.Config, registry *ProviderRegistry) {
+	if cfg.EventRegistryEnabled && cfg.EventRegistryAPIKey != "" {
+		er := NewEventRegistryProvider(EventRegistryConfig{
+			Enabled:        true,
+			APIKey:         cfg.EventRegistryAPIKey,
+			RequestsPerMin: cfg.EventRegistryRequestsPerMin,
+			Timeout:        cfg.EventRegistryTimeout,
+		})
+		registry.Register(er)
+	}
+}
+
+func registerNewsAPI(cfg *config.Config, registry *ProviderRegistry) {
+	if cfg.NewsAPIEnabled && cfg.NewsAPIKey != "" {
+		newsapi := NewNewsAPIProvider(NewsAPIConfig{
+			Enabled:        true,
+			APIKey:         cfg.NewsAPIKey,
+			RequestsPerMin: cfg.NewsAPIRequestsPerMin,
+			Timeout:        cfg.NewsAPITimeout,
+		})
+		registry.Register(newsapi)
+	}
+}
+
+// defaultProviderOrder is the fallback order per the proposal:
+// YaCy → GDELT → Event Registry → NewsAPI → SearxNG
+var defaultProviderOrder = []ProviderName{
+	ProviderYaCy,
+	ProviderGDELT,
+	ProviderEventRegistry,
+	ProviderNewsAPI,
+	ProviderSearxNG,
 }
 
 func providerOrder(raw string) []ProviderName {
 	if strings.TrimSpace(raw) == "" {
-		return []ProviderName{ProviderYaCy, ProviderGDELT}
+		return defaultProviderOrder
 	}
 
 	seen := make(map[ProviderName]bool)
@@ -340,7 +476,7 @@ func providerOrder(raw string) []ProviderName {
 		}
 
 		switch name {
-		case ProviderYaCy, ProviderGDELT:
+		case ProviderYaCy, ProviderGDELT, ProviderSearxNG, ProviderEventRegistry, ProviderNewsAPI:
 			if seen[name] {
 				continue
 			}
@@ -351,10 +487,28 @@ func providerOrder(raw string) []ProviderName {
 	}
 
 	if len(order) == 0 {
-		return []ProviderName{ProviderYaCy, ProviderGDELT}
+		return defaultProviderOrder
 	}
 
 	return order
+}
+
+// parseEngineList parses a comma-separated list of search engines.
+func parseEngineList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	engines := []string{}
+
+	for _, engine := range strings.Split(raw, ",") {
+		engine = strings.TrimSpace(engine)
+		if engine != "" {
+			engines = append(engines, engine)
+		}
+	}
+
+	return engines
 }
 
 func (w *Worker) getItemTimeout() time.Duration {
@@ -670,4 +824,25 @@ func (w *Worker) trackUsage(ctx context.Context, provider ProviderName) {
 	if err := w.db.IncrementEnrichmentUsage(ctx, string(provider)); err != nil {
 		w.logger.Warn().Err(err).Msg("failed to track enrichment usage")
 	}
+}
+
+// reloadDomainFilter reloads domain filter settings from the database.
+// Settings override config values if set.
+func (w *Worker) reloadDomainFilter(ctx context.Context) {
+	allowDomains := w.loadDomainSetting(ctx, settingEnrichmentAllowDomains, w.cfg.EnrichmentAllowlistDomains)
+	denyDomains := w.loadDomainSetting(ctx, settingEnrichmentDenyDomains, w.cfg.EnrichmentDenylistDomains)
+
+	w.domainFilter = NewDomainFilter(allowDomains, denyDomains)
+	w.lastDomainReload = time.Now()
+}
+
+// loadDomainSetting loads a domain list from settings, falling back to config default.
+func (w *Worker) loadDomainSetting(ctx context.Context, settingKey, configDefault string) string {
+	var domains []string
+
+	if err := w.db.GetSetting(ctx, settingKey, &domains); err == nil && len(domains) > 0 {
+		return strings.Join(domains, ",")
+	}
+
+	return configDefault
 }

@@ -12,6 +12,15 @@ const (
 	maxQueryLength      = 150
 	minKeywordLength    = 3
 	maxKeywordsPerQuery = 5
+
+	// Language codes
+	langEnglish = "en"
+	langRussian = "ru"
+	langUnknown = "unknown"
+
+	// Language detection thresholds
+	cyrillicThreshold = 0.3 // If >30% Cyrillic, consider Russian
+	latinThreshold    = 0.5 // If >50% Latin, consider English
 )
 
 // QueryGenerator creates search queries from item summaries.
@@ -26,18 +35,21 @@ func NewQueryGenerator() *QueryGenerator {
 type GeneratedQuery struct {
 	Query    string
 	Strategy string // "entity", "keyword", "topic", "fallback"
+	Language string // detected language code
 }
 
 // queryBuilder helps build and deduplicate generated queries.
 type queryBuilder struct {
-	queries []GeneratedQuery
-	seen    map[string]bool
+	queries  []GeneratedQuery
+	seen     map[string]bool
+	language string
 }
 
-func newQueryBuilder() *queryBuilder {
+func newQueryBuilder(language string) *queryBuilder {
 	return &queryBuilder{
-		queries: make([]GeneratedQuery, 0, maxQueries),
-		seen:    make(map[string]bool),
+		queries:  make([]GeneratedQuery, 0, maxQueries),
+		seen:     make(map[string]bool),
+		language: language,
 	}
 }
 
@@ -52,7 +64,11 @@ func (qb *queryBuilder) add(query, strategy string) {
 	}
 
 	qb.seen[lower] = true
-	qb.queries = append(qb.queries, GeneratedQuery{Query: query, Strategy: strategy})
+	qb.queries = append(qb.queries, GeneratedQuery{
+		Query:    query,
+		Strategy: strategy,
+		Language: qb.language,
+	})
 }
 
 // Generate creates 2-4 search queries from an item summary.
@@ -71,11 +87,12 @@ func (g *QueryGenerator) Generate(summary, topic string) []GeneratedQuery {
 		return nil
 	}
 
+	language := detectLanguage(cleaned)
 	entities := extractQueryEntities(cleaned)
 	locations := extractLocations(cleaned)
 	keywords := extractKeywords(cleaned)
 
-	qb := newQueryBuilder()
+	qb := newQueryBuilder(language)
 
 	g.addEntityQuery(qb, entities, keywords)
 	g.addLocationQuery(qb, entities, locations, keywords)
@@ -84,6 +101,11 @@ func (g *QueryGenerator) Generate(summary, topic string) []GeneratedQuery {
 	g.addFallbackQuery(qb, cleaned)
 
 	return qb.queries
+}
+
+// DetectLanguage returns the detected language code for a text.
+func (g *QueryGenerator) DetectLanguage(text string) string {
+	return detectLanguage(text)
 }
 
 func (g *QueryGenerator) addEntityQuery(qb *queryBuilder, entities, keywords []string) {
@@ -416,4 +438,63 @@ func isCommonAcronym(s string) bool {
 	}
 
 	return common[s]
+}
+
+// detectLanguage detects the primary language of text using character analysis.
+// Returns "en" for English, "ru" for Russian, or "unknown" for other languages.
+func detectLanguage(text string) string {
+	if text == "" {
+		return langUnknown
+	}
+
+	var latinCount, cyrillicCount, totalLetters int
+
+	for _, r := range text {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+
+		totalLetters++
+
+		if isCyrillic(r) {
+			cyrillicCount++
+		} else if isLatin(r) {
+			latinCount++
+		}
+	}
+
+	if totalLetters == 0 {
+		return langUnknown
+	}
+
+	cyrillicRatio := float64(cyrillicCount) / float64(totalLetters)
+	latinRatio := float64(latinCount) / float64(totalLetters)
+
+	if cyrillicRatio >= cyrillicThreshold {
+		return langRussian
+	}
+
+	if latinRatio >= latinThreshold {
+		return langEnglish
+	}
+
+	return langUnknown
+}
+
+// isCyrillic checks if a rune is a Cyrillic character.
+func isCyrillic(r rune) bool {
+	return (r >= 0x0400 && r <= 0x04FF) || // Cyrillic
+		(r >= 0x0500 && r <= 0x052F) // Cyrillic Supplement
+}
+
+// isLatin checks if a rune is a Latin character.
+func isLatin(r rune) bool {
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
+		(r >= 0x00C0 && r <= 0x00FF) || // Latin-1 Supplement
+		(r >= 0x0100 && r <= 0x017F) // Latin Extended-A
+}
+
+// IsEnglishOrRussian checks if the detected language is English or Russian.
+func IsEnglishOrRussian(language string) bool {
+	return language == langEnglish || language == langRussian
 }

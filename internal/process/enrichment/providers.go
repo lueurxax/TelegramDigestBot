@@ -3,6 +3,7 @@ package enrichment
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -10,8 +11,11 @@ import (
 type ProviderName string
 
 const (
-	ProviderYaCy  ProviderName = "yacy"
-	ProviderGDELT ProviderName = "gdelt"
+	ProviderYaCy          ProviderName = "yacy"
+	ProviderGDELT         ProviderName = "gdelt"
+	ProviderSearxNG       ProviderName = "searxng"
+	ProviderEventRegistry ProviderName = "eventregistry"
+	ProviderNewsAPI       ProviderName = "newsapi"
 )
 
 var (
@@ -80,6 +84,11 @@ func (r *ProviderRegistry) SearchWithFallback(ctx context.Context, query string,
 	copy(providers, r.order)
 	r.mu.RUnlock()
 
+	var (
+		lastErr   error
+		attempted bool
+	)
+
 	for _, name := range providers {
 		provider, err := r.Get(name)
 		if err != nil {
@@ -95,15 +104,24 @@ func (r *ProviderRegistry) SearchWithFallback(ctx context.Context, query string,
 			continue
 		}
 
+		attempted = true
+
 		results, err := provider.Search(ctx, query, maxResults)
 		if err != nil {
 			cb.recordFailure()
+
+			lastErr = fmt.Errorf("provider %s: %w", name, err)
+
 			continue
 		}
 
 		cb.recordSuccess()
 
 		return results, name, nil
+	}
+
+	if attempted && lastErr != nil {
+		return nil, "", lastErr
 	}
 
 	return nil, "", errNoProvidersAvailable

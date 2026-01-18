@@ -111,7 +111,7 @@ func (p *YaCyProvider) Search(ctx context.Context, query string, maxResults int)
 
 func (p *YaCyProvider) buildSearchURL(query string, maxResults int) string {
 	params := url.Values{}
-	params.Set("query", query)
+	params.Set(searchParamKeyQuery, query)
 	params.Set("count", fmt.Sprintf("%d", maxResults))
 	params.Set("resource", "global")
 	params.Set("urlmaskfilter", ".*")

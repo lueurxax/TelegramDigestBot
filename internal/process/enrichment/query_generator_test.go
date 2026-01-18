@@ -352,3 +352,103 @@ func TestIsCommonAcronym(t *testing.T) {
 		}
 	}
 }
+
+func TestDetectLanguage(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		expected string
+	}{
+		{
+			name:     "English text",
+			text:     "Apple Inc announced new iPhone sales increased by 15%",
+			expected: langEnglish,
+		},
+		{
+			name:     "Russian text",
+			text:     "Президент объявил о новых мерах поддержки экономики",
+			expected: langRussian,
+		},
+		{
+			name:     "Mixed English-Russian",
+			text:     "Apple объявила о новых продуктах",
+			expected: langRussian, // Cyrillic dominates
+		},
+		{
+			name:     "Chinese text",
+			text:     "苹果公司宣布新款iPhone销量增长",
+			expected: langUnknown,
+		},
+		{
+			name:     "Empty text",
+			text:     "",
+			expected: langUnknown,
+		},
+		{
+			name:     "Numbers only",
+			text:     "12345 67890",
+			expected: langUnknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := detectLanguage(tt.text)
+			if got != tt.expected {
+				t.Errorf("detectLanguage(%q) = %q, want %q", tt.text, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsEnglishOrRussian(t *testing.T) {
+	tests := []struct {
+		language string
+		expected bool
+	}{
+		{langEnglish, true},
+		{langRussian, true},
+		{langUnknown, false},
+		{"de", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.language, func(t *testing.T) {
+			got := IsEnglishOrRussian(tt.language)
+			if got != tt.expected {
+				t.Errorf("IsEnglishOrRussian(%q) = %v, want %v", tt.language, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGenerateIncludesLanguage(t *testing.T) {
+	gen := NewQueryGenerator()
+
+	t.Run("English summary has English language", func(t *testing.T) {
+		queries := gen.Generate("Apple Inc announced new iPhone sales increased by 15% in Q3", "Tech")
+		if len(queries) == 0 {
+			t.Fatal("no queries generated for English summary")
+		}
+
+		for _, q := range queries {
+			if q.Language != langEnglish {
+				t.Errorf("English query %q: got language %q, want %q", q.Query, q.Language, langEnglish)
+			}
+		}
+	})
+
+	t.Run("Russian summary has Russian language", func(t *testing.T) {
+		queries := gen.Generate("Президент России объявил о новых мерах поддержки экономики страны", "Политика")
+		if len(queries) == 0 {
+			t.Fatal("no queries generated for Russian summary")
+		}
+
+		for _, q := range queries {
+			if q.Language != langRussian {
+				t.Errorf("Russian query %q: got language %q, want %q", q.Query, q.Language, langRussian)
+			}
+		}
+	})
+}
