@@ -9,7 +9,10 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
 
-const errAddChannelByUsername = "add channel by username: %w"
+const (
+	errAddChannelByUsername = "add channel by username: %w"
+	errMarkDiscoveryAdded   = "mark discovery added: %w"
+)
 
 // normalizeUsername converts username to lowercase for consistent storage
 func normalizeUsername(username string) string {
@@ -91,7 +94,7 @@ func (db *DB) AddChannel(ctx context.Context, peerID int64, username, title stri
 	}
 
 	if err := db.markDiscoveryAdded(ctx, username, peerID, ""); err != nil {
-		return fmt.Errorf("mark discovery added: %w", err)
+		return fmt.Errorf(errMarkDiscoveryAdded, err)
 	}
 
 	return nil
@@ -103,7 +106,7 @@ func (db *DB) AddChannelByUsername(ctx context.Context, username string) error {
 	}
 
 	if err := db.markDiscoveryAdded(ctx, username, 0, ""); err != nil {
-		return fmt.Errorf("mark discovery added: %w", err)
+		return fmt.Errorf(errMarkDiscoveryAdded, err)
 	}
 
 	return nil
@@ -115,7 +118,7 @@ func (db *DB) AddChannelByID(ctx context.Context, peerID int64) error {
 	}
 
 	if err := db.markDiscoveryAdded(ctx, "", peerID, ""); err != nil {
-		return fmt.Errorf("mark discovery added: %w", err)
+		return fmt.Errorf(errMarkDiscoveryAdded, err)
 	}
 
 	return nil
@@ -127,7 +130,7 @@ func (db *DB) AddChannelByInviteLink(ctx context.Context, inviteLink string) err
 	}
 
 	if err := db.markDiscoveryAdded(ctx, "", 0, inviteLink); err != nil {
-		return fmt.Errorf("mark discovery added: %w", err)
+		return fmt.Errorf(errMarkDiscoveryAdded, err)
 	}
 
 	return nil

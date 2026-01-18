@@ -18,14 +18,15 @@ const (
 	DefaultAnnotateHours = 24
 	DefaultAnnotateLimit = 50
 
-	annotationTextLimit   = 800
-	annotateEnqueueUsage  = "Usage: <code>/annotate enqueue [hours] [limit]</code>"
-	annotateLabelUsage    = "Usage: <code>/annotate label &lt;good|bad|irrelevant&gt; [comment]</code>"
-	annotateNoAssigned    = "No assigned annotation item. Use <code>/annotate next</code> first."
-	annotateNoSummary     = "(no summary)"
-	annotateBlockquoteFmt = "<blockquote>%s</blockquote>\n"
-	annotateUnknown       = "unknown"
-	annotationActionSkip  = "skip"
+	annotationTextLimit        = 800
+	annotationCallbackNumParts = 3 // prefix:action:itemID
+	annotateEnqueueUsage       = "Usage: <code>/annotate enqueue [hours] [limit]</code>"
+	annotateLabelUsage         = "Usage: <code>/annotate label &lt;good|bad|irrelevant&gt; [comment]</code>"
+	annotateNoAssigned         = "No assigned annotation item. Use <code>/annotate next</code> first."
+	annotateNoSummary          = "(no summary)"
+	annotateBlockquoteFmt      = "<blockquote>%s</blockquote>\n"
+	annotateUnknown            = "unknown"
+	annotationActionSkip       = "skip"
 
 	buttonAnnotateGood       = "👍 Good"
 	buttonAnnotateBad        = "👎 Bad"
@@ -259,8 +260,8 @@ func truncateAnnotationText(text string, limit int) string {
 }
 
 func (b *Bot) handleAnnotateCallback(ctx context.Context, query *tgbotapi.CallbackQuery, data string) {
-	parts := strings.SplitN(data, ":", 3)
-	if len(parts) != 3 {
+	parts := strings.SplitN(data, ":", annotationCallbackNumParts)
+	if len(parts) != annotationCallbackNumParts {
 		return
 	}
 
@@ -284,6 +285,7 @@ func (b *Bot) handleAnnotateCallback(ctx context.Context, query *tgbotapi.Callba
 	if err != nil {
 		b.logger.Error().Err(err).Msg("failed to update annotation from callback")
 		b.answerCallback(query, "Error saving annotation.")
+
 		return
 	}
 

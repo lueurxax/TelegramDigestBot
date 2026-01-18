@@ -16,7 +16,15 @@ const (
 	AnnotationStatusAssigned = "assigned"
 	AnnotationStatusLabeled  = "labeled"
 	AnnotationStatusSkipped  = "skipped"
+
+	errBeginTransaction       = "begin transaction: %w"
+	errCommitTransaction      = "commit transaction: %w"
+	errUpdateAnnotationQueue  = "update annotation queue: %w"
+	errInvalidItemIDFormatMsg = "invalid item id: %s"
+	errInvalidItemIDFormat    = "%w: %s"
 )
+
+var errInvalidItemID = errors.New("invalid item id")
 
 type AnnotationItem struct {
 	ItemID          string
@@ -123,7 +131,7 @@ func (db *DB) GetAssignedAnnotation(ctx context.Context, userID int64) (*Annotat
 func (db *DB) LabelAssignedAnnotation(ctx context.Context, userID int64, label, comment string) (*AnnotationItem, error) {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("begin transaction: %w", err)
+		return nil, fmt.Errorf(errBeginTransaction, err)
 	}
 
 	defer func() {
@@ -147,7 +155,7 @@ func (db *DB) LabelAssignedAnnotation(ctx context.Context, userID int64, label, 
 			return nil, nil //nolint:nilnil // nil,nil indicates no annotation to label
 		}
 
-		return nil, fmt.Errorf("update annotation queue: %w", err)
+		return nil, fmt.Errorf(errUpdateAnnotationQueue, err)
 	}
 
 	err = db.Queries.WithTx(tx).SaveItemRating(ctx, sqlc.SaveItemRatingParams{
@@ -161,7 +169,7 @@ func (db *DB) LabelAssignedAnnotation(ctx context.Context, userID int64, label, 
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit transaction: %w", err)
+		return nil, fmt.Errorf(errCommitTransaction, err)
 	}
 
 	return db.getAnnotationItemByID(ctx, fromUUID(itemID))
@@ -170,12 +178,12 @@ func (db *DB) LabelAssignedAnnotation(ctx context.Context, userID int64, label, 
 func (db *DB) LabelAnnotationByItem(ctx context.Context, userID int64, itemID, label, comment string) (*AnnotationItem, error) {
 	itemUUID := toUUID(itemID)
 	if !itemUUID.Valid {
-		return nil, fmt.Errorf("invalid item id: %s", itemID)
+		return nil, fmt.Errorf(errInvalidItemIDFormat, errInvalidItemID, itemID)
 	}
 
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("begin transaction: %w", err)
+		return nil, fmt.Errorf(errBeginTransaction, err)
 	}
 
 	defer func() {
@@ -200,7 +208,7 @@ func (db *DB) LabelAnnotationByItem(ctx context.Context, userID int64, itemID, l
 			return nil, nil //nolint:nilnil // nil,nil indicates no annotation to label
 		}
 
-		return nil, fmt.Errorf("update annotation queue: %w", err)
+		return nil, fmt.Errorf(errUpdateAnnotationQueue, err)
 	}
 
 	err = db.Queries.WithTx(tx).SaveItemRating(ctx, sqlc.SaveItemRatingParams{
@@ -214,7 +222,7 @@ func (db *DB) LabelAnnotationByItem(ctx context.Context, userID int64, itemID, l
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit transaction: %w", err)
+		return nil, fmt.Errorf(errCommitTransaction, err)
 	}
 
 	return db.getAnnotationItemByID(ctx, fromUUID(updatedID))
@@ -245,7 +253,7 @@ func (db *DB) SkipAssignedAnnotation(ctx context.Context, userID int64) (*Annota
 func (db *DB) SkipAnnotationByItem(ctx context.Context, userID int64, itemID string) (*AnnotationItem, error) {
 	itemUUID := toUUID(itemID)
 	if !itemUUID.Valid {
-		return nil, fmt.Errorf("invalid item id: %s", itemID)
+		return nil, fmt.Errorf(errInvalidItemIDFormat, errInvalidItemID, itemID)
 	}
 
 	var updatedID pgtype.UUID
