@@ -257,7 +257,7 @@ func (s *Scheduler) getEvidenceMap(ctx context.Context, items []db.Item, cfg clu
 	}
 
 	if len(evidenceMap) > 0 {
-		logger.Debug().Int("items_with_evidence", len(evidenceMap)).Msg("loaded evidence for clustering")
+		logger.Debug().Int(LogFieldItemsWithEvidence, len(evidenceMap)).Msg("loaded evidence for clustering")
 	}
 
 	return evidenceMap

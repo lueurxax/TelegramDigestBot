@@ -313,8 +313,8 @@ func (w *Worker) translateQueriesIfNeeded(ctx context.Context, queries []Generat
 		// Always include original query
 		result = append(result, q)
 
-		// For non-EN/RU queries, also add English translation
-		if !IsEnglishOrRussian(q.Language) && q.Language != "" {
+		// For non-EN queries, also add English translation
+		if !isEnglish(q.Language) {
 			translated, err := w.translationClient.TranslateToEnglish(ctx, q.Query)
 			if err != nil {
 				w.logger.Debug().
@@ -662,13 +662,14 @@ func (w *Worker) processSingleResult(
 	scoringResult := w.scorer.Score(item.Summary, evidence)
 
 	// Skip if agreement score is below minimum threshold
-	if scoringResult.AgreementScore < minAgreement {
-		w.logger.Debug().
-			Str(logKeyURL, result.URL).
-			Float32("score", scoringResult.AgreementScore).
-			Float32("min", minAgreement).
-			Msg("evidence below minimum agreement threshold")
+	w.logger.Info().
+		Str(logKeyURL, result.URL).
+		Float32("score", scoringResult.AgreementScore).
+		Float32("min", minAgreement).
+		Int("matched_claims", len(scoringResult.MatchedClaims)).
+		Msg("processed evidence source matching")
 
+	if scoringResult.AgreementScore < minAgreement {
 		return 0, false
 	}
 

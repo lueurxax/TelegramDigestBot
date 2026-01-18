@@ -370,6 +370,11 @@ func TestDetectLanguage(t *testing.T) {
 			expected: langRussian,
 		},
 		{
+			name:     "Ukrainian text",
+			text:     "Президент України підписав закон про освіту та безпеку",
+			expected: langUkrainian,
+		},
+		{
 			name:     "Mixed English-Russian",
 			text:     "Apple объявила о новых продуктах",
 			expected: langRussian, // Cyrillic dominates
@@ -401,13 +406,14 @@ func TestDetectLanguage(t *testing.T) {
 	}
 }
 
-func TestIsEnglishOrRussian(t *testing.T) {
+func TestIsEnglish(t *testing.T) {
 	tests := []struct {
 		language string
 		expected bool
 	}{
 		{langEnglish, true},
-		{langRussian, true},
+		{langRussian, false},
+		{langUkrainian, false},
 		{langUnknown, false},
 		{"de", false},
 		{"", false},
@@ -415,9 +421,9 @@ func TestIsEnglishOrRussian(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.language, func(t *testing.T) {
-			got := IsEnglishOrRussian(tt.language)
+			got := isEnglish(tt.language)
 			if got != tt.expected {
-				t.Errorf("IsEnglishOrRussian(%q) = %v, want %v", tt.language, got, tt.expected)
+				t.Errorf("isEnglish(%q) = %v, want %v", tt.language, got, tt.expected)
 			}
 		})
 	}
@@ -448,6 +454,19 @@ func TestGenerateIncludesLanguage(t *testing.T) {
 		for _, q := range queries {
 			if q.Language != langRussian {
 				t.Errorf("Russian query %q: got language %q, want %q", q.Query, q.Language, langRussian)
+			}
+		}
+	})
+
+	t.Run("Ukrainian summary has Ukrainian language", func(t *testing.T) {
+		queries := gen.Generate("Президент України підписав закон про освіту", "Політика", "")
+		if len(queries) == 0 {
+			t.Fatal("no queries generated for Ukrainian summary")
+		}
+
+		for _, q := range queries {
+			if q.Language != langUkrainian {
+				t.Errorf("Ukrainian query %q: got language %q, want %q", q.Query, q.Language, langUkrainian)
 			}
 		}
 	})

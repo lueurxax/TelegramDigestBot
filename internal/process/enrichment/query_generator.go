@@ -14,9 +14,10 @@ const (
 	maxKeywordsPerQuery = 5
 
 	// Language codes
-	langEnglish = "en"
-	langRussian = "ru"
-	langUnknown = "unknown"
+	langEnglish   = "en"
+	langRussian   = "ru"
+	langUkrainian = "uk"
+	langUnknown   = "unknown"
 
 	// Language detection thresholds
 	cyrillicThreshold = 0.3 // If >30% Cyrillic, consider Russian
@@ -451,27 +452,13 @@ func isCommonAcronym(s string) bool {
 }
 
 // detectLanguage detects the primary language of text using character analysis.
-// Returns "en" for English, "ru" for Russian, or "unknown" for other languages.
+// Returns "en" for English, "ru" for Russian, "uk" for Ukrainian, or "unknown" for other languages.
 func detectLanguage(text string) string {
 	if text == "" {
 		return langUnknown
 	}
 
-	var latinCount, cyrillicCount, totalLetters int
-
-	for _, r := range text {
-		if !unicode.IsLetter(r) {
-			continue
-		}
-
-		totalLetters++
-
-		if isCyrillic(r) {
-			cyrillicCount++
-		} else if isLatin(r) {
-			latinCount++
-		}
-	}
+	latinCount, cyrillicCount, totalLetters, hasUkrainian := countCharacters(text)
 
 	if totalLetters == 0 {
 		return langUnknown
@@ -481,6 +468,10 @@ func detectLanguage(text string) string {
 	latinRatio := float64(latinCount) / float64(totalLetters)
 
 	if cyrillicRatio >= cyrillicThreshold {
+		if hasUkrainian {
+			return langUkrainian
+		}
+
 		return langRussian
 	}
 
@@ -489,6 +480,28 @@ func detectLanguage(text string) string {
 	}
 
 	return langUnknown
+}
+
+func countCharacters(text string) (latinCount, cyrillicCount, totalLetters int, hasUkrainian bool) {
+	for _, r := range text {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+
+		totalLetters++
+
+		if isCyrillic(r) {
+			cyrillicCount++
+
+			if isUkrainianLetter(r) {
+				hasUkrainian = true
+			}
+		} else if isLatin(r) {
+			latinCount++
+		}
+	}
+
+	return
 }
 
 // isCyrillic checks if a rune is a Cyrillic character.
@@ -504,7 +517,16 @@ func isLatin(r rune) bool {
 		(r >= 0x0100 && r <= 0x017F) // Latin Extended-A
 }
 
-// IsEnglishOrRussian checks if the detected language is English or Russian.
-func IsEnglishOrRussian(language string) bool {
-	return language == langEnglish || language == langRussian
+func isUkrainianLetter(r rune) bool {
+	switch r {
+	case 'і', 'ї', 'є', 'ґ', 'І', 'Ї', 'Є', 'Ґ':
+		return true
+	default:
+		return false
+	}
+}
+
+// isEnglish checks if the detected language is English.
+func isEnglish(language string) bool {
+	return language == langEnglish
 }

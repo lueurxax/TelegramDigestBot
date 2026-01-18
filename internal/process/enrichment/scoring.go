@@ -16,8 +16,8 @@ const (
 	highConfidenceMin      = 2
 	maxItemClaimLen        = 100
 	maxEvidenceClaimLen    = 200
-	minMatchScore          = 0.3
-	highTierScoreThreshold = 0.5
+	minMatchScore          = 0.15
+	highTierScoreThreshold = 0.4
 	contradictionThreshold = 0.4 // Entity overlap threshold for contradiction check
 )
 
@@ -166,14 +166,14 @@ func entityOverlapRatio(entities1, entities2 []Entity) float64 {
 		return 0
 	}
 
-	matches := 0
-	totalWeight := 0.0
+	var matchedWeight, totalWeight float64
 
 	for _, e1 := range entities1 {
-		totalWeight += getEntityWeight(e1.Type)
+		weight := getEntityWeight(e1.Type)
+		totalWeight += weight
 
 		if entityMatchExists(e1, entities2) {
-			matches++
+			matchedWeight += weight
 		}
 	}
 
@@ -181,7 +181,7 @@ func entityOverlapRatio(entities1, entities2 []Entity) float64 {
 		return 0
 	}
 
-	return float64(matches) / totalWeight
+	return matchedWeight / totalWeight
 }
 
 func getEntityWeight(entityType string) float64 {
@@ -247,11 +247,11 @@ func normalizeEntity(text string) string {
 
 func isAlias(s1, s2 string) bool {
 	aliases := map[string][]string{
-		"usa":           {"unitedstates", "unitedstatesofamerica", "us"},
-		"uk":            {"unitedkingdom", "britain", "greatbritain"},
+		"usa":           {"unitedstates", "unitedstatesofamerica", "us", "ssha"},
+		"uk":            {"unitedkingdom", "britain", "greatbritain", "velikobritaniya"},
 		"un":            {"unitednations"},
 		"eu":            {"europeanunion"},
-		"russia":        {"russianfederation"},
+		"russia":        {"russianfederation", "rossiya", "rossii", "rossiyu"},
 		"uae":           {"unitedarabemirates"},
 		"apple":         {"appleinc"},
 		"microsoft":     {"microsoftcorp"},
@@ -262,10 +262,20 @@ func isAlias(s1, s2 string) bool {
 		"joebiden":      {"biden"},
 		"vladimirputin": {"putin"},
 		"kyiv":          {"kiev"},
-		"zelenskyy":     {"zelensky"},
-		"netanyahu":     {"bibi"},
-		"macron":        {"emmanuelmacron"},
-		"scholz":        {"olafscholz"},
+		"zelenskyy":     {"zelensky", "zelenskiy"},
+		"netanyahu":     {"bibi", "netanyakhu"},
+		"macron":        {"emmanuelmacron", "makron"},
+		"scholz":        {"olafscholz", "sholts"},
+		"iran":          {"islamicrepublicofiran"},
+		"turkey":        {"turkiye", "turtsiya"},
+		"syria":         {"sar", "siriya"},
+		"israel":        {"izrail"},
+		"france":        {"frantsiya", "frantsii"},
+		"germany":       {"germaniya", "germanii"},
+		"china":         {"prc", "kitay", "kitaya", "kitaye"},
+		"lebanon":       {"livan"},
+		"moscow":        {"moskva", "moskvu", "moskve", "moskvy"},
+		"ukraine":       {"ukraina", "ukrainy", "ukrainu"},
 	}
 
 	for k, vals := range aliases {

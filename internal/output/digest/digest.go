@@ -1100,6 +1100,11 @@ func (s *Scheduler) loadEvidence(ctx context.Context, items []db.Item, logger *z
 		return map[string][]db.ItemEvidenceWithSource{}
 	}
 
+	logger.Debug().
+		Int("items_queried", len(itemIDs)).
+		Int(LogFieldItemsWithEvidence, len(evidence)).
+		Msg("loaded evidence for items")
+
 	return evidence
 }
 

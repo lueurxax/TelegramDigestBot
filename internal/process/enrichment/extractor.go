@@ -369,6 +369,9 @@ func isFactualSentence(sentence string) bool {
 		"said", "stated", "released", "published",
 		"million", "billion", "percent", "%",
 		"increased", "decreased", "grew", "fell",
+		"сообщил", "заявил", "объявил", "подтвердил",
+		"согласно", "опубликовал", "выпустил", "говорится",
+		"миллион", "миллиард", "процент", "вырос", "снизился",
 	}
 
 	for _, indicator := range factualIndicators {
@@ -391,10 +394,10 @@ func containsNumber(s string) bool {
 }
 
 var (
-	orgPattern     = regexp.MustCompile(`(?i)\b(Inc|Corp|Ltd|LLC|Company|Group|Organization|Association|Foundation)\b`)
-	personPattern  = regexp.MustCompile(`\b[A-Z][a-z]+\s+[A-Z][a-z]+\b`)
-	locPattern     = regexp.MustCompile(`(?i)\b(United States|Russia|China|Ukraine|Germany|France|UK|USA|Moscow|Washington|Beijing|London|Paris|Berlin)\b`)
-	moneyPattern   = regexp.MustCompile(`\$[\d,.]+\s*(million|billion|trillion)?|\d+\s*(million|billion|trillion)?\s*(dollars|euros|pounds)`)
+	orgPattern     = regexp.MustCompile(`(?i)(Inc|Corp|Ltd|LLC|Company|Group|Organization|Association|Foundation|ООО|ОАО|ЗАО|ПАО|Группа|Компания|Организация|Фонд)`)
+	personPattern  = regexp.MustCompile(`[A-ZА-Я][a-zа-я]+\s+[A-ZА-Я][a-zа-я]+`)
+	locPattern     = regexp.MustCompile(`(?i)(United States|Russia|China|Ukraine|Germany|France|UK|USA|Moscow|Washington|Beijing|London|Paris|Berlin|США|Росси[ияюе]|Кита[еяй]|Украин[аыеу]|Германи[ияюе]|Франци[ияюе]|Великобритани[ияюе]|Москв[аыеу]|Вашингтон[ае]?|Пекин[ае]?|Лондон[ае]?|Париж[ае]?|Берлин[ае]?)`)
+	moneyPattern   = regexp.MustCompile(`\$[\d,.]+\s*(million|billion|trillion)?|\d+\s*(million|billion|trillion)?\s*(dollars|euros|pounds|рублей|долларов|евро)`)
 	percentPattern = regexp.MustCompile(`\d+(?:\.\d+)?%`)
 )
 
