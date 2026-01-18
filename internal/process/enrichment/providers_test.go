@@ -32,7 +32,7 @@ func (m *mockProvider) IsAvailable() bool {
 }
 
 func TestProviderRegistry_Register(t *testing.T) {
-	registry := NewProviderRegistry()
+	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 
 	mock := &mockProvider{name: ProviderYaCy, available: true}
 	registry.Register(mock)
@@ -51,7 +51,7 @@ func TestProviderRegistry_Register(t *testing.T) {
 }
 
 func TestProviderRegistry_Get(t *testing.T) {
-	registry := NewProviderRegistry()
+	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 	mock := &mockProvider{name: ProviderYaCy, available: true}
 	registry.Register(mock)
 
@@ -72,7 +72,7 @@ func TestProviderRegistry_Get(t *testing.T) {
 
 func TestProviderRegistry_SearchWithFallback_FirstProvider(t *testing.T) {
 	ctx := context.Background()
-	registry := NewProviderRegistry()
+	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 	mock := &mockProvider{
 		name:      ProviderYaCy,
 		available: true,
@@ -96,7 +96,7 @@ func TestProviderRegistry_SearchWithFallback_FirstProvider(t *testing.T) {
 
 func TestProviderRegistry_SearchWithFallback_Fallback(t *testing.T) {
 	ctx := context.Background()
-	registry := NewProviderRegistry()
+	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 
 	failing := &mockProvider{
 		name:      ProviderYaCy,
@@ -128,7 +128,7 @@ func TestProviderRegistry_SearchWithFallback_Fallback(t *testing.T) {
 
 func TestProviderRegistry_SearchWithFallback_SkipsUnavailable(t *testing.T) {
 	ctx := context.Background()
-	registry := NewProviderRegistry()
+	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 
 	unavailable := &mockProvider{
 		name:      ProviderYaCy,
@@ -159,7 +159,7 @@ func TestProviderRegistry_SearchWithFallback_SkipsUnavailable(t *testing.T) {
 
 func TestProviderRegistry_SearchWithFallback_NoProviders(t *testing.T) {
 	ctx := context.Background()
-	registry := NewProviderRegistry()
+	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 
 	_, _, err := registry.SearchWithFallback(ctx, "empty query", 5)
 	if !errors.Is(err, errNoProvidersAvailable) {
@@ -168,7 +168,7 @@ func TestProviderRegistry_SearchWithFallback_NoProviders(t *testing.T) {
 }
 
 func TestProviderRegistry_AvailableProviders(t *testing.T) {
-	registry := NewProviderRegistry()
+	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 
 	available := &mockProvider{name: ProviderYaCy, available: true}
 	unavailable := &mockProvider{name: ProviderGDELT, available: false}
@@ -188,14 +188,14 @@ func TestProviderRegistry_AvailableProviders(t *testing.T) {
 
 func TestCircuitBreaker_canAttempt(t *testing.T) {
 	t.Run("closed circuit allows attempts", func(t *testing.T) {
-		cb := newCircuitBreaker()
+		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
 		if !cb.canAttempt() {
 			t.Error("closed circuit should allow attempts")
 		}
 	})
 
 	t.Run("open circuit blocks attempts", func(t *testing.T) {
-		cb := newCircuitBreaker()
+		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
 		cb.state = circuitOpen
 		cb.lastFailure = time.Now()
 
@@ -205,7 +205,7 @@ func TestCircuitBreaker_canAttempt(t *testing.T) {
 	})
 
 	t.Run("open circuit transitions to half-open after reset period", func(t *testing.T) {
-		cb := newCircuitBreaker()
+		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
 		cb.state = circuitOpen
 		cb.lastFailure = time.Now().Add(-6 * time.Minute) // Past reset period
 
@@ -219,7 +219,7 @@ func TestCircuitBreaker_canAttempt(t *testing.T) {
 	})
 
 	t.Run("half-open circuit allows attempts", func(t *testing.T) {
-		cb := newCircuitBreaker()
+		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
 		cb.state = circuitHalfOpen
 
 		if !cb.canAttempt() {
@@ -230,7 +230,7 @@ func TestCircuitBreaker_canAttempt(t *testing.T) {
 
 func TestCircuitBreaker_recordSuccess(t *testing.T) {
 	t.Run("resets failure count", func(t *testing.T) {
-		cb := newCircuitBreaker()
+		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
 		cb.failures = 2
 		cb.recordSuccess()
 
@@ -240,7 +240,7 @@ func TestCircuitBreaker_recordSuccess(t *testing.T) {
 	})
 
 	t.Run("transitions half-open to closed after successes", func(t *testing.T) {
-		cb := newCircuitBreaker()
+		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
 		cb.state = circuitHalfOpen
 
 		cb.recordSuccess()
@@ -259,7 +259,7 @@ func TestCircuitBreaker_recordSuccess(t *testing.T) {
 
 func TestCircuitBreaker_recordFailure(t *testing.T) {
 	t.Run("increments failure count", func(t *testing.T) {
-		cb := newCircuitBreaker()
+		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
 		cb.recordFailure()
 
 		if cb.failures != 1 {
@@ -268,7 +268,7 @@ func TestCircuitBreaker_recordFailure(t *testing.T) {
 	})
 
 	t.Run("opens circuit after threshold", func(t *testing.T) {
-		cb := newCircuitBreaker()
+		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
 
 		for i := 0; i < circuitBreakerThreshold; i++ {
 			cb.recordFailure()

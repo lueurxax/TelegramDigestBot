@@ -22,6 +22,8 @@ type enrichmentStats struct {
 	cacheCount    int
 	totalMatches  int
 	recentMatches int
+	dailyUsage    int
+	monthlyUsage  int
 }
 
 func (b *Bot) handleEnrichment(ctx context.Context, msg *tgbotapi.Message) {
@@ -57,11 +59,18 @@ func (b *Bot) fetchEnrichmentStats(ctx context.Context) (*enrichmentStats, error
 		return nil, fmt.Errorf("counting recent item evidence: %w", err)
 	}
 
+	dailyUsage, monthlyUsage, err := b.database.GetEnrichmentUsageStats(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching enrichment usage stats: %w", err)
+	}
+
 	return &enrichmentStats{
 		queueStats:    queueStats,
 		cacheCount:    cacheCount,
 		totalMatches:  totalMatches,
 		recentMatches: recentMatches,
+		dailyUsage:    dailyUsage,
+		monthlyUsage:  monthlyUsage,
 	}, nil
 }
 
@@ -98,7 +107,32 @@ func (b *Bot) renderEnrichmentStatus(stats *enrichmentStats) string {
 	fmt.Fprintf(&sb, "Evidence (last %d hours): <code>%d</code>\n", DefaultEnrichmentRecentHours, stats.recentMatches)
 	fmt.Fprintf(&sb, "Evidence total: <code>%d</code>\n", stats.totalMatches)
 
+	b.renderBudgetUsage(&sb, stats)
+
 	return sb.String()
+}
+
+func (b *Bot) renderBudgetUsage(sb *strings.Builder, stats *enrichmentStats) {
+	dailyLimit := b.cfg.EnrichmentDailyLimit
+	monthlyLimit := b.cfg.EnrichmentMonthlyLimit
+
+	if dailyLimit <= 0 && monthlyLimit <= 0 {
+		return
+	}
+
+	sb.WriteString("\nBudget Usage:\n")
+
+	if dailyLimit > 0 {
+		fmt.Fprintf(sb, "  today: <code>%d/%d</code>\n", stats.dailyUsage, dailyLimit)
+	} else {
+		fmt.Fprintf(sb, "  today: <code>%d</code>\n", stats.dailyUsage)
+	}
+
+	if monthlyLimit > 0 {
+		fmt.Fprintf(sb, "  this month: <code>%d/%d</code>\n", stats.monthlyUsage, monthlyLimit)
+	} else {
+		fmt.Fprintf(sb, "  this month: <code>%d</code>\n", stats.monthlyUsage)
+	}
 }
 
 func (b *Bot) renderEnrichmentProviders(sb *strings.Builder) {

@@ -2,11 +2,16 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v11"
 	"github.com/joho/godotenv"
 )
+
+const hoursPerDay = 24
 
 type Config struct {
 	AppEnv                        string  `env:"APP_ENV" envDefault:"local"`
@@ -73,14 +78,27 @@ type Config struct {
 	MaxContentLength      int           `env:"MAX_CONTENT_LENGTH" envDefault:"5000"`
 
 	// Source enrichment (Phase 2)
-	EnrichmentEnabled          bool    `env:"ENRICHMENT_ENABLED" envDefault:"false"`
-	EnrichmentMaxResults       int     `env:"ENRICHMENT_MAX_RESULTS" envDefault:"5"`
-	EnrichmentCacheTTLHours    int     `env:"ENRICHMENT_CACHE_TTL_HOURS" envDefault:"168"`
-	EnrichmentQueueMax         int     `env:"ENRICHMENT_QUEUE_MAX" envDefault:"5000"`
-	EnrichmentMinAgreement     float32 `env:"ENRICHMENT_MIN_AGREEMENT" envDefault:"0.3"`
-	EnrichmentMaxEvidenceItem  int     `env:"ENRICHMENT_MAX_EVIDENCE_PER_ITEM" envDefault:"5"`
-	EnrichmentAllowlistDomains string  `env:"ENRICHMENT_ALLOWLIST_DOMAINS" envDefault:""`
-	EnrichmentDenylistDomains  string  `env:"ENRICHMENT_DENYLIST_DOMAINS" envDefault:""`
+	EnrichmentEnabled          bool          `env:"ENRICHMENT_ENABLED" envDefault:"false"`
+	EnrichmentMaxResults       int           `env:"ENRICHMENT_MAX_RESULTS" envDefault:"5"`
+	EnrichmentCacheTTLHours    int           `env:"ENRICHMENT_CACHE_TTL_HOURS" envDefault:"168"`
+	EnrichmentQueueMax         int           `env:"ENRICHMENT_QUEUE_MAX" envDefault:"5000"`
+	EnrichmentMinAgreement     float32       `env:"ENRICHMENT_MIN_AGREEMENT" envDefault:"0.3"`
+	EnrichmentMaxEvidenceItem  int           `env:"ENRICHMENT_MAX_EVIDENCE_PER_ITEM" envDefault:"5"`
+	EnrichmentAllowlistDomains string        `env:"ENRICHMENT_ALLOWLIST_DOMAINS" envDefault:""`
+	EnrichmentDenylistDomains  string        `env:"ENRICHMENT_DENYLIST_DOMAINS" envDefault:""`
+	EnrichmentDedupSimilarity  float32       `env:"ENRICHMENT_DEDUP_SIMILARITY" envDefault:"0.98"`
+	EnrichmentMaxSeconds       int           `env:"ENRICHMENT_MAX_SECONDS" envDefault:"60"`
+	EnrichmentProviders        string        `env:"ENRICHMENT_PROVIDERS" envDefault:""`
+	EnrichmentProviderCooldown time.Duration `env:"ENRICHMENT_PROVIDER_COOLDOWN" envDefault:"10m"`
+	EnrichmentQueryTranslate   bool          `env:"ENRICHMENT_QUERY_TRANSLATE" envDefault:"true"`
+	EnrichmentDailyBudgetUSD   float64       `env:"ENRICHMENT_DAILY_BUDGET_USD" envDefault:"0"`
+	EnrichmentMonthlyCapUSD    float64       `env:"ENRICHMENT_MONTHLY_CAP_USD" envDefault:"0"`
+	EnrichmentOpensearchURL    string        `env:"ENRICHMENT_OPENSEARCH_URL" envDefault:""`
+	EnrichmentOpensearchRPM    int           `env:"ENRICHMENT_OPENSEARCH_RPM" envDefault:"0"`
+	EnrichmentEventRegistryRPM int           `env:"ENRICHMENT_EVENTREGISTRY_RPM" envDefault:"0"`
+	EnrichmentNewsAPIRPM       int           `env:"ENRICHMENT_NEWSAPI_RPM" envDefault:"0"`
+	EnrichmentDailyLimit       int           `env:"ENRICHMENT_DAILY_LIMIT" envDefault:"0"`
+	EnrichmentMonthlyLimit     int           `env:"ENRICHMENT_MONTHLY_LIMIT" envDefault:"0"`
 
 	// YaCy provider
 	YaCyEnabled bool          `env:"YACY_ENABLED" envDefault:"false"`
@@ -101,5 +119,134 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("parsing environment config: %w", err)
 	}
 
+	applyEnrichmentAliases(cfg)
+
 	return cfg, nil
+}
+
+func applyEnrichmentAliases(cfg *Config) {
+	if !hasEnv("ENRICHMENT_MAX_RESULTS") {
+		setIntFromEnv("ENRICHMENT_MAX_SOURCES", &cfg.EnrichmentMaxResults)
+	}
+
+	if !hasEnv("ENRICHMENT_CACHE_TTL_HOURS") {
+		setDaysAsHours("ENRICHMENT_EVIDENCE_TTL_DAYS", &cfg.EnrichmentCacheTTLHours)
+	}
+
+	if !hasEnv("ENRICHMENT_DEDUP_SIMILARITY") {
+		setFloat32FromEnv("ENRICHMENT_EVIDENCE_DEDUP_SIM", &cfg.EnrichmentDedupSimilarity)
+	}
+
+	if !hasEnv("ENRICHMENT_MAX_EVIDENCE_PER_ITEM") {
+		setIntFromEnv("ENRICHMENT_EVIDENCE_MAX_PER_ITEM", &cfg.EnrichmentMaxEvidenceItem)
+	}
+
+	if !hasEnv("YACY_ENABLED") {
+		setBoolFromEnv("ENRICHMENT_YACY_ENABLED", &cfg.YaCyEnabled)
+	}
+
+	if !hasEnv("YACY_BASE_URL") {
+		setStringFromEnv("ENRICHMENT_YACY_URL", &cfg.YaCyBaseURL)
+	}
+
+	if !hasEnv("YACY_TIMEOUT") {
+		setDurationFromEnv("ENRICHMENT_YACY_TIMEOUT", &cfg.YaCyTimeout)
+	}
+
+	if !hasEnv("GDELT_RPM") {
+		setIntFromEnv("ENRICHMENT_GDELT_RPM", &cfg.GDELTRequestsPerMin)
+	}
+
+	if !hasEnv("GDELT_TIMEOUT") {
+		setDurationFromEnv("ENRICHMENT_GDELT_TIMEOUT", &cfg.GDELTTimeout)
+	}
+}
+
+func hasEnv(key string) bool {
+	_, ok := os.LookupEnv(key)
+	return ok
+}
+
+func setStringFromEnv(key string, target *string) {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return
+	}
+
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return
+	}
+
+	*target = val
+}
+
+func setBoolFromEnv(key string, target *bool) {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return
+	}
+
+	parsed, err := strconv.ParseBool(strings.TrimSpace(val))
+	if err != nil {
+		return
+	}
+
+	*target = parsed
+}
+
+func setIntFromEnv(key string, target *int) {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return
+	}
+
+	parsed, err := strconv.Atoi(strings.TrimSpace(val))
+	if err != nil {
+		return
+	}
+
+	*target = parsed
+}
+
+func setFloat32FromEnv(key string, target *float32) {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return
+	}
+
+	parsed, err := strconv.ParseFloat(strings.TrimSpace(val), 32)
+	if err != nil {
+		return
+	}
+
+	*target = float32(parsed)
+}
+
+func setDurationFromEnv(key string, target *time.Duration) {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return
+	}
+
+	parsed, err := time.ParseDuration(strings.TrimSpace(val))
+	if err != nil {
+		return
+	}
+
+	*target = parsed
+}
+
+func setDaysAsHours(key string, target *int) {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return
+	}
+
+	parsed, err := strconv.Atoi(strings.TrimSpace(val))
+	if err != nil || parsed <= 0 {
+		return
+	}
+
+	*target = parsed * hoursPerDay
 }

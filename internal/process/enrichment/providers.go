@@ -40,13 +40,15 @@ type ProviderRegistry struct {
 	order     []ProviderName
 
 	circuitBreakers map[ProviderName]*circuitBreaker
+	cooldown        time.Duration
 }
 
-func NewProviderRegistry() *ProviderRegistry {
+func NewProviderRegistry(cooldown time.Duration) *ProviderRegistry {
 	return &ProviderRegistry{
 		providers:       make(map[ProviderName]Provider),
 		order:           []ProviderName{},
 		circuitBreakers: make(map[ProviderName]*circuitBreaker),
+		cooldown:        cooldown,
 	}
 }
 
@@ -57,7 +59,7 @@ func (r *ProviderRegistry) Register(p Provider) {
 	name := p.Name()
 	r.providers[name] = p
 	r.order = append(r.order, name)
-	r.circuitBreakers[name] = newCircuitBreaker()
+	r.circuitBreakers[name] = newCircuitBreaker(r.cooldown)
 }
 
 func (r *ProviderRegistry) Get(name ProviderName) (Provider, error) {
@@ -130,10 +132,9 @@ func (r *ProviderRegistry) getCircuitBreaker(name ProviderName) *circuitBreaker 
 	return r.circuitBreakers[name]
 }
 
-const (
-	circuitBreakerThreshold  = 3
-	circuitBreakerResetAfter = 5 * time.Minute
-)
+const circuitBreakerThreshold = 3
+
+const defaultCircuitBreakerResetAfter = 5 * time.Minute
 
 type circuitBreaker struct {
 	mu           sync.Mutex
@@ -141,6 +142,7 @@ type circuitBreaker struct {
 	lastFailure  time.Time
 	state        circuitState
 	successCount int
+	resetAfter   time.Duration
 }
 
 type circuitState int
@@ -151,9 +153,14 @@ const (
 	circuitHalfOpen
 )
 
-func newCircuitBreaker() *circuitBreaker {
+func newCircuitBreaker(resetAfter time.Duration) *circuitBreaker {
+	if resetAfter <= 0 {
+		resetAfter = defaultCircuitBreakerResetAfter
+	}
+
 	return &circuitBreaker{
-		state: circuitClosed,
+		state:      circuitClosed,
+		resetAfter: resetAfter,
 	}
 }
 
@@ -165,7 +172,7 @@ func (cb *circuitBreaker) canAttempt() bool {
 	case circuitClosed:
 		return true
 	case circuitOpen:
-		if time.Since(cb.lastFailure) > circuitBreakerResetAfter {
+		if time.Since(cb.lastFailure) > cb.resetAfter {
 			cb.state = circuitHalfOpen
 			cb.successCount = 0
 

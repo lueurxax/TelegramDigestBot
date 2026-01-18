@@ -3,6 +3,7 @@ package enrichment
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -21,6 +22,9 @@ const (
 	defaultMaxResults                = 5
 	defaultItemTimeout               = 60 * time.Second
 	defaultMaxEvidencePerItem        = 5
+	defaultDedupSimilarity           = 0.98
+	maxLogClaimLen                   = 100
+	budgetCheckInterval              = 5 * time.Minute
 
 	// Log field keys
 	logKeyItemID  = "item_id"
@@ -28,6 +32,8 @@ const (
 	logKeyURL     = "url"
 	logKeyDeleted = "deleted"
 )
+
+const errEnrichmentWorkerFmt = "enrichment worker: %w"
 
 type Repository interface {
 	ClaimNextEnrichment(ctx context.Context) (*db.EnrichmentQueueItem, error)
@@ -40,49 +46,44 @@ type Repository interface {
 	DeleteExpiredEvidenceSources(ctx context.Context) (int64, error)
 	CleanupExcessEvidencePerItem(ctx context.Context, maxPerItem int) (int64, error)
 	DeduplicateEvidenceClaims(ctx context.Context) (int64, error)
+	FindSimilarClaim(ctx context.Context, evidenceID string, embedding []float32, similarity float32) (*db.EvidenceClaim, error)
+	// Budget tracking
+	GetDailyEnrichmentCount(ctx context.Context) (int, error)
+	GetMonthlyEnrichmentCount(ctx context.Context) (int, error)
+	IncrementEnrichmentUsage(ctx context.Context, provider string) error
+}
+
+// EmbeddingClient provides embedding generation for semantic deduplication.
+type EmbeddingClient interface {
+	GetEmbedding(ctx context.Context, text string) ([]float32, error)
 }
 
 type Worker struct {
-	cfg            *config.Config
-	db             Repository
-	registry       *ProviderRegistry
-	extractor      *Extractor
-	scorer         *Scorer
-	queryGenerator *QueryGenerator
-	domainFilter   *DomainFilter
-	logger         *zerolog.Logger
+	cfg             *config.Config
+	db              Repository
+	embeddingClient EmbeddingClient
+	registry        *ProviderRegistry
+	extractor       *Extractor
+	scorer          *Scorer
+	queryGenerator  *QueryGenerator
+	domainFilter    *DomainFilter
+	logger          *zerolog.Logger
 }
 
-func NewWorker(cfg *config.Config, database Repository, logger *zerolog.Logger) *Worker {
-	registry := NewProviderRegistry()
-
-	if cfg.YaCyEnabled && cfg.YaCyBaseURL != "" {
-		yacy := NewYaCyProvider(YaCyConfig{
-			Enabled: true,
-			BaseURL: cfg.YaCyBaseURL,
-			Timeout: cfg.YaCyTimeout,
-		})
-		registry.Register(yacy)
-	}
-
-	if cfg.GDELTEnabled {
-		gdelt := NewGDELTProvider(GDELTConfig{
-			Enabled:        true,
-			RequestsPerMin: cfg.GDELTRequestsPerMin,
-			Timeout:        cfg.GDELTTimeout,
-		})
-		registry.Register(gdelt)
-	}
+func NewWorker(cfg *config.Config, database Repository, embeddingClient EmbeddingClient, logger *zerolog.Logger) *Worker {
+	registry := NewProviderRegistry(cfg.EnrichmentProviderCooldown)
+	registerProviders(cfg, registry)
 
 	return &Worker{
-		cfg:            cfg,
-		db:             database,
-		registry:       registry,
-		extractor:      NewExtractor(),
-		scorer:         NewScorer(),
-		queryGenerator: NewQueryGenerator(),
-		domainFilter:   NewDomainFilter(cfg.EnrichmentAllowlistDomains, cfg.EnrichmentDenylistDomains),
-		logger:         logger,
+		cfg:             cfg,
+		db:              database,
+		embeddingClient: embeddingClient,
+		registry:        registry,
+		extractor:       NewExtractor(),
+		scorer:          NewScorer(),
+		queryGenerator:  NewQueryGenerator(),
+		domainFilter:    NewDomainFilter(cfg.EnrichmentAllowlistDomains, cfg.EnrichmentDenylistDomains),
+		logger:          logger,
 	}
 }
 
@@ -100,16 +101,27 @@ func (w *Worker) Run(ctx context.Context) error {
 
 	w.logger.Info().Strs("providers", providerNamesToStrings(available)).Msg("enrichment worker starting")
 
+	return w.runLoop(ctx)
+}
+
+// runLoop is the main processing loop for the enrichment worker.
+func (w *Worker) runLoop(ctx context.Context) error {
 	pollInterval := w.parsePollInterval()
 	lastCleanup := time.Now()
+	lastBudgetCheck := time.Time{}
 
 	for {
-		item, err := w.db.ClaimNextEnrichment(ctx)
-		if err != nil {
-			w.logger.Error().Err(err).Msg("failed to claim enrichment item")
-		} else if item != nil {
-			w.processItem(ctx, item)
+		// Check budget limits before processing
+		budgetResult := w.handleBudgetCheck(ctx, &lastBudgetCheck)
+		if budgetResult.err != nil {
+			return budgetResult.err
 		}
+
+		if budgetResult.shouldContinue {
+			continue
+		}
+
+		w.processNextItem(ctx)
 
 		if time.Since(lastCleanup) >= defaultEnrichmentCleanupInterval {
 			w.cleanupCache(ctx)
@@ -119,9 +131,53 @@ func (w *Worker) Run(ctx context.Context) error {
 
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("enrichment worker: %w", ctx.Err())
+			return fmt.Errorf(errEnrichmentWorkerFmt, ctx.Err())
 		case <-time.After(pollInterval):
 		}
+	}
+}
+
+// budgetCheckResult holds the result of a budget check operation.
+type budgetCheckResult struct {
+	shouldContinue bool
+	err            error
+}
+
+// handleBudgetCheck checks budget limits and waits if exceeded.
+func (w *Worker) handleBudgetCheck(ctx context.Context, lastBudgetCheck *time.Time) budgetCheckResult {
+	if !w.shouldCheckBudget(*lastBudgetCheck) {
+		return budgetCheckResult{}
+	}
+
+	exceeded, reason := w.checkBudgetLimits(ctx)
+	if !exceeded {
+		*lastBudgetCheck = time.Now()
+
+		return budgetCheckResult{}
+	}
+
+	w.logger.Warn().Str("reason", reason).Msg("budget limit exceeded, pausing enrichment")
+
+	*lastBudgetCheck = time.Now()
+
+	select {
+	case <-ctx.Done():
+		return budgetCheckResult{err: fmt.Errorf(errEnrichmentWorkerFmt, ctx.Err())}
+	case <-time.After(budgetCheckInterval):
+		return budgetCheckResult{shouldContinue: true}
+	}
+}
+
+// processNextItem claims and processes the next enrichment item.
+func (w *Worker) processNextItem(ctx context.Context) {
+	item, err := w.db.ClaimNextEnrichment(ctx)
+	if err != nil {
+		w.logger.Error().Err(err).Msg("failed to claim enrichment item")
+		return
+	}
+
+	if item != nil {
+		w.processItem(ctx, item)
 	}
 }
 
@@ -136,7 +192,7 @@ func (w *Worker) parsePollInterval() time.Duration {
 }
 
 func (w *Worker) processItem(ctx context.Context, item *db.EnrichmentQueueItem) {
-	itemCtx, cancel := context.WithTimeout(ctx, defaultItemTimeout)
+	itemCtx, cancel := context.WithTimeout(ctx, w.getItemTimeout())
 	defer cancel()
 
 	if err := w.processWithProviders(itemCtx, item); err != nil {
@@ -226,6 +282,9 @@ func (w *Worker) executeQuery(ctx context.Context, gq GeneratedQuery, maxResults
 
 	observability.EnrichmentRequests.WithLabelValues(string(provider), "success").Inc()
 
+	// Track usage for budget controls
+	w.trackUsage(ctx, provider)
+
 	w.collectResults(results, state)
 }
 
@@ -244,6 +303,71 @@ func (w *Worker) collectResults(results []SearchResult, state *searchState) {
 		state.seenURLs[result.URL] = true
 		state.allResults = append(state.allResults, result)
 	}
+}
+
+func registerProviders(cfg *config.Config, registry *ProviderRegistry) {
+	for _, name := range providerOrder(cfg.EnrichmentProviders) {
+		switch name {
+		case ProviderYaCy:
+			if cfg.YaCyEnabled && cfg.YaCyBaseURL != "" {
+				yacy := NewYaCyProvider(YaCyConfig{
+					Enabled: true,
+					BaseURL: cfg.YaCyBaseURL,
+					Timeout: cfg.YaCyTimeout,
+				})
+				registry.Register(yacy)
+			}
+		case ProviderGDELT:
+			if cfg.GDELTEnabled {
+				gdelt := NewGDELTProvider(GDELTConfig{
+					Enabled:        true,
+					RequestsPerMin: cfg.GDELTRequestsPerMin,
+					Timeout:        cfg.GDELTTimeout,
+				})
+				registry.Register(gdelt)
+			}
+		}
+	}
+}
+
+func providerOrder(raw string) []ProviderName {
+	if strings.TrimSpace(raw) == "" {
+		return []ProviderName{ProviderYaCy, ProviderGDELT}
+	}
+
+	seen := make(map[ProviderName]bool)
+	order := []ProviderName{}
+
+	for _, entry := range strings.Split(raw, ",") {
+		name := ProviderName(strings.TrimSpace(strings.ToLower(entry)))
+		if name == "" {
+			continue
+		}
+
+		switch name {
+		case ProviderYaCy, ProviderGDELT:
+			if seen[name] {
+				continue
+			}
+
+			seen[name] = true
+			order = append(order, name)
+		}
+	}
+
+	if len(order) == 0 {
+		return []ProviderName{ProviderYaCy, ProviderGDELT}
+	}
+
+	return order
+}
+
+func (w *Worker) getItemTimeout() time.Duration {
+	if w.cfg.EnrichmentMaxSeconds > 0 {
+		return time.Duration(w.cfg.EnrichmentMaxSeconds) * time.Second
+	}
+
+	return defaultItemTimeout
 }
 
 func (w *Worker) handleNoResults(itemID string, lastErr error) error {
@@ -358,19 +482,72 @@ func (w *Worker) processEvidenceSource(ctx context.Context, result SearchResult,
 
 	evidence.Source.ID = sourceID
 
-	for _, claim := range evidence.Claims {
+	w.saveClaimsWithDedup(ctx, sourceID, evidence.Claims)
+
+	return evidence, nil
+}
+
+// saveClaimsWithDedup saves claims with embedding-based deduplication.
+func (w *Worker) saveClaimsWithDedup(ctx context.Context, sourceID string, claims []ExtractedClaim) {
+	similarity := w.cfg.EnrichmentDedupSimilarity
+	if similarity <= 0 {
+		similarity = defaultDedupSimilarity
+	}
+
+	for _, claim := range claims {
+		embedding := w.generateClaimEmbedding(ctx, claim.Text)
+
+		// Check for similar existing claim if embedding was generated
+		if len(embedding) > 0 {
+			existing, err := w.db.FindSimilarClaim(ctx, sourceID, embedding, similarity)
+			if err != nil {
+				w.logger.Warn().Err(err).Msg("failed to check for similar claim")
+			} else if existing != nil {
+				w.logger.Debug().
+					Str("existing_id", existing.ID).
+					Str("claim_text", truncateText(claim.Text, maxLogClaimLen)).
+					Msg("skipping duplicate claim")
+
+				continue
+			}
+		}
+
 		dbClaim := &db.EvidenceClaim{
 			EvidenceID:  sourceID,
 			ClaimText:   claim.Text,
 			EntitiesRaw: claim.EntitiesJSON(),
+			Embedding:   embedding,
 		}
 
 		if _, err := w.db.SaveEvidenceClaim(ctx, dbClaim); err != nil {
 			w.logger.Warn().Err(err).Msg("failed to save evidence claim")
 		}
 	}
+}
 
-	return evidence, nil
+// generateClaimEmbedding generates an embedding for a claim text.
+// Returns nil if embedding client is not available or generation fails.
+func (w *Worker) generateClaimEmbedding(ctx context.Context, text string) []float32 {
+	if w.embeddingClient == nil {
+		return nil
+	}
+
+	embedding, err := w.embeddingClient.GetEmbedding(ctx, text)
+	if err != nil {
+		w.logger.Warn().Err(err).Msg("failed to generate claim embedding")
+
+		return nil
+	}
+
+	return embedding
+}
+
+func truncateText(text string, maxLen int) string {
+	if len(text) <= maxLen {
+		return text
+	}
+
+	return text[:maxLen] + "..."
 }
 
 func (w *Worker) saveItemEvidence(ctx context.Context, itemID string, evidence *ExtractedEvidence, scoringResult ScoringResult) error {
@@ -453,4 +630,49 @@ func providerNamesToStrings(names []ProviderName) []string {
 	}
 
 	return strs
+}
+
+// shouldCheckBudget returns true if enough time has passed since the last budget check.
+func (w *Worker) shouldCheckBudget(lastCheck time.Time) bool {
+	// If limits are not configured, skip budget checks
+	if w.cfg.EnrichmentDailyLimit <= 0 && w.cfg.EnrichmentMonthlyLimit <= 0 {
+		return false
+	}
+
+	return time.Since(lastCheck) >= budgetCheckInterval
+}
+
+// checkBudgetLimits checks if daily or monthly limits have been exceeded.
+// Returns true and a reason string if exceeded.
+func (w *Worker) checkBudgetLimits(ctx context.Context) (exceeded bool, reason string) {
+	if w.cfg.EnrichmentDailyLimit > 0 {
+		daily, err := w.db.GetDailyEnrichmentCount(ctx)
+		if err != nil {
+			w.logger.Warn().Err(err).Msg("failed to get daily enrichment count")
+		} else if daily >= w.cfg.EnrichmentDailyLimit {
+			return true, fmt.Sprintf("daily limit reached (%d/%d)", daily, w.cfg.EnrichmentDailyLimit)
+		}
+	}
+
+	if w.cfg.EnrichmentMonthlyLimit > 0 {
+		monthly, err := w.db.GetMonthlyEnrichmentCount(ctx)
+		if err != nil {
+			w.logger.Warn().Err(err).Msg("failed to get monthly enrichment count")
+		} else if monthly >= w.cfg.EnrichmentMonthlyLimit {
+			return true, fmt.Sprintf("monthly limit reached (%d/%d)", monthly, w.cfg.EnrichmentMonthlyLimit)
+		}
+	}
+
+	return false, ""
+}
+
+// trackUsage records the enrichment request for budget tracking.
+func (w *Worker) trackUsage(ctx context.Context, provider ProviderName) {
+	if w.cfg.EnrichmentDailyLimit <= 0 && w.cfg.EnrichmentMonthlyLimit <= 0 {
+		return
+	}
+
+	if err := w.db.IncrementEnrichmentUsage(ctx, string(provider)); err != nil {
+		w.logger.Warn().Err(err).Msg("failed to track enrichment usage")
+	}
 }

@@ -120,7 +120,9 @@ func (a *App) runFactCheckWorker(ctx context.Context) {
 }
 
 func (a *App) runEnrichmentWorker(ctx context.Context) {
-	worker := enrichment.NewWorker(a.cfg, a.database, a.logger)
+	llmClient := a.newLLMClient()
+
+	worker := enrichment.NewWorker(a.cfg, a.database, llmClient, a.logger)
 	if err := worker.Run(ctx); err != nil {
 		a.logger.Warn().Err(err).Msg("enrichment worker stopped")
 	}

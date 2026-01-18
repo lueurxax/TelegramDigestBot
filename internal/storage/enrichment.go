@@ -543,3 +543,143 @@ func (db *DB) DeduplicateEvidenceClaims(ctx context.Context) (int64, error) {
 
 	return tag.RowsAffected(), nil
 }
+
+// EnrichmentUsage represents daily usage counters for enrichment.
+type EnrichmentUsage struct {
+	Date           string
+	Provider       string
+	RequestCount   int
+	EmbeddingCount int
+}
+
+// IncrementEnrichmentUsage increments the request counter for the current day and provider.
+func (db *DB) IncrementEnrichmentUsage(ctx context.Context, provider string) error {
+	_, err := db.Pool.Exec(ctx, `
+		INSERT INTO enrichment_usage (date, provider, request_count, embedding_count)
+		VALUES (CURRENT_DATE, $1, 1, 0)
+		ON CONFLICT (date, provider)
+		DO UPDATE SET
+			request_count = enrichment_usage.request_count + 1,
+			updated_at = now()
+	`, provider)
+	if err != nil {
+		return fmt.Errorf("increment enrichment usage: %w", err)
+	}
+
+	return nil
+}
+
+// IncrementEmbeddingUsage increments the embedding counter for the current day.
+func (db *DB) IncrementEmbeddingUsage(ctx context.Context) error {
+	_, err := db.Pool.Exec(ctx, `
+		INSERT INTO enrichment_usage (date, provider, request_count, embedding_count)
+		VALUES (CURRENT_DATE, 'embedding', 0, 1)
+		ON CONFLICT (date, provider)
+		DO UPDATE SET
+			embedding_count = enrichment_usage.embedding_count + 1,
+			updated_at = now()
+	`)
+	if err != nil {
+		return fmt.Errorf("increment embedding usage: %w", err)
+	}
+
+	return nil
+}
+
+// GetDailyEnrichmentCount returns the total enrichment request count for the current day.
+func (db *DB) GetDailyEnrichmentCount(ctx context.Context) (int, error) {
+	var count int64
+
+	err := db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(request_count), 0)::bigint
+		FROM enrichment_usage
+		WHERE date = CURRENT_DATE
+	`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("get daily enrichment count: %w", err)
+	}
+
+	return int(count), nil
+}
+
+// GetMonthlyEnrichmentCount returns the total enrichment request count for the current month.
+func (db *DB) GetMonthlyEnrichmentCount(ctx context.Context) (int, error) {
+	var count int64
+
+	err := db.Pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(request_count), 0)::bigint
+		FROM enrichment_usage
+		WHERE date >= DATE_TRUNC('month', CURRENT_DATE)
+	`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("get monthly enrichment count: %w", err)
+	}
+
+	return int(count), nil
+}
+
+// GetEnrichmentUsageStats returns usage statistics for display.
+func (db *DB) GetEnrichmentUsageStats(ctx context.Context) (daily, monthly int, err error) {
+	daily, err = db.GetDailyEnrichmentCount(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	monthly, err = db.GetMonthlyEnrichmentCount(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return daily, monthly, nil
+}
+
+// FindSimilarClaim finds an existing claim with embedding similarity above the threshold.
+// Uses pgvector cosine distance operator (<=>). Returns nil if no similar claim found.
+// The similarity parameter should be 0-1 where 1 is identical; we convert to distance.
+func (db *DB) FindSimilarClaim(ctx context.Context, evidenceID string, embedding []float32, similarity float32) (*EvidenceClaim, error) {
+	if len(embedding) == 0 {
+		return nil, nil //nolint:nilnil // no embedding means no similarity search possible
+	}
+
+	// Convert similarity (0-1) to cosine distance threshold
+	// Cosine distance = 1 - cosine similarity
+	// For similarity >= 0.98, we want distance <= 0.02
+	distanceThreshold := 1 - similarity
+
+	var (
+		claim       EvidenceClaim
+		id          uuid.UUID
+		evidenceUID uuid.UUID
+		entitiesRaw pgtype.Text
+	)
+
+	// pgvector uses <=> for cosine distance
+	// We look for claims within the same evidence source that are semantically similar
+	err := db.Pool.QueryRow(ctx, `
+		SELECT id, evidence_id, claim_text, entities_json, embedding, created_at
+		FROM evidence_claims
+		WHERE evidence_id = $1
+		  AND embedding IS NOT NULL
+		  AND embedding <=> $2::vector < $3
+		ORDER BY embedding <=> $2::vector
+		LIMIT 1
+	`, toUUID(evidenceID), embedding, distanceThreshold).Scan(
+		&id, &evidenceUID, &claim.ClaimText, &entitiesRaw, &claim.Embedding, &claim.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil //nolint:nilnil // nil means no similar claim found
+		}
+
+		return nil, fmt.Errorf("find similar claim: %w", err)
+	}
+
+	claim.ID = id.String()
+	claim.EvidenceID = evidenceUID.String()
+
+	if entitiesRaw.Valid {
+		claim.EntitiesRaw = []byte(entitiesRaw.String)
+	}
+
+	return &claim, nil
+}
