@@ -45,6 +45,7 @@ type Client interface {
 	GetEmbedding(ctx context.Context, text string) ([]float32, error)
 	ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage string, model string, tone string) ([]BatchResult, error)
 	TranslateText(ctx context.Context, text string, targetLanguage string, model string) (string, error)
+	CompleteText(ctx context.Context, prompt string, model string) (string, error)
 	GenerateNarrative(ctx context.Context, items []domain.Item, targetLanguage string, model string, tone string) (string, error)
 	GenerateNarrativeWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage string, model string, tone string) (string, error)
 	SummarizeCluster(ctx context.Context, items []domain.Item, targetLanguage string, model string, tone string) (string, error)
@@ -118,6 +119,14 @@ func (c *mockClient) ProcessBatch(_ context.Context, messages []MessageInput, ta
 
 func (c *mockClient) TranslateText(_ context.Context, text string, _ string, _ string) (string, error) {
 	return text, nil
+}
+
+func (c *mockClient) CompleteText(_ context.Context, prompt string, _ string) (string, error) {
+	if strings.Contains(prompt, "JSON array") {
+		return `[{"text": "Mock claim", "entities": [{"text": "Mock entity", "type": "ORG"}]}]`, nil
+	}
+
+	return "Mock response", nil
 }
 
 func (c *mockClient) GenerateNarrative(_ context.Context, items []domain.Item, _ string, _ string, tone string) (string, error) {

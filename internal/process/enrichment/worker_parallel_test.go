@@ -20,17 +20,18 @@ type slowProvider struct {
 func (p *slowProvider) Name() ProviderName { return p.name }
 func (p *slowProvider) Priority() int      { return p.priority }
 func (p *slowProvider) IsAvailable() bool  { return true }
-func (p *slowProvider) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+func (p *slowProvider) Search(ctx context.Context, query string, _ int) ([]SearchResult, error) {
 	select {
 	case <-time.After(p.delay):
 		domain := fmt.Sprintf("%s-%s.com", p.name, query)
+
 		return []SearchResult{{
 			URL:    "http://" + domain,
 			Title:  string(p.name),
 			Domain: domain,
 		}}, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, fmt.Errorf("slow provider search canceled: %w", ctx.Err())
 	}
 }
 

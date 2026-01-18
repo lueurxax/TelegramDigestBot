@@ -3,6 +3,7 @@ package enrichment
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -166,18 +167,10 @@ func (r *ProviderRegistry) selectBestResult(ctx context.Context, resultsChan cha
 				return bestResults, bestProvider, nil
 			}
 
-			return nil, "", ctx.Err()
+			return nil, "", fmt.Errorf("search context canceled: %w", ctx.Err())
 		case res, ok := <-resultsChan:
 			if !ok {
-				if bestResults != nil {
-					return bestResults, bestProvider, nil
-				}
-
-				if lastErr != nil {
-					return nil, "", lastErr
-				}
-
-				return nil, "", errNoProvidersAvailable
+				return r.handleChanClosed(bestResults, bestProvider, lastErr)
 			}
 
 			if res.err != nil {
@@ -198,6 +191,18 @@ func (r *ProviderRegistry) selectBestResult(ctx context.Context, resultsChan cha
 			}
 		}
 	}
+}
+
+func (r *ProviderRegistry) handleChanClosed(bestResults []SearchResult, bestProvider ProviderName, lastErr error) ([]SearchResult, ProviderName, error) {
+	if bestResults != nil {
+		return bestResults, bestProvider, nil
+	}
+
+	if lastErr != nil {
+		return nil, "", lastErr
+	}
+
+	return nil, "", errNoProvidersAvailable
 }
 
 func (r *ProviderRegistry) AvailableProviders() []ProviderName {

@@ -222,6 +222,41 @@ func (c *openaiClient) TranslateText(ctx context.Context, text string, targetLan
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
 
+func (c *openaiClient) CompleteText(ctx context.Context, prompt string, model string) (string, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return "", nil
+	}
+
+	if err := c.checkCircuit(); err != nil {
+		return "", err
+	}
+
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return "", fmt.Errorf(errRateLimiter, err)
+	}
+
+	model = c.resolveModel(model)
+
+	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model: model,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: prompt,
+			},
+		},
+	})
+	if err != nil {
+		c.recordFailure()
+
+		return "", fmt.Errorf(errOpenAIChatCompletion, err)
+	}
+
+	c.recordSuccess()
+
+	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
+}
+
 func (c *openaiClient) buildLangInstruction(targetLanguage, tone string) string {
 	langInstruction := ""
 

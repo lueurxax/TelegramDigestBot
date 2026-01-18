@@ -146,25 +146,42 @@ Return a JSON array of objects, where each object has:
 Text:
 ` + truncateText(content, llmInputLimit)
 
-	res, err := e.llmClient.TranslateText(ctx, prompt, "", e.llmModel)
+	res, err := e.llmClient.CompleteText(ctx, prompt, e.llmModel)
 	if err != nil {
 		return nil, fmt.Errorf("llm extract claims: %w", err)
 	}
 
-	// Find the JSON array in the response
-	start := strings.Index(res, "[")
-	end := strings.LastIndex(res, "]")
+	var claims []ExtractedClaim
 
-	if start == -1 || end == -1 || end <= start {
+	var lastErr error
+
+	// Try to find the valid JSON array by trying all combinations of [ and ] positions.
+	// This handles cases where the LLM might include preamble or postamble text with brackets.
+	for start := strings.Index(res, "["); start != -1; {
+		for end := strings.LastIndex(res, "]"); end > start; end = strings.LastIndex(res[:end], "]") {
+			if err := json.Unmarshal([]byte(res[start:end+1]), &claims); err == nil {
+				if len(claims) > 0 {
+					return claims, nil
+				}
+			}
+
+			lastErr = err
+		}
+
+		// Move to next possible start position
+		nextStart := strings.Index(res[start+1:], "[")
+		if nextStart == -1 {
+			break
+		}
+
+		start = start + 1 + nextStart
+	}
+
+	if lastErr == nil {
 		return nil, errInvalidLLMResponse
 	}
 
-	var claims []ExtractedClaim
-	if err := json.Unmarshal([]byte(res[start:end+1]), &claims); err != nil {
-		return nil, fmt.Errorf("unmarshal llm claims: %w", err)
-	}
-
-	return claims, nil
+	return nil, fmt.Errorf("unmarshal llm claims: %w", lastErr)
 }
 
 func toTimePtr(t time.Time) *time.Time {
