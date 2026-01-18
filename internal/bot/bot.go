@@ -38,6 +38,7 @@ const (
 const (
 	CallbackPrefixRate     = "rate:"
 	CallbackPrefixDiscover = "discover:"
+	CallbackPrefixAnnotate = "annotate:"
 	CallbackSuffixUp       = ":up"
 	CallbackSuffixDown     = ":down"
 )
@@ -229,6 +230,8 @@ func (b *Bot) handleCallback(ctx context.Context, query *tgbotapi.CallbackQuery)
 		b.handleRateCallback(ctx, query, data)
 	case strings.HasPrefix(data, CallbackPrefixDiscover):
 		b.handleDiscoverCallback(ctx, query)
+	case strings.HasPrefix(data, CallbackPrefixAnnotate):
+		b.handleAnnotateCallback(ctx, query, data)
 	}
 }
 
@@ -569,12 +572,16 @@ func getTopicEmoji(topic string) string {
 }
 
 func (b *Bot) reply(msg *tgbotapi.Message, text string) {
+	b.sendMessage(msg.Chat.ID, text)
+}
+
+func (b *Bot) sendMessage(chatID int64, text string) {
 	parts := SplitHTML(text, MaxMessageSize)
 
 	for _, part := range parts {
-		reply := tgbotapi.NewMessage(msg.Chat.ID, part)
-
+		reply := tgbotapi.NewMessage(chatID, part)
 		reply.ParseMode = tgbotapi.ModeHTML
+
 		if _, err := b.api.Send(reply); err != nil {
 			b.logger.Error().Err(err).Msg("failed to send reply")
 		}

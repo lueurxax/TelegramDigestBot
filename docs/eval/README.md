@@ -26,7 +26,7 @@ Fields:
 ## Export Labeled Set
 
 ```
-go run ./cmd/labels -out docs/eval/golden.jsonl -limit 200
+go run ./cmd/tools/labels -out docs/eval/golden.jsonl -limit 200
 ```
 
 Requires `POSTGRES_DSN` (or pass `-dsn`).
@@ -34,7 +34,7 @@ Requires `POSTGRES_DSN` (or pass `-dsn`).
 ## Run the Harness
 
 ```
-go run ./cmd/eval -input docs/eval/sample.jsonl -relevance-threshold 0.5 -importance-threshold 0.3
+go run ./cmd/tools/eval -input docs/eval/sample.jsonl -relevance-threshold 0.5 -importance-threshold 0.3
 ```
 
 Optional flags:

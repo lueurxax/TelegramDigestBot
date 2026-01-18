@@ -10,8 +10,8 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
+	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 const (
@@ -25,6 +25,12 @@ const (
 	annotateNoSummary     = "(no summary)"
 	annotateBlockquoteFmt = "<blockquote>%s</blockquote>\n"
 	annotateUnknown       = "unknown"
+	annotationActionSkip  = "skip"
+
+	buttonAnnotateGood       = "👍 Good"
+	buttonAnnotateBad        = "👎 Bad"
+	buttonAnnotateIrrelevant = "🚫 Irrelevant"
+	buttonAnnotateSkip       = "⏭ Skip"
 )
 
 func (b *Bot) handleAnnotate(ctx context.Context, msg *tgbotapi.Message) {
@@ -84,18 +90,7 @@ func (b *Bot) handleAnnotateEnqueue(ctx context.Context, msg *tgbotapi.Message, 
 }
 
 func (b *Bot) handleAnnotateNext(ctx context.Context, msg *tgbotapi.Message) {
-	item, err := b.database.AssignNextAnnotation(ctx, msg.From.ID)
-	if err != nil {
-		b.reply(msg, fmt.Sprintf("Error fetching annotation item: %s", html.EscapeString(err.Error())))
-		return
-	}
-
-	if item == nil {
-		b.reply(msg, "No pending annotation items. Use <code>/annotate enqueue [hours] [limit]</code>.")
-		return
-	}
-
-	b.reply(msg, formatAnnotationItem(item))
+	b.sendNextAnnotation(ctx, msg.Chat.ID, msg.From.ID)
 }
 
 func (b *Bot) handleAnnotateLabel(ctx context.Context, msg *tgbotapi.Message, args []string) {
@@ -181,7 +176,8 @@ func annotateUsage() string {
 		"<code>/annotate next</code>\n" +
 		"<code>/annotate label &lt;good|bad|irrelevant&gt; [comment]</code>\n" +
 		"<code>/annotate skip</code>\n" +
-		"<code>/annotate stats</code>"
+		"<code>/annotate stats</code>\n" +
+		"Tap buttons on annotation cards to label quickly."
 }
 
 func normalizeAnnotationLabel(raw string) (string, bool) {
@@ -236,7 +232,7 @@ func formatAnnotationItem(item *db.AnnotationItem) string {
 		sb.WriteString(fmt.Sprintf(annotateBlockquoteFmt, text))
 	}
 
-	sb.WriteString("\nLabel with <code>/annotate label good|bad|irrelevant [comment]</code> or <code>/annotate skip</code>.")
+	sb.WriteString("\nLabel with buttons below or <code>/annotate label good|bad|irrelevant [comment]</code> or <code>/annotate skip</code>.")
 
 	return sb.String()
 }
@@ -260,4 +256,114 @@ func truncateAnnotationText(text string, limit int) string {
 	}
 
 	return string(runes[:limit]) + "..."
+}
+
+func (b *Bot) handleAnnotateCallback(ctx context.Context, query *tgbotapi.CallbackQuery, data string) {
+	parts := strings.SplitN(data, ":", 3)
+	if len(parts) != 3 {
+		return
+	}
+
+	action := parts[1]
+	itemID := parts[2]
+
+	var (
+		item *db.AnnotationItem
+		err  error
+	)
+
+	switch action {
+	case RatingGood, RatingBad, RatingIrrelevant:
+		item, err = b.database.LabelAnnotationByItem(ctx, query.From.ID, itemID, action, "")
+	case annotationActionSkip:
+		item, err = b.database.SkipAnnotationByItem(ctx, query.From.ID, itemID)
+	default:
+		return
+	}
+
+	if err != nil {
+		b.logger.Error().Err(err).Msg("failed to update annotation from callback")
+		b.answerCallback(query, "Error saving annotation.")
+		return
+	}
+
+	if item == nil {
+		b.answerCallback(query, "No assigned annotation item.")
+		return
+	}
+
+	b.answerCallback(query, "Saved. Sending next...")
+
+	if query.Message == nil {
+		return
+	}
+
+	b.clearAnnotationButtons(query.Message.Chat.ID, query.Message.MessageID)
+	b.sendNextAnnotation(ctx, query.Message.Chat.ID, query.From.ID)
+}
+
+func (b *Bot) sendNextAnnotation(ctx context.Context, chatID int64, userID int64) {
+	item, err := b.database.AssignNextAnnotation(ctx, userID)
+	if err != nil {
+		b.sendMessage(chatID, fmt.Sprintf("Error fetching annotation item: %s", html.EscapeString(err.Error())))
+		return
+	}
+
+	if item == nil {
+		b.sendMessage(chatID, "No pending annotation items. Use <code>/annotate enqueue [hours] [limit]</code>.")
+		return
+	}
+
+	b.sendAnnotationItem(chatID, item)
+}
+
+func (b *Bot) sendAnnotationItem(chatID int64, item *db.AnnotationItem) {
+	text := formatAnnotationItem(item)
+	parts := SplitHTML(text, MaxMessageSize)
+	keyboard := annotationKeyboard(item.ItemID)
+
+	for i, part := range parts {
+		msg := tgbotapi.NewMessage(chatID, part)
+		msg.ParseMode = tgbotapi.ModeHTML
+		msg.DisableWebPagePreview = true
+
+		if i == len(parts)-1 {
+			msg.ReplyMarkup = keyboard
+		}
+
+		if _, err := b.api.Send(msg); err != nil {
+			b.logger.Error().Err(err).Msg("failed to send annotation item")
+		}
+	}
+}
+
+func annotationKeyboard(itemID string) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(buttonAnnotateGood, annotationCallbackData(RatingGood, itemID)),
+			tgbotapi.NewInlineKeyboardButtonData(buttonAnnotateBad, annotationCallbackData(RatingBad, itemID)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(buttonAnnotateIrrelevant, annotationCallbackData(RatingIrrelevant, itemID)),
+			tgbotapi.NewInlineKeyboardButtonData(buttonAnnotateSkip, annotationCallbackData(annotationActionSkip, itemID)),
+		),
+	)
+}
+
+func annotationCallbackData(action, itemID string) string {
+	return CallbackPrefixAnnotate + action + ":" + itemID
+}
+
+func (b *Bot) answerCallback(query *tgbotapi.CallbackQuery, text string) {
+	callback := tgbotapi.NewCallback(query.ID, text)
+	if _, err := b.api.Request(callback); err != nil {
+		b.logger.Error().Err(err).Msg(ErrSendCallbackResp)
+	}
+}
+
+func (b *Bot) clearAnnotationButtons(chatID int64, messageID int) {
+	edit := tgbotapi.NewEditMessageReplyMarkup(chatID, messageID, tgbotapi.InlineKeyboardMarkup{})
+	if _, err := b.api.Request(edit); err != nil {
+		b.logger.Debug().Err(err).Msg("failed to clear annotation buttons")
+	}
 }

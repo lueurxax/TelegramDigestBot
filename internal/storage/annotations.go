@@ -167,6 +167,59 @@ func (db *DB) LabelAssignedAnnotation(ctx context.Context, userID int64, label, 
 	return db.getAnnotationItemByID(ctx, fromUUID(itemID))
 }
 
+func (db *DB) LabelAnnotationByItem(ctx context.Context, userID int64, itemID, label, comment string) (*AnnotationItem, error) {
+	itemUUID := toUUID(itemID)
+	if !itemUUID.Valid {
+		return nil, fmt.Errorf("invalid item id: %s", itemID)
+	}
+
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+
+	defer func() {
+		_ = tx.Rollback(ctx) //nolint:errcheck // rollback after commit returns error, this is best-effort cleanup
+	}()
+
+	var updatedID pgtype.UUID
+
+	err = tx.QueryRow(ctx, `
+		UPDATE annotation_queue
+		SET status = $2,
+			label = $3,
+			comment = $4,
+			updated_at = NOW()
+		WHERE assigned_to = $1
+		  AND status = $5
+		  AND item_id = $6
+		RETURNING item_id
+	`, userID, AnnotationStatusLabeled, label, toText(comment), AnnotationStatusAssigned, itemUUID).Scan(&updatedID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil //nolint:nilnil // nil,nil indicates no annotation to label
+		}
+
+		return nil, fmt.Errorf("update annotation queue: %w", err)
+	}
+
+	err = db.Queries.WithTx(tx).SaveItemRating(ctx, sqlc.SaveItemRatingParams{
+		ItemID:   updatedID,
+		UserID:   userID,
+		Rating:   label,
+		Feedback: toText(comment),
+	})
+	if err != nil {
+		return nil, fmt.Errorf(errSaveItemRating, err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return db.getAnnotationItemByID(ctx, fromUUID(updatedID))
+}
+
 func (db *DB) SkipAssignedAnnotation(ctx context.Context, userID int64) (*AnnotationItem, error) {
 	var itemID pgtype.UUID
 
@@ -187,6 +240,34 @@ func (db *DB) SkipAssignedAnnotation(ctx context.Context, userID int64) (*Annota
 	}
 
 	return db.getAnnotationItemByID(ctx, fromUUID(itemID))
+}
+
+func (db *DB) SkipAnnotationByItem(ctx context.Context, userID int64, itemID string) (*AnnotationItem, error) {
+	itemUUID := toUUID(itemID)
+	if !itemUUID.Valid {
+		return nil, fmt.Errorf("invalid item id: %s", itemID)
+	}
+
+	var updatedID pgtype.UUID
+
+	err := db.Pool.QueryRow(ctx, `
+		UPDATE annotation_queue
+		SET status = $2,
+			updated_at = NOW()
+		WHERE assigned_to = $1
+		  AND status = $3
+		  AND item_id = $4
+		RETURNING item_id
+	`, userID, AnnotationStatusSkipped, AnnotationStatusAssigned, itemUUID).Scan(&updatedID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil //nolint:nilnil // nil,nil indicates no annotation to skip
+		}
+
+		return nil, fmt.Errorf("skip annotation: %w", err)
+	}
+
+	return db.getAnnotationItemByID(ctx, fromUUID(updatedID))
 }
 
 func (db *DB) GetAnnotationStats(ctx context.Context) (map[string]int, error) {

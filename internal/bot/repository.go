@@ -27,7 +27,9 @@ type Repository interface {
 	EnqueueAnnotationItems(ctx context.Context, since time.Time, limit int) (int, error)
 	AssignNextAnnotation(ctx context.Context, userID int64) (*db.AnnotationItem, error)
 	LabelAssignedAnnotation(ctx context.Context, userID int64, label, comment string) (*db.AnnotationItem, error)
+	LabelAnnotationByItem(ctx context.Context, userID int64, itemID, label, comment string) (*db.AnnotationItem, error)
 	SkipAssignedAnnotation(ctx context.Context, userID int64) (*db.AnnotationItem, error)
+	SkipAnnotationByItem(ctx context.Context, userID int64, itemID string) (*db.AnnotationItem, error)
 	GetAnnotationStats(ctx context.Context) (map[string]int, error)
 
 	// Channel operations

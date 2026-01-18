@@ -4,7 +4,7 @@ Per-channel importance weight allows boosting or reducing a channel's contributi
 
 ## Overview
 
-Each channel has an `importance_weight` multiplier (0.1–2.0) that adjusts the LLM-assigned importance score:
+Each channel has an `importance_weight` multiplier (0.1-2.0) that adjusts the LLM-assigned importance score:
 
 ```
 final_importance = min(1.0, llm_importance * channel_weight)
@@ -84,7 +84,7 @@ Where:
 
 ### Auto-Weight Range
 
-Auto-calculated weights are constrained to **0.5–1.5** (more conservative than manual 0.1–2.0) to prevent extreme swings.
+Auto-calculated weights are constrained to **0.5-1.5** (more conservative than manual 0.1-2.0) to prevent extreme swings.
 
 ### Configuration
 
@@ -138,7 +138,7 @@ CREATE TABLE channel_stats (
 
 ## Pipeline Behavior
 
-Weight is applied in `internal/pipeline/pipeline.go` after LLM scoring:
+Weight is applied in `internal/process/pipeline/pipeline.go` after LLM scoring:
 
 ```go
 // Apply channel importance weight multiplier
@@ -201,11 +201,11 @@ Channels with fewer than 10 messages in the rolling window keep the default weig
 | `internal/db/channels.go` | Channel model and weight queries |
 | `internal/db/channel_stats.go` | Stats collection and auto-weight queries |
 | `internal/db/queries.sql` | SQL queries |
-| `internal/pipeline/pipeline.go` | Weight application logic |
-| `internal/digest/autoweight.go` | Auto-weight calculation algorithm |
-| `internal/digest/digest.go` | Stats collection and weekly job |
+| `internal/process/pipeline/pipeline.go` | Weight application logic |
+| `internal/output/digest/autoweight.go` | Auto-weight calculation algorithm |
+| `internal/output/digest/digest.go` | Stats collection and weekly job |
 | `internal/telegrambot/handlers.go` | `/channel weight` command handler |
 
 ## See Also
 
-- [Content Quality Improvements](../proposals/content-quality-improvements.md) - Roadmap for future quality improvements
+- [Content Quality System](../features/content-quality.md) - How relevance, ratings, and clustering fit together

@@ -57,7 +57,7 @@ The gate prompt can be customized via the `settings` table:
 
 ### Implementation
 
-- **File**: `internal/pipeline/relevance_gate.go`
+- **File**: `internal/process/pipeline/relevance_gate.go`
 - Gate decisions are logged to `relevance_gate_log` with: decision, confidence, reason, model, version
 
 ---
@@ -109,7 +109,7 @@ net = (weighted_good - (weighted_bad + weighted_irrelevant)) / weighted_total
 
 ### Implementation
 
-- **File**: `internal/digest/threshold_tuning.go`
+- **File**: `internal/output/digest/threshold_tuning.go`
 - Thresholds are stored in the `settings` table as `relevance_threshold` and `importance_threshold`
 
 ---
@@ -160,7 +160,7 @@ A channel with 100% good ratings gets no penalty. A channel with 0% good ratings
 
 ### Implementation
 
-- **File**: `internal/digest/autorelevance.go`
+- **File**: `internal/output/digest/autorelevance.go`
 - Constants: 30-day window, 14-day half-life, 0.2 max penalty factor
 
 ---
@@ -198,7 +198,7 @@ These can also be overridden in the `settings` table:
 
 ### Implementation
 
-- **File**: `internal/digest/clustering.go`
+- **File**: `internal/output/digest/clustering.go`
 - Clusters stored in `clusters` table with item links via `cluster_items`
 - Maximum 500 items per clustering run to prevent performance issues
 
@@ -247,7 +247,7 @@ With defaults (36-hour decay, 0.4 floor):
 
 ### Implementation
 
-- **File**: `internal/digest/topic_balance.go`
+- **File**: `internal/output/digest/topic_balance.go`
 - Topics normalized to lowercase with trimmed whitespace
 - Unknown/empty topics grouped as `__unknown__` and excluded from diversity counting
 
@@ -262,7 +262,7 @@ The evaluation harness measures quality metrics against labeled data to validate
 Export labeled annotations from the database to a JSONL file:
 
 ```bash
-go run cmd/labels/main.go \
+go run ./cmd/tools/labels \
   -dsn "$POSTGRES_DSN" \
   -out docs/eval/golden.jsonl \
   -limit 500
@@ -280,7 +280,7 @@ Labels can be: `good`, `bad`, or `irrelevant`.
 Run evaluation against a labeled dataset:
 
 ```bash
-go run cmd/eval/main.go \
+go run ./cmd/tools/eval \
   -input docs/eval/golden.jsonl \
   -relevance-threshold 0.5 \
   -importance-threshold 0.3
@@ -308,7 +308,7 @@ go run cmd/eval/main.go \
 Add to your CI pipeline to catch regressions:
 
 ```bash
-go run cmd/eval/main.go \
+go run ./cmd/tools/eval \
   -input docs/eval/golden.jsonl \
   -min-precision 0.80 \
   -max-noise-rate 0.15
@@ -318,8 +318,8 @@ The tool exits with code 1 if thresholds are violated.
 
 ### Implementation
 
-- **Evaluation tool**: `cmd/eval/main.go`
-- **Label export**: `cmd/labels/main.go`
+- **Evaluation tool**: `cmd/tools/eval`
+- **Label export**: `cmd/tools/labels`
 - **Golden datasets**: Store in `docs/eval/` directory
 
 ---
