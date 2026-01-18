@@ -80,6 +80,7 @@ const (
 	CmdChannel            = "channel"
 	CmdScores             = "scores"
 	CmdFactCheck          = "factcheck"
+	CmdEnrichment         = "enrichment"
 	CmdRatings            = "ratings"
 	CmdCoverImage         = "cover_image"
 	CmdCoverImageAlt      = "coverimage"

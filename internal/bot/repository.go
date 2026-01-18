@@ -70,6 +70,12 @@ type Repository interface {
 	CountFactCheckMatchesSince(ctx context.Context, since time.Time) (int, error)
 	GetRecentFactCheckMatches(ctx context.Context, limit int) ([]db.FactCheckMatch, error)
 
+	// Enrichment operations
+	GetEnrichmentQueueStats(ctx context.Context) ([]db.EnrichmentQueueStat, error)
+	CountEvidenceSources(ctx context.Context) (int, error)
+	CountItemEvidence(ctx context.Context) (int, error)
+	CountItemEvidenceSince(ctx context.Context, since time.Time) (int, error)
+
 	// Digest operations
 	GetLastPostedDigest(ctx context.Context) (*db.LastDigestInfo, error)
 	GetRecentErrors(ctx context.Context, limit int) ([]db.Item, error)

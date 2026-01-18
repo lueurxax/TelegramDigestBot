@@ -55,6 +55,12 @@ const (
 	translatePromptTemplate       = "Translate the following text to %s. Preserve HTML tags and return only the translated text."
 	coverPromptNarrativeMaxLength = 200
 	compressSummariesTemperature  = 0.3
+
+	// Format strings for LLM prompts
+	narrativeItemFormat       = "[%d] Topic: %s - %s\n"
+	summaryLangInstructionFmt = " IMPORTANT: Write the summary in %s language."
+	percentageMultiplier      = 100
+
 	compressSummariesSystemPrompt = `You are a news headline writer. Your task is to compress news summaries into very short English phrases (3-6 words each) suitable for image generation.
 
 Rules:
@@ -529,7 +535,60 @@ func (c *openaiClient) GenerateNarrative(ctx context.Context, items []domain.Ite
 	sb.WriteString(applyPromptTokens(promptTemplate, langInstruction, len(items)))
 
 	for i, item := range items {
-		sb.WriteString(fmt.Sprintf("[%d] Topic: %s - %s\n", i+1, item.Topic, item.Summary))
+		sb.WriteString(fmt.Sprintf(narrativeItemFormat, i+1, item.Topic, item.Summary))
+	}
+
+	if err := c.checkCircuit(); err != nil {
+		return "", err
+	}
+
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return "", fmt.Errorf(errRateLimiter, err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model: model,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: sb.String(),
+			},
+		},
+	})
+	if err != nil {
+		c.recordFailure()
+
+		return "", fmt.Errorf(errOpenAIChatCompletion, err)
+	}
+
+	c.recordSuccess()
+
+	return resp.Choices[0].Message.Content, nil
+}
+
+func (c *openaiClient) GenerateNarrativeWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage string, model string, tone string) (string, error) {
+	if len(items) == 0 {
+		return "", nil
+	}
+
+	if model == "" {
+		model = c.cfg.LLMModel
+	}
+
+	langInstruction := c.buildLangInstruction(targetLanguage, tone)
+
+	var sb strings.Builder
+
+	promptTemplate, _ := c.loadPrompt(ctx, promptKeyNarrative, defaultNarrativePrompt)
+	sb.WriteString(applyPromptTokens(promptTemplate, langInstruction, len(items)))
+
+	for i, item := range items {
+		sb.WriteString(fmt.Sprintf(narrativeItemFormat, i+1, item.Topic, item.Summary))
+
+		// Add evidence context if available
+		if ev, ok := evidence[item.ID]; ok && len(ev) > 0 {
+			sb.WriteString(formatEvidenceContext(ev))
+		}
 	}
 
 	if err := c.checkCircuit(); err != nil {
@@ -572,7 +631,7 @@ func (c *openaiClient) SummarizeCluster(ctx context.Context, items []domain.Item
 	langInstruction := ""
 
 	if targetLanguage != "" {
-		langInstruction = fmt.Sprintf(" IMPORTANT: Write the summary in %s language.", targetLanguage)
+		langInstruction = fmt.Sprintf(summaryLangInstructionFmt, targetLanguage)
 	}
 
 	if tone != "" {
@@ -602,6 +661,78 @@ func (c *openaiClient) SummarizeCluster(ctx context.Context, items []domain.Item
 			{
 				Role:    openai.ChatMessageRoleUser,
 				Content: sb.String(),
+			},
+		},
+	})
+	if err != nil {
+		c.recordFailure()
+
+		return "", fmt.Errorf(errOpenAIChatCompletion, err)
+	}
+
+	c.recordSuccess()
+
+	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
+}
+
+func (c *openaiClient) SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage string, model string, tone string) (string, error) {
+	if len(items) == 0 {
+		return "", nil
+	}
+
+	model = c.resolveModel(model)
+	langInstruction := c.buildSummaryLangInstruction(targetLanguage, tone)
+	prompt := c.buildClusterPromptWithEvidence(ctx, items, evidence, langInstruction)
+
+	return c.executeClusterSummary(ctx, model, prompt)
+}
+
+func (c *openaiClient) buildSummaryLangInstruction(targetLanguage, tone string) string {
+	langInstruction := ""
+
+	if targetLanguage != "" {
+		langInstruction = fmt.Sprintf(summaryLangInstructionFmt, targetLanguage)
+	}
+
+	if tone != "" {
+		langInstruction += fmt.Sprintf(toneFormatString, getToneInstruction(tone))
+	}
+
+	return langInstruction
+}
+
+func (c *openaiClient) buildClusterPromptWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, langInstruction string) string {
+	var sb strings.Builder
+
+	promptTemplate, _ := c.loadPrompt(ctx, promptKeyClusterSummary, defaultClusterSummaryPrompt)
+	sb.WriteString(applyPromptTokens(promptTemplate, langInstruction, len(items)))
+
+	for i, item := range items {
+		sb.WriteString(fmt.Sprintf(indexedItemFormat, i+1, item.Summary))
+
+		if ev, ok := evidence[item.ID]; ok && len(ev) > 0 {
+			sb.WriteString(formatEvidenceContext(ev))
+		}
+	}
+
+	return sb.String()
+}
+
+func (c *openaiClient) executeClusterSummary(ctx context.Context, model, prompt string) (string, error) {
+	if err := c.checkCircuit(); err != nil {
+		return "", err
+	}
+
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return "", fmt.Errorf(errRateLimiter, err)
+	}
+
+	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model: model,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: prompt,
 			},
 		},
 	})
@@ -732,6 +863,29 @@ func truncate(s string, max int) string {
 	runes := []rune(s)
 
 	return string(runes[:max]) + "..."
+}
+
+// formatEvidenceContext formats evidence sources for inclusion in LLM prompts.
+func formatEvidenceContext(evidence []EvidenceSource) string {
+	if len(evidence) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	sb.WriteString("   [Supporting Evidence:")
+
+	for _, ev := range evidence {
+		if ev.IsContradiction {
+			sb.WriteString(fmt.Sprintf(" ⚠️ CONTRADICTS: %s (%s)", ev.Title, ev.Domain))
+		} else {
+			sb.WriteString(fmt.Sprintf(" ✓ %s (%s, score: %.0f%%)", ev.Title, ev.Domain, ev.AgreementScore*percentageMultiplier))
+		}
+	}
+
+	sb.WriteString("]\n")
+
+	return sb.String()
 }
 
 // GenerateDigestCover generates a cover image for the digest using DALL-E.

@@ -28,12 +28,26 @@ type MessageInput struct {
 	ResolvedLinks []domain.ResolvedLink
 }
 
+// EvidenceSource represents evidence from external sources for context injection.
+type EvidenceSource struct {
+	URL             string
+	Domain          string
+	Title           string
+	AgreementScore  float32
+	IsContradiction bool
+}
+
+// ItemEvidence maps item IDs to their associated evidence sources.
+type ItemEvidence map[string][]EvidenceSource
+
 type Client interface {
 	GetEmbedding(ctx context.Context, text string) ([]float32, error)
 	ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage string, model string, tone string) ([]BatchResult, error)
 	TranslateText(ctx context.Context, text string, targetLanguage string, model string) (string, error)
 	GenerateNarrative(ctx context.Context, items []domain.Item, targetLanguage string, model string, tone string) (string, error)
+	GenerateNarrativeWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage string, model string, tone string) (string, error)
 	SummarizeCluster(ctx context.Context, items []domain.Item, targetLanguage string, model string, tone string) (string, error)
+	SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage string, model string, tone string) (string, error)
 	GenerateClusterTopic(ctx context.Context, items []domain.Item, targetLanguage string, model string) (string, error)
 	RelevanceGate(ctx context.Context, text string, model string, prompt string) (RelevanceGateResult, error)
 	CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error)
@@ -109,8 +123,16 @@ func (c *mockClient) GenerateNarrative(_ context.Context, items []domain.Item, _
 	return "This is a mock cohesive narrative of the latest news based on " + fmt.Sprint(len(items)) + " items in " + tone + " tone.", nil
 }
 
+func (c *mockClient) GenerateNarrativeWithEvidence(ctx context.Context, items []domain.Item, _ ItemEvidence, targetLanguage string, model string, tone string) (string, error) {
+	return c.GenerateNarrative(ctx, items, targetLanguage, model, tone)
+}
+
 func (c *mockClient) SummarizeCluster(_ context.Context, items []domain.Item, _ string, _ string, tone string) (string, error) {
 	return "This is a mock consolidated summary of " + fmt.Sprint(len(items)) + " related items in " + tone + " tone.", nil
+}
+
+func (c *mockClient) SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, _ ItemEvidence, targetLanguage string, model string, tone string) (string, error) {
+	return c.SummarizeCluster(ctx, items, targetLanguage, model, tone)
 }
 
 func (c *mockClient) GenerateClusterTopic(_ context.Context, items []domain.Item, _ string, _ string) (string, error) {

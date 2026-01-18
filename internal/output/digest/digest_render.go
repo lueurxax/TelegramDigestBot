@@ -219,12 +219,39 @@ func (rc *digestRenderContext) buildMetadataSection(sb *strings.Builder) {
 	fmt.Fprintf(sb, "📊 <i>%d items from %d channels | %d topics</i>\n\n", len(rc.items), len(uniqueChannels), topicCount)
 }
 
+// convertEvidenceForLLM converts database evidence to LLM-compatible format.
+func (rc *digestRenderContext) convertEvidenceForLLM(items []db.Item) llm.ItemEvidence {
+	result := make(llm.ItemEvidence)
+
+	for _, item := range items {
+		if ev, ok := rc.evidence[item.ID]; ok && len(ev) > 0 {
+			sources := make([]llm.EvidenceSource, 0, len(ev))
+
+			for _, e := range ev {
+				sources = append(sources, llm.EvidenceSource{
+					URL:             e.Source.URL,
+					Domain:          e.Source.Domain,
+					Title:           e.Source.Title,
+					AgreementScore:  e.AgreementScore,
+					IsContradiction: e.IsContradiction,
+				})
+			}
+
+			result[item.ID] = sources
+		}
+	}
+
+	return result
+}
+
 func (rc *digestRenderContext) generateNarrative(ctx context.Context, sb *strings.Builder) bool {
 	if !rc.settings.editorEnabled || rc.settings.smartLLMModel == "" {
 		return false
 	}
 
-	narrative, err := rc.llmClient.GenerateNarrative(ctx, rc.items, rc.settings.digestLanguage, rc.settings.smartLLMModel, rc.settings.digestTone)
+	evidence := rc.convertEvidenceForLLM(rc.items)
+
+	narrative, err := rc.llmClient.GenerateNarrativeWithEvidence(ctx, rc.items, evidence, rc.settings.digestLanguage, rc.settings.smartLLMModel, rc.settings.digestTone)
 	if err != nil {
 		rc.logger.Warn().Err(err).Msg("Editor-in-Chief narrative generation failed")
 		return false
@@ -350,8 +377,10 @@ func (rc *digestRenderContext) renderOthersAsNarrative(ctx context.Context, sb *
 		return true
 	}
 
-	// Generate narrative for "others" items
-	narrative, err := rc.llmClient.SummarizeCluster(ctx, allItems, rc.settings.digestLanguage, model, rc.settings.digestTone)
+	// Generate narrative for "others" items with evidence context
+	evidence := rc.convertEvidenceForLLM(allItems)
+	narrative, err := rc.llmClient.SummarizeClusterWithEvidence(ctx, allItems, evidence, rc.settings.digestLanguage, model, rc.settings.digestTone)
+
 	if err != nil || narrative == "" {
 		if err != nil {
 			rc.logger.Warn().Err(err).Msg("failed to generate others narrative, falling back to detailed list")
@@ -424,7 +453,9 @@ func (rc *digestRenderContext) renderMultiItemCluster(ctx context.Context, sb *s
 func (rc *digestRenderContext) renderConsolidatedCluster(ctx context.Context, sb *strings.Builder, c db.ClusterWithItems) bool {
 	model := rc.getNarrativeModel()
 
-	summary, err := rc.llmClient.SummarizeCluster(ctx, c.Items, rc.settings.digestLanguage, model, rc.settings.digestTone)
+	evidence := rc.convertEvidenceForLLM(c.Items)
+	summary, err := rc.llmClient.SummarizeClusterWithEvidence(ctx, c.Items, evidence, rc.settings.digestLanguage, model, rc.settings.digestTone)
+
 	if err != nil || summary == "" {
 		if err != nil {
 			rc.logger.Warn().Err(err).Str("cluster", c.Topic).Msg("failed to summarize cluster, falling back to detailed list")
