@@ -69,7 +69,7 @@ func TestExtractor_ExtractClaimsWithLLM_Robustness(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &mockLLMClient{response: tt.llmResponse}
-			e := NewExtractor()
+			e := NewExtractor(nil)
 			e.SetLLMClient(m, "test-model")
 
 			claims, err := e.extractClaimsWithLLM(context.Background(), "some content")

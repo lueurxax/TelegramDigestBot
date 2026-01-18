@@ -101,7 +101,7 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 	registry := NewProviderRegistry(cfg.EnrichmentProviderCooldown)
 	registerProviders(cfg, registry)
 
-	extractor := NewExtractor()
+	extractor := NewExtractor(logger)
 	// The actual wiring of LLM client happens in app.go.
 
 	return &Worker{

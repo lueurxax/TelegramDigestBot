@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/rs/zerolog"
+
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
@@ -46,13 +48,20 @@ type Extractor struct {
 	httpClient *http.Client
 	llmClient  llm.Client
 	llmModel   string
+	logger     *zerolog.Logger
 }
 
-func NewExtractor() *Extractor {
+func NewExtractor(logger *zerolog.Logger) *Extractor {
+	if logger == nil {
+		l := zerolog.Nop()
+		logger = &l
+	}
+
 	return &Extractor{
 		httpClient: &http.Client{
 			Timeout: fetchTimeout,
 		},
+		logger: logger,
 	}
 }
 
@@ -123,7 +132,7 @@ func (e *Extractor) Extract(ctx context.Context, result SearchResult, provider P
 	if e.llmClient != nil {
 		claims, err = e.extractClaimsWithLLM(ctx, content.Content)
 		if err != nil {
-			fmt.Printf("LLM extraction failed: %v\n", err)
+			e.logger.Error().Err(err).Str("url", result.URL).Msg("LLM extraction failed")
 
 			claims = extractClaims(content.Content)
 		}
@@ -178,8 +187,12 @@ Text:
 	}
 
 	if lastErr == nil {
+		e.logger.Warn().Str("response", res).Msg("invalid LLM response format: no JSON array found")
+
 		return nil, errInvalidLLMResponse
 	}
+
+	e.logger.Warn().Err(lastErr).Str("response", res).Msg("unmarshal llm claims failed")
 
 	return nil, fmt.Errorf("unmarshal llm claims: %w", lastErr)
 }

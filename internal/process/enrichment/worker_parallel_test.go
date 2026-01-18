@@ -85,7 +85,7 @@ func TestWorker_ProcessSearchResults_Parallelism(t *testing.T) {
 		domainFilter: NewDomainFilter("", ""),
 		// We can't mock extractor easily, so we just check it doesn't crash
 		// and maybe we can use a very fast one or a failing one.
-		extractor: NewExtractor(),
+		extractor: NewExtractor(nil),
 	}
 
 	results := []SearchResult{

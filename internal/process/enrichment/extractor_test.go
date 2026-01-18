@@ -232,7 +232,7 @@ func TestCoalesce(t *testing.T) {
 }
 
 func TestNewExtractor(t *testing.T) {
-	ext := NewExtractor()
+	ext := NewExtractor(nil)
 	if ext == nil {
 		t.Fatal("expected non-nil extractor")
 	}
