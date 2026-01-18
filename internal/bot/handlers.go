@@ -175,6 +175,7 @@ const (
 const (
 	filterTypeAllow = "allow"
 	filterTypeDeny  = "deny"
+	subCmdHelp      = "help"
 )
 
 // Preview field constants.
@@ -3446,11 +3447,41 @@ func (b *Bot) executeDiscoverSimpleCmd(ctx context.Context, msg *tgbotapi.Messag
 		b.handleDiscoverCleanup(ctx, msg)
 	case SubCmdStats:
 		b.handleDiscoverStats(ctx, msg)
+	case subCmdHelp:
+		b.reply(msg, discoverHelpMessage())
 	default:
 		return false
 	}
 
 	return true
+}
+
+func discoverHelpMessage() string {
+	return `📖 <b>Discovery Commands</b>
+
+<b>Browse discoveries:</b>
+• <code>/discover</code> - List pending discoveries
+• <code>/discover stats</code> - Show statistics
+
+<b>Manage channels:</b>
+• <code>/discover approve @user</code> - Add to tracking
+• <code>/discover reject @user</code> - Mark as not useful
+• <code>/discover preview @user</code> - Check why visible/hidden
+
+<b>Threshold filters:</b>
+• <code>/discover min_seen &lt;n&gt;</code> - Min discovery count
+• <code>/discover min_engagement &lt;n&gt;</code> - Min engagement score
+
+<b>Keyword filters:</b>
+• <code>/discover allow</code> - List allow keywords
+• <code>/discover allow &lt;word&gt;</code> - Add allow keyword
+• <code>/discover allow remove &lt;word&gt;</code> - Remove keyword
+• <code>/discover deny</code> - List deny keywords
+• <code>/discover deny &lt;word&gt;</code> - Add deny keyword
+
+<b>Maintenance:</b>
+• <code>/discover cleanup</code> - Backfill matched channels
+• <code>/discover rejected</code> - Show rejected list`
 }
 
 func (b *Bot) executeDiscoverArgsCmd(ctx context.Context, msg *tgbotapi.Message, args []string, cmd string) bool {
@@ -3586,9 +3617,10 @@ func (b *Bot) processDiscoveryKeywordAction(msg *tgbotapi.Message, label, action
 	case SubCmdClear:
 		return []string{}, true
 	default:
-		b.reply(msg, fmt.Sprintf("❓ Unknown %s keyword command. Use <code>add</code>, <code>remove</code>, <code>clear</code> or no arguments to list.", html.EscapeString(label)))
+		// Treat unknown action as a keyword to add (e.g., "/discover deny РКН" → add "РКН")
+		allArgs := append([]string{action}, args...)
 
-		return nil, false
+		return b.addDiscoveryKeyword(msg, label, allArgs, keywords)
 	}
 }
 

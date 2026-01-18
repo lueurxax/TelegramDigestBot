@@ -19,6 +19,7 @@ const (
 	DefaultAnnotateLimit = 50
 
 	annotationTextLimit        = 800
+	annotationSummaryLimit     = 600
 	annotationCallbackNumParts = 3 // prefix:action:itemID
 	annotateEnqueueUsage       = "Usage: <code>/annotate enqueue [hours] [limit]</code>"
 	annotateLabelUsage         = "Usage: <code>/annotate label &lt;good|bad|irrelevant&gt; [comment]</code>"
@@ -216,10 +217,12 @@ func formatAnnotationItem(item *db.AnnotationItem) string {
 	summary := strings.TrimSpace(item.Summary)
 	if summary == "" {
 		summary = annotateNoSummary
-		summary = html.EscapeString(summary)
 	} else {
-		summary = htmlutils.SanitizeHTML(summary)
+		summary = htmlutils.StripHTMLTags(summary)
 	}
+
+	summary = truncateAnnotationText(summary, annotationSummaryLimit)
+	summary = html.EscapeString(summary)
 
 	sb.WriteString("\nSummary:\n")
 	sb.WriteString(fmt.Sprintf(annotateBlockquoteFmt, summary))
@@ -334,6 +337,23 @@ func (b *Bot) sendAnnotationItem(chatID int64, item *db.AnnotationItem) {
 		}
 
 		if _, err := b.api.Send(msg); err != nil {
+			if strings.Contains(err.Error(), "can't parse entities") {
+				fallback := htmlutils.SanitizeHTML(html.UnescapeString(part))
+				fallbackMsg := tgbotapi.NewMessage(chatID, fallback)
+				fallbackMsg.ParseMode = tgbotapi.ModeHTML
+				fallbackMsg.DisableWebPagePreview = true
+
+				if i == len(parts)-1 {
+					fallbackMsg.ReplyMarkup = keyboard
+				}
+
+				if _, fallbackErr := b.api.Send(fallbackMsg); fallbackErr != nil {
+					b.logger.Error().Err(fallbackErr).Msg("failed to send annotation item fallback")
+				}
+
+				continue
+			}
+
 			b.logger.Error().Err(err).Msg("failed to send annotation item")
 		}
 	}
@@ -364,7 +384,12 @@ func (b *Bot) answerCallback(query *tgbotapi.CallbackQuery, text string) {
 }
 
 func (b *Bot) clearAnnotationButtons(chatID int64, messageID int) {
-	edit := tgbotapi.NewEditMessageReplyMarkup(chatID, messageID, tgbotapi.InlineKeyboardMarkup{})
+	emptyKeyboard := tgbotapi.InlineKeyboardMarkup{
+		InlineKeyboard: [][]tgbotapi.InlineKeyboardButton{},
+	}
+
+	edit := tgbotapi.NewEditMessageReplyMarkup(chatID, messageID, emptyKeyboard)
+
 	if _, err := b.api.Request(edit); err != nil {
 		b.logger.Debug().Err(err).Msg("failed to clear annotation buttons")
 	}
