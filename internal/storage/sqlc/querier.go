@@ -37,6 +37,7 @@ type Querier interface {
 	GetActiveFilters(ctx context.Context) ([]GetActiveFiltersRow, error)
 	GetAllSettings(ctx context.Context) ([]GetAllSettingsRow, error)
 	GetBacklogCount(ctx context.Context) (int64, error)
+	GetChannelByID(ctx context.Context, id pgtype.UUID) (GetChannelByIDRow, error)
 	GetChannelByPeerID(ctx context.Context, tgPeerID int64) (Channel, error)
 	GetChannelStats(ctx context.Context) ([]GetChannelStatsRow, error)
 	GetChannelStatsForPeriod(ctx context.Context, arg GetChannelStatsForPeriodParams) ([]GetChannelStatsForPeriodRow, error)

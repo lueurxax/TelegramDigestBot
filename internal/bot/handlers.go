@@ -3381,13 +3381,13 @@ func (b *Bot) handleDiscoverShowRejected(ctx context.Context, msg *tgbotapi.Mess
 		return
 	}
 
-	text := formatDiscoveryListWithTip("🗂 <b>Rejected Channel Discoveries</b>", discoveries, "💡 <i>Use <code>/discover approve @username</code> to add a channel back.</i>")
-	reply := tgbotapi.NewMessage(msg.Chat.ID, text)
-	reply.ParseMode = tgbotapi.ModeHTML
-
-	if _, err := b.api.Send(reply); err != nil {
-		b.logger.Error().Err(err).Msg("failed to send rejected discover list")
+	header := "🗂 <b>Rejected Channel Discoveries</b>"
+	if stats, err := b.database.GetDiscoveryStats(ctx); err == nil {
+		header = fmt.Sprintf("%s (%d shown of %d)", header, len(discoveries), stats.RejectedCount)
 	}
+
+	text := formatDiscoveryListWithTip(header, discoveries, "💡 <i>Use <code>/discover approve @username</code> to add a channel back.</i>")
+	b.sendMessage(msg.Chat.ID, text)
 }
 
 func (b *Bot) handleDiscoverCleanup(ctx context.Context, msg *tgbotapi.Message) {

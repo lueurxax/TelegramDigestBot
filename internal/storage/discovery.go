@@ -2,9 +2,11 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
@@ -88,6 +90,15 @@ func (db *DB) shouldSkipDiscovery(ctx context.Context, normalizedUsername string
 		return true, nil
 	}
 
+	skip, err := db.shouldSkipForSourceHygiene(ctx, normalizedUsername, d)
+	if err != nil {
+		return false, err
+	}
+
+	if skip {
+		return true, nil
+	}
+
 	rejected, err := db.Queries.IsChannelDiscoveredRejected(ctx, sqlc.IsChannelDiscoveredRejectedParams{
 		Username:   toText(normalizedUsername),
 		TgPeerID:   toInt8(d.TGPeerID),
@@ -98,6 +109,51 @@ func (db *DB) shouldSkipDiscovery(ctx context.Context, normalizedUsername string
 	}
 
 	return rejected, nil
+}
+
+// shouldSkipForSourceHygiene checks if the discovery should be skipped because
+// the source channel is inactive or the discovery is self-referential.
+func (db *DB) shouldSkipForSourceHygiene(ctx context.Context, normalizedUsername string, d Discovery) (bool, error) {
+	if d.FromChannelID == "" {
+		return false, nil
+	}
+
+	sourceID := toUUID(d.FromChannelID)
+	if !sourceID.Valid {
+		return false, nil
+	}
+
+	source, err := db.Queries.GetChannelByID(ctx, sourceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("get discovery source channel: %w", err)
+	}
+
+	if !source.IsActive {
+		return true, nil
+	}
+
+	return db.isSelfDiscovery(source, normalizedUsername, d), nil
+}
+
+// isSelfDiscovery checks if the discovery refers to the same channel as the source.
+func (db *DB) isSelfDiscovery(source sqlc.GetChannelByIDRow, normalizedUsername string, d Discovery) bool {
+	if d.TGPeerID != 0 && source.TgPeerID == d.TGPeerID {
+		return true
+	}
+
+	if normalizedUsername != "" && source.Username.String != "" && normalizedUsername == source.Username.String {
+		return true
+	}
+
+	if d.InviteLink != "" && source.InviteLink.String != "" && d.InviteLink == source.InviteLink.String {
+		return true
+	}
+
+	return false
 }
 
 // upsertDiscovery records the discovery based on which identifier is available

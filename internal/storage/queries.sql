@@ -355,6 +355,9 @@ ORDER BY ml.position;
 -- name: GetChannelByPeerID :one
 SELECT id, tg_peer_id, username, title, is_active, added_at, added_by_tg_user, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at, weight_updated_by, auto_relevance_enabled, relevance_threshold_delta FROM channels WHERE tg_peer_id = $1;
 
+-- name: GetChannelByID :one
+SELECT id, tg_peer_id, username, invite_link, is_active FROM channels WHERE id = $1;
+
 -- Channel Discovery queries
 
 -- name: UpsertDiscoveredChannelByUsername :exec
