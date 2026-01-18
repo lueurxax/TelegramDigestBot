@@ -138,39 +138,26 @@ func (db *DB) AddChannelByInviteLink(ctx context.Context, inviteLink string) err
 
 func (db *DB) markDiscoveryAdded(ctx context.Context, username string, peerID int64, inviteLink string) error {
 	normalized := normalizeUsername(username)
-	if normalized != "" {
-		if _, err := db.Pool.Exec(ctx, `
-			UPDATE discovered_channels
-			SET status = $2, status_changed_at = now(), status_changed_by = NULL
-			WHERE status = $3
-			  AND (username = $1 OR '@' || username = $1)
-		`, normalized, DiscoveryStatusAdded, DiscoveryStatusPending); err != nil {
-			return fmt.Errorf("update discovery by username: %w", err)
-		}
-	}
+	statuses := []string{DiscoveryStatusPending, DiscoveryStatusRejected}
 
-	if peerID != 0 {
-		if _, err := db.Pool.Exec(ctx, `
-			UPDATE discovered_channels
-			SET status = $2, status_changed_at = now(), status_changed_by = NULL
-			WHERE status = $3
-			  AND tg_peer_id = $1
-			  AND tg_peer_id != 0
-		`, peerID, DiscoveryStatusAdded, DiscoveryStatusPending); err != nil {
-			return fmt.Errorf("update discovery by peer id: %w", err)
-		}
-	}
-
-	if inviteLink != "" {
-		if _, err := db.Pool.Exec(ctx, `
-			UPDATE discovered_channels
-			SET status = $2, status_changed_at = now(), status_changed_by = NULL
-			WHERE status = $3
-			  AND invite_link = $1
-			  AND invite_link != ''
-		`, inviteLink, DiscoveryStatusAdded, DiscoveryStatusPending); err != nil {
-			return fmt.Errorf("update discovery by invite: %w", err)
-		}
+	_, err := db.Pool.Exec(ctx, `
+		UPDATE discovered_channels dc
+		SET matched_channel_id = c.id,
+			status = $2,
+			status_changed_at = now(),
+			status_changed_by = NULL
+		FROM channels c
+		WHERE c.is_active = TRUE
+		  AND dc.matched_channel_id IS NULL
+		  AND dc.status = ANY($3)
+		  AND (
+			($1 != '' AND dc.username = $1 AND c.username = $1) OR
+			($4 != 0 AND dc.tg_peer_id = $4 AND c.tg_peer_id = $4) OR
+			($5 != '' AND dc.invite_link = $5 AND c.invite_link = $5)
+		  )
+	`, normalized, DiscoveryStatusAdded, statuses, peerID, inviteLink)
+	if err != nil {
+		return fmt.Errorf("update discovery matches: %w", err)
 	}
 
 	return nil

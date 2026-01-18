@@ -139,6 +139,8 @@ type DiscoveredChannel struct {
 	AccessHash              pgtype.Int8        `json:"access_hash"`
 	ResolutionAttempts      pgtype.Int4        `json:"resolution_attempts"`
 	LastResolutionAttempt   pgtype.Timestamptz `json:"last_resolution_attempt"`
+	MatchedChannelID        pgtype.UUID        `json:"matched_channel_id"`
+	Description             pgtype.Text        `json:"description"`
 }
 
 type Embedding struct {

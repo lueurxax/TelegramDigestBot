@@ -22,8 +22,8 @@ type Repository interface {
 	GetDiscoveriesNeedingResolution(ctx context.Context, limit int) ([]db.UnresolvedDiscovery, error)
 	GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, limit int) ([]db.InviteLinkDiscovery, error)
 	IncrementDiscoveryResolutionAttempts(ctx context.Context, id string) error
-	UpdateDiscoveryChannelInfo(ctx context.Context, id, title, username string) error
-	UpdateDiscoveryFromInvite(ctx context.Context, id, title, username string, peerID, accessHash int64) error
+	UpdateDiscoveryChannelInfo(ctx context.Context, id, title, username, description string) error
+	UpdateDiscoveryFromInvite(ctx context.Context, id, title, username, description string, peerID, accessHash int64) error
 }
 
 // Compile-time assertion that *db.DB implements Repository.

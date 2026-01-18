@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
 
@@ -15,6 +16,7 @@ type DiscoveredChannel struct {
 	TGPeerID        int64
 	InviteLink      string
 	Title           string
+	Description     string
 	SourceType      string
 	DiscoveryCount  int
 	FirstSeenAt     time.Time
@@ -33,6 +35,13 @@ type DiscoveryStats struct {
 	AddedCount       int64
 	TotalCount       int64
 	TotalDiscoveries int64
+}
+
+// DiscoveryFilterStats captures filter reason counts for pending discoveries.
+type DiscoveryFilterStats struct {
+	MatchedChannelIDCount int64
+	BelowThresholdCount   int64
+	AlreadyTrackedCount   int64
 }
 
 // Discovery represents info about a channel to be discovered
@@ -144,8 +153,12 @@ func (db *DB) upsertDiscovery(ctx context.Context, normalizedUsername string, d 
 }
 
 // GetPendingDiscoveries returns pending discoveries sorted by count
-func (db *DB) GetPendingDiscoveries(ctx context.Context, limit int) ([]DiscoveredChannel, error) {
-	rows, err := db.Queries.GetPendingDiscoveries(ctx, safeIntToInt32(limit))
+func (db *DB) GetPendingDiscoveries(ctx context.Context, limit int, minSeen int, minEngagement float32) ([]DiscoveredChannel, error) {
+	rows, err := db.Queries.GetPendingDiscoveries(ctx, sqlc.GetPendingDiscoveriesParams{
+		DiscoveryCount:  safeIntToInt32(minSeen),
+		EngagementScore: pgtype.Float4{Float32: minEngagement, Valid: true},
+		Limit:           safeIntToInt32(limit),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get pending discoveries: %w", err)
 	}
@@ -158,6 +171,36 @@ func (db *DB) GetPendingDiscoveries(ctx context.Context, limit int) ([]Discovere
 			TGPeerID:        r.TgPeerID.Int64,
 			InviteLink:      r.InviteLink.String,
 			Title:           r.Title.String,
+			Description:     r.Description.String,
+			SourceType:      r.SourceType,
+			DiscoveryCount:  int(r.DiscoveryCount),
+			FirstSeenAt:     r.FirstSeenAt.Time,
+			LastSeenAt:      r.LastSeenAt.Time,
+			MaxViews:        int(r.MaxViews.Int32),
+			MaxForwards:     int(r.MaxForwards.Int32),
+			EngagementScore: float64(r.EngagementScore.Float32),
+		}
+	}
+
+	return result, nil
+}
+
+// GetRejectedDiscoveries returns rejected discoveries sorted by last seen time.
+func (db *DB) GetRejectedDiscoveries(ctx context.Context, limit int) ([]DiscoveredChannel, error) {
+	rows, err := db.Queries.GetRejectedDiscoveries(ctx, safeIntToInt32(limit))
+	if err != nil {
+		return nil, fmt.Errorf("get rejected discoveries: %w", err)
+	}
+
+	result := make([]DiscoveredChannel, len(rows))
+	for i, r := range rows {
+		result[i] = DiscoveredChannel{
+			ID:              fromUUID(r.ID),
+			Username:        r.Username.String,
+			TGPeerID:        r.TgPeerID.Int64,
+			InviteLink:      r.InviteLink.String,
+			Title:           r.Title.String,
+			Description:     r.Description.String,
 			SourceType:      r.SourceType,
 			DiscoveryCount:  int(r.DiscoveryCount),
 			FirstSeenAt:     r.FirstSeenAt.Time,
@@ -233,6 +276,23 @@ func (db *DB) GetDiscoveryStats(ctx context.Context) (*DiscoveryStats, error) {
 	}, nil
 }
 
+// GetDiscoveryFilterStats returns counts for discovery filter reasons.
+func (db *DB) GetDiscoveryFilterStats(ctx context.Context, minSeen int, minEngagement float32) (*DiscoveryFilterStats, error) {
+	row, err := db.Queries.GetDiscoveryFilterStats(ctx, sqlc.GetDiscoveryFilterStatsParams{
+		DiscoveryCount:  safeIntToInt32(minSeen),
+		EngagementScore: pgtype.Float4{Float32: minEngagement, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get discovery filter stats: %w", err)
+	}
+
+	return &DiscoveryFilterStats{
+		MatchedChannelIDCount: row.MatchedChannelIDCount,
+		BelowThresholdCount:   row.BelowThresholdCount,
+		AlreadyTrackedCount:   row.AlreadyTrackedCount,
+	}, nil
+}
+
 // UnresolvedDiscovery represents a discovery that needs channel info resolution
 type UnresolvedDiscovery struct {
 	ID         string
@@ -259,12 +319,13 @@ func (db *DB) GetDiscoveriesNeedingResolution(ctx context.Context, limit int) ([
 	return result, nil
 }
 
-// UpdateDiscoveryChannelInfo updates the title and username for a discovery
-func (db *DB) UpdateDiscoveryChannelInfo(ctx context.Context, id string, title string, username string) error {
+// UpdateDiscoveryChannelInfo updates the title, username, and description for a discovery.
+func (db *DB) UpdateDiscoveryChannelInfo(ctx context.Context, id string, title string, username string, description string) error {
 	if err := db.Queries.UpdateDiscoveryChannelInfo(ctx, sqlc.UpdateDiscoveryChannelInfoParams{
-		ID:       toUUID(id),
-		Title:    title,
-		Username: normalizeUsername(username),
+		ID:          toUUID(id),
+		Title:       title,
+		Username:    normalizeUsername(username),
+		Description: description,
 	}); err != nil {
 		return fmt.Errorf("update discovery channel info: %w", err)
 	}
@@ -305,17 +366,53 @@ func (db *DB) GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, lim
 	return result, nil
 }
 
-// UpdateDiscoveryFromInvite updates a discovery with info resolved from an invite link
-func (db *DB) UpdateDiscoveryFromInvite(ctx context.Context, id string, title string, username string, peerID int64, accessHash int64) error {
+// UpdateDiscoveryFromInvite updates a discovery with info resolved from an invite link.
+func (db *DB) UpdateDiscoveryFromInvite(ctx context.Context, id string, title string, username string, description string, peerID int64, accessHash int64) error {
 	if err := db.Queries.UpdateDiscoveryFromInvite(ctx, sqlc.UpdateDiscoveryFromInviteParams{
-		ID:         toUUID(id),
-		Title:      title,
-		Username:   normalizeUsername(username),
-		TgPeerID:   peerID,
-		AccessHash: accessHash,
+		ID:          toUUID(id),
+		Title:       title,
+		Username:    normalizeUsername(username),
+		Description: description,
+		TgPeerID:    peerID,
+		AccessHash:  accessHash,
 	}); err != nil {
 		return fmt.Errorf("update discovery from invite: %w", err)
 	}
 
 	return nil
+}
+
+// CleanupDiscoveriesBatch marks discoveries as added when a tracked channel matches identifiers.
+func (db *DB) CleanupDiscoveriesBatch(ctx context.Context, limit int, adminID int64) (int, error) {
+	allowedStatuses := []string{DiscoveryStatusPending, DiscoveryStatusRejected}
+
+	tag, err := db.Pool.Exec(ctx, `
+		WITH candidates AS (
+			SELECT DISTINCT ON (dc.id)
+				dc.id AS discovery_id,
+				c.id AS channel_id
+			FROM discovered_channels dc
+			JOIN channels c ON c.is_active = TRUE AND (
+				(dc.username != '' AND c.username = dc.username) OR
+				(dc.tg_peer_id != 0 AND c.tg_peer_id = dc.tg_peer_id) OR
+				(dc.invite_link != '' AND c.invite_link = dc.invite_link)
+			)
+			WHERE dc.matched_channel_id IS NULL
+			  AND dc.status = ANY($2)
+			ORDER BY dc.id
+			LIMIT $1
+		)
+		UPDATE discovered_channels dc
+		SET matched_channel_id = candidates.channel_id,
+			status = $3,
+			status_changed_at = now(),
+			status_changed_by = $4
+		FROM candidates
+		WHERE dc.id = candidates.discovery_id
+	`, limit, allowedStatuses, DiscoveryStatusAdded, toInt8(adminID))
+	if err != nil {
+		return 0, fmt.Errorf("cleanup discoveries batch: %w", err)
+	}
+
+	return int(tag.RowsAffected()), nil
 }

@@ -110,6 +110,7 @@ const (
 const (
 	LogFieldUserID   = "user_id"
 	LogFieldUsername = "username"
+	LogFieldAction   = "action"
 )
 
 // Button labels.

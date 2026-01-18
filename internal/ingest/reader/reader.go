@@ -16,11 +16,11 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	links "github.com/lueurxax/telegram-digest-bot/internal/core/links"
-	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links/linkextract"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
+	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 // Constants for magic numbers and repeated strings.
@@ -50,14 +50,14 @@ const (
 	webpageSliceCapacity   = 4
 
 	// Log field names (goconst)
-	logFieldChannels     = "channels"
-	logFieldChannel      = "channel"
-	logFieldCount        = "count"
-	logFieldPeerID       = "peer_id"
-	logFieldTitle        = "title"
-	logFieldUsername     = "username"
-	logFieldInviteLink   = "invite_link"
-	logFieldMsgID        = "msg_id"
+	logFieldChannels   = "channels"
+	logFieldChannel    = "channel"
+	logFieldCount      = "count"
+	logFieldPeerID     = "peer_id"
+	logFieldTitle      = "title"
+	logFieldUsername   = "username"
+	logFieldInviteLink = "invite_link"
+	logFieldMsgID      = "msg_id"
 
 	// Error messages
 	errMsgIncrementResolutionAttempts = "failed to increment resolution attempts"
@@ -327,7 +327,7 @@ func (r *Reader) resolveSingleUnknownDiscovery(ctx context.Context, api *tg.Clie
 		return
 	}
 
-	resolved := r.tryExtractChannelInfo(ctx, channels, d)
+	resolved := r.tryExtractChannelInfo(ctx, api, channels, d)
 
 	if !resolved {
 		if err := r.database.IncrementDiscoveryResolutionAttempts(ctx, d.ID); err != nil {
@@ -348,7 +348,7 @@ func (r *Reader) handleDiscoveryResolutionError(ctx context.Context, d db.Unreso
 	time.Sleep(resolutionSleepShortMs * time.Millisecond)
 }
 
-func (r *Reader) tryExtractChannelInfo(ctx context.Context, channels tg.MessagesChatsClass, d db.UnresolvedDiscovery) bool {
+func (r *Reader) tryExtractChannelInfo(ctx context.Context, api *tg.Client, channels tg.MessagesChatsClass, d db.UnresolvedDiscovery) bool {
 	channelsResult, ok := channels.(*tg.MessagesChats)
 	if !ok {
 		return false
@@ -366,7 +366,17 @@ func (r *Reader) tryExtractChannelInfo(ctx context.Context, channels tg.Messages
 			Str(logFieldUsername, channel.Username).
 			Msg("Resolved unknown discovery")
 
-		if err := r.database.UpdateDiscoveryChannelInfo(ctx, d.ID, channel.Title, channel.Username); err != nil {
+		description := ""
+
+		if d.AccessHash != 0 {
+			if desc, err := r.fetchChannelDescription(ctx, api, d.TGPeerID, d.AccessHash); err != nil {
+				r.logger.Debug().Err(err).Msg("failed to fetch discovery description")
+			} else {
+				description = desc
+			}
+		}
+
+		if err := r.database.UpdateDiscoveryChannelInfo(ctx, d.ID, channel.Title, channel.Username, description); err != nil {
 			r.logger.Warn().Err(err).Msg("failed to update discovery info")
 		}
 
@@ -440,7 +450,17 @@ func (r *Reader) resolveSingleInviteLinkDiscovery(ctx context.Context, api *tg.C
 		Int64(logFieldPeerID, info.peerID).
 		Msg("Resolved invite link discovery")
 
-	if err := r.database.UpdateDiscoveryFromInvite(ctx, d.ID, info.title, info.username, info.peerID, info.accessHash); err != nil {
+	description := ""
+
+	if info.peerID != 0 && info.accessHash != 0 {
+		if desc, err := r.fetchChannelDescription(ctx, api, info.peerID, info.accessHash); err != nil {
+			r.logger.Debug().Err(err).Msg("failed to fetch invite discovery description")
+		} else {
+			description = desc
+		}
+	}
+
+	if err := r.database.UpdateDiscoveryFromInvite(ctx, d.ID, info.title, info.username, description, info.peerID, info.accessHash); err != nil {
 		r.logger.Warn().Err(err).Msg("failed to update discovery from invite")
 	}
 }
@@ -861,10 +881,10 @@ func (r *Reader) fetchHistory(ctx context.Context, api *tg.Client, peer tg.Input
 }
 
 type historyProcessingContext struct {
-	api                  *tg.Client
-	ch                   db.Channel
-	channelTitles        map[int64]string
-	channelAccessHashes  map[int64]int64
+	api                 *tg.Client
+	ch                  db.Channel
+	channelTitles       map[int64]string
+	channelAccessHashes map[int64]int64
 }
 
 func (r *Reader) extractHistoryData(history tg.MessagesMessagesClass) ([]tg.MessageClass, []tg.ChatClass, bool) {

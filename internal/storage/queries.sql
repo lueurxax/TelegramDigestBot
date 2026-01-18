@@ -404,11 +404,14 @@ DO UPDATE SET
 -- Uses DISTINCT ON to deduplicate multiple rows for the same channel (discovered via different identifiers)
 SELECT * FROM (
   SELECT DISTINCT ON (dc.username)
-    dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.source_type,
+    dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.description, dc.source_type,
     dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score
   FROM discovered_channels dc
   WHERE dc.status = 'pending'
     AND dc.username IS NOT NULL AND dc.username != ''
+    AND dc.matched_channel_id IS NULL
+    AND dc.discovery_count >= $1
+    AND dc.engagement_score >= $2
     AND NOT EXISTS (
       SELECT 1
       FROM channels c
@@ -422,6 +425,14 @@ SELECT * FROM (
   ORDER BY dc.username, dc.engagement_score DESC
 ) deduped
 ORDER BY engagement_score DESC, discovery_count DESC, last_seen_at DESC
+LIMIT $3;
+
+-- name: GetRejectedDiscoveries :many
+SELECT dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.description, dc.source_type,
+       dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score
+FROM discovered_channels dc
+WHERE dc.status = 'rejected'
+ORDER BY dc.last_seen_at DESC
 LIMIT $1;
 
 -- name: UpdateDiscoveryStatus :exec
@@ -454,6 +465,37 @@ SELECT
     COUNT(*) FILTER (WHERE status = 'added') as added_count,
     COUNT(*) as total_count,
     COALESCE(SUM(discovery_count), 0) as total_discoveries
+FROM discovered_channels;
+
+-- name: GetDiscoveryFilterStats :one
+SELECT
+    COUNT(*) FILTER (
+        WHERE status = 'pending'
+          AND matched_channel_id IS NOT NULL
+    ) as matched_channel_id_count,
+    COUNT(*) FILTER (
+        WHERE status = 'pending'
+          AND matched_channel_id IS NULL
+          AND username IS NOT NULL AND username != ''
+          AND (discovery_count < $1 OR COALESCE(engagement_score, 0) < $2)
+    ) as below_threshold_count,
+    COUNT(*) FILTER (
+        WHERE status = 'pending'
+          AND matched_channel_id IS NULL
+          AND username IS NOT NULL AND username != ''
+          AND discovery_count >= $1
+          AND COALESCE(engagement_score, 0) >= $2
+          AND EXISTS (
+            SELECT 1
+            FROM channels c
+            WHERE c.is_active = TRUE AND (
+              (c.username = discovered_channels.username AND c.username != '') OR
+              ('@' || c.username = discovered_channels.username AND c.username != '') OR
+              (c.tg_peer_id = discovered_channels.tg_peer_id AND discovered_channels.tg_peer_id != 0 AND c.tg_peer_id != 0) OR
+              (c.invite_link = discovered_channels.invite_link AND discovered_channels.invite_link != '' AND c.invite_link != '')
+            )
+          )
+    ) as already_tracked_count
 FROM discovered_channels;
 
 -- name: IsChannelTracked :one
@@ -498,6 +540,7 @@ LIMIT $1;
 UPDATE discovered_channels
 SET title = COALESCE(NULLIF(@title, ''), title),
     username = COALESCE(NULLIF(@username, ''), username),
+    description = COALESCE(NULLIF(@description, ''), description),
     resolution_attempts = 0
 WHERE id = @id;
 
@@ -522,6 +565,7 @@ LIMIT $1;
 UPDATE discovered_channels
 SET title = COALESCE(NULLIF(@title, ''), title),
     username = COALESCE(NULLIF(@username, ''), username),
+    description = COALESCE(NULLIF(@description, ''), description),
     tg_peer_id = COALESCE(NULLIF(@tg_peer_id::bigint, 0::bigint), tg_peer_id),
     access_hash = COALESCE(NULLIF(@access_hash::bigint, 0::bigint), access_hash),
     resolution_attempts = 0

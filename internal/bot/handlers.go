@@ -35,6 +35,12 @@ const (
 	SettingHistoryLimit = 20
 	// DiscoveriesLimit is the limit for fetching pending discoveries.
 	DiscoveriesLimit = 15
+	// DiscoveryCleanupBatchSize is the number of rows to process per cleanup batch.
+	DiscoveryCleanupBatchSize = 100
+	// DefaultDiscoveryMinSeen is the default minimum discovery count for pending list.
+	DefaultDiscoveryMinSeen = 2
+	// DefaultDiscoveryMinEngagement is the default minimum engagement score for pending list.
+	DefaultDiscoveryMinEngagement float32 = 50
 	// RetryErrorsLimit is the limit for fetching errors when doing bulk retry.
 	RetryErrorsLimit = 1000
 )
@@ -59,6 +65,8 @@ const (
 	SubCmdPreview  = "preview"
 	SubCmdApprove  = "approve"
 	SubCmdReject   = "reject"
+	SubCmdCleanup  = "cleanup"
+	SubCmdRejected = "show-rejected"
 	SubCmdConfirm  = "confirm"
 	SubCmdAuto     = "auto"
 	SubCmdMode     = "mode"
@@ -81,6 +89,8 @@ const (
 	SettingDigestWindow       = "digest_window"
 	SettingFiltersAdsKeywords = "filters_ads_keywords"
 	SettingFiltersAds         = "filters_ads"
+	SettingDiscoveryMinSeen   = "discovery_min_seen"
+	SettingDiscoveryMinScore  = "discovery_min_engagement"
 )
 
 // Date/time formats.
@@ -2880,6 +2890,8 @@ func (b *Bot) handleSettings(ctx context.Context, msg *tgbotapi.Message) {
 		{"filters_min_length", "Min Message Length", 20},
 		{"filters_skip_forwards", "Skip Forwards", false},
 		{SettingFiltersAdsKeywords, "Ads Keywords Count", 0},
+		{SettingDiscoveryMinSeen, "Discovery Min Seen", DefaultDiscoveryMinSeen},
+		{SettingDiscoveryMinScore, "Discovery Min Engagement", DefaultDiscoveryMinEngagement},
 		{SettingDigestCoverImage, "Cover Image", true},
 		{SettingDigestAICover, "AI Cover (DALL-E)", false},
 		{SettingDigestInlineImages, "Inline Images", false},
@@ -3242,7 +3254,6 @@ func (b *Bot) handleDiscoverNamespace(ctx context.Context, msg *tgbotapi.Message
 	args := strings.Fields(msg.CommandArguments())
 
 	if len(args) == 0 {
-		// Show pending discoveries
 		b.handleDiscoverList(ctx, msg)
 
 		return
@@ -3252,30 +3263,60 @@ func (b *Bot) handleDiscoverNamespace(ctx context.Context, msg *tgbotapi.Message
 
 	switch subcommand {
 	case SubCmdApprove:
-		if len(args) < 2 {
-			b.reply(msg, "Usage: <code>/discover approve &lt;@username&gt;</code>")
-
-			return
-		}
-
-		b.handleDiscoverApprove(ctx, msg, args[1])
+		b.handleDiscoverApproveCmd(ctx, msg, args)
 	case SubCmdReject:
-		if len(args) < 2 {
-			b.reply(msg, "Usage: <code>/discover reject &lt;@username&gt;</code>")
-
-			return
-		}
-
-		b.handleDiscoverReject(ctx, msg, args[1])
+		b.handleDiscoverRejectCmd(ctx, msg, args)
+	case SubCmdRejected:
+		b.handleDiscoverShowRejectedCmd(ctx, msg, args)
+	case SubCmdCleanup:
+		b.handleDiscoverCleanup(ctx, msg)
 	case SubCmdStats:
 		b.handleDiscoverStats(ctx, msg)
 	default:
-		b.reply(msg, fmt.Sprintf("❓ Unknown discover subcommand: <code>%s</code>. Use <code>approve</code>, <code>reject</code>, or <code>stats</code>.", html.EscapeString(subcommand)))
+		b.reply(msg, fmt.Sprintf("❓ Unknown discover subcommand: <code>%s</code>. Use <code>approve</code>, <code>reject</code>, <code>show-rejected</code>, <code>cleanup</code>, or <code>stats</code>.", html.EscapeString(subcommand)))
 	}
 }
 
+func (b *Bot) handleDiscoverApproveCmd(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) < 2 {
+		b.reply(msg, "Usage: <code>/discover approve &lt;@username&gt;</code>")
+
+		return
+	}
+
+	b.handleDiscoverApprove(ctx, msg, args[1])
+}
+
+func (b *Bot) handleDiscoverRejectCmd(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) < 2 {
+		b.reply(msg, "Usage: <code>/discover reject &lt;@username&gt;</code>")
+
+		return
+	}
+
+	b.handleDiscoverReject(ctx, msg, args[1])
+}
+
+func (b *Bot) handleDiscoverShowRejectedCmd(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	limit := DiscoveriesLimit
+
+	if len(args) > 1 {
+		if v, err := strconv.Atoi(args[1]); err == nil && v > 0 {
+			limit = v
+		} else {
+			b.reply(msg, "Usage: <code>/discover show-rejected [limit]</code>")
+
+			return
+		}
+	}
+
+	b.handleDiscoverShowRejected(ctx, msg, limit)
+}
+
 func (b *Bot) handleDiscoverList(ctx context.Context, msg *tgbotapi.Message) {
-	discoveries, err := b.database.GetPendingDiscoveries(ctx, DiscoveriesLimit)
+	minSeen, minEngagement := b.getDiscoveryThresholds(ctx)
+
+	discoveries, err := b.database.GetPendingDiscoveries(ctx, DiscoveriesLimit, minSeen, minEngagement)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching discoveries: %s", html.EscapeString(err.Error())))
 
@@ -3303,16 +3344,92 @@ func (b *Bot) handleDiscoverList(ctx context.Context, msg *tgbotapi.Message) {
 	}
 }
 
+func (b *Bot) getDiscoveryThresholds(ctx context.Context) (int, float32) {
+	minSeen := DefaultDiscoveryMinSeen
+	if err := b.database.GetSetting(ctx, SettingDiscoveryMinSeen, &minSeen); err != nil {
+		b.logger.Warn().Err(err).Msg("failed to read discovery_min_seen")
+	}
+
+	if minSeen < 1 {
+		minSeen = DefaultDiscoveryMinSeen
+	}
+
+	minEngagement := DefaultDiscoveryMinEngagement
+	if err := b.database.GetSetting(ctx, SettingDiscoveryMinScore, &minEngagement); err != nil {
+		b.logger.Warn().Err(err).Msg("failed to read discovery_min_engagement")
+	}
+
+	return minSeen, minEngagement
+}
+
+func (b *Bot) handleDiscoverShowRejected(ctx context.Context, msg *tgbotapi.Message, limit int) {
+	discoveries, err := b.database.GetRejectedDiscoveries(ctx, limit)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error fetching rejected discoveries: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	if len(discoveries) == 0 {
+		b.reply(msg, "📋 No rejected channel discoveries.")
+
+		return
+	}
+
+	text := formatDiscoveryListWithTip("🗂 <b>Rejected Channel Discoveries</b>", discoveries, "💡 <i>Use <code>/discover approve @username</code> to add a channel back.</i>")
+	reply := tgbotapi.NewMessage(msg.Chat.ID, text)
+	reply.ParseMode = tgbotapi.ModeHTML
+
+	if _, err := b.api.Send(reply); err != nil {
+		b.logger.Error().Err(err).Msg("failed to send rejected discover list")
+	}
+}
+
+func (b *Bot) handleDiscoverCleanup(ctx context.Context, msg *tgbotapi.Message) {
+	var (
+		totalUpdated int
+		batches      int
+	)
+
+	for batches < 100 {
+		updated, err := b.database.CleanupDiscoveriesBatch(ctx, DiscoveryCleanupBatchSize, msg.From.ID)
+		if err != nil {
+			b.logger.Error().Err(err).Msg("discover cleanup batch failed")
+
+			batches++
+
+			continue
+		}
+
+		if updated == 0 {
+			break
+		}
+
+		totalUpdated += updated
+		batches++
+	}
+
+	b.reply(msg, fmt.Sprintf("✅ Cleanup complete. Updated <code>%d</code> discoveries, matched <code>%d</code> to tracked channels.", totalUpdated, totalUpdated))
+}
+
 func formatDiscoveryList(discoveries []db.DiscoveredChannel) string {
+	return formatDiscoveryListWithTip("🔍 <b>Pending Channel Discoveries</b>", discoveries, "💡 <i>Use <code>/discover approve @username</code> or <code>/discover reject @username</code></i>")
+}
+
+func formatDiscoveryListWithTip(title string, discoveries []db.DiscoveredChannel, tip string) string {
 	var sb strings.Builder
 
-	sb.WriteString("🔍 <b>Pending Channel Discoveries</b>\n\n")
+	sb.WriteString(title)
+	sb.WriteString("\n\n")
 
 	for _, d := range discoveries {
 		sb.WriteString(formatDiscoveryItem(d))
 	}
 
-	sb.WriteString("\n💡 <i>Use <code>/discover approve @username</code> or <code>/discover reject @username</code></i>")
+	if tip != "" {
+		sb.WriteString("\n")
+		sb.WriteString(tip)
+	}
 
 	return sb.String()
 }
@@ -3387,12 +3504,16 @@ func (b *Bot) handleDiscoverApprove(ctx context.Context, msg *tgbotapi.Message, 
 func (b *Bot) handleDiscoverReject(ctx context.Context, msg *tgbotapi.Message, username string) {
 	username = strings.TrimPrefix(username, "@")
 
+	b.logger.Info().Str(LogFieldUsername, username).Int64(LogFieldUserID, msg.From.ID).Msg("rejecting discovery")
+
 	if err := b.database.RejectDiscovery(ctx, username, msg.From.ID); err != nil {
+		b.logger.Error().Err(err).Str(LogFieldUsername, username).Msg("failed to reject discovery")
 		b.reply(msg, fmt.Sprintf("❌ Error rejecting channel: %s", html.EscapeString(err.Error())))
 
 		return
 	}
 
+	b.logger.Info().Str(LogFieldUsername, username).Msg("discovery rejected successfully")
 	b.reply(msg, fmt.Sprintf("✅ Channel <code>@%s</code> rejected. It will not appear in discoveries again.", html.EscapeString(username)))
 }
 
@@ -3402,6 +3523,15 @@ func (b *Bot) handleDiscoverStats(ctx context.Context, msg *tgbotapi.Message) {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching discovery stats: %s", html.EscapeString(err.Error())))
 
 		return
+	}
+
+	minSeen, minEngagement := b.getDiscoveryThresholds(ctx)
+
+	filterStats, err := b.database.GetDiscoveryFilterStats(ctx, minSeen, minEngagement)
+	if err != nil {
+		b.logger.Warn().Err(err).Msg("failed to fetch discovery filter stats")
+
+		filterStats = nil
 	}
 
 	var sb strings.Builder
@@ -3417,6 +3547,16 @@ func (b *Bot) handleDiscoverStats(ctx context.Context, msg *tgbotapi.Message) {
 	sb.WriteString(fmt.Sprintf("• <b>Added:</b> <code>%d</code>\n", stats.AddedCount))
 	sb.WriteString(fmt.Sprintf("• <b>Total Channels:</b> <code>%d</code>\n", stats.TotalCount))
 	sb.WriteString(fmt.Sprintf("• <b>Total Discovery Events:</b> <code>%d</code>\n", stats.TotalDiscoveries))
+	sb.WriteString(fmt.Sprintf("• <b>Thresholds:</b> seen ≥ <code>%d</code>, engagement ≥ <code>%.0f</code>\n", minSeen, minEngagement))
+
+	if filterStats != nil {
+		sb.WriteString("\n<b>Filtered (pending)</b>\n")
+		sb.WriteString(fmt.Sprintf("• <b>Matched channel:</b> <code>%d</code>\n", filterStats.MatchedChannelIDCount))
+		sb.WriteString(fmt.Sprintf("• <b>Below thresholds:</b> <code>%d</code>\n", filterStats.BelowThresholdCount))
+		sb.WriteString(fmt.Sprintf("• <b>Already tracked:</b> <code>%d</code>\n", filterStats.AlreadyTrackedCount))
+		sb.WriteString("• <b>Allow miss:</b> <code>0</code> <i>(v2)</i>\n")
+		sb.WriteString("• <b>Deny hit:</b> <code>0</code> <i>(v2)</i>\n")
+	}
 
 	b.reply(msg, sb.String())
 }
@@ -3431,6 +3571,8 @@ func (b *Bot) handleDiscoverCallback(ctx context.Context, query *tgbotapi.Callba
 	action := parts[1] // "approve" or "reject"
 	username := parts[2]
 
+	b.logger.Info().Str(LogFieldAction, action).Str(LogFieldUsername, username).Int64(LogFieldUserID, query.From.ID).Msg("discover callback received")
+
 	var callbackText string
 
 	var err error
@@ -3440,11 +3582,13 @@ func (b *Bot) handleDiscoverCallback(ctx context.Context, query *tgbotapi.Callba
 		err = b.database.ApproveDiscovery(ctx, username, query.From.ID)
 		if err == nil {
 			callbackText = fmt.Sprintf("✅ @%s approved and added to tracking", username)
+			b.logger.Info().Str(LogFieldUsername, username).Msg("discovery approved via callback")
 		}
 	case SubCmdReject:
 		err = b.database.RejectDiscovery(ctx, username, query.From.ID)
 		if err == nil {
 			callbackText = fmt.Sprintf("❌ @%s rejected", username)
+			b.logger.Info().Str(LogFieldUsername, username).Msg("discovery rejected via callback")
 		}
 	default:
 		return
@@ -3452,7 +3596,7 @@ func (b *Bot) handleDiscoverCallback(ctx context.Context, query *tgbotapi.Callba
 
 	if err != nil {
 		callbackText = fmt.Sprintf(ErrGenericFmt, err.Error())
-		b.logger.Error().Err(err).Str("action", action).Str(LogFieldUsername, username).Msg("discover callback failed")
+		b.logger.Error().Err(err).Str(LogFieldAction, action).Str(LogFieldUsername, username).Msg("discover callback failed")
 	}
 
 	callback := tgbotapi.NewCallback(query.ID, callbackText)

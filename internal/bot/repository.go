@@ -71,10 +71,13 @@ type Repository interface {
 	GetItemsForWindowWithMedia(ctx context.Context, start, end time.Time, threshold float32, limit int) ([]db.ItemWithMedia, error)
 
 	// Discovery operations
-	GetPendingDiscoveries(ctx context.Context, limit int) ([]db.DiscoveredChannel, error)
+	GetPendingDiscoveries(ctx context.Context, limit int, minSeen int, minEngagement float32) ([]db.DiscoveredChannel, error)
+	GetRejectedDiscoveries(ctx context.Context, limit int) ([]db.DiscoveredChannel, error)
+	CleanupDiscoveriesBatch(ctx context.Context, limit int, adminID int64) (int, error)
 	ApproveDiscovery(ctx context.Context, username string, userID int64) error
 	RejectDiscovery(ctx context.Context, username string, userID int64) error
 	GetDiscoveryStats(ctx context.Context) (*db.DiscoveryStats, error)
+	GetDiscoveryFilterStats(ctx context.Context, minSeen int, minEngagement float32) (*db.DiscoveryFilterStats, error)
 }
 
 // Compile-time assertion that *db.DB implements Repository.

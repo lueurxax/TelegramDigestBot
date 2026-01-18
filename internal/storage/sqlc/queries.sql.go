@@ -909,6 +909,56 @@ func (q *Queries) GetDiscoveriesNeedingResolution(ctx context.Context, limit int
 	return items, nil
 }
 
+const getDiscoveryFilterStats = `-- name: GetDiscoveryFilterStats :one
+SELECT
+    COUNT(*) FILTER (
+        WHERE status = 'pending'
+          AND matched_channel_id IS NOT NULL
+    ) as matched_channel_id_count,
+    COUNT(*) FILTER (
+        WHERE status = 'pending'
+          AND matched_channel_id IS NULL
+          AND username IS NOT NULL AND username != ''
+          AND (discovery_count < $1 OR COALESCE(engagement_score, 0) < $2)
+    ) as below_threshold_count,
+    COUNT(*) FILTER (
+        WHERE status = 'pending'
+          AND matched_channel_id IS NULL
+          AND username IS NOT NULL AND username != ''
+          AND discovery_count >= $1
+          AND COALESCE(engagement_score, 0) >= $2
+          AND EXISTS (
+            SELECT 1
+            FROM channels c
+            WHERE c.is_active = TRUE AND (
+              (c.username = discovered_channels.username AND c.username != '') OR
+              ('@' || c.username = discovered_channels.username AND c.username != '') OR
+              (c.tg_peer_id = discovered_channels.tg_peer_id AND discovered_channels.tg_peer_id != 0 AND c.tg_peer_id != 0) OR
+              (c.invite_link = discovered_channels.invite_link AND discovered_channels.invite_link != '' AND c.invite_link != '')
+            )
+          )
+    ) as already_tracked_count
+FROM discovered_channels
+`
+
+type GetDiscoveryFilterStatsParams struct {
+	DiscoveryCount  int32         `json:"discovery_count"`
+	EngagementScore pgtype.Float4 `json:"engagement_score"`
+}
+
+type GetDiscoveryFilterStatsRow struct {
+	MatchedChannelIDCount int64 `json:"matched_channel_id_count"`
+	BelowThresholdCount   int64 `json:"below_threshold_count"`
+	AlreadyTrackedCount   int64 `json:"already_tracked_count"`
+}
+
+func (q *Queries) GetDiscoveryFilterStats(ctx context.Context, arg GetDiscoveryFilterStatsParams) (GetDiscoveryFilterStatsRow, error) {
+	row := q.db.QueryRow(ctx, getDiscoveryFilterStats, arg.DiscoveryCount, arg.EngagementScore)
+	var i GetDiscoveryFilterStatsRow
+	err := row.Scan(&i.MatchedChannelIDCount, &i.BelowThresholdCount, &i.AlreadyTrackedCount)
+	return i, err
+}
+
 const getDiscoveryStats = `-- name: GetDiscoveryStats :one
 SELECT
     COUNT(*) FILTER (WHERE status = 'pending' AND username IS NOT NULL AND username != '') as pending_count,
@@ -1333,13 +1383,16 @@ func (q *Queries) GetLinksForMessage(ctx context.Context, rawMessageID pgtype.UU
 }
 
 const getPendingDiscoveries = `-- name: GetPendingDiscoveries :many
-SELECT id, username, tg_peer_id, invite_link, title, source_type, discovery_count, first_seen_at, last_seen_at, max_views, max_forwards, engagement_score FROM (
+SELECT id, username, tg_peer_id, invite_link, title, description, source_type, discovery_count, first_seen_at, last_seen_at, max_views, max_forwards, engagement_score FROM (
   SELECT DISTINCT ON (dc.username)
-    dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.source_type,
+    dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.description, dc.source_type,
     dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score
   FROM discovered_channels dc
   WHERE dc.status = 'pending'
     AND dc.username IS NOT NULL AND dc.username != ''
+    AND dc.matched_channel_id IS NULL
+    AND dc.discovery_count >= $1
+    AND dc.engagement_score >= $2
     AND NOT EXISTS (
       SELECT 1
       FROM channels c
@@ -1353,8 +1406,14 @@ SELECT id, username, tg_peer_id, invite_link, title, source_type, discovery_coun
   ORDER BY dc.username, dc.engagement_score DESC
 ) deduped
 ORDER BY engagement_score DESC, discovery_count DESC, last_seen_at DESC
-LIMIT $1
+LIMIT $3
 `
+
+type GetPendingDiscoveriesParams struct {
+	DiscoveryCount  int32         `json:"discovery_count"`
+	EngagementScore pgtype.Float4 `json:"engagement_score"`
+	Limit           int32         `json:"limit"`
+}
 
 type GetPendingDiscoveriesRow struct {
 	ID              pgtype.UUID        `json:"id"`
@@ -1362,6 +1421,7 @@ type GetPendingDiscoveriesRow struct {
 	TgPeerID        pgtype.Int8        `json:"tg_peer_id"`
 	InviteLink      pgtype.Text        `json:"invite_link"`
 	Title           pgtype.Text        `json:"title"`
+	Description     pgtype.Text        `json:"description"`
 	SourceType      string             `json:"source_type"`
 	DiscoveryCount  int32              `json:"discovery_count"`
 	FirstSeenAt     pgtype.Timestamptz `json:"first_seen_at"`
@@ -1373,8 +1433,8 @@ type GetPendingDiscoveriesRow struct {
 
 // Only return actionable discoveries (with username for approve/reject)
 // Uses DISTINCT ON to deduplicate multiple rows for the same channel (discovered via different identifiers)
-func (q *Queries) GetPendingDiscoveries(ctx context.Context, limit int32) ([]GetPendingDiscoveriesRow, error) {
-	rows, err := q.db.Query(ctx, getPendingDiscoveries, limit)
+func (q *Queries) GetPendingDiscoveries(ctx context.Context, arg GetPendingDiscoveriesParams) ([]GetPendingDiscoveriesRow, error) {
+	rows, err := q.db.Query(ctx, getPendingDiscoveries, arg.DiscoveryCount, arg.EngagementScore, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1388,6 +1448,7 @@ func (q *Queries) GetPendingDiscoveries(ctx context.Context, limit int32) ([]Get
 			&i.TgPeerID,
 			&i.InviteLink,
 			&i.Title,
+			&i.Description,
 			&i.SourceType,
 			&i.DiscoveryCount,
 			&i.FirstSeenAt,
@@ -1522,6 +1583,65 @@ func (q *Queries) GetRecentSettingHistory(ctx context.Context, limit int32) ([]G
 			&i.NewValue,
 			&i.ChangedBy,
 			&i.ChangedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getRejectedDiscoveries = `-- name: GetRejectedDiscoveries :many
+SELECT dc.id, dc.username, dc.tg_peer_id, dc.invite_link, dc.title, dc.description, dc.source_type,
+       dc.discovery_count, dc.first_seen_at, dc.last_seen_at, dc.max_views, dc.max_forwards, dc.engagement_score
+FROM discovered_channels dc
+WHERE dc.status = 'rejected'
+ORDER BY dc.last_seen_at DESC
+LIMIT $1
+`
+
+type GetRejectedDiscoveriesRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	Username        pgtype.Text        `json:"username"`
+	TgPeerID        pgtype.Int8        `json:"tg_peer_id"`
+	InviteLink      pgtype.Text        `json:"invite_link"`
+	Title           pgtype.Text        `json:"title"`
+	Description     pgtype.Text        `json:"description"`
+	SourceType      string             `json:"source_type"`
+	DiscoveryCount  int32              `json:"discovery_count"`
+	FirstSeenAt     pgtype.Timestamptz `json:"first_seen_at"`
+	LastSeenAt      pgtype.Timestamptz `json:"last_seen_at"`
+	MaxViews        pgtype.Int4        `json:"max_views"`
+	MaxForwards     pgtype.Int4        `json:"max_forwards"`
+	EngagementScore pgtype.Float4      `json:"engagement_score"`
+}
+
+func (q *Queries) GetRejectedDiscoveries(ctx context.Context, limit int32) ([]GetRejectedDiscoveriesRow, error) {
+	rows, err := q.db.Query(ctx, getRejectedDiscoveries, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetRejectedDiscoveriesRow
+	for rows.Next() {
+		var i GetRejectedDiscoveriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.TgPeerID,
+			&i.InviteLink,
+			&i.Title,
+			&i.Description,
+			&i.SourceType,
+			&i.DiscoveryCount,
+			&i.FirstSeenAt,
+			&i.LastSeenAt,
+			&i.MaxViews,
+			&i.MaxForwards,
+			&i.EngagementScore,
 		); err != nil {
 			return nil, err
 		}
@@ -2260,18 +2380,25 @@ const updateDiscoveryChannelInfo = `-- name: UpdateDiscoveryChannelInfo :exec
 UPDATE discovered_channels
 SET title = COALESCE(NULLIF($1, ''), title),
     username = COALESCE(NULLIF($2, ''), username),
+    description = COALESCE(NULLIF($3, ''), description),
     resolution_attempts = 0
-WHERE id = $3
+WHERE id = $4
 `
 
 type UpdateDiscoveryChannelInfoParams struct {
-	Title    interface{} `json:"title"`
-	Username interface{} `json:"username"`
-	ID       pgtype.UUID `json:"id"`
+	Title       interface{} `json:"title"`
+	Username    interface{} `json:"username"`
+	Description interface{} `json:"description"`
+	ID          pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateDiscoveryChannelInfo(ctx context.Context, arg UpdateDiscoveryChannelInfoParams) error {
-	_, err := q.db.Exec(ctx, updateDiscoveryChannelInfo, arg.Title, arg.Username, arg.ID)
+	_, err := q.db.Exec(ctx, updateDiscoveryChannelInfo,
+		arg.Title,
+		arg.Username,
+		arg.Description,
+		arg.ID,
+	)
 	return err
 }
 
@@ -2279,24 +2406,27 @@ const updateDiscoveryFromInvite = `-- name: UpdateDiscoveryFromInvite :exec
 UPDATE discovered_channels
 SET title = COALESCE(NULLIF($1, ''), title),
     username = COALESCE(NULLIF($2, ''), username),
-    tg_peer_id = COALESCE(NULLIF($3::bigint, 0::bigint), tg_peer_id),
-    access_hash = COALESCE(NULLIF($4::bigint, 0::bigint), access_hash),
+    description = COALESCE(NULLIF($3, ''), description),
+    tg_peer_id = COALESCE(NULLIF($4::bigint, 0::bigint), tg_peer_id),
+    access_hash = COALESCE(NULLIF($5::bigint, 0::bigint), access_hash),
     resolution_attempts = 0
-WHERE id = $5
+WHERE id = $6
 `
 
 type UpdateDiscoveryFromInviteParams struct {
-	Title      interface{} `json:"title"`
-	Username   interface{} `json:"username"`
-	TgPeerID   int64       `json:"tg_peer_id"`
-	AccessHash int64       `json:"access_hash"`
-	ID         pgtype.UUID `json:"id"`
+	Title       interface{} `json:"title"`
+	Username    interface{} `json:"username"`
+	Description interface{} `json:"description"`
+	TgPeerID    int64       `json:"tg_peer_id"`
+	AccessHash  int64       `json:"access_hash"`
+	ID          pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateDiscoveryFromInvite(ctx context.Context, arg UpdateDiscoveryFromInviteParams) error {
 	_, err := q.db.Exec(ctx, updateDiscoveryFromInvite,
 		arg.Title,
 		arg.Username,
+		arg.Description,
 		arg.TgPeerID,
 		arg.AccessHash,
 		arg.ID,
