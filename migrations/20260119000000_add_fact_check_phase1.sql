@@ -1,3 +1,5 @@
+-- +goose Up
+-- +goose StatementBegin
 CREATE TABLE fact_check_queue (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     item_id UUID NOT NULL REFERENCES items(id) ON DELETE CASCADE,
@@ -34,3 +36,11 @@ CREATE TABLE item_fact_checks (
 
 CREATE UNIQUE INDEX item_fact_checks_item_url_idx ON item_fact_checks (item_id, url);
 CREATE INDEX item_fact_checks_item_id_idx ON item_fact_checks (item_id);
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+DROP TABLE IF EXISTS item_fact_checks;
+DROP TABLE IF EXISTS fact_check_cache;
+DROP TABLE IF EXISTS fact_check_queue;
+-- +goose StatementEnd
