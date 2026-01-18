@@ -133,7 +133,7 @@ func (r *ProviderRegistry) SearchWithFallback(ctx context.Context, query string,
 		close(resultsChan)
 	}()
 
-	return r.selectBestResult(resultsChan)
+	return r.selectBestResult(ctx, resultsChan)
 }
 
 func (r *ProviderRegistry) getActiveProviders() []Provider {
@@ -151,7 +151,7 @@ func (r *ProviderRegistry) getActiveProviders() []Provider {
 	return active
 }
 
-func (r *ProviderRegistry) selectBestResult(resultsChan chan fanOutResult) ([]SearchResult, ProviderName, error) {
+func (r *ProviderRegistry) selectBestResult(ctx context.Context, resultsChan chan fanOutResult) ([]SearchResult, ProviderName, error) {
 	var (
 		bestResults  []SearchResult
 		bestProvider ProviderName
@@ -159,29 +159,45 @@ func (r *ProviderRegistry) selectBestResult(resultsChan chan fanOutResult) ([]Se
 		lastErr      error
 	)
 
-	for res := range resultsChan {
-		if res.err != nil {
-			lastErr = res.err
+	for {
+		select {
+		case <-ctx.Done():
+			if bestResults != nil {
+				return bestResults, bestProvider, nil
+			}
 
-			continue
+			return nil, "", ctx.Err()
+		case res, ok := <-resultsChan:
+			if !ok {
+				if bestResults != nil {
+					return bestResults, bestProvider, nil
+				}
+
+				if lastErr != nil {
+					return nil, "", lastErr
+				}
+
+				return nil, "", errNoProvidersAvailable
+			}
+
+			if res.err != nil {
+				lastErr = res.err
+
+				continue
+			}
+
+			if len(res.results) > 0 && res.priority > bestPriority {
+				bestResults = res.results
+				bestProvider = res.name
+				bestPriority = res.priority
+
+				// If we have a high priority result, we can return early to save time budget
+				if bestPriority >= PriorityHighSelfHosted {
+					return bestResults, bestProvider, nil
+				}
+			}
 		}
-
-		if len(res.results) > 0 && res.priority > bestPriority {
-			bestResults = res.results
-			bestProvider = res.name
-			bestPriority = res.priority
-		}
 	}
-
-	if bestResults != nil {
-		return bestResults, bestProvider, nil
-	}
-
-	if lastErr != nil {
-		return nil, "", lastErr
-	}
-
-	return nil, "", errNoProvidersAvailable
 }
 
 func (r *ProviderRegistry) AvailableProviders() []ProviderName {
