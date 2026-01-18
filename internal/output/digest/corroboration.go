@@ -5,13 +5,20 @@ import (
 	"html"
 	"strings"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
-const maxCorroborationChannels = 3
+const (
+	maxCorroborationChannels = 3
+	labelFalse               = "false"
+	labelTrue                = "true"
+)
 
 func (s *Scheduler) buildCorroborationLine(items []db.Item, representative db.Item) string {
 	if len(items) <= 1 {
+		observability.CorroborationCoverage.WithLabelValues(labelFalse).Inc()
+
 		return ""
 	}
 
@@ -19,12 +26,16 @@ func (s *Scheduler) buildCorroborationLine(items []db.Item, representative db.It
 	channels, relatedLink := s.collectCorroborationInfo(items, representative, repKey)
 
 	if len(channels) > 0 {
+		observability.CorroborationCoverage.WithLabelValues(labelTrue).Inc()
+
 		if len(channels) > maxCorroborationChannels {
 			channels = channels[:maxCorroborationChannels]
 		}
 
 		return fmt.Sprintf("\n    ↳ <i>Also reported by: %s</i>", strings.Join(channels, ", "))
 	}
+
+	observability.CorroborationCoverage.WithLabelValues(labelFalse).Inc()
 
 	if relatedLink != "" {
 		return fmt.Sprintf("\n    ↳ <i>Related: %s</i>", relatedLink)

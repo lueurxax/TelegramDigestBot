@@ -885,6 +885,27 @@ func formatEvidenceContext(evidence []EvidenceSource) string {
 
 	sb.WriteString("]\n")
 
+	// Add Background context if available from sources
+	var background []string
+
+	for _, ev := range evidence {
+		if ev.Description != "" && !ev.IsContradiction && ev.AgreementScore > 0.7 {
+			background = append(background, fmt.Sprintf("- %s: %s", ev.Domain, ev.Description))
+		}
+	}
+
+	if len(background) > 0 {
+		sb.WriteString("   [Background Context:\n")
+
+		for _, b := range background {
+			sb.WriteString("    ")
+			sb.WriteString(b)
+			sb.WriteString("\n")
+		}
+
+		sb.WriteString("   ]\n")
+	}
+
 	return sb.String()
 }
 

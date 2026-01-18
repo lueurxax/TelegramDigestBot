@@ -80,11 +80,14 @@ REQUIRED STRUCTURE with emojis:
 • First notable story
 • Second notable story
 
+📖 <b>Контекст</b>
+[Additional background information derived from the "Background Context" provided for the summaries. Use this section to explain WHY something is happening or provide historical context. Skip if no background info provided.]
+
 🔮 <b>Следим за</b>
 [Brief outlook - what to expect next, 1-2 sentences]
 
 RULES:
-- Every fact MUST appear in source summaries - no speculation
+- Every fact MUST appear in source summaries or background context - no speculation
 - Make it scannable - reader should get key info in 10 seconds
 - Use dynamic verbs, avoid passive voice
 - Bold ALL names, numbers, percentages, money amounts

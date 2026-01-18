@@ -260,7 +260,7 @@ func TestCircuitBreaker_recordSuccess(t *testing.T) {
 func TestCircuitBreaker_recordFailure(t *testing.T) {
 	t.Run("increments failure count", func(t *testing.T) {
 		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
-		cb.recordFailure()
+		cb.recordFailure(ProviderYaCy)
 
 		if cb.failures != 1 {
 			t.Errorf("failures: got %d, want 1", cb.failures)
@@ -271,7 +271,7 @@ func TestCircuitBreaker_recordFailure(t *testing.T) {
 		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
 
 		for i := 0; i < circuitBreakerThreshold; i++ {
-			cb.recordFailure()
+			cb.recordFailure(ProviderYaCy)
 		}
 
 		if cb.state != circuitOpen {

@@ -2,6 +2,7 @@ package enrichment
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 )
@@ -19,5 +20,10 @@ func NewTranslationAdapter(llmClient llm.Client, model string) TranslationClient
 }
 
 func (a *translationAdapter) TranslateToEnglish(ctx context.Context, text string) (string, error) {
-	return a.llmClient.TranslateText(ctx, text, "en", a.model)
+	res, err := a.llmClient.TranslateText(ctx, text, "en", a.model)
+	if err != nil {
+		return "", fmt.Errorf("translate text: %w", err)
+	}
+
+	return res, nil
 }

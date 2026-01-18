@@ -33,6 +33,7 @@ type EvidenceSource struct {
 	URL             string
 	Domain          string
 	Title           string
+	Description     string // Added for "Background" context
 	AgreementScore  float32
 	IsContradiction bool
 }

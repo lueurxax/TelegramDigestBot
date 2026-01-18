@@ -54,7 +54,7 @@ func TestQueryGenerator_Generate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			queries := gen.Generate(tt.summary, tt.topic)
+			queries := gen.Generate(tt.summary, tt.topic, "")
 
 			if tt.expectQueries {
 				if len(queries) < tt.minQueries || len(queries) > tt.maxQueries {
@@ -82,7 +82,7 @@ func TestQueryGenerator_NoDuplicates(t *testing.T) {
 	summary := "Apple Inc announced that Apple profits increased in the Apple store segment"
 	topic := "Business"
 
-	queries := gen.Generate(summary, topic)
+	queries := gen.Generate(summary, topic, "")
 	seen := make(map[string]bool)
 
 	for _, q := range queries {
@@ -427,7 +427,7 @@ func TestGenerateIncludesLanguage(t *testing.T) {
 	gen := NewQueryGenerator()
 
 	t.Run("English summary has English language", func(t *testing.T) {
-		queries := gen.Generate("Apple Inc announced new iPhone sales increased by 15% in Q3", "Tech")
+		queries := gen.Generate("Apple Inc announced new iPhone sales increased by 15% in Q3", "Tech", "")
 		if len(queries) == 0 {
 			t.Fatal("no queries generated for English summary")
 		}
@@ -440,7 +440,7 @@ func TestGenerateIncludesLanguage(t *testing.T) {
 	})
 
 	t.Run("Russian summary has Russian language", func(t *testing.T) {
-		queries := gen.Generate("Президент России объявил о новых мерах поддержки экономики страны", "Политика")
+		queries := gen.Generate("Президент России объявил о новых мерах поддержки экономики страны", "Политика", "")
 		if len(queries) == 0 {
 			t.Fatal("no queries generated for Russian summary")
 		}

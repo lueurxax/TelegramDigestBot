@@ -279,6 +279,7 @@ func (w *Worker) generateQueries(item *db.EnrichmentQueueItem) []GeneratedQuery 
 	queries := w.queryGenerator.Generate(item.Summary, item.Topic, item.ChannelTitle)
 	if len(queries) == 0 {
 		lang := w.queryGenerator.DetectLanguage(item.Summary)
+
 		query := item.Summary
 		if item.ChannelTitle != "" {
 			query = item.ChannelTitle + " " + item.Summary
@@ -336,14 +337,17 @@ func (w *Worker) executeQueries(ctx context.Context, queries []GeneratedQuery, m
 	}
 
 	var wg sync.WaitGroup
+
 	for _, gq := range queries {
 		if ctx.Err() != nil {
 			break
 		}
 
 		wg.Add(1)
+
 		go func(q GeneratedQuery) {
 			defer wg.Done()
+
 			w.executeQuery(ctx, q, maxResults, state)
 		}(gq)
 	}
@@ -603,41 +607,16 @@ func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQu
 			break
 		}
 
-		evidence, err := w.processEvidenceSource(ctx, result, provider, cacheTTL)
-		if err != nil {
-			w.logger.Warn().Err(err).Str(logKeyURL, result.URL).Msg("failed to process evidence source")
-
+		score, ok := w.processSingleResult(ctx, item, result, provider, cacheTTL, minAgreement)
+		if !ok {
 			continue
 		}
 
-		if evidence.Source.ExtractionFailed {
-			continue
-		}
-
-		scoringResult := w.scorer.Score(item.Summary, evidence)
-
-		// Skip if agreement score is below minimum threshold
-		if scoringResult.AgreementScore < minAgreement {
-			w.logger.Debug().
-				Str(logKeyURL, result.URL).
-				Float32("score", scoringResult.AgreementScore).
-				Float32("min", minAgreement).
-				Msg("evidence below minimum agreement threshold")
-
-			continue
-		}
-
-		if err := w.saveItemEvidence(ctx, item.ItemID, evidence, scoringResult); err != nil {
-			w.logger.Warn().Err(err).Msg("failed to save item evidence")
-
-			continue
-		}
-
-		scores = append(scores, scoringResult.AgreementScore)
+		scores = append(scores, score)
 		sourceCount++
 
 		observability.EnrichmentMatches.Inc()
-		observability.EnrichmentCorroborationScore.Observe(float64(scoringResult.AgreementScore))
+		observability.EnrichmentCorroborationScore.Observe(float64(score))
 	}
 
 	if sourceCount > 0 {
@@ -650,6 +629,47 @@ func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQu
 	}
 
 	return nil
+}
+
+func (w *Worker) processSingleResult(
+	ctx context.Context,
+	item *db.EnrichmentQueueItem,
+	result SearchResult,
+	provider ProviderName,
+	cacheTTL time.Duration,
+	minAgreement float32,
+) (float32, bool) {
+	evidence, err := w.processEvidenceSource(ctx, result, provider, cacheTTL)
+	if err != nil {
+		w.logger.Warn().Err(err).Str(logKeyURL, result.URL).Msg("failed to process evidence source")
+
+		return 0, false
+	}
+
+	if evidence.Source.ExtractionFailed {
+		return 0, false
+	}
+
+	scoringResult := w.scorer.Score(item.Summary, evidence)
+
+	// Skip if agreement score is below minimum threshold
+	if scoringResult.AgreementScore < minAgreement {
+		w.logger.Debug().
+			Str(logKeyURL, result.URL).
+			Float32("score", scoringResult.AgreementScore).
+			Float32("min", minAgreement).
+			Msg("evidence below minimum agreement threshold")
+
+		return 0, false
+	}
+
+	if err := w.saveItemEvidence(ctx, item.ItemID, evidence, scoringResult); err != nil {
+		w.logger.Warn().Err(err).Msg("failed to save item evidence")
+
+		return 0, false
+	}
+
+	return scoringResult.AgreementScore, true
 }
 
 func (w *Worker) processEvidenceSource(ctx context.Context, result SearchResult, provider ProviderName, cacheTTL time.Duration) (*ExtractedEvidence, error) {
@@ -851,6 +871,14 @@ func (w *Worker) shouldCheckBudget(lastCheck time.Time) bool {
 // checkBudgetLimits checks if daily or monthly limits have been exceeded.
 // Returns true and a reason string if exceeded.
 func (w *Worker) checkBudgetLimits(ctx context.Context) (exceeded bool, reason string) {
+	if exceeded, reason := w.checkDailyLimits(ctx); exceeded {
+		return true, reason
+	}
+
+	return w.checkMonthlyLimits(ctx)
+}
+
+func (w *Worker) checkDailyLimits(ctx context.Context) (exceeded bool, reason string) {
 	if w.cfg.EnrichmentDailyLimit > 0 {
 		daily, err := w.db.GetDailyEnrichmentCount(ctx)
 		if err != nil {
@@ -860,21 +888,25 @@ func (w *Worker) checkBudgetLimits(ctx context.Context) (exceeded bool, reason s
 		}
 	}
 
-	if w.cfg.EnrichmentMonthlyLimit > 0 {
-		monthly, err := w.db.GetMonthlyEnrichmentCount(ctx)
-		if err != nil {
-			w.logger.Warn().Err(err).Msg("failed to get monthly enrichment count")
-		} else if monthly >= w.cfg.EnrichmentMonthlyLimit {
-			return true, fmt.Sprintf("monthly request limit reached (%d/%d)", monthly, w.cfg.EnrichmentMonthlyLimit)
-		}
-	}
-
 	if w.cfg.EnrichmentDailyBudgetUSD > 0 {
 		dailyCost, err := w.db.GetDailyEnrichmentCost(ctx)
 		if err != nil {
 			w.logger.Warn().Err(err).Msg("failed to get daily enrichment cost")
 		} else if dailyCost >= w.cfg.EnrichmentDailyBudgetUSD {
 			return true, fmt.Sprintf("daily budget reached ($%.2f/$%.2f)", dailyCost, w.cfg.EnrichmentDailyBudgetUSD)
+		}
+	}
+
+	return false, ""
+}
+
+func (w *Worker) checkMonthlyLimits(ctx context.Context) (exceeded bool, reason string) {
+	if w.cfg.EnrichmentMonthlyLimit > 0 {
+		monthly, err := w.db.GetMonthlyEnrichmentCount(ctx)
+		if err != nil {
+			w.logger.Warn().Err(err).Msg("failed to get monthly enrichment count")
+		} else if monthly >= w.cfg.EnrichmentMonthlyLimit {
+			return true, fmt.Sprintf("monthly request limit reached (%d/%d)", monthly, w.cfg.EnrichmentMonthlyLimit)
 		}
 	}
 

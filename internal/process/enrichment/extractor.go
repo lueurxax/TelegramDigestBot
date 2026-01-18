@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -79,6 +81,7 @@ func (e *Extractor) Extract(ctx context.Context, result SearchResult, provider P
 	if err != nil {
 		source.ExtractionFailed = true
 
+		//nolint:nilerr // we want to store failed extraction in DB but continue processing
 		return &ExtractedEvidence{
 			Source: source,
 			Claims: nil,
@@ -89,6 +92,7 @@ func (e *Extractor) Extract(ctx context.Context, result SearchResult, provider P
 	if err != nil {
 		source.ExtractionFailed = true
 
+		//nolint:nilerr // we want to store failed extraction in DB but continue processing
 		return &ExtractedEvidence{
 			Source: source,
 			Claims: nil,
@@ -148,36 +152,113 @@ func (e *Extractor) fetchContent(ctx context.Context, url string) ([]byte, error
 	return body, nil
 }
 
+type claimCandidate struct {
+	text     string
+	score    float64
+	entities []Entity
+}
+
 func extractClaims(content string) []ExtractedClaim {
 	if content == "" {
 		return nil
 	}
 
 	sentences := splitSentences(content)
-	claims := []ExtractedClaim{}
+	if len(sentences) == 0 {
+		return nil
+	}
 
-	for _, sentence := range sentences {
-		sentence = strings.TrimSpace(sentence)
-		if len(sentence) < minClaimLength || len(sentence) > maxClaimLength {
+	candidates := filterCandidates(sentences)
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	return rankAndExtractClaims(candidates)
+}
+
+func filterCandidates(sentences []string) []claimCandidate {
+	candidates := []claimCandidate{}
+
+	for _, s := range sentences {
+		s = strings.TrimSpace(s)
+		if len(s) < minClaimLength || len(s) > maxClaimLength {
 			continue
 		}
 
-		if !isFactualSentence(sentence) {
+		if !isFactualSentence(s) {
 			continue
 		}
 
-		entities := extractEntities(sentence)
-		claims = append(claims, ExtractedClaim{
-			Text:     sentence,
-			Entities: entities,
+		entities := extractEntities(s)
+		candidates = append(candidates, claimCandidate{
+			text:     s,
+			entities: entities,
 		})
+	}
 
-		if len(claims) >= maxExtractedClaims {
-			break
+	return candidates
+}
+
+func rankAndExtractClaims(candidates []claimCandidate) []ExtractedClaim {
+	// Simple TextRank-like scoring based on word overlap with all other sentences
+	for i := range candidates {
+		for j := range candidates {
+			if i == j {
+				continue
+			}
+
+			candidates[i].score += calculateSentenceSimilarity(candidates[i].text, candidates[j].text)
 		}
 	}
 
-	return claims
+	// Sort by score descending
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
+
+	result := []ExtractedClaim{}
+
+	limit := maxExtractedClaims
+	if len(candidates) < limit {
+		limit = len(candidates)
+	}
+
+	for i := 0; i < limit; i++ {
+		result = append(result, ExtractedClaim{
+			Text:     candidates[i].text,
+			Entities: candidates[i].entities,
+		})
+	}
+
+	return result
+}
+
+func calculateSentenceSimilarity(s1, s2 string) float64 {
+	words1 := strings.Fields(strings.ToLower(s1))
+	words2 := strings.Fields(strings.ToLower(s2))
+
+	if len(words1) == 0 || len(words2) == 0 {
+		return 0
+	}
+
+	set1 := make(map[string]bool)
+
+	for _, w := range words1 {
+		if len(w) > 3 {
+			set1[w] = true
+		}
+	}
+
+	matches := 0
+
+	for _, w := range words2 {
+		if set1[w] {
+			matches++
+		}
+	}
+
+	// Normalizing by log of lengths to avoid bias towards long sentences
+	return float64(matches) / (math.Log(float64(len(words1))) + math.Log(float64(len(words2))) + 1)
 }
 
 var sentenceEndRegex = regexp.MustCompile(`[.!?]+\s+`)

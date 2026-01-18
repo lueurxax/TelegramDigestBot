@@ -135,6 +135,7 @@ func (g *QueryGenerator) addKeywordQuery(qb *queryBuilder, keywords []string) {
 func (g *QueryGenerator) addFallbackQuery(qb *queryBuilder, cleaned, channelTitle string, keywords []string) {
 	if len(qb.queries) == 0 {
 		query := TruncateQuery(cleaned)
+
 		if channelTitle != "" {
 			if len(keywords) > 0 {
 				query = channelTitle + " " + strings.Join(keywords, " ")

@@ -193,13 +193,118 @@ func getEntityWeight(entityType string) float64 {
 }
 
 func entityMatchExists(entity Entity, candidates []Entity) bool {
+	norm1 := normalizeEntity(entity.Text)
 	for _, candidate := range candidates {
-		if strings.EqualFold(entity.Text, candidate.Text) && entity.Type == candidate.Type {
+		if entity.Type != candidate.Type {
+			continue
+		}
+
+		norm2 := normalizeEntity(candidate.Text)
+		if norm1 == norm2 {
 			return true
+		}
+
+		// Check for aliases
+		if isAlias(norm1, norm2) {
+			return true
+		}
+
+		// Check for partial match (one name is a prefix of another, but not too short)
+		if len(norm1) > 4 && len(norm2) > 4 {
+			if strings.HasPrefix(norm1, norm2) || strings.HasPrefix(norm2, norm1) {
+				return true
+			}
 		}
 	}
 
 	return false
+}
+
+func normalizeEntity(text string) string {
+	text = strings.ToLower(text)
+	text = strings.TrimSpace(text)
+	// Remove common suffixes
+	text = strings.TrimSuffix(text, " inc")
+	text = strings.TrimSuffix(text, " corp")
+	text = strings.TrimSuffix(text, " ltd")
+	text = strings.TrimSuffix(text, " llc")
+	text = strings.TrimSuffix(text, " limited")
+
+	// Basic transliteration for common RU-EN names
+	text = transliterate(text)
+
+	// Remove punctuation
+	var b strings.Builder
+
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+
+	return b.String()
+}
+
+func isAlias(s1, s2 string) bool {
+	aliases := map[string][]string{
+		"usa":           {"unitedstates", "unitedstatesofamerica", "us"},
+		"uk":            {"unitedkingdom", "britain", "greatbritain"},
+		"un":            {"unitednations"},
+		"eu":            {"europeanunion"},
+		"russia":        {"russianfederation"},
+		"uae":           {"unitedarabemirates"},
+		"apple":         {"appleinc"},
+		"microsoft":     {"microsoftcorp"},
+		"google":        {"alphabetinc"},
+		"meta":          {"facebook"},
+		"openai":        {"chatgpt"},
+		"donaldtrump":   {"trump"},
+		"joebiden":      {"biden"},
+		"vladimirputin": {"putin"},
+	}
+
+	for k, vals := range aliases {
+		if s1 == k {
+			for _, v := range vals {
+				if s2 == v {
+					return true
+				}
+			}
+		}
+
+		if s2 == k {
+			for _, v := range vals {
+				if s1 == v {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+func transliterate(text string) string {
+	// Simple RU -> EN transliteration for common names
+	ruToEn := map[rune]string{
+		'а': "a", 'б': "b", 'в': "v", 'г': "g", 'д': "d", 'е': "e", 'ё': "yo",
+		'ж': "zh", 'з': "z", 'и': "i", 'й': "y", 'к': "k", 'л': "l", 'м': "m",
+		'н': "n", 'о': "o", 'п': "p", 'р': "r", 'с': "s", 'т': "t", 'у': "u",
+		'ф': "f", 'х': "kh", 'ц': "ts", 'ч': "ch", 'ш': "sh", 'щ': "shch",
+		'ъ': "", 'ы': "y", 'ь': "", 'э': "e", 'ю': "yu", 'я': "ya",
+	}
+
+	var b strings.Builder
+
+	for _, r := range text {
+		if en, ok := ruToEn[r]; ok {
+			b.WriteString(en)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+
+	return b.String()
 }
 
 func isStopWord(word string) bool {

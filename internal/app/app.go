@@ -130,6 +130,7 @@ func (a *App) runEnrichmentWorker(ctx context.Context) {
 		if transModel == "" {
 			transModel = a.cfg.LLMModel // Fallback to main model
 		}
+
 		worker.SetTranslationClient(enrichment.NewTranslationAdapter(llmClient, transModel))
 	}
 

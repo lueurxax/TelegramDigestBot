@@ -113,7 +113,19 @@ func (m *mockRepository) GetMonthlyEnrichmentCount(_ context.Context) (int, erro
 	return 0, nil
 }
 
-func (m *mockRepository) IncrementEnrichmentUsage(_ context.Context, _ string) error {
+func (m *mockRepository) GetDailyEnrichmentCost(_ context.Context) (float64, error) {
+	return 0, nil
+}
+
+func (m *mockRepository) GetMonthlyEnrichmentCost(_ context.Context) (float64, error) {
+	return 0, nil
+}
+
+func (m *mockRepository) IncrementEnrichmentUsage(_ context.Context, _ string, _ float64) error {
+	return nil
+}
+
+func (m *mockRepository) IncrementEmbeddingUsage(_ context.Context, _ float64) error {
 	return nil
 }
 
@@ -139,7 +151,9 @@ func TestWorker_generateClaimEmbedding(t *testing.T) {
 	t.Run("returns embedding from client", func(t *testing.T) {
 		expectedEmb := []float32{0.1, 0.2, 0.3}
 		mock := &mockEmbeddingClient{embedding: expectedEmb}
+		repo := &mockRepository{}
 		w := &Worker{
+			db:              repo,
 			embeddingClient: mock,
 			logger:          &logger,
 		}

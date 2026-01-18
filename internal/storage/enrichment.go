@@ -603,12 +603,12 @@ func (db *DB) IncrementEmbeddingUsage(ctx context.Context, cost float64) error {
 	return nil
 }
 
-// GetDailyEnrichmentCount returns the total enrichment request count for the current day.
+// GetDailyEnrichmentCount returns the total enrichment request count (including embeddings) for the current day.
 func (db *DB) GetDailyEnrichmentCount(ctx context.Context) (int, error) {
 	var count int64
 
 	err := db.Pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(request_count), 0)::bigint
+		SELECT COALESCE(SUM(request_count + embedding_count), 0)::bigint
 		FROM enrichment_usage
 		WHERE date = CURRENT_DATE
 	`).Scan(&count)
@@ -616,21 +616,10 @@ func (db *DB) GetDailyEnrichmentCount(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("get daily enrichment count: %w", err)
 	}
 
-	return int(count) + int(db.getEmbeddingCount(ctx)), nil
+	return int(count), nil
 }
 
-func (db *DB) getEmbeddingCount(ctx context.Context) int64 {
-	var count int64
-	_ = db.Pool.QueryRow(ctx, `
-		SELECT COALESCE(SUM(embedding_count), 0)::bigint
-		FROM enrichment_usage
-		WHERE date = CURRENT_DATE
-	`).Scan(&count)
-
-	return count
-}
-
-// GetMonthlyEnrichmentCount returns the total enrichment request count for the current month.
+// GetMonthlyEnrichmentCount returns the total enrichment request count (including embeddings) for the current month.
 func (db *DB) GetMonthlyEnrichmentCount(ctx context.Context) (int, error) {
 	var count int64
 

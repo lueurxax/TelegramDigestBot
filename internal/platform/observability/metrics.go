@@ -120,4 +120,9 @@ var (
 		Help:    "Distribution of corroboration scores for enriched items",
 		Buckets: []float64{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0},
 	})
+
+	CorroborationCoverage = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_corroboration_coverage_total",
+		Help: "Total number of items with and without channel corroboration",
+	}, []string{"has_corroboration"})
 )
