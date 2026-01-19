@@ -152,6 +152,17 @@ data:
     who.int
     un.org
     europa.eu
+    cyprus-mail.com
+    philenews.com
+    sigmalive.com
+    reporter.com.cy
+    politis.com.cy
+    alphanews.live
+    cyprusnews.eu
+    pafospress.com
+    cosmosnews.com.cy
+    pafosnet.com
+    newsincyprus.com
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -195,7 +206,7 @@ metadata:
   name: yacy-seed-bootstrap
   namespace: digest
 spec:
-  schedule: "0 2 * * *"
+  schedule: "*/10 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 5

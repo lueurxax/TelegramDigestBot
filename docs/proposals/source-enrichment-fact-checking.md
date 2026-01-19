@@ -1,15 +1,15 @@
 # Source Enrichment & Fact-Checking Pipeline
 
-> **Status: Phase 2 Partially Implemented** (January 2026)
+> **Status: Phase 2 Implemented** (January 2026)
 >
-> Phase 1 is complete. Phase 2 core functionality works but has gaps (see Known Gaps section).
-> See [docs/features/corroboration.md](../features/corroboration.md) for user-facing documentation.
+> Both phases are complete. Only USD-based budget caps remain unimplemented (count-based limits work).
+> See [docs/features/corroboration.md](../features/corroboration.md) and [docs/features/source-enrichment.md](../features/source-enrichment.md) for user-facing documentation.
 > Phase 2 is enabled via `ENRICHMENT_ENABLED=true`.
 
 ## Summary
 Two-phase rollout:
 1. **Phase 1** ✅ Channel corroboration + Google Fact Check API (implemented)
-2. **Phase 2** 🟡 Evidence retrieval, extraction, and agreement scoring (partial - see Known Gaps)
+2. **Phase 2** ✅ Evidence retrieval, extraction, and agreement scoring (implemented)
 
 ## Goals
 - Improve factual accuracy and context with measurable outcomes.
@@ -333,44 +333,19 @@ Phase 1:
 
 Phase 2:
 1. ✅ Implement storage + retrieval behind `ENRICHMENT_ENABLED`.
-2. 🟡 Add evidence extraction + scoring, log metrics. (basic extraction only)
-3. 🟡 Integrate into summarization prompts. ("Supporting Evidence" only, no "Background")
+2. ✅ Add evidence extraction + scoring, log metrics.
+3. ✅ Integrate into summarization prompts (Supporting Evidence + Background/Context sections).
 4. ✅ Implement multi-provider support (YaCy, GDELT, Event Registry, NewsAPI, SearxNG, OpenSearch).
-5. ⏳ Add language detection and query translation. (TranslationClient not wired)
+5. ✅ Add language detection and query translation.
 6. ✅ Add admin domain management (`/enrichment domains`).
 7. 🟡 Add budget controls (daily/monthly limits). (count-based only, USD caps not enforced)
 8. ✅ Add embedding-based claim deduplication.
 9. ✅ Clustering improvement with evidence embeddings.
 
 ## Known Gaps (Phase 2)
-The following items from the proposal are not yet implemented:
+Most Phase 2 features are implemented. The following item remains incomplete:
 
-1. **Query translation not wired**: `TranslationClient` exists but is never set in `app.go`, so `ENRICHMENT_QUERY_TRANSLATE` has no effect.
-
-2. **Evidence extraction narrower than spec**:
-   - Uses readability + OpenGraph meta + simple sentence heuristics only
-   - No JSON-LD/RSS/Atom parsing
-   - No TextRank sentence ranking
-   - No optional LLM claim extraction
-
-3. **No extraction failure flag**: Proposal mentions `extraction_failed=true` but `evidence_sources` table has no such field.
-
-4. **Entity overlap normalization is basic**:
-   - No RU↔EN transliteration
-   - No alias expansion (e.g., Kyiv/Kiev)
-   - Matching is exact string + entity type only
-
-5. **"Background" bullets not surfaced**: Prompts include "Supporting Evidence" block but no "Background" section; digest output only shows "Corroborated" line.
-
-6. **Sequential source retrieval**: Providers are queried with fallback sequentially, not in parallel within time budget as spec describes.
-
-7. **USD budget caps not enforced**: `ENRICHMENT_DAILY_BUDGET_USD` / `ENRICHMENT_MONTHLY_CAP_USD` are configured but unused; only count-based limits (`ENRICHMENT_DAILY_LIMIT` / `ENRICHMENT_MONTHLY_LIMIT`) work.
-
-8. **Observability gaps**:
-   - No metric for corroboration coverage (% items with >=1 other channel)
-   - No metric for circuit breaker opens
-
-9. **Query fallback missing channel name**: Proposal says fallback uses "top keywords + channel name" but implementation doesn't include channel name.
+1. **USD budget caps not enforced**: `ENRICHMENT_DAILY_BUDGET_USD` / `ENRICHMENT_MONTHLY_CAP_USD` are configured but unused; only count-based limits (`ENRICHMENT_DAILY_LIMIT` / `ENRICHMENT_MONTHLY_LIMIT`) work.
 
 ## Testing Strategy
 - Unit tests:

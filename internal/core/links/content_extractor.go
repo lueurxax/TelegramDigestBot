@@ -29,7 +29,7 @@ type WebContent struct {
 func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent, error) {
 	u, _ := url.Parse(rawURL) //nolint:errcheck // URL was already validated
 
-	// Try RSS/Atom parsing first (Phase 2 gap)
+	// Try RSS/Atom parsing first
 	if feedContent, ok := tryExtractFeed(htmlBytes, maxLen); ok {
 		return feedContent, nil
 	}

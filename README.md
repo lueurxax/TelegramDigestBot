@@ -44,6 +44,7 @@ Feature documentation is available in `docs/features/`:
 - [Vision & Images](docs/features/vision-images.md) - Vision routing, cover images, AI covers
 - [Annotations](docs/features/annotations.md) - Item labeling for quality evaluation and threshold tuning
 - [Corroboration](docs/features/corroboration.md) - Channel corroboration and fact-check links
+- [Link Enrichment](docs/features/link-enrichment.md) - URL resolution and content extraction for better summaries
 
 ## Fact Check (Phase 1)
 

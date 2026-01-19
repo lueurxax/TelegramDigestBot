@@ -199,13 +199,8 @@ The fact-check worker runs as part of the pipeline and:
 
 ---
 
-## Future: Phase 2
+## Phase 2: Source Enrichment
 
-Phase 1 provides basic corroboration signals. Phase 2 (not yet implemented) would add:
+Phase 2 extends corroboration with multi-provider evidence retrieval. It is **implemented** - only USD-based budget caps remain unimplemented (count-based limits work).
 
-- Full evidence retrieval from multiple providers (GDELT, NewsAPI, etc.)
-- Agreement scoring between sources
-- Confidence tiers (High/Medium/Low)
-- Evidence bullets in summaries
-
-See [proposals/source-enrichment-fact-checking.md](../proposals/source-enrichment-fact-checking.md) for Phase 2 details.
+See [source-enrichment.md](source-enrichment.md) for Phase 2 documentation and [proposals/source-enrichment-fact-checking.md](../proposals/source-enrichment-fact-checking.md) for the original proposal.
