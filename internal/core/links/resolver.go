@@ -3,6 +3,7 @@ package links
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/gotd/td/telegram"
@@ -32,6 +33,7 @@ type Resolver struct {
 	tgCacheTTL  time.Duration
 	maxLinks    int
 	maxLen      int
+	denylist    map[string]bool
 }
 
 func New(cfg *config.Config, linkCache LinkCacheRepository, channelRepo ChannelRepository, tgClient *telegram.Client, logger *zerolog.Logger) *Resolver {
@@ -82,6 +84,7 @@ func New(cfg *config.Config, linkCache LinkCacheRepository, channelRepo ChannelR
 		tgCacheTTL:  tgTTL,
 		maxLinks:    maxLinks,
 		maxLen:      maxLen,
+		denylist:    parseDomainList(cfg.LinkDenylistDomains),
 	}
 }
 
@@ -130,6 +133,11 @@ func (r *Resolver) normalizeResolveParams(maxLinks int, webTTL, tgTTL time.Durat
 }
 
 func (r *Resolver) resolveSingleLink(ctx context.Context, link linkextract.Link, params resolveParams) *domain.ResolvedLink {
+	if r.isDomainDenied(link.Domain) {
+		r.logger.Debug().Str("domain", link.Domain).Str(logKeyURL, link.URL).Msg("link domain denied")
+		return nil
+	}
+
 	// Check cache first
 	cached, err := r.linkCache.GetLinkCache(ctx, link.URL)
 	if err == nil && cached != nil && time.Now().Before(cached.ExpiresAt) {
@@ -212,6 +220,7 @@ func (r *Resolver) resolveWebLink(ctx context.Context, link *linkextract.Link, t
 		Description: content.Description,
 		ImageURL:    content.ImageURL,
 		WordCount:   content.WordCount,
+		Language:    content.Language,
 		Status:      domain.LinkStatusSuccess,
 		ResolvedAt:  time.Now(),
 		ExpiresAt:   time.Now().Add(ttl),
@@ -233,6 +242,7 @@ func (r *Resolver) resolveTelegramLink(ctx context.Context, link *linkextract.Li
 		MessageID:       content.MessageID,
 		Content:         content.Text,
 		PublishedAt:     content.Date,
+		Language:        DetectLanguage(content.Text),
 		Views:           content.Views,
 		Forwards:        content.Forwards,
 		HasMedia:        content.HasMedia,
@@ -241,4 +251,57 @@ func (r *Resolver) resolveTelegramLink(ctx context.Context, link *linkextract.Li
 		ResolvedAt:      time.Now(),
 		ExpiresAt:       time.Now().Add(ttl),
 	}, nil
+}
+
+func (r *Resolver) isDomainDenied(domain string) bool {
+	if len(r.denylist) == 0 || domain == "" {
+		return false
+	}
+
+	return matchesDomain(domain, r.denylist)
+}
+
+func parseDomainList(raw string) map[string]bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' '
+	})
+
+	list := make(map[string]bool)
+
+	for _, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if part == "" {
+			continue
+		}
+
+		list[part] = true
+	}
+
+	return list
+}
+
+func matchesDomain(domain string, list map[string]bool) bool {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if domain == "" {
+		return false
+	}
+
+	if list[domain] {
+		return true
+	}
+
+	parts := strings.Split(domain, ".")
+	for i := 1; i < len(parts); i++ {
+		suffix := strings.Join(parts[i:], ".")
+		if list[suffix] {
+			return true
+		}
+	}
+
+	return false
 }

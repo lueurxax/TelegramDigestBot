@@ -84,3 +84,5 @@ data:
   EVIDENCE_CLUSTERING_ENABLED: "true"
   EVIDENCE_CLUSTERING_BOOST: "0.15"
   EVIDENCE_CLUSTERING_MIN_SCORE: "0.5"
+  LINK_ENRICHMENT_ENABLED: "true"
+  LINK_ENRICHMENT_SCOPE: "summary, relevance, topic, dedup, queries, factcheck"

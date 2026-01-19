@@ -39,16 +39,23 @@ func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent
 	if err != nil {
 		// Fall back to meta tags only - readability failure is not fatal
 		meta := extractMetaTags(htmlBytes)
+		lang := DetectLanguage(meta.Title + " " + meta.Description)
 
 		//nolint:nilerr // fallback to meta tags when readability fails
 		return &WebContent{
 			Title:       meta.Title,
 			Description: meta.Description,
+			Language:    lang,
 		}, nil
 	}
 
 	meta := extractMetaTags(htmlBytes)
 	jsonLD := extractJSONLD(htmlBytes)
+
+	lang := DetectLanguage(article.TextContent)
+	if lang == "" {
+		lang = DetectLanguage(meta.Title + " " + meta.Description)
+	}
 
 	return &WebContent{
 		Title:       coalesce(jsonLD.Title, article.Title, meta.OGTitle, meta.Title),
@@ -58,6 +65,7 @@ func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent
 		PublishedAt: coalesceTime(parseDate(jsonLD.PublishedAt), parseDate(meta.PublishedTime)),
 		ImageURL:    coalesce(jsonLD.Image, meta.OGImage),
 		WordCount:   countWords(article.TextContent),
+		Language:    lang,
 	}, nil
 }
 
@@ -72,6 +80,7 @@ func tryExtractFeed(htmlBytes []byte, maxLen int) (*WebContent, bool) {
 	// If it's a feed, we take the first item as the content for the specific URL if it matches,
 	// or just the first item if we are treating the feed URL as the source.
 	item := feed.Items[0]
+	lang := DetectLanguage(item.Title + " " + item.Description + " " + item.Content)
 
 	return &WebContent{
 		Title:       item.Title,
@@ -81,6 +90,7 @@ func tryExtractFeed(htmlBytes []byte, maxLen int) (*WebContent, bool) {
 		PublishedAt: coalesceTime(toTime(item.PublishedParsed), toTime(item.UpdatedParsed)),
 		ImageURL:    extractFeedImage(item),
 		WordCount:   countWords(item.Content),
+		Language:    lang,
 	}, true
 }
 

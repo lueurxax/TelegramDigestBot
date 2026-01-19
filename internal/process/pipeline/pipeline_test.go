@@ -1540,11 +1540,12 @@ func TestGetDurationSetting(t *testing.T) {
 
 func TestSkipMessage(t *testing.T) {
 	tests := []struct {
-		name         string
-		message      db.RawMessage
-		skipForwards bool
-		seenHashes   map[string]string
-		expectSkip   bool
+		name                  string
+		message               db.RawMessage
+		skipForwards          bool
+		linkEnrichmentEnabled bool
+		seenHashes            map[string]string
+		expectSkip            bool
 	}{
 		{
 			name:       "duplicate hash in batch",
@@ -1572,6 +1573,20 @@ func TestSkipMessage(t *testing.T) {
 			seenHashes: make(map[string]string),
 			expectSkip: false,
 		},
+		{
+			name:                  "short message with link passes when enrichment enabled",
+			message:               db.RawMessage{ID: "1", Text: "https://t.me/1"},
+			linkEnrichmentEnabled: true,
+			seenHashes:            make(map[string]string),
+			expectSkip:            false,
+		},
+		{
+			name:                  "short message with link skipped when enrichment disabled",
+			message:               db.RawMessage{ID: "1", Text: "https://t.me/1"},
+			linkEnrichmentEnabled: false,
+			seenHashes:            make(map[string]string),
+			expectSkip:            true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1585,11 +1600,12 @@ func TestSkipMessage(t *testing.T) {
 			p := New(cfg, repo, nil, nil, &logger)
 
 			s := &pipelineSettings{
-				skipForwards: tt.skipForwards,
-				minLength:    10,
+				skipForwards:          tt.skipForwards,
+				linkEnrichmentEnabled: tt.linkEnrichmentEnabled,
+				minLength:             20,
 			}
 
-			f := filters.New(nil, false, 10, nil, "mixed")
+			f := filters.New(nil, false, 20, nil, "mixed")
 
 			skip := p.skipMessageBasic(context.Background(), logger, &tt.message, s, tt.seenHashes, f)
 

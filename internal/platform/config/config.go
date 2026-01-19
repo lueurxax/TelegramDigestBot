@@ -83,6 +83,7 @@ type Config struct {
 	LinkMinWords           int           `env:"LINK_MIN_WORDS" envDefault:"80"`
 	LinkSnippetMaxChars    int           `env:"LINK_SNIPPET_MAX_CHARS" envDefault:"1200"`
 	LinkEmbeddingMaxMsgLen int           `env:"LINK_EMBEDDING_MAX_MSG_LEN" envDefault:"200"`
+	LinkDenylistDomains    string        `env:"LINK_DENYLIST_DOMAINS" envDefault:""`
 
 	// Source enrichment (Phase 2)
 	EnrichmentEnabled          bool          `env:"ENRICHMENT_ENABLED" envDefault:"false"`

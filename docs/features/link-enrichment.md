@@ -27,6 +27,7 @@ Set these in your `.env` or Kubernetes config:
 - `MAX_LINKS_PER_MESSAGE` (default: `3`)
 - `LINK_CACHE_TTL` (default: `24h`)
 - `TG_LINK_CACHE_TTL` (default: `1h`) for Telegram-specific link resolution
+- `LINK_DENYLIST_DOMAINS` (default: empty, comma-separated)
 
 ## Notes for annotation
 The annotation UI shows the raw message text plus the generated summary. It does not display the fetched link content, even when link enrichment is enabled.

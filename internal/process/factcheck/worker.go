@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
+	linkscore "github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
@@ -118,12 +119,40 @@ func (w *Worker) enrichClaimFromLinks(ctx context.Context, item *db.FactCheckQue
 		return
 	}
 
+	links = w.filterLinksForFactCheck(item, links)
+	if len(links) == 0 {
+		return
+	}
+
 	extracted := w.extractClaimFromLink(links[0])
 	if len(extracted) >= w.factCheckMinLength() {
 		item.Claim = extracted
 		// Re-normalizing if needed (NormalizeClaim is in factcheck package)
 		item.NormalizedClaim = NormalizeClaim(extracted)
 	}
+}
+
+func (w *Worker) filterLinksForFactCheck(item *db.FactCheckQueueItem, links []domain.ResolvedLink) []domain.ResolvedLink {
+	if len(links) == 0 {
+		return links
+	}
+
+	msgLang := linkscore.DetectLanguage(item.Claim)
+	filtered := make([]domain.ResolvedLink, 0, len(links))
+
+	for _, link := range links {
+		if len(strings.Fields(link.Content)) < w.cfg.LinkMinWords {
+			continue
+		}
+
+		if msgLang != "" && link.Language != "" && msgLang != link.Language {
+			continue
+		}
+
+		filtered = append(filtered, link)
+	}
+
+	return filtered
 }
 
 func (w *Worker) shouldEnrichClaim(item *db.FactCheckQueueItem) bool {

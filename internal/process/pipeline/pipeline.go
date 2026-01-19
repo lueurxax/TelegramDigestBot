@@ -13,6 +13,7 @@ import (
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	links "github.com/lueurxax/telegram-digest-bot/internal/core/links"
+	"github.com/lueurxax/telegram-digest-bot/internal/core/links/linkextract"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
@@ -413,6 +414,12 @@ func (p *Pipeline) skipMessageBasic(ctx context.Context, logger zerolog.Logger, 
 	}
 
 	if filtered, reason := f.FilterReason(m.Text); filtered {
+		if reason == filters.ReasonMinLength && s.linkEnrichmentEnabled && len(linkextract.ExtractLinks(m.Text)) > 0 {
+			// Do not skip if the message contains links and link enrichment is enabled,
+			// even if it's shorter than the minimum length.
+			return false
+		}
+
 		p.recordDrop(ctx, logger, m.ID, reason, "")
 		p.markProcessed(ctx, logger, m.ID)
 
