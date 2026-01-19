@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
+	linkscore "github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
@@ -258,18 +259,19 @@ type searchState struct {
 func (w *Worker) processWithProviders(ctx context.Context, item *db.EnrichmentQueueItem) error {
 	maxResults := w.getMaxResults()
 
-	var links []domain.ResolvedLink
+	var resolvedLinks []domain.ResolvedLink
 
 	if item.RawMessageID != "" && w.cfg.LinkEnrichmentEnabled && strings.Contains(w.cfg.LinkEnrichmentScope, domain.ScopeQueries) {
 		var err error
 
-		links, err = w.db.GetLinksForMessage(ctx, item.RawMessageID)
+		resolvedLinks, err = w.db.GetLinksForMessage(ctx, item.RawMessageID)
 		if err != nil {
 			w.logger.Warn().Err(err).Str(logKeyItemID, item.ItemID).Msg("failed to fetch links for query generation")
 		}
 	}
 
-	queries := w.generateQueries(item, links)
+	resolvedLinks = w.filterLinksForQueries(item, resolvedLinks)
+	queries := w.generateQueries(item, resolvedLinks)
 
 	// Translate queries if enabled and language is not EN/RU
 	queries = w.translateQueriesIfNeeded(ctx, queries)
@@ -310,6 +312,29 @@ func (w *Worker) generateQueries(item *db.EnrichmentQueueItem, links []domain.Re
 	}
 
 	return queries
+}
+
+func (w *Worker) filterLinksForQueries(item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []domain.ResolvedLink {
+	if len(links) == 0 {
+		return links
+	}
+
+	msgLang := linkscore.DetectLanguage(item.Summary)
+	filtered := make([]domain.ResolvedLink, 0, len(links))
+
+	for _, link := range links {
+		if len(strings.Fields(link.Content)) < w.cfg.LinkMinWords {
+			continue
+		}
+
+		if msgLang != "" && link.Language != "" && msgLang != link.Language {
+			continue
+		}
+
+		filtered = append(filtered, link)
+	}
+
+	return filtered
 }
 
 // translateQueriesIfNeeded translates queries if translation is enabled and language is not EN/RU.

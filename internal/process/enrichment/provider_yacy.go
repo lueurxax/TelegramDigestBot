@@ -75,11 +75,7 @@ func (p *YaCyProvider) IsAvailable() bool {
 		return false
 	}
 
-	if p.username != "" && p.password != "" {
-		req.SetBasicAuth(p.username, p.password)
-	}
-
-	resp, err := p.httpClient.Do(req)
+	resp, err := p.doRequest(req)
 	if err != nil {
 		return false
 	}
@@ -103,11 +99,7 @@ func (p *YaCyProvider) Search(ctx context.Context, query string, maxResults int)
 		return nil, fmt.Errorf("create yacy request: %w", err)
 	}
 
-	if p.username != "" && p.password != "" {
-		req.SetBasicAuth(p.username, p.password)
-	}
-
-	resp, err := p.httpClient.Do(req)
+	resp, err := p.doRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("yacy request: %w", err)
 	}
