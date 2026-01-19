@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
@@ -126,7 +127,11 @@ func (m *mockRepository) IncrementEnrichmentUsage(_ context.Context, _ string, _
 }
 
 func (m *mockRepository) IncrementEmbeddingUsage(_ context.Context, _ float64) error {
-	return nil
+	return errNotImplemented
+}
+
+func (m *mockRepository) GetLinksForMessage(_ context.Context, _ string) ([]domain.ResolvedLink, error) {
+	return nil, nil
 }
 
 func (m *mockRepository) GetSetting(_ context.Context, _ string, _ interface{}) error {

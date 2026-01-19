@@ -73,6 +73,15 @@ Optional helper settings:
 ## Rollout Plan
 Implement all scope items in a single release with the guardrails enabled by default.
 
+## Cache Strategy
+- **Key Design**: 
+  - **Storage**: Content is stored once per URL in the `link_cache` table. This prevents redundant scraping and LLM token usage for identical articles shared across different channels.
+  - **Retrieval**: Downstream workers (enrichment, fact-check) retrieve resolved content by joining `items` → `raw_messages` → `message_links` → `link_cache`. This ensures a stable link between a specific digest item and its referenced sources.
+- **Handling Multi-Message URLs**: When the same URL appears in multiple messages, all messages point to the same cache entry. This maintains consistency (same summary/context) across the entire digest.
+- **Expiration Policy**: 
+  - `LINK_CACHE_TTL` should be set to a duration that comfortably covers the pipeline lifecycle (default: 24h, recommended: 48h-72h for high-backlog scenarios).
+  - If a worker finds a cache entry is expired, it will trigger a background re-resolution but proceed with existing data if available to avoid blocking the pipeline.
+
 ## Success Metrics
 - ≥15% reduction in “irrelevant” ratings for link-only posts.
 - ≥10% increase in topic accuracy (manual sampling).

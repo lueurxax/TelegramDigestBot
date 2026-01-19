@@ -80,6 +80,10 @@ type pipelineSettings struct {
 	maxLinks                int
 	linkCacheTTL            time.Duration
 	tgLinkCacheTTL          time.Duration
+	linkEnrichmentScope     string
+	linkMinWords            int
+	linkSnippetMaxChars     int
+	linkEmbeddingMaxMsgLen  int
 }
 
 const (
@@ -182,21 +186,61 @@ func (p *Pipeline) hasUniqueInfo(summary string) bool {
 	return nameRegex.MatchString(clean) || numberRegex.MatchString(clean) || dateRegex.MatchString(clean)
 }
 
+func (p *Pipeline) augmentTextWithLinks(c *llm.MessageInput, s *pipelineSettings, scope string) string {
+	if !strings.Contains(s.linkEnrichmentScope, scope) || len(c.ResolvedLinks) == 0 {
+		return c.Text
+	}
+
+	// Heuristics from proposal
+	if scope == ScopeTopic {
+		// Topic detection uses link snippets only if message is short or lacks entities.
+		// For now we check length < 120.
+		if len(c.Text) >= 120 {
+			return c.Text
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(c.Text)
+	sb.WriteString("\n\nReferenced Content:\n")
+
+	for _, link := range c.ResolvedLinks {
+		// Guardrails: LINK_MIN_WORDS and denylist (denylist handled by resolver)
+		wordCount := len(strings.Fields(link.Content))
+		if wordCount < s.linkMinWords {
+			continue
+		}
+
+		snippet := link.Content
+		if len(snippet) > s.linkSnippetMaxChars {
+			snippet = snippet[:s.linkSnippetMaxChars]
+		}
+
+		sb.WriteString(fmt.Sprintf("- %s: %s\n", link.Title, snippet))
+	}
+
+	return sb.String()
+}
+
 func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logger) (*pipelineSettings, error) {
 	s := &pipelineSettings{
-		batchSize:             p.cfg.WorkerBatchSize,
-		relevanceThreshold:    p.cfg.RelevanceThreshold,
-		relevanceGateEnabled:  p.cfg.RelevanceGateEnabled,
-		relevanceGateMode:     p.cfg.RelevanceGateMode,
-		relevanceGateModel:    p.cfg.RelevanceGateModel,
-		linkEnrichmentEnabled: p.cfg.LinkEnrichmentEnabled,
-		maxLinks:              p.cfg.MaxLinksPerMessage,
-		linkCacheTTL:          p.cfg.LinkCacheTTL,
-		tgLinkCacheTTL:        p.cfg.TelegramLinkCacheTTL,
-		filtersMode:           FilterModeMixed,
-		dedupMode:             DedupModeSemantic,
-		topicsEnabled:         true,
-		minLength:             DefaultMinLength,
+		batchSize:              p.cfg.WorkerBatchSize,
+		relevanceThreshold:     p.cfg.RelevanceThreshold,
+		relevanceGateEnabled:   p.cfg.RelevanceGateEnabled,
+		relevanceGateMode:      p.cfg.RelevanceGateMode,
+		relevanceGateModel:     p.cfg.RelevanceGateModel,
+		linkEnrichmentEnabled:  p.cfg.LinkEnrichmentEnabled,
+		maxLinks:               p.cfg.MaxLinksPerMessage,
+		linkCacheTTL:           p.cfg.LinkCacheTTL,
+		tgLinkCacheTTL:         p.cfg.TelegramLinkCacheTTL,
+		linkEnrichmentScope:    p.cfg.LinkEnrichmentScope,
+		linkMinWords:           p.cfg.LinkMinWords,
+		linkSnippetMaxChars:    p.cfg.LinkSnippetMaxChars,
+		linkEmbeddingMaxMsgLen: p.cfg.LinkEmbeddingMaxMsgLen,
+		filtersMode:            FilterModeMixed,
+		dedupMode:              DedupModeSemantic,
+		topicsEnabled:          true,
+		minLength:              DefaultMinLength,
 	}
 
 	p.getSetting(ctx, "worker_batch_size", &s.batchSize, logger)
@@ -239,6 +283,10 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 	}
 
 	p.getSetting(ctx, "link_enrichment_enabled", &s.linkEnrichmentEnabled, logger)
+	p.getSetting(ctx, "link_enrichment_scope", &s.linkEnrichmentScope, logger)
+	p.getSetting(ctx, "link_min_words", &s.linkMinWords, logger)
+	p.getSetting(ctx, "link_snippet_max_chars", &s.linkSnippetMaxChars, logger)
+	p.getSetting(ctx, "link_embedding_max_msg_len", &s.linkEmbeddingMaxMsgLen, logger)
 	p.getSetting(ctx, "max_links_per_message", &s.maxLinks, logger)
 	s.linkCacheTTL = p.getDurationSetting(ctx, "link_cache_ttl", p.cfg.LinkCacheTTL, logger)
 	s.tgLinkCacheTTL = p.getDurationSetting(ctx, "tg_link_cache_ttl", p.cfg.TelegramLinkCacheTTL, logger)
@@ -321,25 +369,32 @@ func (p *Pipeline) prepareCandidates(ctx context.Context, logger zerolog.Logger,
 	seenHashes := make(map[string]string) // hash -> msg_id
 
 	for _, m := range messages {
-		if p.skipMessage(ctx, logger, &m, s, seenHashes, f) {
+		if p.skipMessageBasic(ctx, logger, &m, s, seenHashes, f) {
 			continue
 		}
 
-		// 2. Deduplication
-		_, skip := p.handleDeduplication(ctx, logger, &m, s, candidates, embeddings, deduplicator)
+		// 1. Fetch links and channel context early
+		candidate := p.enrichMessage(ctx, logger, m, s)
+
+		// 2. Advanced filters (Relevance Gate) using augmented text
+		if p.skipMessageAdvanced(ctx, logger, &candidate, s) {
+			continue
+		}
+
+		// 3. Deduplication
+		_, skip := p.handleDeduplication(ctx, logger, &candidate, s, candidates, embeddings, deduplicator)
 		if skip {
 			continue
 		}
 
-		// Fetch channel context and enrich
-		candidates = append(candidates, p.enrichMessage(ctx, logger, m, s))
+		candidates = append(candidates, candidate)
 		seenHashes[m.CanonicalHash] = m.ID
 	}
 
 	return candidates, embeddings, nil
 }
 
-func (p *Pipeline) skipMessage(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, seenHashes map[string]string, f *filters.Filterer) bool {
+func (p *Pipeline) skipMessageBasic(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, seenHashes map[string]string, f *filters.Filterer) bool {
 	if dupID, seen := seenHashes[m.CanonicalHash]; seen {
 		logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, dupID).Msg("skipping strict duplicate in batch")
 		p.recordDrop(ctx, logger, m.ID, dropReasonDuplicateBatch, dupID)
@@ -363,14 +418,19 @@ func (p *Pipeline) skipMessage(ctx context.Context, logger zerolog.Logger, m *db
 		return true
 	}
 
+	return false
+}
+
+func (p *Pipeline) skipMessageAdvanced(ctx context.Context, logger zerolog.Logger, c *llm.MessageInput, s *pipelineSettings) bool {
 	if s.relevanceGateEnabled {
-		decision := p.evaluateRelevanceGate(ctx, logger, m.Text, s)
-		p.recordRelevanceGateDecision(ctx, logger, m.ID, decision)
+		text := p.augmentTextWithLinks(c, s, ScopeRelevance)
+		decision := p.evaluateRelevanceGate(ctx, logger, text, s)
+		p.recordRelevanceGateDecision(ctx, logger, c.ID, decision)
 
 		if decision.decision == DecisionIrrelevant {
-			logger.Info().Str(LogFieldMsgID, m.ID).Str("reason", decision.reason).Msg("skipping message by relevance gate")
-			p.recordDrop(ctx, logger, m.ID, dropReasonRelevanceGate, decision.reason)
-			p.markProcessed(ctx, logger, m.ID)
+			logger.Info().Str(LogFieldMsgID, c.ID).Str("reason", decision.reason).Msg("skipping message by relevance gate")
+			p.recordDrop(ctx, logger, c.ID, dropReasonRelevanceGate, decision.reason)
+			p.markProcessed(ctx, logger, c.ID)
 
 			return true
 		}
@@ -379,36 +439,55 @@ func (p *Pipeline) skipMessage(ctx context.Context, logger zerolog.Logger, m *db
 	return false
 }
 
-func (p *Pipeline) handleDeduplication(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, candidates []llm.MessageInput, embeddings map[string][]float32, deduplicator dedup.Deduplicator) ([]float32, bool) {
-	emb, skip := p.generateEmbeddingIfNeeded(ctx, logger, m, s, embeddings)
+func (p *Pipeline) handleDeduplication(ctx context.Context, logger zerolog.Logger, c *llm.MessageInput, s *pipelineSettings, candidates []llm.MessageInput, embeddings map[string][]float32, deduplicator dedup.Deduplicator) ([]float32, bool) {
+	emb, skip := p.generateEmbeddingIfNeeded(ctx, logger, c, s, embeddings)
 	if skip {
 		return nil, true
 	}
 
-	if p.checkBatchDuplicate(ctx, logger, m, s, candidates, embeddings, emb) {
+	if p.checkBatchDuplicate(ctx, logger, &c.RawMessage, s, candidates, embeddings, emb) {
 		return nil, true
 	}
 
-	if p.checkGlobalDuplicate(ctx, logger, m, s, emb, deduplicator) {
+	if p.checkGlobalDuplicate(ctx, logger, &c.RawMessage, s, emb, deduplicator) {
 		return nil, true
 	}
 
 	return emb, false
 }
 
-func (p *Pipeline) generateEmbeddingIfNeeded(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, embeddings map[string][]float32) ([]float32, bool) {
+func (p *Pipeline) generateEmbeddingIfNeeded(ctx context.Context, logger zerolog.Logger, c *llm.MessageInput, s *pipelineSettings, embeddings map[string][]float32) ([]float32, bool) {
 	if s.dedupMode != DedupModeSemantic && !s.topicsEnabled {
 		return nil, false
 	}
 
-	emb, err := p.llmClient.GetEmbedding(ctx, m.Text)
+	text := c.Text
+	if strings.Contains(s.linkEnrichmentScope, ScopeDedup) && len(c.ResolvedLinks) > 0 {
+		if len(c.Text) < s.linkEmbeddingMaxMsgLen {
+			// Message is short: use message + link snippet
+			text = p.augmentTextWithLinks(c, s, ScopeDedup)
+		} else {
+			// Message is long: use title/domain but prioritize message
+			var sb strings.Builder
+			sb.WriteString(c.Text)
+			sb.WriteString("\nRef: ")
+
+			for _, link := range c.ResolvedLinks {
+				sb.WriteString(fmt.Sprintf("%s (%s) ", link.Title, link.Domain))
+			}
+
+			text = sb.String()
+		}
+	}
+
+	emb, err := p.llmClient.GetEmbedding(ctx, text)
 	if err != nil {
-		logger.Error().Str(LogFieldMsgID, m.ID).Err(err).Msg("failed to get embedding")
+		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg("failed to get embedding")
 
 		return nil, true
 	}
 
-	embeddings[m.ID] = emb
+	embeddings[c.ID] = emb
 
 	return emb, false
 }

@@ -3,10 +3,12 @@ package factcheck
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
@@ -27,6 +29,7 @@ type Repository interface {
 	SaveFactCheckCache(ctx context.Context, normalizedClaim string, payload []byte, cachedAt time.Time) error
 	SaveItemFactChecks(ctx context.Context, itemID string, matches []db.FactCheckMatch) error
 	DeleteFactCheckCacheBefore(ctx context.Context, cutoff time.Time) (int64, error)
+	GetLinksForMessage(ctx context.Context, msgID string) ([]domain.ResolvedLink, error)
 }
 
 type Worker struct {
@@ -85,6 +88,8 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) processItem(ctx context.Context, item *db.FactCheckQueueItem) {
+	w.enrichClaimFromLinks(ctx, item)
+
 	if w.shouldSkipClaim(ctx, item) {
 		return
 	}
@@ -100,6 +105,34 @@ func (w *Worker) processItem(ctx context.Context, item *db.FactCheckQueueItem) {
 	}
 
 	w.updateStatus(ctx, item.ID, db.FactCheckStatusDone, "", nil)
+}
+
+func (w *Worker) enrichClaimFromLinks(ctx context.Context, item *db.FactCheckQueueItem) {
+	// If claim is short, try to extract from link context
+	if len(item.Claim) >= w.factCheckMinLength() || item.RawMessageID == "" {
+		return
+	}
+
+	links, err := w.db.GetLinksForMessage(ctx, item.RawMessageID)
+	if err != nil || len(links) == 0 {
+		return
+	}
+
+	// Extract from first link's title or content (headline/lead)
+	// Simple heuristic: top 1-2 factual sentences from ResolvedLink.Content.
+	extracted := links[0].Title
+	if links[0].Content != "" {
+		sentences := strings.Split(links[0].Content, ".")
+		if len(sentences) > 0 {
+			extracted += ": " + strings.TrimSpace(sentences[0])
+		}
+	}
+
+	if len(extracted) >= w.factCheckMinLength() {
+		item.Claim = extracted
+		// Re-normalizing if needed (NormalizeClaim is in factcheck package)
+		item.NormalizedClaim = NormalizeClaim(extracted)
+	}
 }
 
 func (w *Worker) shouldSkipClaim(ctx context.Context, item *db.FactCheckQueueItem) bool {

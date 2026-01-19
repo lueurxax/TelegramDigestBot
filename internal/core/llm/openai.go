@@ -347,11 +347,22 @@ func (c *openaiClient) buildMessageTextPart(index int, m MessageInput) string {
 		textPart += fmt.Sprintf("[BACKGROUND CONTEXT - DO NOT SUMMARIZE: %s] ", truncate(strings.Join(m.Context, " | "), truncateLengthShort))
 	}
 
+	textPart += c.buildLinkContext(m)
+	textPart += ">>> MESSAGE TO SUMMARIZE <<< " + m.Text + "\n"
+
+	return textPart
+}
+
+func (c *openaiClient) buildLinkContext(m MessageInput) string {
+	textPart := ""
+
 	if len(m.ResolvedLinks) > 0 {
 		textPart += c.buildResolvedLinksText(m.ResolvedLinks)
 	}
 
-	textPart += ">>> MESSAGE TO SUMMARIZE <<< " + m.Text + "\n"
+	if len(m.ResolvedLinks) > 0 && len(m.Text) < 100 {
+		textPart += "NOTE: The main message is short. Please use the [Referenced Content] above to determine relevance, topic, and summary.\n"
+	}
 
 	return textPart
 }
@@ -367,7 +378,12 @@ func (c *openaiClient) buildResolvedLinksText(links []domain.ResolvedLink) strin
 				text += fmt.Sprintf("[%d views] ", link.Views)
 			}
 		} else {
-			text += fmt.Sprintf("[Web] %s Title: %s Content: %s ", link.Domain, link.Title, truncate(link.Content, truncateLengthLong))
+			limit := c.cfg.LinkSnippetMaxChars
+			if limit == 0 {
+				limit = truncateLengthLong
+			}
+
+			text += fmt.Sprintf("[Web] %s Title: %s Content: %s ", link.Domain, link.Title, truncate(link.Content, limit))
 		}
 	}
 

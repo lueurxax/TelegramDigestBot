@@ -34,6 +34,16 @@ const (
 	FilterModeMixed = "mixed"
 )
 
+// Link enrichment scope constants
+const (
+	ScopeSummary   = "summary"
+	ScopeRelevance = "relevance"
+	ScopeTopic     = "topic"
+	ScopeDedup     = "dedup"
+	ScopeQueries   = "queries"
+	ScopeFactCheck = "factcheck"
+)
+
 // Log field constants
 const (
 	LogFieldMsgID         = "msg_id"
@@ -51,15 +61,15 @@ const (
 
 // Magic number constants for pipeline configuration
 const (
-	DefaultPollInterval         = 10 * time.Second
-	DefaultMinLength            = 20
-	DefaultChannelContextLimit  = 5
-	TieredImportanceThreshold   = 0.8
-	MinChannelWeight            = 0.1
-	MaxChannelWeight            = 2.0
-	MaxImportanceScore          = 1.0
-	UniqueInfoPenalty           = 0.2
-	NormalizationStddevMinimum  = 0.01
+	DefaultPollInterval        = 10 * time.Second
+	DefaultMinLength           = 20
+	DefaultChannelContextLimit = 5
+	TieredImportanceThreshold  = 0.8
+	MinChannelWeight           = 0.1
+	MaxChannelWeight           = 2.0
+	MaxImportanceScore         = 1.0
+	UniqueInfoPenalty          = 0.2
+	NormalizationStddevMinimum = 0.01
 )
 
 // Relevance gate confidence constants

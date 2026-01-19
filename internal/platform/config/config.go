@@ -72,13 +72,17 @@ type Config struct {
 	FactCheckQueueMax             int     `env:"FACTCHECK_QUEUE_MAX" envDefault:"5000"`
 
 	// Link enrichment
-	LinkEnrichmentEnabled bool          `env:"LINK_ENRICHMENT_ENABLED" envDefault:"false"`
-	WebFetchRPS           float64       `env:"WEB_FETCH_RPS" envDefault:"2"`
-	WebFetchTimeout       time.Duration `env:"WEB_FETCH_TIMEOUT" envDefault:"30s"`
-	LinkCacheTTL          time.Duration `env:"LINK_CACHE_TTL" envDefault:"24h"`
-	TelegramLinkCacheTTL  time.Duration `env:"TG_LINK_CACHE_TTL" envDefault:"1h"`
-	MaxLinksPerMessage    int           `env:"MAX_LINKS_PER_MESSAGE" envDefault:"3"`
-	MaxContentLength      int           `env:"MAX_CONTENT_LENGTH" envDefault:"5000"`
+	LinkEnrichmentEnabled  bool          `env:"LINK_ENRICHMENT_ENABLED" envDefault:"false"`
+	WebFetchRPS            float64       `env:"WEB_FETCH_RPS" envDefault:"2"`
+	WebFetchTimeout        time.Duration `env:"WEB_FETCH_TIMEOUT" envDefault:"30s"`
+	LinkCacheTTL           time.Duration `env:"LINK_CACHE_TTL" envDefault:"24h"`
+	TelegramLinkCacheTTL   time.Duration `env:"TG_LINK_CACHE_TTL" envDefault:"1h"`
+	MaxLinksPerMessage     int           `env:"MAX_LINKS_PER_MESSAGE" envDefault:"3"`
+	MaxContentLength       int           `env:"MAX_CONTENT_LENGTH" envDefault:"5000"`
+	LinkEnrichmentScope    string        `env:"LINK_ENRICHMENT_SCOPE" envDefault:"summary"`
+	LinkMinWords           int           `env:"LINK_MIN_WORDS" envDefault:"80"`
+	LinkSnippetMaxChars    int           `env:"LINK_SNIPPET_MAX_CHARS" envDefault:"1200"`
+	LinkEmbeddingMaxMsgLen int           `env:"LINK_EMBEDDING_MAX_MSG_LEN" envDefault:"200"`
 
 	// Source enrichment (Phase 2)
 	EnrichmentEnabled          bool          `env:"ENRICHMENT_ENABLED" envDefault:"false"`

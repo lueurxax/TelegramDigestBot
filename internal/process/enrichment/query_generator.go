@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 )
 
 const (
@@ -78,7 +80,7 @@ func (qb *queryBuilder) add(query, strategy string) {
 // - Q2: primary_entity + location + date/time
 // - Q3: topic + primary_entity + keyword
 // - Fallback: top keywords if extraction fails.
-func (g *QueryGenerator) Generate(summary, topic, channelTitle string) []GeneratedQuery {
+func (g *QueryGenerator) Generate(summary, topic, channelTitle string, links []domain.ResolvedLink) []GeneratedQuery {
 	if summary == "" {
 		return nil
 	}
@@ -93,6 +95,25 @@ func (g *QueryGenerator) Generate(summary, topic, channelTitle string) []Generat
 	locations := extractLocations(cleaned)
 	keywords := extractKeywords(cleaned)
 
+	// If summary is vague, pull more entities/keywords from links
+	if len(cleaned) < 100 || (len(entities) == 0 && len(locations) == 0) {
+		for _, link := range links {
+			linkText := cleanText(link.Title + ". " + link.Content)
+			if len(linkText) < minQueryLength {
+				continue
+			}
+
+			entities = append(entities, extractQueryEntities(linkText)...)
+			locations = append(locations, extractLocations(linkText)...)
+			keywords = append(keywords, extractKeywords(linkText)...)
+		}
+
+		// Deduplicate merged entities/locations
+		entities = uniqueStrings(entities)
+		locations = uniqueStrings(locations)
+		keywords = uniqueStrings(keywords)
+	}
+
 	qb := newQueryBuilder(language)
 
 	g.addEntityQuery(qb, entities, keywords)
@@ -102,6 +123,24 @@ func (g *QueryGenerator) Generate(summary, topic, channelTitle string) []Generat
 	g.addFallbackQuery(qb, cleaned, channelTitle, keywords)
 
 	return qb.queries
+}
+
+func uniqueStrings(s []string) []string {
+	if len(s) == 0 {
+		return s
+	}
+
+	m := make(map[string]bool)
+	res := make([]string, 0, len(s))
+
+	for _, v := range s {
+		if !m[v] {
+			m[v] = true
+			res = append(res, v)
+		}
+	}
+
+	return res
 }
 
 // DetectLanguage returns the detected language code for a text.

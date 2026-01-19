@@ -426,7 +426,19 @@ func (s *Scheduler) sortClusterItems(clusterItemsList []db.Item) {
 
 func (s *Scheduler) generateClusterTopic(ctx context.Context, clusterItemsList []db.Item, defaultTopic, digestLanguage, smartLLMModel string) string {
 	if smartLLMModel != "" && len(clusterItemsList) > 1 {
-		if betterTopic, err := s.llmClient.GenerateClusterTopic(ctx, clusterItemsList, digestLanguage, smartLLMModel); err == nil && betterTopic != "" {
+		// Augment vague summaries with link context for better topic generation
+		augmentedItems := make([]db.Item, len(clusterItemsList))
+		for i, item := range clusterItemsList {
+			augmentedItems[i] = item
+			if len(item.Summary) < 100 {
+				links, err := s.database.GetLinksForMessage(ctx, item.RawMessageID)
+				if err == nil && len(links) > 0 {
+					augmentedItems[i].Summary += " (Context: " + links[0].Title + ")"
+				}
+			}
+		}
+
+		if betterTopic, err := s.llmClient.GenerateClusterTopic(ctx, augmentedItems, digestLanguage, smartLLMModel); err == nil && betterTopic != "" {
 			return betterTopic
 		}
 	}

@@ -1591,7 +1591,7 @@ func TestSkipMessage(t *testing.T) {
 
 			f := filters.New(nil, false, 10, nil, "mixed")
 
-			skip := p.skipMessage(context.Background(), logger, &tt.message, s, tt.seenHashes, f)
+			skip := p.skipMessageBasic(context.Background(), logger, &tt.message, s, tt.seenHashes, f)
 
 			if skip != tt.expectSkip {
 				t.Errorf("skipMessage() = %v, want %v", skip, tt.expectSkip)

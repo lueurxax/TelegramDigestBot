@@ -569,7 +569,7 @@ func TestPopulateResultsByIndex(t *testing.T) {
 }
 
 func TestBuildResolvedLinksText(t *testing.T) {
-	c := &openaiClient{}
+	c := &openaiClient{cfg: &config.Config{}}
 
 	tests := []struct {
 		name         string
@@ -632,7 +632,7 @@ func TestBuildResolvedLinksText(t *testing.T) {
 }
 
 func TestBuildMessageTextPart(t *testing.T) {
-	c := &openaiClient{}
+	c := &openaiClient{cfg: &config.Config{}}
 
 	tests := []struct {
 		name         string
@@ -1384,7 +1384,7 @@ func TestBuildMessagePartsWithResolvedLinks(t *testing.T) {
 }
 
 func TestBuildResolvedLinksTextVariations(t *testing.T) {
-	c := &openaiClient{}
+	c := &openaiClient{cfg: &config.Config{}}
 
 	t.Run("youtube link", func(t *testing.T) {
 		links := []domain.ResolvedLink{
@@ -1889,8 +1889,7 @@ func TestBuildMessageTextPartWithAllFields(t *testing.T) {
 }
 
 func TestBuildResolvedLinksTextWebWithDetails(t *testing.T) {
-	c := &openaiClient{}
-
+	c := &openaiClient{cfg: &config.Config{}}
 	links := []domain.ResolvedLink{
 		{
 			LinkType: LinkTypeWeb,

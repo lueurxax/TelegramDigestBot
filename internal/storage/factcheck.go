@@ -21,6 +21,7 @@ const (
 type FactCheckQueueItem struct {
 	ID              string
 	ItemID          string
+	RawMessageID    string
 	Claim           string
 	NormalizedClaim string
 	AttemptCount    int
@@ -64,6 +65,7 @@ func (db *DB) ClaimNextFactCheck(ctx context.Context) (*FactCheckQueueItem, erro
 		item     FactCheckQueueItem
 		queueID  uuid.UUID
 		itemUUID uuid.UUID
+		msgUUID  uuid.UUID
 	)
 
 	err := db.Pool.QueryRow(ctx, `
@@ -75,17 +77,23 @@ func (db *DB) ClaimNextFactCheck(ctx context.Context) (*FactCheckQueueItem, erro
 			ORDER BY created_at
 			FOR UPDATE SKIP LOCKED
 			LIMIT 1
+		),
+		updated AS (
+			UPDATE fact_check_queue fq
+			SET status = $2,
+				attempt_count = fq.attempt_count + 1,
+				updated_at = now()
+			FROM picked
+			WHERE fq.id = picked.id
+			RETURNING fq.id, fq.item_id, fq.claim, fq.normalized_claim, fq.attempt_count
 		)
-		UPDATE fact_check_queue fq
-		SET status = $2,
-			attempt_count = fq.attempt_count + 1,
-			updated_at = now()
-		FROM picked
-		WHERE fq.id = picked.id
-		RETURNING fq.id, fq.item_id, fq.claim, fq.normalized_claim, fq.attempt_count
+		SELECT u.id, u.item_id, i.raw_message_id, u.claim, u.normalized_claim, u.attempt_count
+		FROM updated u
+		JOIN items i ON i.id = u.item_id
 	`, FactCheckStatusPending, FactCheckStatusProcessing).Scan(
 		&queueID,
 		&itemUUID,
+		&msgUUID,
 		&item.Claim,
 		&item.NormalizedClaim,
 		&item.AttemptCount,
@@ -100,6 +108,7 @@ func (db *DB) ClaimNextFactCheck(ctx context.Context) (*FactCheckQueueItem, erro
 
 	item.ID = queueID.String()
 	item.ItemID = itemUUID.String()
+	item.RawMessageID = msgUUID.String()
 
 	return &item, nil
 }

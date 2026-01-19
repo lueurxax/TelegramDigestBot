@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -32,6 +33,7 @@ type Repository interface {
 	MarkItemsAsDigested(ctx context.Context, ids []string) error
 	GetItemEmbedding(ctx context.Context, id string) ([]float32, error)
 	GetBacklogCount(ctx context.Context) (int, error)
+	GetLinksForMessage(ctx context.Context, msgID string) ([]domain.ResolvedLink, error)
 	GetFactChecksForItems(ctx context.Context, itemIDs []string) (map[string]db.FactCheckMatch, error)
 	GetEvidenceForItems(ctx context.Context, itemIDs []string) (map[string][]db.ItemEvidenceWithSource, error)
 

@@ -10,6 +10,7 @@ import (
 	"github.com/pgvector/pgvector-go"
 	"github.com/rs/zerolog"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
@@ -67,6 +68,7 @@ type Repository interface {
 	GetMonthlyEnrichmentCost(ctx context.Context) (float64, error)
 	IncrementEnrichmentUsage(ctx context.Context, provider string, cost float64) error
 	IncrementEmbeddingUsage(ctx context.Context, cost float64) error
+	GetLinksForMessage(ctx context.Context, msgID string) ([]domain.ResolvedLink, error)
 	// Settings access for domain lists
 	GetSetting(ctx context.Context, key string, target interface{}) error
 }
@@ -255,7 +257,19 @@ type searchState struct {
 
 func (w *Worker) processWithProviders(ctx context.Context, item *db.EnrichmentQueueItem) error {
 	maxResults := w.getMaxResults()
-	queries := w.generateQueries(item)
+
+	var links []domain.ResolvedLink
+
+	if item.RawMessageID != "" {
+		var err error
+
+		links, err = w.db.GetLinksForMessage(ctx, item.RawMessageID)
+		if err != nil {
+			w.logger.Warn().Err(err).Str(logKeyItemID, item.ItemID).Msg("failed to fetch links for query generation")
+		}
+	}
+
+	queries := w.generateQueries(item, links)
 
 	// Translate queries if enabled and language is not EN/RU
 	queries = w.translateQueriesIfNeeded(ctx, queries)
@@ -282,8 +296,8 @@ func (w *Worker) getMaxResults() int {
 	return w.cfg.EnrichmentMaxResults
 }
 
-func (w *Worker) generateQueries(item *db.EnrichmentQueueItem) []GeneratedQuery {
-	queries := w.queryGenerator.Generate(item.Summary, item.Topic, item.ChannelTitle)
+func (w *Worker) generateQueries(item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []GeneratedQuery {
+	queries := w.queryGenerator.Generate(item.Summary, item.Topic, item.ChannelTitle, links)
 	if len(queries) == 0 {
 		lang := w.queryGenerator.DetectLanguage(item.Summary)
 

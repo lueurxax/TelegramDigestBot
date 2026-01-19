@@ -30,6 +30,7 @@ const (
 type EnrichmentQueueItem struct {
 	ID           string
 	ItemID       string
+	RawMessageID string
 	Summary      string
 	Topic        string
 	ChannelTitle string
@@ -100,6 +101,7 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 		item     EnrichmentQueueItem
 		queueID  uuid.UUID
 		itemUUID uuid.UUID
+		msgUUID  uuid.UUID
 		topic    pgtype.Text
 	)
 
@@ -122,7 +124,7 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 			WHERE eq.id = picked.id
 			RETURNING eq.id, eq.item_id, eq.summary, eq.attempt_count
 		)
-		SELECT u.id, u.item_id, u.summary, u.attempt_count, i.topic, c.title
+		SELECT u.id, u.item_id, i.raw_message_id, u.summary, u.attempt_count, i.topic, c.title
 		FROM updated u
 		JOIN items i ON i.id = u.item_id
 		JOIN raw_messages rm ON rm.id = i.raw_message_id
@@ -130,6 +132,7 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 	`, EnrichmentStatusPending, EnrichmentStatusProcessing).Scan(
 		&queueID,
 		&itemUUID,
+		&msgUUID,
 		&item.Summary,
 		&item.AttemptCount,
 		&topic,
@@ -145,6 +148,7 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 
 	item.ID = queueID.String()
 	item.ItemID = itemUUID.String()
+	item.RawMessageID = msgUUID.String()
 	item.Topic = topic.String
 
 	return &item, nil
