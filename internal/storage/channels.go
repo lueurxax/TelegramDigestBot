@@ -194,7 +194,7 @@ func (db *DB) UpdateChannel(ctx context.Context, id string, peerID int64, title 
 			// Channel with this peer ID already exists under another UUID.
 			// Deactivate the current placeholder channel.
 			if deactivateErr := db.Queries.DeactivateChannelByID(ctx, toUUID(id)); deactivateErr != nil {
-				return fmt.Errorf("deactivate duplicate channel %s: %v (original error: %w)", id, deactivateErr, err)
+				return fmt.Errorf("deactivate duplicate channel %s: %w (original error: %w)", id, deactivateErr, err)
 			}
 
 			return fmt.Errorf("channel %s is a duplicate of an existing channel with peer ID %d, deactivated: %w", id, peerID, err)

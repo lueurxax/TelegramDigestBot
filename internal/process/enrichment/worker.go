@@ -440,9 +440,11 @@ func registerProvider(cfg *config.Config, registry *ProviderRegistry, name Provi
 func registerYaCy(cfg *config.Config, registry *ProviderRegistry) {
 	if cfg.YaCyEnabled && cfg.YaCyBaseURL != "" {
 		yacy := NewYaCyProvider(YaCyConfig{
-			Enabled: true,
-			BaseURL: cfg.YaCyBaseURL,
-			Timeout: cfg.YaCyTimeout,
+			Enabled:  true,
+			BaseURL:  cfg.YaCyBaseURL,
+			Timeout:  cfg.YaCyTimeout,
+			Username: cfg.YaCyUser,
+			Password: cfg.YaCyPassword,
 		})
 		registry.Register(yacy)
 	}

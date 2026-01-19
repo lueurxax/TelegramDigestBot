@@ -866,10 +866,11 @@ func (r *Reader) fetchDescriptionIfMissing(ctx context.Context, api *tg.Client, 
 
 	description, err := r.fetchChannelDescription(ctx, api, ch.TGPeerID, ch.AccessHash)
 	if err != nil {
-		if tgerr.Is(err, "CHANNEL_PRIVATE") {
+		if tgerr.Is(err, errChannelPrivate) {
 			r.logger.Warn().Err(err).Int64(logFieldPeerID, ch.TGPeerID).Msg("Channel is private (from description fetch), deactivating")
+
 			if deactivateErr := r.database.DeactivateChannelByID(ctx, ch.ID); deactivateErr != nil {
-				r.logger.Error().Err(deactivateErr).Str(logFieldUsername, ch.Username).Msg("failed to deactivate private channel")
+				r.logger.Error().Err(deactivateErr).Str(logFieldUsername, ch.Username).Msg(errMsgDeactivatePrivateChannel)
 			}
 		} else {
 			r.logger.Warn().Err(err).Int64(logFieldPeerID, ch.TGPeerID).Msg("failed to fetch channel description")

@@ -23,14 +23,18 @@ var errYaCyUnexpectedStatus = errors.New("yacy unexpected status")
 
 type YaCyProvider struct {
 	baseURL    string
+	username   string
+	password   string
 	httpClient *http.Client
 	enabled    bool
 }
 
 type YaCyConfig struct {
-	Enabled bool
-	BaseURL string
-	Timeout time.Duration
+	Enabled  bool
+	BaseURL  string
+	Timeout  time.Duration
+	Username string
+	Password string
 }
 
 func NewYaCyProvider(cfg YaCyConfig) *YaCyProvider {
@@ -40,7 +44,9 @@ func NewYaCyProvider(cfg YaCyConfig) *YaCyProvider {
 	}
 
 	return &YaCyProvider{
-		baseURL: strings.TrimSuffix(cfg.BaseURL, "/"),
+		baseURL:  strings.TrimSuffix(cfg.BaseURL, "/"),
+		username: cfg.Username,
+		password: cfg.Password,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -69,6 +75,10 @@ func (p *YaCyProvider) IsAvailable() bool {
 		return false
 	}
 
+	if p.username != "" && p.password != "" {
+		req.SetBasicAuth(p.username, p.password)
+	}
+
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return false
@@ -91,6 +101,10 @@ func (p *YaCyProvider) Search(ctx context.Context, query string, maxResults int)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create yacy request: %w", err)
+	}
+
+	if p.username != "" && p.password != "" {
+		req.SetBasicAuth(p.username, p.password)
 	}
 
 	resp, err := p.httpClient.Do(req)

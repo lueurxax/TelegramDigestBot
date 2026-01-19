@@ -103,9 +103,11 @@ type Config struct {
 	EnrichmentMonthlyLimit     int           `env:"ENRICHMENT_MONTHLY_LIMIT" envDefault:"0"`
 
 	// YaCy provider
-	YaCyEnabled bool          `env:"YACY_ENABLED" envDefault:"false"`
-	YaCyBaseURL string        `env:"YACY_BASE_URL" envDefault:"http://localhost:8090"`
-	YaCyTimeout time.Duration `env:"YACY_TIMEOUT" envDefault:"30s"`
+	YaCyEnabled  bool          `env:"YACY_ENABLED" envDefault:"false"`
+	YaCyBaseURL  string        `env:"YACY_BASE_URL" envDefault:"http://localhost:8090"`
+	YaCyTimeout  time.Duration `env:"YACY_TIMEOUT" envDefault:"30s"`
+	YaCyUser     string        `env:"YACY_USER"`
+	YaCyPassword string        `env:"YACY_PASSWORD"`
 
 	// GDELT provider
 	GDELTEnabled        bool          `env:"GDELT_ENABLED" envDefault:"false"`
@@ -187,6 +189,14 @@ func applyYaCyAliases(cfg *Config) {
 
 	if !hasEnv("YACY_TIMEOUT") {
 		setDurationFromEnv("ENRICHMENT_YACY_TIMEOUT", &cfg.YaCyTimeout)
+	}
+
+	if !hasEnv("YACY_USER") {
+		setStringFromEnv("ENRICHMENT_YACY_USER", &cfg.YaCyUser)
+	}
+
+	if !hasEnv("YACY_PASSWORD") {
+		setStringFromEnv("ENRICHMENT_YACY_PASSWORD", &cfg.YaCyPassword)
 	}
 }
 
