@@ -258,6 +258,15 @@ func (q *Queries) DeactivateChannel(ctx context.Context, username pgtype.Text) e
 	return err
 }
 
+const deactivateChannelByID = `-- name: DeactivateChannelByID :exec
+UPDATE channels SET is_active = FALSE WHERE id = $1
+`
+
+func (q *Queries) DeactivateChannelByID(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deactivateChannelByID, id)
+	return err
+}
+
 const deactivateFilter = `-- name: DeactivateFilter :exec
 UPDATE filters SET is_active = FALSE WHERE pattern = $1
 `

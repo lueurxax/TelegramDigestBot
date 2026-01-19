@@ -2,9 +2,11 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
@@ -187,6 +189,17 @@ func (db *DB) UpdateChannel(ctx context.Context, id string, peerID int64, title 
 		Username:    toText(normalizeUsername(username)),
 		Description: toText(description),
 	}); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "channels_peer_id_uq" {
+			// Channel with this peer ID already exists under another UUID.
+			// Deactivate the current placeholder channel.
+			if deactivateErr := db.Queries.DeactivateChannelByID(ctx, toUUID(id)); deactivateErr != nil {
+				return fmt.Errorf("deactivate duplicate channel %s: %v (original error: %w)", id, deactivateErr, err)
+			}
+
+			return fmt.Errorf("channel %s is a duplicate of an existing channel with peer ID %d, deactivated: %w", id, peerID, err)
+		}
+
 		return fmt.Errorf("update channel: %w", err)
 	}
 
@@ -196,6 +209,14 @@ func (db *DB) UpdateChannel(ctx context.Context, id string, peerID int64, title 
 func (db *DB) DeactivateChannel(ctx context.Context, identifier string) error {
 	if err := db.Queries.DeactivateChannel(ctx, toText(identifier)); err != nil {
 		return fmt.Errorf("deactivate channel: %w", err)
+	}
+
+	return nil
+}
+
+func (db *DB) DeactivateChannelByID(ctx context.Context, id string) error {
+	if err := db.Queries.DeactivateChannelByID(ctx, toUUID(id)); err != nil {
+		return fmt.Errorf("deactivate channel by id: %w", err)
 	}
 
 	return nil

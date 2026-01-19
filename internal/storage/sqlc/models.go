@@ -149,6 +149,74 @@ type Embedding struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type EnrichmentQueue struct {
+	ID           pgtype.UUID        `json:"id"`
+	ItemID       pgtype.UUID        `json:"item_id"`
+	Summary      string             `json:"summary"`
+	Status       string             `json:"status"`
+	AttemptCount int32              `json:"attempt_count"`
+	ErrorMessage pgtype.Text        `json:"error_message"`
+	NextRetryAt  pgtype.Timestamptz `json:"next_retry_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type EnrichmentUsage struct {
+	ID             pgtype.UUID        `json:"id"`
+	Date           pgtype.Date        `json:"date"`
+	Provider       string             `json:"provider"`
+	RequestCount   int32              `json:"request_count"`
+	EmbeddingCount int32              `json:"embedding_count"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	CostUsd        pgtype.Numeric     `json:"cost_usd"`
+}
+
+type EvidenceClaim struct {
+	ID           pgtype.UUID        `json:"id"`
+	EvidenceID   pgtype.UUID        `json:"evidence_id"`
+	ClaimText    string             `json:"claim_text"`
+	EntitiesJson []byte             `json:"entities_json"`
+	Embedding    pgvector.Vector    `json:"embedding"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type EvidenceSource struct {
+	ID               pgtype.UUID        `json:"id"`
+	Url              string             `json:"url"`
+	UrlHash          string             `json:"url_hash"`
+	Domain           string             `json:"domain"`
+	Title            pgtype.Text        `json:"title"`
+	Description      pgtype.Text        `json:"description"`
+	Content          pgtype.Text        `json:"content"`
+	Author           pgtype.Text        `json:"author"`
+	PublishedAt      pgtype.Timestamptz `json:"published_at"`
+	Language         pgtype.Text        `json:"language"`
+	Provider         string             `json:"provider"`
+	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	ExtractionFailed bool               `json:"extraction_failed"`
+}
+
+type FactCheckCache struct {
+	NormalizedClaim string             `json:"normalized_claim"`
+	ResultJson      []byte             `json:"result_json"`
+	CachedAt        pgtype.Timestamptz `json:"cached_at"`
+}
+
+type FactCheckQueue struct {
+	ID              pgtype.UUID        `json:"id"`
+	ItemID          pgtype.UUID        `json:"item_id"`
+	Claim           string             `json:"claim"`
+	NormalizedClaim string             `json:"normalized_claim"`
+	Status          string             `json:"status"`
+	AttemptCount    int32              `json:"attempt_count"`
+	ErrorMessage    pgtype.Text        `json:"error_message"`
+	NextRetryAt     pgtype.Timestamptz `json:"next_retry_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Filter struct {
 	ID        pgtype.UUID        `json:"id"`
 	Type      string             `json:"type"`
@@ -183,6 +251,30 @@ type Item struct {
 	DigestedAt      pgtype.Timestamptz `json:"digested_at"`
 	RetryCount      int32              `json:"retry_count"`
 	NextRetryAt     pgtype.Timestamptz `json:"next_retry_at"`
+	FactCheckScore  pgtype.Float4      `json:"fact_check_score"`
+	FactCheckTier   pgtype.Text        `json:"fact_check_tier"`
+	FactCheckNotes  pgtype.Text        `json:"fact_check_notes"`
+}
+
+type ItemEvidence struct {
+	ID                pgtype.UUID        `json:"id"`
+	ItemID            pgtype.UUID        `json:"item_id"`
+	EvidenceID        pgtype.UUID        `json:"evidence_id"`
+	AgreementScore    float32            `json:"agreement_score"`
+	IsContradiction   bool               `json:"is_contradiction"`
+	MatchedClaimsJson []byte             `json:"matched_claims_json"`
+	MatchedAt         pgtype.Timestamptz `json:"matched_at"`
+}
+
+type ItemFactCheck struct {
+	ID        pgtype.UUID        `json:"id"`
+	ItemID    pgtype.UUID        `json:"item_id"`
+	Claim     string             `json:"claim"`
+	Url       string             `json:"url"`
+	Publisher pgtype.Text        `json:"publisher"`
+	Rating    pgtype.Text        `json:"rating"`
+	MatchedAt pgtype.Timestamptz `json:"matched_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type ItemRating struct {

@@ -12,6 +12,8 @@ type Repository interface {
 	GetActiveChannels(ctx context.Context) ([]db.Channel, error)
 	UpdateChannel(ctx context.Context, id string, peerID int64, title string, accessHash int64, username, description string) error
 	UpdateChannelLastMessageID(ctx context.Context, id string, msgID int64) error
+	DeactivateChannel(ctx context.Context, identifier string) error
+	DeactivateChannelByID(ctx context.Context, id string) error
 
 	// Message operations
 	SaveRawMessage(ctx context.Context, msg *db.RawMessage) error

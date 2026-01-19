@@ -35,6 +35,9 @@ UPDATE channels SET last_tg_message_id = $2 WHERE id = $1;
 -- name: DeactivateChannel :exec
 UPDATE channels SET is_active = FALSE WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1;
 
+-- name: DeactivateChannelByID :exec
+UPDATE channels SET is_active = FALSE WHERE id = $1;
+
 -- name: GetUnprocessedMessages :many
 SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.entities_json, rm.media_json, rm.media_data, rm.canonical_hash, rm.is_forward,
        c.title as channel_title, c.context as channel_context, c.description as channel_description,

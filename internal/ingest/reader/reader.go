@@ -61,6 +61,10 @@ const (
 
 	// Error messages
 	errMsgIncrementResolutionAttempts = "failed to increment resolution attempts"
+	errMsgDeactivatePrivateChannel    = "failed to deactivate private channel"
+
+	// TG Errors
+	errChannelPrivate = "CHANNEL_PRIVATE"
 
 	// Telegram link types (used in case statements for link.TelegramType)
 	telegramLinkTypeChannel = "channel"
@@ -649,11 +653,27 @@ func (r *Reader) fetchChannelMessages(ctx context.Context, api *tg.Client, ch db
 
 	peer, err := r.resolvePeer(ctx, api, &ch)
 	if err != nil {
+		if tgerr.Is(err, errChannelPrivate) {
+			r.logger.Warn().Err(err).Str(logFieldUsername, ch.Username).Msg("Channel is private, deactivating")
+
+			if deactivateErr := r.database.DeactivateChannelByID(ctx, ch.ID); deactivateErr != nil {
+				r.logger.Error().Err(deactivateErr).Str(logFieldUsername, ch.Username).Msg(errMsgDeactivatePrivateChannel)
+			}
+		}
+
 		return 0, err
 	}
 
 	history, err := r.fetchHistory(ctx, api, peer, ch)
 	if err != nil {
+		if tgerr.Is(err, errChannelPrivate) {
+			r.logger.Warn().Err(err).Str(logFieldUsername, ch.Username).Msg("Channel is private (from history), deactivating")
+
+			if deactivateErr := r.database.DeactivateChannelByID(ctx, ch.ID); deactivateErr != nil {
+				r.logger.Error().Err(deactivateErr).Str(logFieldUsername, ch.Username).Msg(errMsgDeactivatePrivateChannel)
+			}
+		}
+
 		return 0, err
 	}
 
@@ -790,6 +810,14 @@ func (r *Reader) resolveByUsername(ctx context.Context, api *tg.Client, ch *db.C
 
 	resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: ch.Username})
 	if err != nil {
+		if tgerr.Is(err, "USERNAME_INVALID", "USERNAME_NOT_OCCUPIED") {
+			r.logger.Warn().Err(err).Str(logFieldUsername, ch.Username).Msg("Invalid or unoccupied username, deactivating channel")
+
+			if deactivateErr := r.database.DeactivateChannel(ctx, ch.Username); deactivateErr != nil {
+				r.logger.Error().Err(deactivateErr).Str(logFieldUsername, ch.Username).Msg("failed to deactivate invalid channel")
+			}
+		}
+
 		return nil, false, fmt.Errorf("failed to resolve username: %w", err)
 	}
 
@@ -838,7 +866,14 @@ func (r *Reader) fetchDescriptionIfMissing(ctx context.Context, api *tg.Client, 
 
 	description, err := r.fetchChannelDescription(ctx, api, ch.TGPeerID, ch.AccessHash)
 	if err != nil {
-		r.logger.Warn().Err(err).Int64(logFieldPeerID, ch.TGPeerID).Msg("failed to fetch channel description")
+		if tgerr.Is(err, "CHANNEL_PRIVATE") {
+			r.logger.Warn().Err(err).Int64(logFieldPeerID, ch.TGPeerID).Msg("Channel is private (from description fetch), deactivating")
+			if deactivateErr := r.database.DeactivateChannelByID(ctx, ch.ID); deactivateErr != nil {
+				r.logger.Error().Err(deactivateErr).Str(logFieldUsername, ch.Username).Msg("failed to deactivate private channel")
+			}
+		} else {
+			r.logger.Warn().Err(err).Int64(logFieldPeerID, ch.TGPeerID).Msg("failed to fetch channel description")
+		}
 	}
 
 	return description

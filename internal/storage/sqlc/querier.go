@@ -28,6 +28,7 @@ type Querier interface {
 	CountRecentlyActiveChannels(ctx context.Context) (int64, error)
 	CreateCluster(ctx context.Context, arg CreateClusterParams) (pgtype.UUID, error)
 	DeactivateChannel(ctx context.Context, username pgtype.Text) error
+	DeactivateChannelByID(ctx context.Context, id pgtype.UUID) error
 	DeactivateFilter(ctx context.Context, pattern string) error
 	DeleteClustersForWindow(ctx context.Context, arg DeleteClustersForWindowParams) error
 	DeleteSetting(ctx context.Context, key string) error

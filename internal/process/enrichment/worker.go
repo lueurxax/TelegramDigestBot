@@ -599,32 +599,47 @@ func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQu
 
 	minAgreement := w.cfg.EnrichmentMinAgreement
 
-	for _, result := range results {
+	var (
+		wg sync.WaitGroup
+		mu sync.Mutex
+	)
+
+	for i, result := range results {
 		if ctx.Err() != nil {
 			break
 		}
 
-		// Limit max evidence sources per item
-		if sourceCount >= maxEvidence {
-			w.logger.Debug().
-				Str(logKeyItemID, item.ItemID).
-				Int("max", maxEvidence).
-				Msg("reached max evidence per item limit")
-
+		// Limit to processing at most maxEvidence * 2 results to find enough high-quality matches
+		if i >= maxEvidence*2 {
 			break
 		}
 
-		score, ok := w.processSingleResult(ctx, item, result, provider, cacheTTL, minAgreement)
-		if !ok {
-			continue
-		}
+		wg.Add(1)
 
-		scores = append(scores, score)
-		sourceCount++
+		go func(res SearchResult) {
+			defer wg.Done()
 
-		observability.EnrichmentMatches.Inc()
-		observability.EnrichmentCorroborationScore.Observe(float64(score))
+			score, ok := w.processSingleResult(ctx, item, res, provider, cacheTTL, minAgreement)
+			if !ok {
+				return
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			if sourceCount >= maxEvidence {
+				return
+			}
+
+			scores = append(scores, score)
+			sourceCount++
+
+			observability.EnrichmentMatches.Inc()
+			observability.EnrichmentCorroborationScore.Observe(float64(score))
+		}(result)
 	}
+
+	wg.Wait()
 
 	if sourceCount > 0 {
 		avgScore := w.scorer.CalculateOverallScore(scores)
