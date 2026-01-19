@@ -623,7 +623,7 @@ func (w *Worker) handleNoResults(itemID string, lastErr error) error {
 		return fmt.Errorf("search providers: %w", lastErr)
 	}
 
-	w.logger.Debug().Str(logKeyItemID, itemID).Msg("no search results found")
+	w.logger.Info().Str(logKeyItemID, itemID).Msg("no search results found")
 
 	return nil
 }

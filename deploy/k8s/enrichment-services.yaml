@@ -58,7 +58,7 @@ spec:
           set_cfg javastart_Xms Xms512m
           set_cfg javastart_Xmx Xmx2048m
           set_cfg adminAccountUserName admin
-          set_cfg adminAccountBase64MD5 MD5:21232f297a57a5a743894a0e4a801fc3
+          set_cfg adminAccountBase64MD5 ISMvKXpXpadDiUoOSoAfww==
           set_cfg adminAccountAllPages true
           set_cfg network.unit.dht false
           set_cfg debug.search.remote.dht.off true
@@ -197,7 +197,7 @@ data:
 
       echo "Seeding: ${url}"
       # shellcheck disable=SC2086
-      curl -sS $auth_args "${YACY_URL}/Crawler_p.html?crawlingstart=${url}&crawlingDepth=2&crawlingMode=url" >/dev/null || echo "Warning: failed to crawl ${url}"
+      curl -sS -f $auth_args "${YACY_URL}/Crawler_p.html?crawlingstart=${url}&crawlingDepth=2&crawlingMode=url" >/dev/null || echo "Warning: failed to crawl ${url}"
     done < /config/seeds.txt
 ---
 apiVersion: batch/v1

@@ -154,6 +154,8 @@ metadata:
   namespace: digest
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: digest-worker
@@ -202,6 +204,8 @@ metadata:
   namespace: digest
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: digest-scheduler

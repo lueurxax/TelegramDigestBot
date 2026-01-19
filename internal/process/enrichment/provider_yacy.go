@@ -84,7 +84,11 @@ func (p *YaCyProvider) IsAvailable() bool {
 		_ = resp.Body.Close()
 	}()
 
-	return resp.StatusCode == http.StatusOK
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+
+	return true
 }
 
 func (p *YaCyProvider) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
