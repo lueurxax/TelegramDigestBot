@@ -354,17 +354,39 @@ func (c *openaiClient) buildMessageTextPart(index int, m MessageInput) string {
 }
 
 func (c *openaiClient) buildLinkContext(m MessageInput) string {
+	if len(m.ResolvedLinks) == 0 {
+		return ""
+	}
+
+	isShort := len(m.Text) < domain.ShortMessageThreshold
 	textPart := ""
 
-	if len(m.ResolvedLinks) > 0 {
+	if c.shouldIncludeLinks(isShort) {
 		textPart += c.buildResolvedLinksText(m.ResolvedLinks)
 	}
 
-	if len(m.ResolvedLinks) > 0 && len(m.Text) < 100 {
+	if isShort {
 		textPart += "NOTE: The main message is short. Please use the [Referenced Content] above to determine relevance, topic, and summary.\n"
 	}
 
 	return textPart
+}
+
+func (c *openaiClient) shouldIncludeLinks(isShort bool) bool {
+	scope := c.cfg.LinkEnrichmentScope
+	if scope == "" {
+		scope = domain.ScopeSummary
+	}
+
+	if strings.Contains(scope, domain.ScopeSummary) {
+		return true
+	}
+
+	if !isShort {
+		return false
+	}
+
+	return strings.Contains(scope, domain.ScopeTopic) || strings.Contains(scope, domain.ScopeRelevance)
 }
 
 func (c *openaiClient) buildResolvedLinksText(links []domain.ResolvedLink) string {

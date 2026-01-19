@@ -11,8 +11,9 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	"github.com/lueurxax/telegram-digest-bot/internal/process/dedup"
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
+	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, end time.Time, logger *zerolog.Logger) error {
@@ -425,25 +426,65 @@ func (s *Scheduler) sortClusterItems(clusterItemsList []db.Item) {
 }
 
 func (s *Scheduler) generateClusterTopic(ctx context.Context, clusterItemsList []db.Item, defaultTopic, digestLanguage, smartLLMModel string) string {
-	if smartLLMModel != "" && len(clusterItemsList) > 1 {
-		// Augment vague summaries with link context for better topic generation
-		augmentedItems := make([]db.Item, len(clusterItemsList))
-		for i, item := range clusterItemsList {
-			augmentedItems[i] = item
-			if len(item.Summary) < 100 {
-				links, err := s.database.GetLinksForMessage(ctx, item.RawMessageID)
-				if err == nil && len(links) > 0 {
-					augmentedItems[i].Summary += " (Context: " + links[0].Title + ")"
-				}
-			}
-		}
+	if smartLLMModel == "" || len(clusterItemsList) <= 1 {
+		return defaultTopic
+	}
 
-		if betterTopic, err := s.llmClient.GenerateClusterTopic(ctx, augmentedItems, digestLanguage, smartLLMModel); err == nil && betterTopic != "" {
-			return betterTopic
-		}
+	// Augment vague summaries with link context for better topic generation
+	augmentedItems := s.augmentClusterItemsForTopic(ctx, clusterItemsList)
+
+	if betterTopic, err := s.llmClient.GenerateClusterTopic(ctx, augmentedItems, digestLanguage, smartLLMModel); err == nil && betterTopic != "" {
+		return betterTopic
 	}
 
 	return defaultTopic
+}
+
+func (s *Scheduler) augmentClusterItemsForTopic(ctx context.Context, items []db.Item) []db.Item {
+	augmentedItems := make([]db.Item, len(items))
+	useLinks := s.cfg.LinkEnrichmentEnabled && strings.Contains(s.cfg.LinkEnrichmentScope, domain.ScopeTopic)
+
+	for i, item := range items {
+		augmentedItems[i] = item
+		if useLinks && len(item.Summary) < domain.ShortMessageThreshold {
+			augmentedItems[i].Summary = s.augmentItemSummaryWithLinks(ctx, item)
+		}
+	}
+
+	return augmentedItems
+}
+
+func (s *Scheduler) augmentItemSummaryWithLinks(ctx context.Context, item db.Item) string {
+	links, err := s.database.GetLinksForMessage(ctx, item.RawMessageID)
+	if err != nil || len(links) == 0 {
+		return item.Summary
+	}
+
+	var sb strings.Builder
+
+	sb.WriteString(item.Summary)
+	sb.WriteString(" (Context: ")
+
+	for j, link := range links {
+		if j > 0 {
+			sb.WriteString(" | ")
+		}
+
+		title := link.Title
+		if title == "" {
+			title = link.Domain
+		}
+
+		sb.WriteString(title)
+
+		if j >= 2 { // limit to 3 links context
+			break
+		}
+	}
+
+	sb.WriteString(")")
+
+	return sb.String()
 }
 
 func (s *Scheduler) calculateCoherence(items []db.Item, embeddings map[string][]float32) float32 {

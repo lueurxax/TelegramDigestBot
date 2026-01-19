@@ -260,7 +260,7 @@ func (w *Worker) processWithProviders(ctx context.Context, item *db.EnrichmentQu
 
 	var links []domain.ResolvedLink
 
-	if item.RawMessageID != "" {
+	if item.RawMessageID != "" && w.cfg.LinkEnrichmentEnabled && strings.Contains(w.cfg.LinkEnrichmentScope, domain.ScopeQueries) {
 		var err error
 
 		links, err = w.db.GetLinksForMessage(ctx, item.RawMessageID)

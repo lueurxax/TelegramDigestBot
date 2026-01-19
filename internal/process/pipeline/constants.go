@@ -34,16 +34,6 @@ const (
 	FilterModeMixed = "mixed"
 )
 
-// Link enrichment scope constants
-const (
-	ScopeSummary   = "summary"
-	ScopeRelevance = "relevance"
-	ScopeTopic     = "topic"
-	ScopeDedup     = "dedup"
-	ScopeQueries   = "queries"
-	ScopeFactCheck = "factcheck"
-)
-
 // Log field constants
 const (
 	LogFieldMsgID         = "msg_id"

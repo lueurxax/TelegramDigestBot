@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	links "github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
@@ -192,10 +193,10 @@ func (p *Pipeline) augmentTextWithLinks(c *llm.MessageInput, s *pipelineSettings
 	}
 
 	// Heuristics from proposal
-	if scope == ScopeTopic {
+	if scope == domain.ScopeTopic {
 		// Topic detection uses link snippets only if message is short or lacks entities.
 		// For now we check length < 120.
-		if len(c.Text) >= 120 {
+		if len(c.Text) >= domain.ShortMessageThreshold {
 			return c.Text
 		}
 	}
@@ -423,7 +424,7 @@ func (p *Pipeline) skipMessageBasic(ctx context.Context, logger zerolog.Logger, 
 
 func (p *Pipeline) skipMessageAdvanced(ctx context.Context, logger zerolog.Logger, c *llm.MessageInput, s *pipelineSettings) bool {
 	if s.relevanceGateEnabled {
-		text := p.augmentTextWithLinks(c, s, ScopeRelevance)
+		text := p.augmentTextWithLinks(c, s, domain.ScopeRelevance)
 		decision := p.evaluateRelevanceGate(ctx, logger, text, s)
 		p.recordRelevanceGateDecision(ctx, logger, c.ID, decision)
 
@@ -462,10 +463,10 @@ func (p *Pipeline) generateEmbeddingIfNeeded(ctx context.Context, logger zerolog
 	}
 
 	text := c.Text
-	if strings.Contains(s.linkEnrichmentScope, ScopeDedup) && len(c.ResolvedLinks) > 0 {
+	if strings.Contains(s.linkEnrichmentScope, domain.ScopeDedup) && len(c.ResolvedLinks) > 0 {
 		if len(c.Text) < s.linkEmbeddingMaxMsgLen {
 			// Message is short: use message + link snippet
-			text = p.augmentTextWithLinks(c, s, ScopeDedup)
+			text = p.augmentTextWithLinks(c, s, domain.ScopeDedup)
 		} else {
 			// Message is long: use title/domain but prioritize message
 			var sb strings.Builder

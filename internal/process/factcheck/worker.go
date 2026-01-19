@@ -109,7 +109,7 @@ func (w *Worker) processItem(ctx context.Context, item *db.FactCheckQueueItem) {
 
 func (w *Worker) enrichClaimFromLinks(ctx context.Context, item *db.FactCheckQueueItem) {
 	// If claim is short, try to extract from link context
-	if len(item.Claim) >= w.factCheckMinLength() || item.RawMessageID == "" {
+	if !w.shouldEnrichClaim(item) {
 		return
 	}
 
@@ -118,21 +118,43 @@ func (w *Worker) enrichClaimFromLinks(ctx context.Context, item *db.FactCheckQue
 		return
 	}
 
-	// Extract from first link's title or content (headline/lead)
-	// Simple heuristic: top 1-2 factual sentences from ResolvedLink.Content.
-	extracted := links[0].Title
-	if links[0].Content != "" {
-		sentences := strings.Split(links[0].Content, ".")
-		if len(sentences) > 0 {
-			extracted += ": " + strings.TrimSpace(sentences[0])
-		}
-	}
-
+	extracted := w.extractClaimFromLink(links[0])
 	if len(extracted) >= w.factCheckMinLength() {
 		item.Claim = extracted
 		// Re-normalizing if needed (NormalizeClaim is in factcheck package)
 		item.NormalizedClaim = NormalizeClaim(extracted)
 	}
+}
+
+func (w *Worker) shouldEnrichClaim(item *db.FactCheckQueueItem) bool {
+	if len(item.Claim) >= w.factCheckMinLength() || item.RawMessageID == "" {
+		return false
+	}
+
+	return w.cfg.LinkEnrichmentEnabled && strings.Contains(w.cfg.LinkEnrichmentScope, domain.ScopeFactCheck)
+}
+
+func (w *Worker) extractClaimFromLink(link domain.ResolvedLink) string {
+	extracted := link.Title
+	if link.Content == "" {
+		return extracted
+	}
+
+	sentences := strings.Split(link.Content, ".")
+	if len(sentences) == 0 {
+		return extracted
+	}
+
+	sentencePart := strings.TrimSpace(sentences[0])
+	if len(sentences) > 1 && len(sentencePart) < 100 { // Add second sentence if first is short
+		sentencePart += ". " + strings.TrimSpace(sentences[1])
+	}
+
+	if extracted != "" {
+		return extracted + ": " + sentencePart
+	}
+
+	return sentencePart
 }
 
 func (w *Worker) shouldSkipClaim(ctx context.Context, item *db.FactCheckQueueItem) bool {

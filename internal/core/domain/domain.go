@@ -82,3 +82,16 @@ const (
 	LinkStatusFailed  = "failed"
 	LinkStatusPending = "pending"
 )
+
+// Link enrichment scope constants.
+const (
+	ScopeSummary   = "summary"
+	ScopeRelevance = "relevance"
+	ScopeTopic     = "topic"
+	ScopeDedup     = "dedup"
+	ScopeQueries   = "queries"
+	ScopeFactCheck = "factcheck"
+)
+
+// ShortMessageThreshold is the character count threshold for a message to be considered short.
+const ShortMessageThreshold = 120
