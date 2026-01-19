@@ -97,7 +97,8 @@ func TestExtractor_ExtractClaimsWithLLM_Robustness(t *testing.T) {
 			e := NewExtractor(nil)
 			e.SetLLMClient(m, testModel)
 
-			claims, err := e.extractClaimsWithLLM(context.Background(), "some content")
+			content := "This is a long enough content to pass the minimum length check for LLM processing."
+			claims, err := e.extractClaimsWithLLM(context.Background(), content)
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("expected error, got nil")

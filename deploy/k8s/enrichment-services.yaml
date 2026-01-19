@@ -169,7 +169,7 @@ data:
 
     auth=""
     if [ -n "$YACY_USER" ] && [ -n "$YACY_PASSWORD" ]; then
-      auth="--user ${YACY_USER}:${YACY_PASSWORD}"
+      auth="--anyauth --user ${YACY_USER}:${YACY_PASSWORD}"
     fi
 
     while IFS= read -r line; do
@@ -193,7 +193,7 @@ metadata:
   name: yacy-seed-bootstrap
   namespace: digest
 spec:
-  schedule: "33 5 * * *"
+  schedule: "43 5 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 5

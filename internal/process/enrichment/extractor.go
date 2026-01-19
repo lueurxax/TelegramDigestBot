@@ -153,8 +153,12 @@ func (e *Extractor) Extract(ctx context.Context, result SearchResult, provider P
 }
 
 func (e *Extractor) extractClaimsWithLLM(ctx context.Context, content string) ([]ExtractedClaim, error) {
+	if e.llmClient == nil {
+		return nil, nil
+	}
+
 	content = strings.TrimSpace(content)
-	if content == "" {
+	if len(content) < 50 {
 		return nil, nil
 	}
 

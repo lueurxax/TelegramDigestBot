@@ -197,7 +197,7 @@ func (db *DB) UpdateChannel(ctx context.Context, id string, peerID int64, title 
 				return fmt.Errorf("deactivate duplicate channel %s: %w (original error: %w)", id, deactivateErr, err)
 			}
 
-			return fmt.Errorf("channel %s is a duplicate of an existing channel with peer ID %d, deactivated: %w", id, peerID, err)
+			return nil
 		}
 
 		return fmt.Errorf("update channel: %w", err)
