@@ -55,7 +55,9 @@ spec:
           }
           set_cfg javastart_Xms Xms512m
           set_cfg javastart_Xmx Xmx2048m
-          set_cfg adminAccount admin:21232f297a57a5a743894a0e4a801fc3
+          set_cfg adminAccountUserName admin
+          set_cfg adminAccountBase64MD5 MD5:8cffbc0d66567a0987a4aba1ec46d63c
+          set_cfg adminAccountAllPages true
           set_cfg network.unit.dht false
           set_cfg debug.search.remote.dht.off true
           set_cfg network.unit.remotesearch.maxcount 0
@@ -167,7 +169,7 @@ data:
 
     auth=""
     if [ -n "$YACY_USER" ] && [ -n "$YACY_PASSWORD" ]; then
-      auth="-u ${YACY_USER}:${YACY_PASSWORD}"
+      auth="--user ${YACY_USER}:${YACY_PASSWORD}"
     fi
 
     while IFS= read -r line; do
@@ -191,8 +193,10 @@ metadata:
   name: yacy-seed-bootstrap
   namespace: digest
 spec:
-  schedule: "0 2 * * *"
+  schedule: "33 5 * * *"
   concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
   jobTemplate:
     spec:
       template:
