@@ -2614,7 +2614,6 @@ func (b *Bot) handleToggleSetting(ctx context.Context, msg *tgbotapi.Message, ke
 	args := msg.CommandArguments()
 
 	if args != "on" && args != ToggleOff {
-		// Deitor_enabled" -> "editor")
 		cmdName := strings.TrimSuffix(key, "_enabled")
 		cmdName = strings.ReplaceAll(cmdName, "_", " ")
 		b.reply(msg, fmt.Sprintf("Usage: <code>/%s &lt;on|off&gt;</code>", html.EscapeString(cmdName)))
@@ -3241,6 +3240,8 @@ func helpConfigMessage() string {
 		"• <code>/config tone &lt;professional|casual|brief&gt;</code>\n" +
 		"• <code>/config relevance &lt;0-1&gt;</code>\n" +
 		"• <code>/config importance &lt;0-1&gt;</code>\n" +
+		"• <code>/config links &lt;on|off&gt;</code>\n" +
+		"• <code>/config maxlinks &lt;n&gt;</code>\n" +
 		"• <code>/config discovery_min_seen &lt;n&gt;</code>\n" +
 		"• <code>/config discovery_min_engagement &lt;n&gt;</code>\n" +
 		"• <code>/config reset &lt;key&gt;</code>"

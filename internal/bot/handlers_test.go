@@ -2686,6 +2686,8 @@ func TestHelpConfigMessage(t *testing.T) {
 		"/config tone",
 		"/config relevance",
 		"/config importance",
+		"/config links",
+		"/config maxlinks",
 		"/config discovery_min_seen",
 		"/config discovery_min_engagement",
 		"/config reset",
