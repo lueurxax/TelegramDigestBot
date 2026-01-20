@@ -697,3 +697,18 @@ LEFT JOIN items i ON i.raw_message_id = rm.id
 WHERE c.is_active = TRUE
 GROUP BY c.id
 HAVING COUNT(DISTINCT rm.id) > 0;
+
+-- name: RetryFailedEnrichmentItems :exec
+UPDATE enrichment_queue
+SET status = 'pending', error_message = NULL, attempt_count = 0, next_retry_at = NULL
+WHERE status = 'error';
+
+-- name: GetEnrichmentQueueStats :many
+SELECT status, COUNT(*) as count FROM enrichment_queue GROUP BY status;
+
+-- name: GetEnrichmentErrors :many
+SELECT id, item_id, error_message, attempt_count, created_at
+FROM enrichment_queue
+WHERE status = 'error'
+ORDER BY created_at DESC
+LIMIT $1;

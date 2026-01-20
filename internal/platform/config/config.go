@@ -98,6 +98,7 @@ type Config struct {
 	EnrichmentMaxSeconds       int           `env:"ENRICHMENT_MAX_SECONDS" envDefault:"60"`
 	EnrichmentProviders        string        `env:"ENRICHMENT_PROVIDERS" envDefault:""`
 	EnrichmentProviderCooldown time.Duration `env:"ENRICHMENT_PROVIDER_COOLDOWN" envDefault:"10m"`
+	EnrichmentProviderGrace    time.Duration `env:"ENRICHMENT_PROVIDER_GRACE" envDefault:"0s"`
 	EnrichmentQueryTranslate   bool          `env:"ENRICHMENT_QUERY_TRANSLATE" envDefault:"true"`
 	TranslationModel           string        `env:"TRANSLATION_MODEL"`
 	EnrichmentDailyBudgetUSD   float64       `env:"ENRICHMENT_DAILY_BUDGET_USD" envDefault:"0"`

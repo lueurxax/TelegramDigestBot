@@ -191,6 +191,11 @@ const (
 	previewNo  = "no"
 )
 
+// Error message formats.
+const (
+	fmtErrRetryingItems = "❌ Error retrying items: %s"
+)
+
 func (b *Bot) handleThreshold(ctx context.Context, msg *tgbotapi.Message, key string) {
 	args := msg.CommandArguments()
 	cmdName := strings.TrimSuffix(key, "_threshold")
@@ -3282,6 +3287,11 @@ func botFatherCommandsMessage() string {
 }
 
 func (b *Bot) handleErrors(ctx context.Context, msg *tgbotapi.Message) {
+	var sb strings.Builder
+
+	hasErrors := false
+
+	// Pipeline processing errors
 	errors, err := b.database.GetRecentErrors(ctx, RecentErrorsLimit)
 	if err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error fetching errors: %s", html.EscapeString(err.Error())))
@@ -3289,21 +3299,36 @@ func (b *Bot) handleErrors(ctx context.Context, msg *tgbotapi.Message) {
 		return
 	}
 
-	if len(errors) == 0 {
-		b.reply(msg, "✅ No recent processing errors found.")
+	if len(errors) > 0 {
+		hasErrors = true
 
-		return
+		sb.WriteString("⚠️ <b>Pipeline Processing Errors:</b>\n\n")
+
+		for _, e := range errors {
+			sb.WriteString(fmt.Sprintf("• <b>Channel:</b> %s\n", html.EscapeString(e.SourceChannel)))
+			sb.WriteString(fmt.Sprintf("  <b>Error:</b> %s\n", b.humanizeError(e.ErrorJSON)))
+			sb.WriteString(fmt.Sprintf("  <b>Time:</b> <code>%s</code>\n", e.CreatedAt.Format(DateTimeFormat)))
+			sb.WriteString(fmt.Sprintf("  %s | /retry_%s\n\n", FormatLink(e.SourceChannel, e.SourceChannelID, e.SourceMsgID, "[View Message]"), strings.ReplaceAll(e.ID, "-", "")))
+		}
 	}
 
-	var sb strings.Builder
+	// Enrichment queue errors
+	enrichmentErrors, err := b.database.CountEnrichmentErrors(ctx)
+	if err == nil && enrichmentErrors > 0 {
+		hasErrors = true
 
-	sb.WriteString("⚠️ <b>Recent Processing Errors:</b>\n\n")
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
 
-	for _, e := range errors {
-		sb.WriteString(fmt.Sprintf("• <b>Channel:</b> %s\n", html.EscapeString(e.SourceChannel)))
-		sb.WriteString(fmt.Sprintf("  <b>Error:</b> %s\n", b.humanizeError(e.ErrorJSON)))
-		sb.WriteString(fmt.Sprintf("  <b>Time:</b> <code>%s</code>\n", e.CreatedAt.Format(DateTimeFormat)))
-		sb.WriteString(fmt.Sprintf("  %s | /retry_%s\n\n", FormatLink(e.SourceChannel, e.SourceChannelID, e.SourceMsgID, "[View Message]"), strings.ReplaceAll(e.ID, "-", "")))
+		sb.WriteString(fmt.Sprintf("⚠️ <b>Enrichment Errors:</b> <code>%d</code> items\n", enrichmentErrors))
+		sb.WriteString("Use <code>/retry enrichment</code> to requeue.\n")
+	}
+
+	if !hasErrors {
+		b.reply(msg, "✅ No recent errors found.")
+
+		return
 	}
 
 	b.reply(msg, sb.String())
@@ -3375,41 +3400,101 @@ func (b *Bot) handleRetry(ctx context.Context, msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 
 	if len(args) == 0 {
-		errors, _ := b.database.GetRecentErrors(ctx, RetryErrorsLimit) //nolint:errcheck // best-effort read
+		b.showRetryStatus(ctx, msg)
 
-		if len(errors) == 0 {
-			b.reply(msg, "✅ No failed items found to retry.")
+		return
+	}
+
+	switch strings.ToLower(args[0]) {
+	case SubCmdConfirm:
+		b.retryPipelineItems(ctx, msg)
+	case "enrichment":
+		b.handleRetryEnrichment(ctx, msg, args[1:])
+	default:
+		// Support both /retry ID and /retry_ID
+		id := strings.TrimPrefix(args[0], "_")
+
+		if err := b.database.RetryItem(ctx, id); err != nil {
+			b.reply(msg, fmt.Sprintf("❌ Error retrying item %s: %s", html.EscapeString(id), html.EscapeString(err.Error())))
 
 			return
 		}
 
-		b.reply(msg, fmt.Sprintf("⚠️ <code>%d</code> failed items found. Are you sure you want to requeue all of them?\nUse <code>/retry confirm</code> to proceed.", len(errors)))
+		b.reply(msg, fmt.Sprintf("✅ Item <code>%s</code> has been requeued.", html.EscapeString(id)))
+	}
+}
+
+func (b *Bot) showRetryStatus(ctx context.Context, msg *tgbotapi.Message) {
+	var sb strings.Builder
+
+	pipelineErrors, _ := b.database.GetRecentErrors(ctx, RetryErrorsLimit) //nolint:errcheck // best-effort
+	enrichmentErrors, _ := b.database.CountEnrichmentErrors(ctx)           //nolint:errcheck // best-effort
+
+	if len(pipelineErrors) == 0 && enrichmentErrors == 0 {
+		b.reply(msg, "✅ No failed items found to retry.")
 
 		return
 	}
 
-	if args[0] == SubCmdConfirm {
-		if err := b.database.RetryFailedItems(ctx); err != nil {
-			b.reply(msg, fmt.Sprintf("❌ Error retrying items: %s", html.EscapeString(err.Error())))
+	sb.WriteString("⚠️ <b>Failed Items Summary:</b>\n\n")
+
+	if len(pipelineErrors) > 0 {
+		sb.WriteString(fmt.Sprintf("• Pipeline errors: <code>%d</code>\n", len(pipelineErrors)))
+		sb.WriteString("  → <code>/retry confirm</code> to requeue\n\n")
+	}
+
+	if enrichmentErrors > 0 {
+		sb.WriteString(fmt.Sprintf("• Enrichment errors: <code>%d</code>\n", enrichmentErrors))
+		sb.WriteString("  → <code>/retry enrichment confirm</code> to requeue\n")
+	}
+
+	b.reply(msg, sb.String())
+}
+
+func (b *Bot) retryPipelineItems(ctx context.Context, msg *tgbotapi.Message) {
+	if err := b.database.RetryFailedItems(ctx); err != nil {
+		b.reply(msg, fmt.Sprintf(fmtErrRetryingItems, html.EscapeString(err.Error())))
+
+		return
+	}
+
+	b.reply(msg, "✅ All failed pipeline items have been requeued for processing.")
+}
+
+func (b *Bot) handleRetryEnrichment(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	errorCount, err := b.database.CountEnrichmentErrors(ctx)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error counting failed items: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	if len(args) == 0 || strings.ToLower(args[0]) != SubCmdConfirm {
+		if errorCount == 0 {
+			b.reply(msg, "✅ No failed enrichment items found.")
 
 			return
 		}
 
-		b.reply(msg, "✅ All failed items have been requeued for processing.")
+		b.reply(msg, fmt.Sprintf("⚠️ <code>%d</code> failed enrichment items found.\n\nUse <code>/retry enrichment confirm</code> to requeue all.", errorCount))
 
 		return
 	}
 
-	// Support both /retry ID and /retry_ID
-	id := strings.TrimPrefix(args[0], "_")
-
-	if err := b.database.RetryItem(ctx, id); err != nil {
-		b.reply(msg, fmt.Sprintf("❌ Error retrying item %s: %s", html.EscapeString(id), html.EscapeString(err.Error())))
+	if errorCount == 0 {
+		b.reply(msg, "✅ No failed enrichment items to retry.")
 
 		return
 	}
 
-	b.reply(msg, fmt.Sprintf("✅ Item <code>%s</code> has been requeued.", html.EscapeString(id)))
+	requeued, err := b.database.RetryFailedEnrichmentItems(ctx)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf(fmtErrRetryingItems, html.EscapeString(err.Error())))
+
+		return
+	}
+
+	b.reply(msg, fmt.Sprintf("✅ Requeued <code>%d</code> enrichment items for processing.", requeued))
 }
 
 func (b *Bot) handleDiscoverNamespace(ctx context.Context, msg *tgbotapi.Message) {

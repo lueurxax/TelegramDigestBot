@@ -171,18 +171,7 @@ func (db *DB) UpdateEnrichmentStatus(ctx context.Context, queueID, status, errMs
 }
 
 func (db *DB) CountPendingEnrichments(ctx context.Context) (int, error) {
-	var count int
-
-	err := db.Pool.QueryRow(ctx, `
-		SELECT COUNT(*)
-		FROM enrichment_queue
-		WHERE status = $1
-	`, EnrichmentStatusPending).Scan(&count)
-	if err != nil {
-		return 0, fmt.Errorf("count pending enrichments: %w", err)
-	}
-
-	return count, nil
+	return db.countEnrichmentByStatus(ctx, EnrichmentStatusPending)
 }
 
 func (db *DB) GetEnrichmentQueueStats(ctx context.Context) ([]EnrichmentQueueStat, error) {
@@ -750,4 +739,38 @@ func (db *DB) FindSimilarClaim(ctx context.Context, evidenceID string, embedding
 	}
 
 	return &claim, nil
+}
+
+// RetryFailedEnrichmentItems resets all enrichment queue items with error status back to pending.
+func (db *DB) RetryFailedEnrichmentItems(ctx context.Context) (int64, error) {
+	result, err := db.Pool.Exec(ctx, `
+		UPDATE enrichment_queue
+		SET status = $1, error_message = NULL, attempt_count = 0, next_retry_at = NULL
+		WHERE status = $2
+	`, EnrichmentStatusPending, EnrichmentStatusError)
+	if err != nil {
+		return 0, fmt.Errorf("retry failed enrichment items: %w", err)
+	}
+
+	return result.RowsAffected(), nil
+}
+
+// CountEnrichmentErrors returns the count of items in error state.
+func (db *DB) CountEnrichmentErrors(ctx context.Context) (int, error) {
+	return db.countEnrichmentByStatus(ctx, EnrichmentStatusError)
+}
+
+func (db *DB) countEnrichmentByStatus(ctx context.Context, status string) (int, error) {
+	var count int
+
+	err := db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM enrichment_queue
+		WHERE status = $1
+	`, status).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count enrichment by status: %w", err)
+	}
+
+	return count, nil
 }

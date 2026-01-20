@@ -56,6 +56,7 @@ type ProviderRegistry struct {
 
 	circuitBreakers map[ProviderName]*circuitBreaker
 	cooldown        time.Duration
+	gracePeriod     time.Duration
 }
 
 func NewProviderRegistry(cooldown time.Duration) *ProviderRegistry {
@@ -64,6 +65,7 @@ func NewProviderRegistry(cooldown time.Duration) *ProviderRegistry {
 		order:           []ProviderName{},
 		circuitBreakers: make(map[ProviderName]*circuitBreaker),
 		cooldown:        cooldown,
+		gracePeriod:     0,
 	}
 }
 
@@ -75,6 +77,17 @@ func (r *ProviderRegistry) Register(p Provider) {
 	r.providers[name] = p
 	r.order = append(r.order, name)
 	r.circuitBreakers[name] = newCircuitBreaker(r.cooldown)
+}
+
+func (r *ProviderRegistry) SetGracePeriod(d time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if d < 0 {
+		d = 0
+	}
+
+	r.gracePeriod = d
 }
 
 func (r *ProviderRegistry) Get(name ProviderName) (Provider, error) {
@@ -152,16 +165,25 @@ func (r *ProviderRegistry) getActiveProviders() []Provider {
 	return active
 }
 
+//nolint:gocyclo
 func (r *ProviderRegistry) selectBestResult(ctx context.Context, resultsChan chan fanOutResult) ([]SearchResult, ProviderName, error) {
 	var (
 		bestResults  []SearchResult
 		bestProvider ProviderName
 		bestPriority = -1
 		lastErr      error
+		graceTimer   *time.Timer
+		graceC       <-chan time.Time
 	)
 
 	for {
 		select {
+		case <-graceC:
+			if bestResults != nil {
+				return bestResults, bestProvider, nil
+			}
+
+			graceC = nil
 		case <-ctx.Done():
 			if bestResults != nil {
 				return bestResults, bestProvider, nil
@@ -184,13 +206,29 @@ func (r *ProviderRegistry) selectBestResult(ctx context.Context, resultsChan cha
 				bestProvider = res.name
 				bestPriority = res.priority
 
-				// If we have a high priority result, we can return early to save time budget
 				if bestPriority >= PriorityHighSelfHosted {
 					return bestResults, bestProvider, nil
+				}
+
+				if graceTimer == nil {
+					graceC = r.initGraceTimer(&graceTimer)
 				}
 			}
 		}
 	}
+}
+
+func (r *ProviderRegistry) initGraceTimer(timer **time.Timer) <-chan time.Time {
+	r.mu.RLock()
+	grace := r.gracePeriod
+	r.mu.RUnlock()
+
+	if grace > 0 {
+		*timer = time.NewTimer(grace)
+		return (*timer).C
+	}
+
+	return nil
 }
 
 func (r *ProviderRegistry) handleChanClosed(bestResults []SearchResult, bestProvider ProviderName, lastErr error) ([]SearchResult, ProviderName, error) {

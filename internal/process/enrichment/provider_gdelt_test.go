@@ -19,6 +19,7 @@ const (
 	gdeltExpectedErrFmt      = "expected error to contain %q, got: %v"
 	gdeltTestURL1            = "https://example.com/1"
 	gdeltExpectedURLFmt      = "expected URL https://example.com/1, got %s"
+	gdeltJSONEmptyResponse   = `{"articles": []}`
 )
 
 func TestGDELTProvider_Search_Success(t *testing.T) {
@@ -87,7 +88,7 @@ func TestGDELTProvider_Search_NoResults(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 
-		_, err := w.Write([]byte(`{"articles": []}`))
+		_, err := w.Write([]byte(gdeltJSONEmptyResponse))
 		if err != nil {
 			t.Errorf(gdeltFailedToWriteResp, err)
 		}
@@ -138,5 +139,37 @@ func TestGDELTProvider_Search_NonJSONResponse_Truncated(t *testing.T) {
 
 	if len(results) != 0 {
 		t.Errorf(gdeltExpected0ResultsGot, len(results))
+	}
+}
+
+func TestGDELTProvider_Search_SanitizesQuery(t *testing.T) {
+	var capturedQuery string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query().Get("query")
+
+		w.WriteHeader(http.StatusOK)
+
+		if _, err := w.Write([]byte(gdeltJSONEmptyResponse)); err != nil {
+			t.Errorf(gdeltFailedToWriteResp, err)
+		}
+	}))
+	defer ts.Close()
+
+	p := NewGDELTProvider(GDELTConfig{
+		Enabled: true,
+		Timeout: 5 * time.Second,
+	})
+	p.baseURL = ts.URL
+
+	_, err := p.Search(context.Background(), "fires of several for the troops", 1)
+	if err != nil {
+		t.Fatalf(unexpectedErrFmt, err)
+	}
+
+	// "of", "for", "the" should be removed as they are stop words or < 3 chars
+	expected := "fires several troops"
+	if capturedQuery != expected {
+		t.Errorf("expected sanitized query %q, got %q", expected, capturedQuery)
 	}
 }

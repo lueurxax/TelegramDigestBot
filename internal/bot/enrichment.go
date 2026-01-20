@@ -75,6 +75,9 @@ func enrichmentHelpMessage() string {
 • <code>/enrichment domains deny remove &lt;domain&gt;</code> - Remove from denylist
 • <code>/enrichment domains clear</code> - Clear all domain lists
 
+<b>Retry Failed Items:</b>
+Use <code>/system errors</code> to view and <code>/retry enrichment confirm</code> to requeue.
+
 <b>Notes:</b>
 • Allowlist mode: only listed domains are searched
 • Denylist mode: listed domains are excluded

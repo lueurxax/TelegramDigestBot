@@ -52,6 +52,8 @@ type Querier interface {
 	GetDiscoveryByUsername(ctx context.Context, lower string) (GetDiscoveryByUsernameRow, error)
 	GetDiscoveryFilterStats(ctx context.Context, arg GetDiscoveryFilterStatsParams) (GetDiscoveryFilterStatsRow, error)
 	GetDiscoveryStats(ctx context.Context) (GetDiscoveryStatsRow, error)
+	GetEnrichmentErrors(ctx context.Context, limit int32) ([]GetEnrichmentErrorsRow, error)
+	GetEnrichmentQueueStats(ctx context.Context) ([]GetEnrichmentQueueStatsRow, error)
 	GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetInviteLinkDiscoveriesNeedingResolutionRow, error)
 	GetItemByID(ctx context.Context, id pgtype.UUID) (GetItemByIDRow, error)
 	GetItemEmbedding(ctx context.Context, itemID pgtype.UUID) (string, error)
@@ -79,6 +81,7 @@ type Querier interface {
 	MarkAsProcessed(ctx context.Context, id pgtype.UUID) error
 	MarkItemsAsDigested(ctx context.Context, dollar_1 []pgtype.UUID) error
 	ReleaseAdvisoryLock(ctx context.Context, pgAdvisoryUnlock int64) error
+	RetryFailedEnrichmentItems(ctx context.Context) error
 	RetryFailedItems(ctx context.Context) error
 	RetryItem(ctx context.Context, id pgtype.UUID) error
 	SaveDigest(ctx context.Context, arg SaveDigestParams) (pgtype.UUID, error)

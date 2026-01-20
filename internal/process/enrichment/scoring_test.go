@@ -16,6 +16,7 @@ func TestScorer_Score(t *testing.T) {
 		expectScore    bool
 		expectMatch    bool
 		expectContradt bool
+		maxScore       float32
 	}{
 		{
 			name:        "nil evidence",
@@ -60,6 +61,22 @@ func TestScorer_Score(t *testing.T) {
 			},
 			expectScore: false,
 		},
+		{
+			name:        "single entity overlap without token match",
+			itemSummary: "Жители России наблюдают северное сияние",
+			evidence: &ExtractedEvidence{
+				Claims: []ExtractedClaim{
+					{
+						Text: "Russia celebrates a cultural holiday in January",
+						Entities: []Entity{
+							{Text: "Russia", Type: entityTypeLoc},
+						},
+					},
+				},
+			},
+			expectScore: false,
+			maxScore:    0.01,
+		},
 	}
 
 	for _, tt := range tests {
@@ -72,6 +89,10 @@ func TestScorer_Score(t *testing.T) {
 
 			if !tt.expectScore && result.AgreementScore > 0.5 {
 				t.Errorf("expected low/zero score, got %f", result.AgreementScore)
+			}
+
+			if tt.maxScore > 0 && result.AgreementScore > tt.maxScore {
+				t.Errorf("expected score <= %f, got %f", tt.maxScore, result.AgreementScore)
 			}
 
 			if tt.expectMatch && len(result.MatchedClaims) == 0 {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -20,7 +21,6 @@ const (
 	secondsPerMinute     = 60.0
 	searchParamKeyQuery  = "query"
 	searchParamKeyFormat = "format"
-	fmtErrWrapStr        = "%w: %s"
 )
 
 var (
@@ -114,14 +114,30 @@ func (p *GDELTProvider) Search(ctx context.Context, query string, maxResults int
 }
 
 func (p *GDELTProvider) buildGDELTURL(query string, maxResults int) string {
+	sanitizedQuery := sanitizeGDELTQuery(query)
+
 	params := url.Values{}
-	params.Set(searchParamKeyQuery, query)
+	params.Set(searchParamKeyQuery, sanitizedQuery)
 	params.Set("mode", "ArtList")
 	params.Set("maxrecords", fmt.Sprintf("%d", maxResults))
-	params.Set(searchParamKeyFormat, "json")
+	params.Set(searchParamKeyFormat, fmtJSON)
 	params.Set("sort", "DateDesc")
 
 	return p.baseURL + "?" + params.Encode()
+}
+
+func sanitizeGDELTQuery(query string) string {
+	words := strings.Fields(query)
+	filtered := make([]string, 0, len(words))
+
+	for _, w := range words {
+		lower := strings.ToLower(w)
+		if len([]rune(w)) >= minKeywordLength && !isStopWord(lower) {
+			filtered = append(filtered, w)
+		}
+	}
+
+	return strings.Join(filtered, " ")
 }
 
 type gdeltResponse struct {

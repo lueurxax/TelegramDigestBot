@@ -1081,6 +1081,77 @@ func (q *Queries) GetDiscoveryStats(ctx context.Context) (GetDiscoveryStatsRow, 
 	return i, err
 }
 
+const getEnrichmentErrors = `-- name: GetEnrichmentErrors :many
+SELECT id, item_id, error_message, attempt_count, created_at
+FROM enrichment_queue
+WHERE status = 'error'
+ORDER BY created_at DESC
+LIMIT $1
+`
+
+type GetEnrichmentErrorsRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	ItemID       pgtype.UUID        `json:"item_id"`
+	ErrorMessage pgtype.Text        `json:"error_message"`
+	AttemptCount int32              `json:"attempt_count"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetEnrichmentErrors(ctx context.Context, limit int32) ([]GetEnrichmentErrorsRow, error) {
+	rows, err := q.db.Query(ctx, getEnrichmentErrors, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetEnrichmentErrorsRow
+	for rows.Next() {
+		var i GetEnrichmentErrorsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ItemID,
+			&i.ErrorMessage,
+			&i.AttemptCount,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getEnrichmentQueueStats = `-- name: GetEnrichmentQueueStats :many
+SELECT status, COUNT(*) as count FROM enrichment_queue GROUP BY status
+`
+
+type GetEnrichmentQueueStatsRow struct {
+	Status string `json:"status"`
+	Count  int64  `json:"count"`
+}
+
+func (q *Queries) GetEnrichmentQueueStats(ctx context.Context) ([]GetEnrichmentQueueStatsRow, error) {
+	rows, err := q.db.Query(ctx, getEnrichmentQueueStats)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetEnrichmentQueueStatsRow
+	for rows.Next() {
+		var i GetEnrichmentQueueStatsRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getInviteLinkDiscoveriesNeedingResolution = `-- name: GetInviteLinkDiscoveriesNeedingResolution :many
 SELECT id, invite_link
 FROM discovered_channels
@@ -2014,6 +2085,17 @@ SELECT pg_advisory_unlock($1)
 
 func (q *Queries) ReleaseAdvisoryLock(ctx context.Context, pgAdvisoryUnlock int64) error {
 	_, err := q.db.Exec(ctx, releaseAdvisoryLock, pgAdvisoryUnlock)
+	return err
+}
+
+const retryFailedEnrichmentItems = `-- name: RetryFailedEnrichmentItems :exec
+UPDATE enrichment_queue
+SET status = 'pending', error_message = NULL, attempt_count = 0, next_retry_at = NULL
+WHERE status = 'error'
+`
+
+func (q *Queries) RetryFailedEnrichmentItems(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, retryFailedEnrichmentItems)
 	return err
 }
 

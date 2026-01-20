@@ -17,15 +17,21 @@ const (
 	maxItemClaimLen        = 100
 	maxEvidenceClaimLen    = 200
 	minMatchScore          = 0.15
+	minEntityMatches       = 2
+	minJaccardForEntities  = 0.05
 	highTierScoreThreshold = 0.4
 	contradictionThreshold = 0.4 // Entity overlap threshold for contradiction check
 )
 
 type ScoringResult struct {
-	AgreementScore  float32
-	IsContradiction bool
-	MatchedClaims   []MatchedClaim
-	Tier            string
+	AgreementScore    float32
+	IsContradiction   bool
+	MatchedClaims     []MatchedClaim
+	Tier              string
+	BestJaccard       float64
+	BestEntityOverlap float64
+	BestEntityMatches int
+	BestClaim         string
 }
 
 type MatchedClaim struct {
@@ -52,6 +58,10 @@ func (s *Scorer) Score(itemSummary string, evidence *ExtractedEvidence) ScoringR
 	itemEntities := extractEntities(itemSummary)
 
 	var bestScore float32
+	var bestJaccard float64
+	var bestEntityOverlap float64
+	var bestEntityMatches int
+	var bestClaim string
 
 	var matchedClaims []MatchedClaim
 
@@ -60,12 +70,19 @@ func (s *Scorer) Score(itemSummary string, evidence *ExtractedEvidence) ScoringR
 
 		jaccardSim := jaccardSimilarity(itemTokens, claimTokens)
 
-		entityOverlap := entityOverlapRatio(itemEntities, claim.Entities)
+		entityOverlap, entityMatches := entityOverlapStats(itemEntities, claim.Entities)
 
 		score := float32(jaccardWeight*jaccardSim + entityWeight*entityOverlap)
+		if jaccardSim < minJaccardForEntities && entityMatches < minEntityMatches {
+			score = 0
+		}
 
-		if score > bestScore {
+		if score > bestScore || bestClaim == "" {
 			bestScore = score
+			bestJaccard = jaccardSim
+			bestEntityOverlap = entityOverlap
+			bestEntityMatches = entityMatches
+			bestClaim = claim.Text
 		}
 
 		if score > minMatchScore {
@@ -81,9 +98,13 @@ func (s *Scorer) Score(itemSummary string, evidence *ExtractedEvidence) ScoringR
 	isContradiction := detectContradiction(itemSummary, evidence.Claims, itemEntities)
 
 	return ScoringResult{
-		AgreementScore:  bestScore,
-		IsContradiction: isContradiction,
-		MatchedClaims:   matchedClaims,
+		AgreementScore:    bestScore,
+		IsContradiction:   isContradiction,
+		MatchedClaims:     matchedClaims,
+		BestJaccard:       bestJaccard,
+		BestEntityOverlap: bestEntityOverlap,
+		BestEntityMatches: bestEntityMatches,
+		BestClaim:         bestClaim,
 	}
 }
 
@@ -182,6 +203,32 @@ func entityOverlapRatio(entities1, entities2 []Entity) float64 {
 	}
 
 	return matchedWeight / totalWeight
+}
+
+func entityOverlapStats(entities1, entities2 []Entity) (float64, int) {
+	if len(entities1) == 0 || len(entities2) == 0 {
+		return 0, 0
+	}
+
+	var matchedWeight, totalWeight float64
+
+	matchedCount := 0
+
+	for _, e1 := range entities1 {
+		weight := getEntityWeight(e1.Type)
+		totalWeight += weight
+
+		if entityMatchExists(e1, entities2) {
+			matchedWeight += weight
+			matchedCount++
+		}
+	}
+
+	if totalWeight == 0 {
+		return 0, matchedCount
+	}
+
+	return matchedWeight / totalWeight, matchedCount
 }
 
 func getEntityWeight(entityType string) float64 {

@@ -21,7 +21,6 @@ const (
 	errFmtClaims      = "expected %d claims, got %d"
 	testModel         = "test-model"
 	expectedErrGotNil = "expected error, got nil"
-	unexpectedErrFmt  = "unexpected error: %v"
 )
 
 func TestExtractor_ExtractClaimsWithLLM_EmptyContent(t *testing.T) {

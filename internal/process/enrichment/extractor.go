@@ -43,6 +43,7 @@ const (
 var (
 	errUnexpectedStatus   = errors.New("unexpected http status")
 	errInvalidLLMResponse = errors.New("invalid LLM response format")
+	errNonTextualContent  = errors.New("non-textual content type")
 )
 
 type Extractor struct {
@@ -138,7 +139,11 @@ func (e *Extractor) Extract(ctx context.Context, result SearchResult, provider P
 	if e.llmClient != nil {
 		claims, err = e.extractClaimsWithLLM(ctx, analysisText)
 		if err != nil {
-			e.logger.Error().Err(err).Str("url", result.URL).Msg("LLM extraction failed")
+			if errors.Is(err, errInvalidLLMResponse) || strings.Contains(err.Error(), "unmarshal") {
+				e.logger.Warn().Err(err).Str(logKeyURL, result.URL).Msg("LLM extraction returned invalid format")
+			} else {
+				e.logger.Error().Err(err).Str(logKeyURL, result.URL).Msg("LLM extraction failed")
+			}
 
 			claims = extractClaims(analysisText)
 		}
@@ -218,12 +223,12 @@ func (e *Extractor) parseLLMClaims(res string) ([]ExtractedClaim, error) {
 	}
 
 	if lastErr == nil {
-		e.logger.Warn().Str(fieldResponse, res).Msg("invalid LLM response format: no JSON array found")
+		e.logger.Debug().Str(fieldResponse, truncateText(res, responseTruncateLen)).Msg("invalid LLM response format: no JSON array found")
 
 		return nil, errInvalidLLMResponse
 	}
 
-	e.logger.Warn().Err(lastErr).Str(fieldResponse, res).Msg("unmarshal llm claims failed")
+	e.logger.Warn().Err(lastErr).Str(fieldResponse, truncateText(res, responseTruncateLen)).Msg("unmarshal llm claims failed")
 
 	return nil, fmt.Errorf("unmarshal llm claims: %w", lastErr)
 }
@@ -243,7 +248,7 @@ func (e *Extractor) fetchContent(ctx context.Context, url string) ([]byte, error
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; DigestBot/1.0)")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain")
 
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
@@ -258,12 +263,56 @@ func (e *Extractor) fetchContent(ctx context.Context, url string) ([]byte, error
 		return nil, fmt.Errorf(errWrapFmtWithCode, errUnexpectedStatus, resp.StatusCode)
 	}
 
+	contentType, err := e.checkResponseContentType(resp)
+	if err != nil {
+		return nil, err
+	}
+
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxContentLength))
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 
+	if err = e.detectAndVerifyContentType(body, contentType); err != nil {
+		return nil, err
+	}
+
 	return body, nil
+}
+
+func (e *Extractor) checkResponseContentType(resp *http.Response) (string, error) {
+	contentType := resp.Header.Get(httpHeaderContent)
+	if contentType != "" &&
+		contentType != applicationOctetStream &&
+		!isTextualContentType(contentType) {
+		return "", fmt.Errorf(fmtErrWrapStr, errNonTextualContent, contentType)
+	}
+
+	return contentType, nil
+}
+
+func (e *Extractor) detectAndVerifyContentType(body []byte, initialCT string) error {
+	detectedType := initialCT
+	if detectedType == "" || detectedType == applicationOctetStream {
+		detectedType = http.DetectContentType(body)
+	}
+
+	if !isTextualContentType(detectedType) {
+		return fmt.Errorf(fmtErrWrapStr, errNonTextualContent, detectedType)
+	}
+
+	return nil
+}
+
+func isTextualContentType(ct string) bool {
+	ct = strings.ToLower(ct)
+
+	return strings.HasPrefix(ct, "text/") ||
+		strings.Contains(ct, "html") ||
+		strings.Contains(ct, "xml") ||
+		strings.Contains(ct, "json") ||
+		strings.Contains(ct, "rss") ||
+		strings.Contains(ct, "atom")
 }
 
 type claimCandidate struct {

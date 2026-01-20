@@ -34,8 +34,6 @@ const (
 
 	// Log field keys
 	logKeyItemID   = "item_id"
-	logKeyQuery    = "query"
-	logKeyURL      = "url"
 	logKeyDeleted  = "deleted"
 	logKeyLanguage = "language"
 
@@ -100,6 +98,7 @@ type Worker struct {
 
 func NewWorker(cfg *config.Config, database Repository, embeddingClient EmbeddingClient, logger *zerolog.Logger) *Worker {
 	registry := NewProviderRegistry(cfg.EnrichmentProviderCooldown)
+	registry.SetGracePeriod(cfg.EnrichmentProviderGrace)
 	registerProviders(cfg, registry)
 
 	extractor := NewExtractor(logger)
@@ -356,7 +355,7 @@ func (w *Worker) translateQueriesIfNeeded(ctx context.Context, queries []Generat
 			if err != nil {
 				w.logger.Debug().
 					Err(err).
-					Str("query", q.Query).
+					Str(logKeyQuery, q.Query).
 					Str(logKeyLanguage, q.Language).
 					Msg("failed to translate query")
 
@@ -722,6 +721,13 @@ func (w *Worker) processSingleResult(
 		Float32("score", scoringResult.AgreementScore).
 		Float32("min", minAgreement).
 		Int("matched_claims", len(scoringResult.MatchedClaims)).
+		Float64("jaccard", scoringResult.BestJaccard).
+		Float64("entity_overlap", scoringResult.BestEntityOverlap).
+		Int("entity_matches", scoringResult.BestEntityMatches).
+		Str("item_lang", w.queryGenerator.DetectLanguage(item.Summary)).
+		Str("source_lang", evidence.Source.Language).
+		Str("claim_lang", linkscore.DetectLanguage(scoringResult.BestClaim)).
+		Str("claim", truncateLogClaim(scoringResult.BestClaim)).
 		Msg("processed evidence source matching")
 
 	if scoringResult.AgreementScore < minAgreement {

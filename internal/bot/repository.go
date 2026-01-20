@@ -76,6 +76,8 @@ type Repository interface {
 	CountItemEvidence(ctx context.Context) (int, error)
 	CountItemEvidenceSince(ctx context.Context, since time.Time) (int, error)
 	GetEnrichmentUsageStats(ctx context.Context) (daily, monthly int, err error)
+	CountEnrichmentErrors(ctx context.Context) (int, error)
+	RetryFailedEnrichmentItems(ctx context.Context) (int64, error)
 
 	// Digest operations
 	GetLastPostedDigest(ctx context.Context) (*db.LastDigestInfo, error)
