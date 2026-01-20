@@ -980,7 +980,7 @@ func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessin
 
 	observability.MessagesIngested.WithLabelValues(hpc.ch.Username).Inc()
 	r.startAsyncMediaDownload(ctx, hpc, msg, rawMsg)
-	r.startAsyncLinkResolution(ctx, msg.Message)
+	r.startAsyncLinkResolution(ctx, msg.Message, entitiesJSON, mediaJSON)
 	r.startAsyncDiscoveryExtraction(ctx, hpc, msg)
 
 	return true
@@ -1018,16 +1018,27 @@ func (r *Reader) startAsyncMediaDownload(ctx context.Context, hpc *historyProces
 	}(ctx, hpc.api, msg.Media, *rawMsg)
 }
 
-func (r *Reader) startAsyncLinkResolution(ctx context.Context, text string) {
+func (r *Reader) startAsyncLinkResolution(ctx context.Context, text string, entitiesJSON, mediaJSON []byte) {
 	links := linkextract.ExtractLinks(text)
 	if len(links) == 0 || r.resolver == nil {
-		return
+		// Try to resolve text_url and webpage links embedded in entities/media.
+		extra := linkextract.ExtractURLsFromJSON(entitiesJSON, mediaJSON)
+		if len(extra) == 0 || r.resolver == nil {
+			return
+		}
+	}
+
+	resolutionText := text
+
+	extra := linkextract.ExtractURLsFromJSON(entitiesJSON, mediaJSON)
+	if len(extra) > 0 {
+		resolutionText = strings.TrimSpace(text + " " + strings.Join(extra, " "))
 	}
 
 	go func(ctx context.Context, text string) {
 		//nolint:errcheck // link resolution is best-effort background task
 		_, _ = r.resolver.ResolveLinks(ctx, text, r.cfg.MaxLinksPerMessage, r.cfg.LinkCacheTTL, r.cfg.TelegramLinkCacheTTL)
-	}(ctx, text)
+	}(ctx, resolutionText)
 }
 
 func (r *Reader) startAsyncDiscoveryExtraction(ctx context.Context, hpc *historyProcessingContext, msg *tg.Message) {

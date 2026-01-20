@@ -419,6 +419,21 @@ func TestExtractMentions(t *testing.T) {
 	}
 }
 
+func TestExtractURLsFromJSON(t *testing.T) {
+	entitiesJSON := []byte(`[{"URL":"http://russiancyprus.news/news/society/test","Length":10,"Offset":0}]`)
+	mediaJSON := []byte(`{"Webpage":{"URL":"https://russiancyprus.news/news/society/test2","DisplayURL":"russiancyprus.news/news/society/test2"}}`)
+
+	got := ExtractURLsFromJSON(entitiesJSON, mediaJSON)
+	want := []string{
+		"http://russiancyprus.news/news/society/test",
+		"https://russiancyprus.news/news/society/test2",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ExtractURLsFromJSON() = %v, want %v", got, want)
+	}
+}
+
 func TestExtractDomain(t *testing.T) {
 	tests := []struct {
 		name   string

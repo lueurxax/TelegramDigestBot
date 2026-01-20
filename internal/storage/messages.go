@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
@@ -68,6 +69,59 @@ func (db *DB) GetUnprocessedMessages(ctx context.Context, limit int) ([]RawMessa
 			CanonicalHash:           m.CanonicalHash,
 			IsForward:               m.IsForward,
 		}
+	}
+
+	return messages, nil
+}
+
+func (db *DB) GetRawMessagesForLinkBackfill(ctx context.Context, since time.Time, limit int) ([]RawMessage, error) {
+	const query = `
+SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.entities_json, rm.media_json
+FROM raw_messages rm
+WHERE rm.tg_date >= $1
+  AND (rm.entities_json IS NOT NULL OR rm.media_json IS NOT NULL)
+  AND NOT EXISTS (
+    SELECT 1 FROM message_links ml WHERE ml.raw_message_id = rm.id
+  )
+ORDER BY rm.tg_date DESC
+LIMIT $2`
+
+	rows, err := db.Pool.Query(ctx, query, since, safeIntToInt32(limit))
+	if err != nil {
+		return nil, fmt.Errorf("get raw messages for link backfill: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []RawMessage
+
+	for rows.Next() {
+		var (
+			id        pgtype.UUID
+			channelID pgtype.UUID
+			tgDate    time.Time
+			tgMessage int64
+			text      pgtype.Text
+			entities  []byte
+			media     []byte
+		)
+
+		if err := rows.Scan(&id, &channelID, &tgMessage, &tgDate, &text, &entities, &media); err != nil {
+			return nil, fmt.Errorf("scan raw message backfill row: %w", err)
+		}
+
+		messages = append(messages, RawMessage{
+			ID:           fromUUID(id),
+			ChannelID:    fromUUID(channelID),
+			TGMessageID:  tgMessage,
+			TGDate:       tgDate,
+			Text:         text.String,
+			EntitiesJSON: entities,
+			MediaJSON:    media,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate raw message backfill rows: %w", err)
 	}
 
 	return messages, nil

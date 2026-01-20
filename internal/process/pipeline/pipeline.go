@@ -12,7 +12,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
-	links "github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links/linkextract"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
@@ -25,7 +24,9 @@ import (
 
 type Repository interface {
 	GetSetting(ctx context.Context, key string, target interface{}) error
+	DeleteSetting(ctx context.Context, key string) error
 	GetUnprocessedMessages(ctx context.Context, limit int) ([]db.RawMessage, error)
+	GetRawMessagesForLinkBackfill(ctx context.Context, since time.Time, limit int) ([]db.RawMessage, error)
 	GetBacklogCount(ctx context.Context) (int, error)
 	GetActiveFilters(ctx context.Context) ([]db.Filter, error)
 	MarkAsProcessed(ctx context.Context, id string) error
@@ -48,11 +49,15 @@ type Repository interface {
 // Compile-time assertion that *db.DB implements Repository.
 var _ Repository = (*db.DB)(nil)
 
+type LinkResolver interface {
+	ResolveLinks(ctx context.Context, text string, maxLinks int, webTTL, tgTTL time.Duration) ([]domain.ResolvedLink, error)
+}
+
 type Pipeline struct {
 	cfg          *config.Config
 	database     Repository
 	llmClient    llm.Client
-	linkResolver *links.Resolver
+	linkResolver LinkResolver
 	logger       *zerolog.Logger
 }
 
@@ -97,7 +102,7 @@ const (
 	dropReasonDedupStrictGlobal   = "dedup_strict_global"
 )
 
-func New(cfg *config.Config, database Repository, llmClient llm.Client, linkResolver *links.Resolver, logger *zerolog.Logger) *Pipeline {
+func New(cfg *config.Config, database Repository, llmClient llm.Client, linkResolver LinkResolver, logger *zerolog.Logger) *Pipeline {
 	return &Pipeline{
 		cfg:          cfg,
 		database:     database,
@@ -117,7 +122,12 @@ func (p *Pipeline) Run(ctx context.Context) error {
 
 	for {
 		correlationID := uuid.New().String()
-		p.logger.Info().Str(LogFieldCorrelationID, correlationID).Msg("Starting pipeline batch")
+		logger := p.logger.With().Str(LogFieldCorrelationID, correlationID).Logger()
+		logger.Info().Msg("Starting pipeline batch")
+
+		if err := p.runLinkBackfill(ctx, logger); err != nil {
+			logger.Error().Err(err).Msg("failed to run link backfill")
+		}
 
 		if err := p.processNextBatch(ctx, correlationID); err != nil {
 			p.logger.Error().Err(err).Str(LogFieldCorrelationID, correlationID).Msg("failed to process batch")
@@ -414,10 +424,12 @@ func (p *Pipeline) skipMessageBasic(ctx context.Context, logger zerolog.Logger, 
 	}
 
 	if filtered, reason := f.FilterReason(m.Text); filtered {
-		if reason == filters.ReasonMinLength && s.linkEnrichmentEnabled && len(linkextract.ExtractLinks(m.Text)) > 0 {
-			// Do not skip if the message contains links and link enrichment is enabled,
-			// even if it's shorter than the minimum length.
-			return false
+		if reason == filters.ReasonMinLength && s.linkEnrichmentEnabled {
+			resolutionText := p.buildLinkResolutionText(m.Text, m.EntitiesJSON, m.MediaJSON)
+			if len(linkextract.ExtractLinks(resolutionText)) > 0 {
+				// Do not skip if the message contains links (including text_url entities).
+				return false
+			}
 		}
 
 		p.recordDrop(ctx, logger, m.ID, reason, "")

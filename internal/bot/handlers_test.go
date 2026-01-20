@@ -391,6 +391,11 @@ func TestPrepareSubcommandMessage(t *testing.T) {
 					t.Errorf("prepareSubcommandMessage().Entities[0].Length = %d, want %d", got.Entities[0].Length, expectedLen)
 				}
 			}
+
+			// Check CommandArguments
+			if got.CommandArguments() != strings.Join(tt.args[1:], " ") {
+				t.Errorf("prepareSubcommandMessage().CommandArguments() = %q, want %q", got.CommandArguments(), strings.Join(tt.args[1:], " "))
+			}
 		})
 	}
 }
@@ -2727,6 +2732,7 @@ func TestHelpSystemMessage(t *testing.T) {
 		"/system settings",
 		"/system errors",
 		"/system retry",
+		"/system link_backfill",
 	}
 
 	for _, part := range wantParts {

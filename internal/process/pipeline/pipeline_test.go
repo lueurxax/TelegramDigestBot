@@ -134,6 +134,16 @@ func (m *mockRepo) LinkMessageToLink(_ context.Context, _, _ string, _ int) erro
 	return nil
 }
 
+func (m *mockRepo) DeleteSetting(_ context.Context, key string) error {
+	delete(m.settings, key)
+
+	return nil
+}
+
+func (m *mockRepo) GetRawMessagesForLinkBackfill(_ context.Context, _ time.Time, _ int) ([]db.RawMessage, error) {
+	return nil, nil
+}
+
 type mockLLM struct {
 	llm.Client
 }

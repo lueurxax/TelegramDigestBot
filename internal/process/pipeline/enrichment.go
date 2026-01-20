@@ -3,8 +3,10 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/links/linkextract"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -13,7 +15,9 @@ func (p *Pipeline) enrichWithLinks(ctx context.Context, msg *db.RawMessage, enab
 		return nil, nil
 	}
 
-	resolvedLinks, err := p.linkResolver.ResolveLinks(ctx, msg.Text, maxLinks, webTTL, tgTTL)
+	resolutionText := p.buildLinkResolutionText(msg.Text, msg.EntitiesJSON, msg.MediaJSON)
+
+	resolvedLinks, err := p.linkResolver.ResolveLinks(ctx, resolutionText, maxLinks, webTTL, tgTTL)
 	if err != nil {
 		return nil, fmt.Errorf("resolve links: %w", err)
 	}
@@ -28,4 +32,17 @@ func (p *Pipeline) enrichWithLinks(ctx context.Context, msg *db.RawMessage, enab
 	}
 
 	return resolvedLinks, nil
+}
+
+func (p *Pipeline) buildLinkResolutionText(text string, entitiesJSON, mediaJSON []byte) string {
+	urls := linkextract.ExtractURLsFromJSON(entitiesJSON, mediaJSON)
+	if len(urls) == 0 {
+		return text
+	}
+
+	if strings.TrimSpace(text) == "" {
+		return strings.Join(urls, " ")
+	}
+
+	return strings.TrimSpace(text + " " + strings.Join(urls, " "))
 }

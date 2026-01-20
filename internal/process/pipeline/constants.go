@@ -42,6 +42,16 @@ const (
 	LogFieldCount         = "count"
 	LogFieldModel         = "model"
 	LogFieldItemID        = "item_id"
+	LogFieldLinkID        = "link_id"
+	LogFieldHours         = "hours"
+	LogFieldLimit         = "limit"
+)
+
+// Setting key constants
+const (
+	SettingMaxLinksPerMessage = "max_links_per_message"
+	SettingLinkCacheTTL       = "link_cache_ttl"
+	SettingTgLinkCacheTTL     = "tg_link_cache_ttl"
 )
 
 // Log message constants
