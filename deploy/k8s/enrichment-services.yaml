@@ -58,7 +58,7 @@ spec:
           set_cfg javastart_Xms Xms512m
           set_cfg javastart_Xmx Xmx2048m
           set_cfg adminAccountUserName admin
-          set_cfg adminAccountBase64MD5 ISMvKXpXpadDiUoOSoAfww==
+          set_cfg adminAccountBase64MD5 MD5:ISMvKXpXpadDiUoOSoAfww==
           set_cfg adminAccountAllPages true
           set_cfg network.unit.dht false
           set_cfg debug.search.remote.dht.off true
@@ -73,7 +73,7 @@ spec:
           set_cfg searchProcessRemoteCount_r 0
           set_cfg searchProcessRemoteCount_s 0
           set_cfg searchProcessRemoteCount_u 0
-          set_cfg crawlingDepth 1
+          set_cfg crawlingDepth 2
         volumeMounts:
         - name: yacy-data
           mountPath: /opt/yacy_search_server/DATA
@@ -206,7 +206,7 @@ metadata:
   name: yacy-seed-bootstrap
   namespace: digest
 spec:
-  schedule: "*/30 * * * *"
+  schedule: "*/10 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 5

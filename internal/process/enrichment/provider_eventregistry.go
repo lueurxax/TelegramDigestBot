@@ -20,7 +20,10 @@ const (
 	eventRegistryParamKeyword   = "keyword"
 )
 
-var errEventRegistryUnexpectedStatus = errors.New("eventregistry unexpected status")
+var (
+	errEventRegistryUnexpectedStatus = errors.New("eventregistry unexpected status")
+	errEventRegistryAPIError         = errors.New("eventregistry api error")
+)
 
 // EventRegistryProvider implements Provider for Event Registry API.
 type EventRegistryProvider struct {
@@ -148,6 +151,10 @@ type eventRegistryArticle struct {
 }
 
 func (p *EventRegistryProvider) parseResponse(body []byte, maxResults int) ([]SearchResult, error) {
+	if err := checkEventRegistryError(body); err != nil {
+		return nil, err
+	}
+
 	var resp eventRegistryResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("parse eventregistry json: %w", err)
@@ -192,4 +199,18 @@ func truncateDescription(text string) string {
 	}
 
 	return text[:maxDescriptionLength] + "..."
+}
+
+func checkEventRegistryError(body []byte) error {
+	if len(body) > 0 && body[0] != '{' && body[0] != '[' {
+		// Not JSON, likely an error message or HTML page from Event Registry
+		errMsg := string(body)
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:200] + "..."
+		}
+
+		return fmt.Errorf(fmtErrWrapStr, errEventRegistryAPIError, errMsg)
+	}
+
+	return nil
 }

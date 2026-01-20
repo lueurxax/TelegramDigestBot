@@ -18,8 +18,10 @@ func (m *mockLLMClient) CompleteText(_ context.Context, _, _ string) (string, er
 }
 
 const (
-	errFmtClaims = "expected %d claims, got %d"
-	testModel    = "test-model"
+	errFmtClaims      = "expected %d claims, got %d"
+	testModel         = "test-model"
+	expectedErrGotNil = "expected error, got nil"
+	unexpectedErrFmt  = "unexpected error: %v"
 )
 
 func TestExtractor_ExtractClaimsWithLLM_EmptyContent(t *testing.T) {
@@ -102,14 +104,14 @@ func TestExtractor_ExtractClaimsWithLLM_Robustness(t *testing.T) {
 			claims, err := e.extractClaimsWithLLM(context.Background(), content)
 			if tt.expectError {
 				if err == nil {
-					t.Errorf("expected error, got nil")
+					t.Error(expectedErrGotNil)
 				}
 
 				return
 			}
 
 			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+				t.Fatalf(unexpectedErrFmt, err)
 			}
 
 			if len(claims) != tt.expectCount {

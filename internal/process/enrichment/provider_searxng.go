@@ -23,7 +23,10 @@ const (
 	httpContentTypeJSON         = "application/json"
 )
 
-var errSearxNGUnexpectedStatus = errors.New("searxng unexpected status")
+var (
+	errSearxNGUnexpectedStatus = errors.New("searxng unexpected status")
+	errSearxNGAPIError         = errors.New("searxng api error")
+)
 
 // SearxNGProvider implements Provider for SearxNG metasearch instances.
 type SearxNGProvider struct {
@@ -165,6 +168,10 @@ type searxngResult struct {
 }
 
 func (p *SearxNGProvider) parseResponse(body []byte, maxResults int) ([]SearchResult, error) {
+	if err := checkSearxNGError(body); err != nil {
+		return nil, err
+	}
+
 	var resp searxngResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("parse searxng json: %w", err)
@@ -221,4 +228,18 @@ func parseSearxNGDate(dateStr string) time.Time {
 	}
 
 	return time.Time{}
+}
+
+func checkSearxNGError(body []byte) error {
+	if len(body) > 0 && body[0] != '{' && body[0] != '[' {
+		// Not JSON, likely an error message or HTML page from SearxNG
+		errMsg := string(body)
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:200] + "..."
+		}
+
+		return fmt.Errorf(fmtErrWrapStr, errSearxNGAPIError, errMsg)
+	}
+
+	return nil
 }

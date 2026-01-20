@@ -24,6 +24,7 @@ const (
 var (
 	errNewsAPIUnexpectedStatus = errors.New("newsapi unexpected status")
 	errNewsAPIBadStatus        = errors.New("newsapi bad status")
+	errNewsAPIError            = errors.New("newsapi api error")
 )
 
 // NewsAPIProvider implements Provider for NewsAPI.
@@ -151,6 +152,10 @@ type newsAPIArticle struct {
 }
 
 func (p *NewsAPIProvider) parseResponse(body []byte, maxResults int) ([]SearchResult, error) {
+	if err := checkNewsAPIError(body); err != nil {
+		return nil, err
+	}
+
 	var resp newsAPIResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("parse newsapi json: %w", err)
@@ -188,4 +193,18 @@ func (p *NewsAPIProvider) parseResponse(body []byte, maxResults int) ([]SearchRe
 	}
 
 	return results, nil
+}
+
+func checkNewsAPIError(body []byte) error {
+	if len(body) > 0 && body[0] != '{' && body[0] != '[' {
+		// Not JSON, likely an error message or HTML page from NewsAPI
+		errMsg := string(body)
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:200] + "..."
+		}
+
+		return fmt.Errorf(fmtErrWrapStr, errNewsAPIError, errMsg)
+	}
+
+	return nil
 }

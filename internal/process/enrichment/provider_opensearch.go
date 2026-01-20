@@ -23,7 +23,10 @@ const (
 	opensearchContentType        = "application/json"
 )
 
-var errOpenSearchUnexpectedStatus = errors.New("opensearch unexpected status")
+var (
+	errOpenSearchUnexpectedStatus = errors.New("opensearch unexpected status")
+	errOpenSearchAPIError         = errors.New("opensearch api error")
+)
 
 // OpenSearchProvider implements Provider for OpenSearch.
 type OpenSearchProvider struct {
@@ -213,6 +216,10 @@ type opensearchDocument struct {
 }
 
 func (p *OpenSearchProvider) parseResponse(body []byte, maxResults int) ([]SearchResult, error) {
+	if err := checkOpenSearchError(body); err != nil {
+		return nil, err
+	}
+
 	var resp opensearchResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("parse opensearch json: %w", err)
@@ -263,4 +270,18 @@ func (p *OpenSearchProvider) getDescription(doc opensearchDocument) string {
 	}
 
 	return ""
+}
+
+func checkOpenSearchError(body []byte) error {
+	if len(body) > 0 && body[0] != '{' && body[0] != '[' {
+		// Not JSON, likely an error message or HTML page from OpenSearch
+		errMsg := string(body)
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:200] + "..."
+		}
+
+		return fmt.Errorf(fmtErrWrapStr, errOpenSearchAPIError, errMsg)
+	}
+
+	return nil
 }

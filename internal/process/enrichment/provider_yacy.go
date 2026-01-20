@@ -19,22 +19,29 @@ const (
 	yacyHealthCheckTimout = 5 * time.Second
 )
 
-var errYaCyUnexpectedStatus = errors.New("yacy unexpected status")
+var (
+	errYaCyUnexpectedStatus = errors.New("yacy unexpected status")
+	errYaCyAPIError         = errors.New("yacy api error")
+)
 
 type YaCyProvider struct {
 	baseURL    string
 	username   string
 	password   string
+	resource   string
 	httpClient *http.Client
+	maxResults int
 	enabled    bool
 }
 
 type YaCyConfig struct {
-	Enabled  bool
-	BaseURL  string
-	Timeout  time.Duration
-	Username string
-	Password string
+	Enabled    bool
+	BaseURL    string
+	Timeout    time.Duration
+	Username   string
+	Password   string
+	Resource   string
+	MaxResults int
 }
 
 func NewYaCyProvider(cfg YaCyConfig) *YaCyProvider {
@@ -43,10 +50,17 @@ func NewYaCyProvider(cfg YaCyConfig) *YaCyProvider {
 		timeout = yacyDefaultTimeout
 	}
 
+	resource := strings.TrimSpace(cfg.Resource)
+	if resource == "" {
+		resource = "local"
+	}
+
 	return &YaCyProvider{
-		baseURL:  strings.TrimSuffix(cfg.BaseURL, "/"),
-		username: cfg.Username,
-		password: cfg.Password,
+		baseURL:    strings.TrimSuffix(cfg.BaseURL, "/"),
+		username:   cfg.Username,
+		password:   cfg.Password,
+		resource:   resource,
+		maxResults: cfg.MaxResults,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -92,6 +106,10 @@ func (p *YaCyProvider) Search(ctx context.Context, query string, maxResults int)
 		return nil, errProviderNotFound
 	}
 
+	if p.maxResults > 0 {
+		maxResults = p.maxResults
+	}
+
 	searchURL := p.buildSearchURL(query, maxResults)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
@@ -124,7 +142,7 @@ func (p *YaCyProvider) buildSearchURL(query string, maxResults int) string {
 	params := url.Values{}
 	params.Set(searchParamKeyQuery, query)
 	params.Set("count", fmt.Sprintf("%d", maxResults))
-	params.Set("resource", "global")
+	params.Set("resource", p.resource)
 	params.Set("urlmaskfilter", ".*")
 	params.Set("prefermaskfilter", "")
 
@@ -150,6 +168,10 @@ type yacyItem struct {
 }
 
 func (p *YaCyProvider) parseResponse(body []byte) ([]SearchResult, error) {
+	if err := checkYaCyError(body); err != nil {
+		return nil, err
+	}
+
 	var resp yacyResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("parse yacy json: %w", err)
@@ -226,4 +248,18 @@ func extractDomain(rawURL string) string {
 	}
 
 	return parsed.Host
+}
+
+func checkYaCyError(body []byte) error {
+	if len(body) > 0 && body[0] != '{' && body[0] != '[' {
+		// Not JSON, likely an error message or HTML page from YaCy
+		errMsg := string(body)
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:200] + "..."
+		}
+
+		return fmt.Errorf(fmtErrWrapStr, errYaCyAPIError, errMsg)
+	}
+
+	return nil
 }

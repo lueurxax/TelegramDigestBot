@@ -223,12 +223,18 @@ func (rc *digestRenderContext) buildMetadataSection(sb *strings.Builder) {
 // convertEvidenceForLLM converts database evidence to LLM-compatible format.
 func (rc *digestRenderContext) convertEvidenceForLLM(items []db.Item) llm.ItemEvidence {
 	result := make(llm.ItemEvidence)
+	minAgreement := rc.evidenceDisplayMinAgreement()
 
 	for _, item := range items {
 		if ev, ok := rc.evidence[item.ID]; ok && len(ev) > 0 {
-			sources := make([]llm.EvidenceSource, 0, len(ev))
+			filtered := filterEvidenceForDisplay(ev, minAgreement)
+			if len(filtered) == 0 {
+				continue
+			}
 
-			for _, e := range ev {
+			sources := make([]llm.EvidenceSource, 0, len(filtered))
+
+			for _, e := range filtered {
 				sources = append(sources, llm.EvidenceSource{
 					URL:             e.Source.URL,
 					Domain:          e.Source.Domain,
@@ -571,6 +577,11 @@ func (rc *digestRenderContext) appendEvidenceLine(sb *strings.Builder, items []d
 		return
 	}
 
+	evidenceList = filterEvidenceForDisplay(evidenceList, rc.evidenceDisplayMinAgreement())
+	if len(evidenceList) == 0 {
+		return
+	}
+
 	// Determine tier from evidence count and average score
 	tier := determineTierFromEvidence(evidenceList)
 	if tier != "" {
@@ -598,6 +609,59 @@ func (rc *digestRenderContext) appendEvidenceLine(sb *strings.Builder, items []d
 			fmt.Fprintf(sb, " <i>(%s)</i>", html.EscapeString(ev.Source.Domain))
 		}
 	}
+}
+
+func (rc *digestRenderContext) evidenceDisplayMinAgreement() float32 {
+	if rc == nil || rc.scheduler == nil || rc.scheduler.cfg == nil {
+		return 0
+	}
+
+	minAgreement := rc.scheduler.cfg.EnrichmentMinAgreement
+	if rc.scheduler.cfg.EvidenceClusteringMinScore > minAgreement {
+		minAgreement = rc.scheduler.cfg.EvidenceClusteringMinScore
+	}
+
+	return minAgreement
+}
+
+func filterEvidenceForDisplay(evidence []db.ItemEvidenceWithSource, minAgreement float32) []db.ItemEvidenceWithSource {
+	if len(evidence) == 0 {
+		return nil
+	}
+
+	filtered := make([]db.ItemEvidenceWithSource, 0, len(evidence))
+	seen := make(map[string]struct{}, len(evidence))
+
+	for _, ev := range evidence {
+		if ev.IsContradiction {
+			continue
+		}
+
+		if ev.AgreementScore < minAgreement {
+			continue
+		}
+
+		key := ev.Source.URL
+		if key == "" {
+			key = ev.Source.Domain + "|" + ev.Source.Title
+		}
+
+		if key != "" {
+			if _, ok := seen[key]; ok {
+				continue
+			}
+
+			seen[key] = struct{}{}
+		}
+
+		filtered = append(filtered, ev)
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].AgreementScore > filtered[j].AgreementScore
+	})
+
+	return filtered
 }
 
 func determineTierFromEvidence(evidenceList []db.ItemEvidenceWithSource) string {

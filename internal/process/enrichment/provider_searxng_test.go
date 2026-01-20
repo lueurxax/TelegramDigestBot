@@ -20,6 +20,8 @@ const (
 	testQueryFull    = "test query"
 	testTitle1       = "Test Article 1"
 	testDescription1 = "Description of article 1"
+	searxngAPIError  = "searxng api error"
+	searxngErrFmt    = "expected error to contain %q, got: %v"
 )
 
 func TestNewSearxNGProvider(t *testing.T) {
@@ -326,5 +328,35 @@ func TestParseSearxNGDate(t *testing.T) {
 				t.Errorf("expected non-zero time for %q", tt.input)
 			}
 		})
+	}
+}
+
+func TestSearxNGProvider_Search_NonJSONResponse(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+
+		_, err := w.Write([]byte("<html><body>SearxNG Error Page</body></html>"))
+		if err != nil {
+			t.Errorf("failed to write response: %v", err)
+		}
+	}))
+	defer ts.Close()
+
+	p := NewSearxNGProvider(SearxNGConfig{
+		Enabled: true,
+		BaseURL: ts.URL,
+	})
+
+	results, err := p.Search(context.Background(), testQuery, 1)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), searxngAPIError) {
+		t.Errorf(searxngErrFmt, searxngAPIError, err)
+	}
+
+	if len(results) != 0 {
+		t.Errorf("expected 0 results, got %d", len(results))
 	}
 }

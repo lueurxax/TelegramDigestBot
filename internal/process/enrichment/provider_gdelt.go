@@ -20,11 +20,16 @@ const (
 	secondsPerMinute     = 60.0
 	searchParamKeyQuery  = "query"
 	searchParamKeyFormat = "format"
+	fmtErrWrapStr        = "%w: %s"
 )
 
-var errGDELTUnexpectedStatus = errors.New("gdelt unexpected status")
+var (
+	errGDELTUnexpectedStatus = errors.New("gdelt unexpected status")
+	errGDELTAPIError         = errors.New("gdelt api error")
+)
 
 type GDELTProvider struct {
+	baseURL     string
 	httpClient  *http.Client
 	rateLimiter *rate.Limiter
 	enabled     bool
@@ -50,6 +55,7 @@ func NewGDELTProvider(cfg GDELTConfig) *GDELTProvider {
 	rps := float64(rpm) / secondsPerMinute
 
 	return &GDELTProvider{
+		baseURL: gdeltBaseURL,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -79,7 +85,7 @@ func (p *GDELTProvider) Search(ctx context.Context, query string, maxResults int
 		return nil, fmt.Errorf("gdelt rate limit: %w", err)
 	}
 
-	searchURL := buildGDELTURL(query, maxResults)
+	searchURL := p.buildGDELTURL(query, maxResults)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
 	if err != nil {
@@ -107,7 +113,7 @@ func (p *GDELTProvider) Search(ctx context.Context, query string, maxResults int
 	return parseGDELTResponse(body)
 }
 
-func buildGDELTURL(query string, maxResults int) string {
+func (p *GDELTProvider) buildGDELTURL(query string, maxResults int) string {
 	params := url.Values{}
 	params.Set(searchParamKeyQuery, query)
 	params.Set("mode", "ArtList")
@@ -115,7 +121,7 @@ func buildGDELTURL(query string, maxResults int) string {
 	params.Set(searchParamKeyFormat, "json")
 	params.Set("sort", "DateDesc")
 
-	return gdeltBaseURL + "?" + params.Encode()
+	return p.baseURL + "?" + params.Encode()
 }
 
 type gdeltResponse struct {
@@ -134,6 +140,10 @@ type gdeltArticle struct {
 }
 
 func parseGDELTResponse(body []byte) ([]SearchResult, error) {
+	if err := checkGDELTError(body); err != nil {
+		return nil, err
+	}
+
 	var resp gdeltResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("parse gdelt json: %w", err)
@@ -142,29 +152,49 @@ func parseGDELTResponse(body []byte) ([]SearchResult, error) {
 	results := make([]SearchResult, 0, len(resp.Articles))
 
 	for _, article := range resp.Articles {
-		articleURL := article.URL
-		if articleURL == "" {
-			articleURL = article.URLMobile
+		if result := mapGDELTArticle(article); result != nil {
+			results = append(results, *result)
 		}
-
-		if articleURL == "" {
-			continue
-		}
-
-		result := SearchResult{
-			URL:    articleURL,
-			Title:  article.Title,
-			Domain: article.Domain,
-		}
-
-		if article.SeenDate != "" {
-			if t, err := time.Parse("20060102T150405Z", article.SeenDate); err == nil {
-				result.PublishedAt = t
-			}
-		}
-
-		results = append(results, result)
 	}
 
 	return results, nil
+}
+
+func checkGDELTError(body []byte) error {
+	if len(body) > 0 && body[0] != '{' && body[0] != '[' {
+		// Not JSON, likely an error message from GDELT
+		errMsg := string(body)
+		if len(errMsg) > 200 {
+			errMsg = errMsg[:200] + "..."
+		}
+
+		return fmt.Errorf(fmtErrWrapStr, errGDELTAPIError, errMsg)
+	}
+
+	return nil
+}
+
+func mapGDELTArticle(article gdeltArticle) *SearchResult {
+	articleURL := article.URL
+	if articleURL == "" {
+		articleURL = article.URLMobile
+	}
+
+	if articleURL == "" {
+		return nil
+	}
+
+	result := &SearchResult{
+		URL:    articleURL,
+		Title:  article.Title,
+		Domain: article.Domain,
+	}
+
+	if article.SeenDate != "" {
+		if t, err := time.Parse("20060102T150405Z", article.SeenDate); err == nil {
+			result.PublishedAt = t
+		}
+	}
+
+	return result
 }
