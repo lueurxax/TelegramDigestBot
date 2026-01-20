@@ -133,7 +133,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		return nil
 	}
 
-	available := w.registry.AvailableProviders()
+	available := w.registry.AvailableProviders(ctx)
 	if len(available) == 0 {
 		w.logger.Warn().Msg("enrichment worker: no providers available")
 		return nil

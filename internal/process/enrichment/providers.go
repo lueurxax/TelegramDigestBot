@@ -45,7 +45,7 @@ type SearchResult struct {
 type Provider interface {
 	Name() ProviderName
 	Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error)
-	IsAvailable() bool
+	IsAvailable(ctx context.Context) bool
 	Priority() int
 }
 
@@ -110,7 +110,7 @@ type fanOutResult struct {
 }
 
 func (r *ProviderRegistry) SearchWithFallback(ctx context.Context, query string, maxResults int) ([]SearchResult, ProviderName, error) {
-	activeProviders := r.getActiveProviders()
+	activeProviders := r.getActiveProviders(ctx)
 	if len(activeProviders) == 0 {
 		return nil, "", errNoProvidersAvailable
 	}
@@ -150,14 +150,14 @@ func (r *ProviderRegistry) SearchWithFallback(ctx context.Context, query string,
 	return r.selectBestResult(ctx, resultsChan)
 }
 
-func (r *ProviderRegistry) getActiveProviders() []Provider {
+func (r *ProviderRegistry) getActiveProviders(ctx context.Context) []Provider {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	active := make([]Provider, 0, len(r.providers))
 
 	for _, p := range r.providers {
-		if p.IsAvailable() && r.getCircuitBreaker(p.Name()).canAttempt() {
+		if p.IsAvailable(ctx) && r.getCircuitBreaker(p.Name()).canAttempt() {
 			active = append(active, p)
 		}
 	}
@@ -243,7 +243,7 @@ func (r *ProviderRegistry) handleChanClosed(bestResults []SearchResult, bestProv
 	return nil, "", errNoProvidersAvailable
 }
 
-func (r *ProviderRegistry) AvailableProviders() []ProviderName {
+func (r *ProviderRegistry) AvailableProviders(ctx context.Context) []ProviderName {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -251,7 +251,7 @@ func (r *ProviderRegistry) AvailableProviders() []ProviderName {
 
 	for _, name := range r.order {
 		p := r.providers[name]
-		if p.IsAvailable() && r.circuitBreakers[name].canAttempt() {
+		if p.IsAvailable(ctx) && r.circuitBreakers[name].canAttempt() {
 			available = append(available, name)
 		}
 	}

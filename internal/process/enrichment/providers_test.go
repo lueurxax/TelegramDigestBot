@@ -27,7 +27,7 @@ func (m *mockProvider) Search(_ context.Context, _ string, _ int) ([]SearchResul
 	return m.results, m.err
 }
 
-func (m *mockProvider) IsAvailable() bool {
+func (m *mockProvider) IsAvailable(_ context.Context) bool {
 	return m.available
 }
 
@@ -180,7 +180,7 @@ func TestProviderRegistry_AvailableProviders(t *testing.T) {
 	registry.Register(available)
 	registry.Register(unavailable)
 
-	providers := registry.AvailableProviders()
+	providers := registry.AvailableProviders(context.Background())
 	if len(providers) != 1 {
 		t.Errorf("available count: got %d, want 1", len(providers))
 	}

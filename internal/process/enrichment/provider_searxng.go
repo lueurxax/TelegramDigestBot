@@ -70,12 +70,12 @@ func (p *SearxNGProvider) Priority() int {
 	return PriorityHighMeta
 }
 
-func (p *SearxNGProvider) IsAvailable() bool {
+func (p *SearxNGProvider) IsAvailable(ctx context.Context) bool {
 	if !p.enabled || p.baseURL == "" {
 		return false
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), searxngHealthCheckTimeout)
+	ctx, cancel := context.WithTimeout(ctx, searxngHealthCheckTimeout)
 	defer cancel()
 
 	// SearxNG has a /config endpoint that returns instance configuration

@@ -91,7 +91,7 @@ func TestOpenSearchProvider_IsAvailable_Disabled(t *testing.T) {
 		BaseURL: opensearchTestBaseURL,
 	})
 
-	if p.IsAvailable() {
+	if p.IsAvailable(context.Background()) {
 		t.Error("expected disabled provider to be unavailable")
 	}
 }
@@ -102,7 +102,7 @@ func TestOpenSearchProvider_IsAvailable_EmptyURL(t *testing.T) {
 		BaseURL: "",
 	})
 
-	if p.IsAvailable() {
+	if p.IsAvailable(context.Background()) {
 		t.Error("expected provider with empty base URL to be unavailable")
 	}
 }
@@ -118,7 +118,7 @@ func TestOpenSearchProvider_IsAvailable_Reachable(t *testing.T) {
 		BaseURL: server.URL,
 	})
 
-	if !p.IsAvailable() {
+	if !p.IsAvailable(context.Background()) {
 		t.Error("expected reachable server to be available")
 	}
 }
@@ -130,7 +130,7 @@ func TestOpenSearchProvider_IsAvailable_Unreachable(t *testing.T) {
 		Timeout: 100 * time.Millisecond,
 	})
 
-	if p.IsAvailable() {
+	if p.IsAvailable(context.Background()) {
 		t.Error("expected unreachable server to be unavailable")
 	}
 }

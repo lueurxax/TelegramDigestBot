@@ -74,7 +74,7 @@ func (p *EventRegistryProvider) Priority() int {
 	return PriorityMedium
 }
 
-func (p *EventRegistryProvider) IsAvailable() bool {
+func (p *EventRegistryProvider) IsAvailable(_ context.Context) bool {
 	return p.enabled && p.apiKey != ""
 }
 

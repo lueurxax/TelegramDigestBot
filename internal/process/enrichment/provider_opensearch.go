@@ -85,12 +85,12 @@ func (p *OpenSearchProvider) Priority() int {
 	return PriorityLow
 }
 
-func (p *OpenSearchProvider) IsAvailable() bool {
+func (p *OpenSearchProvider) IsAvailable(ctx context.Context) bool {
 	if !p.enabled || p.baseURL == "" {
 		return false
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opensearchHealthCheckTimeout)
+	ctx, cancel := context.WithTimeout(ctx, opensearchHealthCheckTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL, nil)

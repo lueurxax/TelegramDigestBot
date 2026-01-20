@@ -17,9 +17,9 @@ type slowProvider struct {
 	priority int
 }
 
-func (p *slowProvider) Name() ProviderName { return p.name }
-func (p *slowProvider) Priority() int      { return p.priority }
-func (p *slowProvider) IsAvailable() bool  { return true }
+func (p *slowProvider) Name() ProviderName                 { return p.name }
+func (p *slowProvider) Priority() int                      { return p.priority }
+func (p *slowProvider) IsAvailable(_ context.Context) bool { return true }
 func (p *slowProvider) Search(ctx context.Context, query string, _ int) ([]SearchResult, error) {
 	select {
 	case <-time.After(p.delay):

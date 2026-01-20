@@ -72,7 +72,7 @@ func (p *GDELTProvider) Priority() int {
 	return PriorityHighFree
 }
 
-func (p *GDELTProvider) IsAvailable() bool {
+func (p *GDELTProvider) IsAvailable(_ context.Context) bool {
 	return p.enabled
 }
 

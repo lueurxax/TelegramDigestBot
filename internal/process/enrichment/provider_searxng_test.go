@@ -88,7 +88,7 @@ func TestSearxNGProvider_IsAvailable(t *testing.T) {
 			BaseURL: testBaseURL,
 		})
 
-		if p.IsAvailable() {
+		if p.IsAvailable(context.Background()) {
 			t.Error("expected unavailable when disabled")
 		}
 	})
@@ -99,7 +99,7 @@ func TestSearxNGProvider_IsAvailable(t *testing.T) {
 			BaseURL: "",
 		})
 
-		if p.IsAvailable() {
+		if p.IsAvailable(context.Background()) {
 			t.Error("expected unavailable when no base URL")
 		}
 	})
@@ -115,7 +115,7 @@ func TestSearxNGProvider_IsAvailable(t *testing.T) {
 			BaseURL: server.URL,
 		})
 
-		if !p.IsAvailable() {
+		if !p.IsAvailable(context.Background()) {
 			t.Error("expected available when server responds")
 		}
 	})

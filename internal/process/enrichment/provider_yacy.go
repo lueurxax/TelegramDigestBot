@@ -76,12 +76,12 @@ func (p *YaCyProvider) Priority() int {
 	return PriorityHighSelfHosted
 }
 
-func (p *YaCyProvider) IsAvailable() bool {
+func (p *YaCyProvider) IsAvailable(ctx context.Context) bool {
 	if !p.enabled || p.baseURL == "" {
 		return false
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), yacyHealthCheckTimout)
+	ctx, cancel := context.WithTimeout(ctx, yacyHealthCheckTimout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/Status.html", nil)

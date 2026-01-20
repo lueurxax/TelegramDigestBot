@@ -97,11 +97,12 @@ type providerHealth struct {
 }
 
 func (b *Bot) handleEnrichmentHealth(ctx context.Context, msg *tgbotapi.Message) {
-	health := b.fetchEnrichmentProviderHealth()
+	health := b.fetchEnrichmentProviderHealth(ctx)
 
 	var sb strings.Builder
 
 	sb.WriteString("🩺 <b>Enrichment Provider Health</b>\n\n")
+
 	statusLabel := StatusDisabled
 	if b.cfg.EnrichmentEnabled {
 		statusLabel = StatusEnabled
@@ -111,9 +112,11 @@ func (b *Bot) handleEnrichmentHealth(ctx context.Context, msg *tgbotapi.Message)
 
 	for _, entry := range health {
 		fmt.Fprintf(&sb, "• %s <b>%s</b>: %s", entry.emoji, html.EscapeString(entry.name), html.EscapeString(entry.status))
+
 		if entry.detail != "" {
 			fmt.Fprintf(&sb, " — %s", html.EscapeString(entry.detail))
 		}
+
 		sb.WriteString("\n")
 	}
 
@@ -122,22 +125,22 @@ func (b *Bot) handleEnrichmentHealth(ctx context.Context, msg *tgbotapi.Message)
 	b.reply(msg, sb.String())
 }
 
-func (b *Bot) fetchEnrichmentProviderHealth() []providerHealth {
+func (b *Bot) fetchEnrichmentProviderHealth(ctx context.Context) []providerHealth {
 	selection := parseProviderSelection(b.cfg.EnrichmentProviders)
 
 	results := []providerHealth{
-		b.checkYaCyHealth(selection),
-		b.checkSearxNGHealth(selection),
-		b.checkGDELTHealth(selection),
-		b.checkEventRegistryHealth(selection),
-		b.checkNewsAPIHealth(selection),
-		b.checkOpenSearchHealth(selection),
+		b.checkYaCyHealth(ctx, selection),
+		b.checkSearxNGHealth(ctx, selection),
+		b.checkGDELTHealth(ctx, selection),
+		b.checkEventRegistryHealth(ctx, selection),
+		b.checkNewsAPIHealth(ctx, selection),
+		b.checkOpenSearchHealth(ctx, selection),
 	}
 
 	return results
 }
 
-func (b *Bot) checkYaCyHealth(selection map[string]bool) providerHealth {
+func (b *Bot) checkYaCyHealth(ctx context.Context, selection map[string]bool) providerHealth {
 	selected := isProviderSelected(selection, string(enrichment.ProviderYaCy))
 	if !selected {
 		return providerHealth{name: "YaCy", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
@@ -160,14 +163,14 @@ func (b *Bot) checkYaCyHealth(selection map[string]bool) providerHealth {
 		Resource: b.cfg.YaCyResource,
 	})
 
-	if provider.IsAvailable() {
+	if provider.IsAvailable(ctx) {
 		return providerHealth{name: "YaCy", status: "ok", emoji: "✅", detail: b.cfg.YaCyBaseURL}
 	}
 
 	return providerHealth{name: "YaCy", status: "unreachable", emoji: "❌", detail: b.cfg.YaCyBaseURL}
 }
 
-func (b *Bot) checkSearxNGHealth(selection map[string]bool) providerHealth {
+func (b *Bot) checkSearxNGHealth(ctx context.Context, selection map[string]bool) providerHealth {
 	selected := isProviderSelected(selection, string(enrichment.ProviderSearxNG))
 	if !selected {
 		return providerHealth{name: "SearxNG", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
@@ -187,14 +190,14 @@ func (b *Bot) checkSearxNGHealth(selection map[string]bool) providerHealth {
 		Timeout: b.cfg.SearxNGTimeout,
 	})
 
-	if provider.IsAvailable() {
+	if provider.IsAvailable(ctx) {
 		return providerHealth{name: "SearxNG", status: "ok", emoji: "✅", detail: b.cfg.SearxNGBaseURL}
 	}
 
 	return providerHealth{name: "SearxNG", status: "unreachable", emoji: "❌", detail: b.cfg.SearxNGBaseURL}
 }
 
-func (b *Bot) checkGDELTHealth(selection map[string]bool) providerHealth {
+func (b *Bot) checkGDELTHealth(ctx context.Context, selection map[string]bool) providerHealth {
 	selected := isProviderSelected(selection, string(enrichment.ProviderGDELT))
 	if !selected {
 		return providerHealth{name: "GDELT", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
@@ -207,7 +210,7 @@ func (b *Bot) checkGDELTHealth(selection map[string]bool) providerHealth {
 	return providerHealth{name: "GDELT", status: "configured", emoji: "🟡"}
 }
 
-func (b *Bot) checkEventRegistryHealth(selection map[string]bool) providerHealth {
+func (b *Bot) checkEventRegistryHealth(ctx context.Context, selection map[string]bool) providerHealth {
 	selected := isProviderSelected(selection, string(enrichment.ProviderEventRegistry))
 	if !selected {
 		return providerHealth{name: "Event Registry", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
@@ -224,7 +227,7 @@ func (b *Bot) checkEventRegistryHealth(selection map[string]bool) providerHealth
 	return providerHealth{name: "Event Registry", status: "configured", emoji: "🟡"}
 }
 
-func (b *Bot) checkNewsAPIHealth(selection map[string]bool) providerHealth {
+func (b *Bot) checkNewsAPIHealth(ctx context.Context, selection map[string]bool) providerHealth {
 	selected := isProviderSelected(selection, string(enrichment.ProviderNewsAPI))
 	if !selected {
 		return providerHealth{name: "NewsAPI", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
@@ -241,7 +244,7 @@ func (b *Bot) checkNewsAPIHealth(selection map[string]bool) providerHealth {
 	return providerHealth{name: "NewsAPI", status: "configured", emoji: "🟡"}
 }
 
-func (b *Bot) checkOpenSearchHealth(selection map[string]bool) providerHealth {
+func (b *Bot) checkOpenSearchHealth(ctx context.Context, selection map[string]bool) providerHealth {
 	selected := isProviderSelected(selection, string(enrichment.ProviderOpenSearch))
 	if !selected {
 		return providerHealth{name: "OpenSearch", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
@@ -262,7 +265,7 @@ func (b *Bot) checkOpenSearchHealth(selection map[string]bool) providerHealth {
 		Timeout: b.cfg.OpenSearchTimeout,
 	})
 
-	if provider.IsAvailable() {
+	if provider.IsAvailable(ctx) {
 		return providerHealth{name: "OpenSearch", status: "ok", emoji: "✅", detail: b.cfg.OpenSearchBaseURL}
 	}
 
@@ -271,6 +274,7 @@ func (b *Bot) checkOpenSearchHealth(selection map[string]bool) providerHealth {
 
 func parseProviderSelection(raw string) map[string]bool {
 	selection := make(map[string]bool)
+
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return selection

@@ -76,7 +76,7 @@ func (p *NewsAPIProvider) Priority() int {
 	return PriorityMediumFallback
 }
 
-func (p *NewsAPIProvider) IsAvailable() bool {
+func (p *NewsAPIProvider) IsAvailable(_ context.Context) bool {
 	return p.enabled && p.apiKey != ""
 }
 
