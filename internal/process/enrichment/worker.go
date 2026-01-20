@@ -31,15 +31,6 @@ const (
 	maxLogClaimLen                   = 100
 	budgetCheckInterval              = 5 * time.Minute
 	domainFilterReloadInterval       = 5 * time.Minute
-
-	// Log field keys
-	logKeyItemID   = "item_id"
-	logKeyDeleted  = "deleted"
-	logKeyLanguage = "language"
-
-	// Settings keys for domain lists
-	settingEnrichmentAllowDomains = "enrichment_allow_domains"
-	settingEnrichmentDenyDomains  = "enrichment_deny_domains"
 )
 
 const (
@@ -202,7 +193,7 @@ func (w *Worker) handleBudget(ctx context.Context, lastBudgetCheck *time.Time) (
 		return false, nil
 	}
 
-	w.logger.Warn().Str("reason", reason).Msg("budget limit exceeded, pausing enrichment")
+	w.logger.Warn().Str(logKeyReason, reason).Msg("budget limit exceeded, pausing enrichment")
 
 	*lastBudgetCheck = time.Now()
 
@@ -714,19 +705,33 @@ func (w *Worker) processSingleResult(
 	}
 
 	scoringResult := w.scorer.Score(item.Summary, evidence)
+	itemLang := w.queryGenerator.DetectLanguage(item.Summary)
+	claimLang := linkscore.DetectLanguage(scoringResult.BestClaim)
+	languageMismatch := itemLang != "" && claimLang != "" && itemLang != claimLang
+	matchReason := w.matchDebugReason(evidence, scoringResult, minAgreement)
+	itemTokens := len(tokenize(item.Summary))
+	claimTokens := len(tokenize(scoringResult.BestClaim))
 
 	// Skip if agreement score is below minimum threshold
 	w.logger.Info().
 		Str(logKeyURL, result.URL).
 		Float32("score", scoringResult.AgreementScore).
 		Float32("min", minAgreement).
+		Str(logKeyReason, matchReason).
 		Int("matched_claims", len(scoringResult.MatchedClaims)).
 		Float64("jaccard", scoringResult.BestJaccard).
 		Float64("entity_overlap", scoringResult.BestEntityOverlap).
 		Int("entity_matches", scoringResult.BestEntityMatches).
-		Str("item_lang", w.queryGenerator.DetectLanguage(item.Summary)).
+		Int("claims", len(evidence.Claims)).
+		Int("item_tokens", itemTokens).
+		Int("claim_tokens", claimTokens).
+		Int("content_len", len(evidence.Source.Content)).
+		Int("description_len", len(evidence.Source.Description)).
+		Int("title_len", len(evidence.Source.Title)).
+		Bool("language_mismatch", languageMismatch).
+		Str("item_lang", itemLang).
 		Str("source_lang", evidence.Source.Language).
-		Str("claim_lang", linkscore.DetectLanguage(scoringResult.BestClaim)).
+		Str("claim_lang", claimLang).
 		Str("claim", truncateLogClaim(scoringResult.BestClaim)).
 		Msg("processed evidence source matching")
 
@@ -741,6 +746,34 @@ func (w *Worker) processSingleResult(
 	}
 
 	return scoringResult.AgreementScore, true
+}
+
+func (w *Worker) matchDebugReason(evidence *ExtractedEvidence, scoring ScoringResult, minAgreement float32) string {
+	if evidence == nil || evidence.Source == nil {
+		return "no_evidence"
+	}
+
+	if evidence.Source.ExtractionFailed {
+		return "extraction_failed"
+	}
+
+	if len(evidence.Claims) == 0 {
+		return "no_claims_extracted"
+	}
+
+	if scoring.BestClaim == "" {
+		return "best_claim_empty"
+	}
+
+	if scoring.AgreementScore == 0 {
+		return "no_overlap"
+	}
+
+	if scoring.AgreementScore < minAgreement {
+		return "below_min_agreement"
+	}
+
+	return "matched"
 }
 
 func (w *Worker) processEvidenceSource(ctx context.Context, result SearchResult, provider ProviderName, cacheTTL time.Duration) (*ExtractedEvidence, error) {
