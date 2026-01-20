@@ -375,9 +375,19 @@ func TestDetectLanguage(t *testing.T) {
 			expected: langUkrainian,
 		},
 		{
+			name:     "Greek text",
+			text:     "Η κυβέρνηση ανακοίνωσε νέα μέτρα για την οικονομία",
+			expected: langGreek,
+		},
+		{
 			name:     "Mixed English-Russian",
 			text:     "Apple объявила о новых продуктах",
 			expected: langRussian, // Cyrillic dominates
+		},
+		{
+			name:     "Latin non-English",
+			text:     "Guten Tag aus Berlin und willkommen",
+			expected: langUnknown,
 		},
 		{
 			name:     "Chinese text",
@@ -414,6 +424,7 @@ func TestIsEnglish(t *testing.T) {
 		{langEnglish, true},
 		{langRussian, false},
 		{langUkrainian, false},
+		{langGreek, false},
 		{langUnknown, false},
 		{"de", false},
 		{"", false},
@@ -432,42 +443,56 @@ func TestIsEnglish(t *testing.T) {
 func TestGenerateIncludesLanguage(t *testing.T) {
 	gen := NewQueryGenerator()
 
-	t.Run("English summary has English language", func(t *testing.T) {
-		queries := gen.Generate("Apple Inc announced new iPhone sales increased by 15% in Q3", "Tech", "", nil)
-		if len(queries) == 0 {
-			t.Fatal("no queries generated for English summary")
-		}
+	testCases := []struct {
+		name         string
+		summary      string
+		topic        string
+		expectedLang string
+	}{
+		{
+			name:         "English summary has English language",
+			summary:      "Apple Inc announced new iPhone sales increased by 15% in Q3",
+			topic:        "Tech",
+			expectedLang: langEnglish,
+		},
+		{
+			name:         "Russian summary has Russian language",
+			summary:      "Президент России объявил о новых мерах поддержки экономики страны",
+			topic:        "Политика",
+			expectedLang: langRussian,
+		},
+		{
+			name:         "Ukrainian summary has Ukrainian language",
+			summary:      "Президент України підписав закон про освіту",
+			topic:        "Політика",
+			expectedLang: langUkrainian,
+		},
+		{
+			name:         "Greek summary has Greek language",
+			summary:      "Η κυβέρνηση ανακοίνωσε νέα μέτρα για την οικονομία",
+			topic:        "Επικαιρότητα",
+			expectedLang: langGreek,
+		},
+	}
 
-		for _, q := range queries {
-			if q.Language != langEnglish {
-				t.Errorf("English query %q: got language %q, want %q", q.Query, q.Language, langEnglish)
-			}
-		}
-	})
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertLanguageInQueries(t, gen, tc.summary, tc.topic, tc.expectedLang)
+		})
+	}
+}
 
-	t.Run("Russian summary has Russian language", func(t *testing.T) {
-		queries := gen.Generate("Президент России объявил о новых мерах поддержки экономики страны", "Политика", "", nil)
-		if len(queries) == 0 {
-			t.Fatal("no queries generated for Russian summary")
-		}
+func assertLanguageInQueries(t *testing.T, gen *QueryGenerator, summary, topic, expectedLang string) {
+	t.Helper()
 
-		for _, q := range queries {
-			if q.Language != langRussian {
-				t.Errorf("Russian query %q: got language %q, want %q", q.Query, q.Language, langRussian)
-			}
-		}
-	})
+	queries := gen.Generate(summary, topic, "", nil)
+	if len(queries) == 0 {
+		t.Fatalf("no queries generated for %s summary", expectedLang)
+	}
 
-	t.Run("Ukrainian summary has Ukrainian language", func(t *testing.T) {
-		queries := gen.Generate("Президент України підписав закон про освіту", "Політика", "", nil)
-		if len(queries) == 0 {
-			t.Fatal("no queries generated for Ukrainian summary")
+	for _, q := range queries {
+		if q.Language != expectedLang {
+			t.Errorf("query %q: got language %q, want %q", q.Query, q.Language, expectedLang)
 		}
-
-		for _, q := range queries {
-			if q.Language != langUkrainian {
-				t.Errorf("Ukrainian query %q: got language %q, want %q", q.Query, q.Language, langUkrainian)
-			}
-		}
-	})
+	}
 }

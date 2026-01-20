@@ -49,6 +49,10 @@ type Provider interface {
 	Priority() int
 }
 
+type LanguageSearchProvider interface {
+	SearchWithLanguage(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error)
+}
+
 type ProviderRegistry struct {
 	mu        sync.RWMutex
 	providers map[ProviderName]Provider
@@ -109,7 +113,7 @@ type fanOutResult struct {
 	priority int
 }
 
-func (r *ProviderRegistry) SearchWithFallback(ctx context.Context, query string, maxResults int) ([]SearchResult, ProviderName, error) {
+func (r *ProviderRegistry) SearchWithFallback(ctx context.Context, query, language string, maxResults int) ([]SearchResult, ProviderName, error) {
 	activeProviders := r.getActiveProviders(ctx)
 	if len(activeProviders) == 0 {
 		return nil, "", errNoProvidersAvailable
@@ -125,7 +129,7 @@ func (r *ProviderRegistry) SearchWithFallback(ctx context.Context, query string,
 		go func(provider Provider) {
 			defer wg.Done()
 
-			results, err := provider.Search(ctx, query, maxResults)
+			results, err := r.searchWithLanguage(ctx, provider, query, language, maxResults)
 			if err != nil {
 				r.getCircuitBreaker(provider.Name()).recordFailure(provider.Name())
 			} else {
@@ -148,6 +152,24 @@ func (r *ProviderRegistry) SearchWithFallback(ctx context.Context, query string,
 	}()
 
 	return r.selectBestResult(ctx, resultsChan)
+}
+
+func (r *ProviderRegistry) searchWithLanguage(ctx context.Context, provider Provider, query, language string, maxResults int) ([]SearchResult, error) {
+	if lp, ok := provider.(LanguageSearchProvider); ok {
+		results, err := lp.SearchWithLanguage(ctx, query, language, maxResults)
+		if err != nil {
+			return nil, fmt.Errorf("%s search with language: %w", provider.Name(), err)
+		}
+
+		return results, nil
+	}
+
+	results, err := provider.Search(ctx, query, maxResults)
+	if err != nil {
+		return nil, fmt.Errorf("%s search: %w", provider.Name(), err)
+	}
+
+	return results, nil
 }
 
 func (r *ProviderRegistry) getActiveProviders(ctx context.Context) []Provider {

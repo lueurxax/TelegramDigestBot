@@ -8,4 +8,8 @@ const (
 	applicationOctetStream = "application/octet-stream"
 	responseTruncateLen    = 200
 	unexpectedErrFmt       = "unexpected error: %v"
+	errWrapFmtWithCode     = "%w: %d"
+	secondsPerMinute       = 60.0
+	statusError            = "error"
+	statusSuccess          = "success"
 )

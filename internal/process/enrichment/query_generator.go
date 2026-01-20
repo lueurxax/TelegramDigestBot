@@ -19,11 +19,16 @@ const (
 	langEnglish   = "en"
 	langRussian   = "ru"
 	langUkrainian = "uk"
+	langGreek     = "el"
 	langUnknown   = "unknown"
 
 	// Language detection thresholds
 	cyrillicThreshold = 0.3 // If >30% Cyrillic, consider Russian
-	latinThreshold    = 0.5 // If >50% Latin, consider English
+	latinThreshold    = 0.5 // If >50% Latin, consider Latin-based language
+	greekThreshold    = 0.2 // If >20% Greek, consider Greek
+
+	englishStopwordMin   = 1
+	englishStopwordRatio = 0.08
 )
 
 // QueryGenerator creates search queries from item summaries.
@@ -491,13 +496,13 @@ func isCommonAcronym(s string) bool {
 }
 
 // detectLanguage detects the primary language of text using character analysis.
-// Returns "en" for English, "ru" for Russian, "uk" for Ukrainian, or "unknown" for other languages.
+// Returns "en" for English, "ru" for Russian, "uk" for Ukrainian, "el" for Greek, or "unknown" for other languages.
 func detectLanguage(text string) string {
 	if text == "" {
 		return langUnknown
 	}
 
-	latinCount, cyrillicCount, totalLetters, hasUkrainian := countCharacters(text)
+	latinCount, cyrillicCount, greekCount, totalLetters, hasUkrainian := countCharacters(text)
 
 	if totalLetters == 0 {
 		return langUnknown
@@ -505,6 +510,7 @@ func detectLanguage(text string) string {
 
 	cyrillicRatio := float64(cyrillicCount) / float64(totalLetters)
 	latinRatio := float64(latinCount) / float64(totalLetters)
+	greekRatio := float64(greekCount) / float64(totalLetters)
 
 	if cyrillicRatio >= cyrillicThreshold {
 		if hasUkrainian {
@@ -514,14 +520,22 @@ func detectLanguage(text string) string {
 		return langRussian
 	}
 
+	if greekRatio >= greekThreshold {
+		return langGreek
+	}
+
 	if latinRatio >= latinThreshold {
-		return langEnglish
+		if isLikelyEnglish(text) {
+			return langEnglish
+		}
+
+		return langUnknown
 	}
 
 	return langUnknown
 }
 
-func countCharacters(text string) (latinCount, cyrillicCount, totalLetters int, hasUkrainian bool) {
+func countCharacters(text string) (latinCount, cyrillicCount, greekCount, totalLetters int, hasUkrainian bool) {
 	for _, r := range text {
 		if !unicode.IsLetter(r) {
 			continue
@@ -535,6 +549,8 @@ func countCharacters(text string) (latinCount, cyrillicCount, totalLetters int, 
 			if isUkrainianLetter(r) {
 				hasUkrainian = true
 			}
+		} else if isGreek(r) {
+			greekCount++
 		} else if isLatin(r) {
 			latinCount++
 		}
@@ -556,6 +572,11 @@ func isLatin(r rune) bool {
 		(r >= 0x0100 && r <= 0x017F) // Latin Extended-A
 }
 
+func isGreek(r rune) bool {
+	return (r >= 0x0370 && r <= 0x03FF) || // Greek and Coptic
+		(r >= 0x1F00 && r <= 0x1FFF) // Greek Extended
+}
+
 func isUkrainianLetter(r rune) bool {
 	switch r {
 	case 'і', 'ї', 'є', 'ґ', 'І', 'Ї', 'Є', 'Ґ':
@@ -568,4 +589,28 @@ func isUkrainianLetter(r rune) bool {
 // isEnglish checks if the detected language is English.
 func isEnglish(language string) bool {
 	return language == langEnglish
+}
+
+func isLikelyEnglish(text string) bool {
+	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r)
+	})
+
+	if len(words) == 0 {
+		return false
+	}
+
+	matches := 0
+
+	for _, w := range words {
+		if isStopWord(w) {
+			matches++
+		}
+	}
+
+	if matches < englishStopwordMin {
+		return false
+	}
+
+	return float64(matches)/float64(len(words)) >= englishStopwordRatio
 }

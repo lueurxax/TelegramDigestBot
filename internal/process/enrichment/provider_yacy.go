@@ -1,6 +1,7 @@
 package enrichment
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -251,9 +252,10 @@ func extractDomain(rawURL string) string {
 }
 
 func checkYaCyError(body []byte) error {
-	if len(body) > 0 && body[0] != '{' && body[0] != '[' {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] != '{' && trimmed[0] != '[' {
 		// Not JSON, likely an error message or HTML page from YaCy
-		errMsg := string(body)
+		errMsg := string(trimmed)
 		if len(errMsg) > 200 {
 			errMsg = errMsg[:200] + "..."
 		}

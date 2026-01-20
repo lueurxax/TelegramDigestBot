@@ -137,7 +137,7 @@ type Config struct {
 	// NewsAPI provider
 	NewsAPIEnabled        bool          `env:"ENRICHMENT_NEWSAPI_ENABLED" envDefault:"false"`
 	NewsAPIKey            string        `env:"ENRICHMENT_NEWSAPI_KEY" envDefault:""`
-	NewsAPIRequestsPerMin int           `env:"ENRICHMENT_NEWSAPI_RPM" envDefault:"100"`
+	NewsAPIRequestsPerMin int           `env:"ENRICHMENT_NEWSAPI_RPM" envDefault:"1"`
 	NewsAPITimeout        time.Duration `env:"ENRICHMENT_NEWSAPI_TIMEOUT" envDefault:"30s"`
 
 	// OpenSearch provider

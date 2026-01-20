@@ -1,6 +1,7 @@
 package enrichment
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ const (
 	eventRegistryDefaultTimeout = 30 * time.Second
 	eventRegistryDefaultRPM     = 30
 	eventRegistryParamKeyword   = "keyword"
+	eventRegistryParamLang      = "lang"
 )
 
 var (
@@ -80,6 +82,18 @@ func (p *EventRegistryProvider) IsAvailable(_ context.Context) bool {
 
 // Search performs a search query against Event Registry.
 func (p *EventRegistryProvider) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+	return p.search(ctx, query, "", maxResults)
+}
+
+func (p *EventRegistryProvider) SearchWithLanguage(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error) {
+	if isUnknownLanguage(language) {
+		return p.search(ctx, query, "", maxResults)
+	}
+
+	return p.search(ctx, query, normalizeLanguage(language), maxResults)
+}
+
+func (p *EventRegistryProvider) search(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error) {
 	if !p.enabled {
 		return nil, errProviderNotFound
 	}
@@ -88,7 +102,7 @@ func (p *EventRegistryProvider) Search(ctx context.Context, query string, maxRes
 		return nil, fmt.Errorf("eventregistry rate limit: %w", err)
 	}
 
-	searchURL := p.buildSearchURL(query, maxResults)
+	searchURL := p.buildSearchURL(query, language, maxResults)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
 	if err != nil {
@@ -113,10 +127,10 @@ func (p *EventRegistryProvider) Search(ctx context.Context, query string, maxRes
 		return nil, fmt.Errorf("read eventregistry response: %w", err)
 	}
 
-	return p.parseResponse(body, maxResults)
+	return p.parseResponse(body, maxResults, language)
 }
 
-func (p *EventRegistryProvider) buildSearchURL(query string, maxResults int) string {
+func (p *EventRegistryProvider) buildSearchURL(query, language string, maxResults int) string {
 	params := url.Values{}
 	params.Set("apiKey", p.apiKey)
 	params.Set(eventRegistryParamKeyword, query)
@@ -124,6 +138,10 @@ func (p *EventRegistryProvider) buildSearchURL(query string, maxResults int) str
 	params.Set("articlesSortBy", "date")
 	params.Set("articlesSortByAsc", "false")
 	params.Set("resultType", "articles")
+
+	if language != "" {
+		params.Set(eventRegistryParamLang, language)
+	}
 
 	return eventRegistryBaseURL + "?" + params.Encode()
 }
@@ -150,7 +168,7 @@ type eventRegistryArticle struct {
 	Lang string `json:"lang"`
 }
 
-func (p *EventRegistryProvider) parseResponse(body []byte, maxResults int) ([]SearchResult, error) {
+func (p *EventRegistryProvider) parseResponse(body []byte, maxResults int, language string) ([]SearchResult, error) {
 	if err := checkEventRegistryError(body); err != nil {
 		return nil, err
 	}
@@ -165,6 +183,10 @@ func (p *EventRegistryProvider) parseResponse(body []byte, maxResults int) ([]Se
 	for i, article := range resp.Articles.Results {
 		if i >= maxResults {
 			break
+		}
+
+		if !languageMatches(language, article.Lang) {
+			continue
 		}
 
 		articleURL := article.URL
@@ -202,9 +224,10 @@ func truncateDescription(text string) string {
 }
 
 func checkEventRegistryError(body []byte) error {
-	if len(body) > 0 && body[0] != '{' && body[0] != '[' {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] != '{' && trimmed[0] != '[' {
 		// Not JSON, likely an error message or HTML page from Event Registry
-		errMsg := string(body)
+		errMsg := string(trimmed)
 		if len(errMsg) > 200 {
 			errMsg = errMsg[:200] + "..."
 		}

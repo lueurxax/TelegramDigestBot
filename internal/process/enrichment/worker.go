@@ -404,7 +404,7 @@ func (w *Worker) executeQueries(ctx context.Context, queries []GeneratedQuery, m
 
 func (w *Worker) executeQuery(ctx context.Context, gq GeneratedQuery, maxResults int, state *searchState) {
 	start := time.Now()
-	results, provider, err := w.registry.SearchWithFallback(ctx, gq.Query, maxResults)
+	results, provider, err := w.registry.SearchWithFallback(ctx, gq.Query, gq.Language, maxResults)
 
 	state.mu.Lock()
 	state.lastProvider = provider
@@ -413,7 +413,7 @@ func (w *Worker) executeQuery(ctx context.Context, gq GeneratedQuery, maxResults
 	observability.EnrichmentRequestDuration.WithLabelValues(string(provider)).Observe(time.Since(start).Seconds())
 
 	if err != nil {
-		observability.EnrichmentRequests.WithLabelValues("", "error").Inc()
+		observability.EnrichmentRequests.WithLabelValues("", statusError).Inc()
 
 		state.mu.Lock()
 		state.lastErr = err
@@ -424,7 +424,7 @@ func (w *Worker) executeQuery(ctx context.Context, gq GeneratedQuery, maxResults
 		return
 	}
 
-	observability.EnrichmentRequests.WithLabelValues(string(provider), "success").Inc()
+	observability.EnrichmentRequests.WithLabelValues(string(provider), statusSuccess).Inc()
 
 	// Track usage for budget controls
 	w.trackUsage(ctx, provider)

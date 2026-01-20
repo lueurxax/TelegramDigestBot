@@ -17,7 +17,6 @@ const (
 	testArticleURL2  = "https://example.org/article2"
 	testDomain       = "example.com"
 	testQuery        = "test"
-	testQueryFull    = "test query"
 	testTitle1       = "Test Article 1"
 	testDescription1 = "Description of article 1"
 	searxngAPIError  = "searxng api error"
@@ -300,6 +299,35 @@ func TestSearxNGProvider_Search_IncludesEngines(t *testing.T) {
 	// Check that engines parameter is in the query
 	if !strings.Contains(capturedQuery, "engines=") {
 		t.Errorf("query should contain engines parameter: %s", capturedQuery)
+	}
+}
+
+func TestSearxNGProvider_SearchWithLanguage_IncludesLanguage(t *testing.T) {
+	var capturedQuery string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.RawQuery
+
+		w.Header().Set(httpHeaderContent, httpContentTypeJSON)
+
+		if err := json.NewEncoder(w).Encode(searxngResponse{}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+
+	p := NewSearxNGProvider(SearxNGConfig{
+		Enabled: true,
+		BaseURL: server.URL,
+	})
+
+	_, err := p.SearchWithLanguage(context.Background(), testQuery, "ru", 10)
+	if err != nil {
+		t.Fatalf("search with language failed: %v", err)
+	}
+
+	if !strings.Contains(capturedQuery, "language=ru") {
+		t.Errorf("query should contain language parameter: %s", capturedQuery)
 	}
 }
 

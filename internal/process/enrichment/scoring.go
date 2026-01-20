@@ -150,11 +150,13 @@ func (s *Scorer) MarshalMatchedClaims(claims []MatchedClaim) []byte {
 
 func tokenize(text string) map[string]bool {
 	tokens := make(map[string]bool)
-	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+	text = normalizeCyrillic(text)
+	words := strings.FieldsFunc(text, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
 
 	for _, word := range words {
+		word = normalizeToken(word)
 		if len(word) >= minTokenLength && !isStopWord(word) {
 			tokens[word] = true
 		}
@@ -243,33 +245,60 @@ func getEntityWeight(entityType string) float64 {
 
 func entityMatchExists(entity Entity, candidates []Entity) bool {
 	norm1 := normalizeEntity(entity.Text)
+	norm1Stem := normalizeEntityStem(entity.Text)
+
 	for _, candidate := range candidates {
 		if entity.Type != candidate.Type {
 			continue
 		}
 
-		norm2 := normalizeEntity(candidate.Text)
-		if norm1 == norm2 {
+		if entitiesMatch(norm1, norm1Stem, candidate) {
 			return true
-		}
-
-		// Check for aliases
-		if isAlias(norm1, norm2) {
-			return true
-		}
-
-		// Check for partial match (one name is a prefix of another, but not too short)
-		if len(norm1) > 4 && len(norm2) > 4 {
-			if strings.HasPrefix(norm1, norm2) || strings.HasPrefix(norm2, norm1) {
-				return true
-			}
 		}
 	}
 
 	return false
 }
 
+func entitiesMatch(norm1, norm1Stem string, candidate Entity) bool {
+	norm2 := normalizeEntity(candidate.Text)
+	norm2Stem := normalizeEntityStem(candidate.Text)
+
+	if normalizedEntitiesEqual(norm1, norm1Stem, norm2, norm2Stem) {
+		return true
+	}
+
+	if isAlias(norm1, norm2) || isAlias(norm1, norm2Stem) || isAlias(norm1Stem, norm2) {
+		return true
+	}
+
+	return entitiesPrefixMatch(norm1, norm1Stem, norm2, norm2Stem)
+}
+
+func normalizedEntitiesEqual(norm1, norm1Stem, norm2, norm2Stem string) bool {
+	return norm1 == norm2 || norm1 == norm2Stem || norm1Stem == norm2 || norm1Stem == norm2Stem
+}
+
+func entitiesPrefixMatch(norm1, norm1Stem, norm2, norm2Stem string) bool {
+	base1 := norm1
+	if base1 == "" {
+		base1 = norm1Stem
+	}
+
+	base2 := norm2
+	if base2 == "" {
+		base2 = norm2Stem
+	}
+
+	if len(base1) > 4 && len(base2) > 4 {
+		return strings.HasPrefix(base1, base2) || strings.HasPrefix(base2, base1)
+	}
+
+	return false
+}
+
 func normalizeEntity(text string) string {
+	text = normalizeCyrillic(text)
 	text = strings.ToLower(text)
 	text = strings.TrimSpace(text)
 	// Remove common suffixes
@@ -279,19 +308,67 @@ func normalizeEntity(text string) string {
 	text = strings.TrimSuffix(text, " llc")
 	text = strings.TrimSuffix(text, " limited")
 
-	// Basic transliteration for common RU-EN names
-	text = transliterate(text)
-
 	// Remove punctuation
-	var b strings.Builder
+	var (
+		b     strings.Builder
+		token strings.Builder
+	)
 
 	for _, r := range text {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(r)
+			token.WriteRune(r)
+			continue
+		}
+
+		if token.Len() > 0 {
+			normalized := normalizeTokenBase(token.String())
+			b.WriteString(normalized)
+			token.Reset()
 		}
 	}
 
-	return b.String()
+	if token.Len() > 0 {
+		normalized := normalizeTokenBase(token.String())
+		b.WriteString(normalized)
+	}
+
+	normalized := b.String()
+
+	// Basic transliteration for common RU-EN names
+	return transliterate(normalized)
+}
+
+func normalizeEntityStem(text string) string {
+	text = normalizeCyrillic(text)
+	text = strings.ToLower(text)
+	text = strings.TrimSpace(text)
+
+	var (
+		b     strings.Builder
+		token strings.Builder
+	)
+
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			token.WriteRune(r)
+			continue
+		}
+
+		if token.Len() > 0 {
+			normalized := normalizeToken(token.String())
+			b.WriteString(normalized)
+			token.Reset()
+		}
+	}
+
+	if token.Len() > 0 {
+		normalized := normalizeToken(token.String())
+		b.WriteString(normalized)
+	}
+
+	normalized := b.String()
+
+	return transliterate(normalized)
 }
 
 func isAlias(s1, s2 string) bool {

@@ -1,6 +1,7 @@
 package enrichment
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ const (
 	searxngResponseFormatJSON   = "json"
 	searxngCategoriesGeneral    = "general"
 	searxngLanguageFilterPrefix = "lang_"
+	searxngParamLanguage        = "language"
 	httpHeaderAccept            = "Accept"
 	httpContentTypeJSON         = "application/json"
 )
@@ -98,11 +100,23 @@ func (p *SearxNGProvider) IsAvailable(ctx context.Context) bool {
 
 // Search performs a search query against the SearxNG instance.
 func (p *SearxNGProvider) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+	return p.search(ctx, query, "", maxResults)
+}
+
+func (p *SearxNGProvider) SearchWithLanguage(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error) {
+	if isUnknownLanguage(language) {
+		return p.search(ctx, query, "", maxResults)
+	}
+
+	return p.search(ctx, query, normalizeLanguage(language), maxResults)
+}
+
+func (p *SearxNGProvider) search(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error) {
 	if !p.enabled {
 		return nil, errProviderNotFound
 	}
 
-	searchURL := p.buildSearchURL(query)
+	searchURL := p.buildSearchURL(query, language)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
 	if err != nil {
@@ -133,11 +147,15 @@ func (p *SearxNGProvider) Search(ctx context.Context, query string, maxResults i
 	return p.parseResponse(body, maxResults)
 }
 
-func (p *SearxNGProvider) buildSearchURL(query string) string {
+func (p *SearxNGProvider) buildSearchURL(query, language string) string {
 	params := url.Values{}
 	params.Set("q", query)
 	params.Set(searchParamKeyFormat, searxngResponseFormatJSON)
 	params.Set("categories", searxngCategoriesGeneral)
+
+	if language != "" {
+		params.Set(searxngParamLanguage, language)
+	}
 
 	// Add engine filter if specified
 	if len(p.engines) > 0 {
@@ -231,9 +249,10 @@ func parseSearxNGDate(dateStr string) time.Time {
 }
 
 func checkSearxNGError(body []byte) error {
-	if len(body) > 0 && body[0] != '{' && body[0] != '[' {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] != '{' && trimmed[0] != '[' {
 		// Not JSON, likely an error message or HTML page from SearxNG
-		errMsg := string(body)
+		errMsg := string(trimmed)
 		if len(errMsg) > 200 {
 			errMsg = errMsg[:200] + "..."
 		}

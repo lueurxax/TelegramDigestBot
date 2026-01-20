@@ -1,6 +1,7 @@
 package enrichment
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,7 +19,6 @@ const (
 	gdeltBaseURL         = "https://api.gdeltproject.org/api/v2/doc/doc"
 	gdeltDefaultTimeout  = 30 * time.Second
 	gdeltDefaultRPM      = 60
-	secondsPerMinute     = 60.0
 	searchParamKeyQuery  = "query"
 	searchParamKeyFormat = "format"
 )
@@ -77,6 +77,18 @@ func (p *GDELTProvider) IsAvailable(_ context.Context) bool {
 }
 
 func (p *GDELTProvider) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+	return p.search(ctx, query, "", maxResults)
+}
+
+func (p *GDELTProvider) SearchWithLanguage(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error) {
+	if isUnknownLanguage(language) {
+		return p.search(ctx, query, "", maxResults)
+	}
+
+	return p.search(ctx, query, normalizeLanguage(language), maxResults)
+}
+
+func (p *GDELTProvider) search(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error) {
 	if !p.enabled {
 		return nil, errProviderNotFound
 	}
@@ -110,7 +122,7 @@ func (p *GDELTProvider) Search(ctx context.Context, query string, maxResults int
 		return nil, fmt.Errorf("read gdelt response: %w", err)
 	}
 
-	return parseGDELTResponse(body)
+	return parseGDELTResponse(body, language)
 }
 
 func (p *GDELTProvider) buildGDELTURL(query string, maxResults int) string {
@@ -155,7 +167,7 @@ type gdeltArticle struct {
 	SourceCountry string `json:"sourcecountry"`
 }
 
-func parseGDELTResponse(body []byte) ([]SearchResult, error) {
+func parseGDELTResponse(body []byte, language string) ([]SearchResult, error) {
 	if err := checkGDELTError(body); err != nil {
 		return nil, err
 	}
@@ -168,6 +180,10 @@ func parseGDELTResponse(body []byte) ([]SearchResult, error) {
 	results := make([]SearchResult, 0, len(resp.Articles))
 
 	for _, article := range resp.Articles {
+		if !languageMatches(language, article.Language) {
+			continue
+		}
+
 		if result := mapGDELTArticle(article); result != nil {
 			results = append(results, *result)
 		}
@@ -177,9 +193,10 @@ func parseGDELTResponse(body []byte) ([]SearchResult, error) {
 }
 
 func checkGDELTError(body []byte) error {
-	if len(body) > 0 && body[0] != '{' && body[0] != '[' {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] != '{' && trimmed[0] != '[' {
 		// Not JSON, likely an error message from GDELT
-		errMsg := string(body)
+		errMsg := string(trimmed)
 		if len(errMsg) > 200 {
 			errMsg = errMsg[:200] + "..."
 		}

@@ -1,6 +1,7 @@
 package enrichment
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,7 +17,7 @@ import (
 const (
 	newsAPIBaseURL        = "https://newsapi.org/v2/everything"
 	newsAPIDefaultTimeout = 30 * time.Second
-	newsAPIDefaultRPM     = 100 // Free tier: 100 requests/day, paid has higher limits
+	newsAPIDefaultRPM     = 1 // Free tier: 100 requests/day, set low to avoid instant rate limiting
 	newsAPIAuthHeader     = "X-Api-Key"
 	newsAPIParamLanguage  = "language"
 )
@@ -25,10 +26,12 @@ var (
 	errNewsAPIUnexpectedStatus = errors.New("newsapi unexpected status")
 	errNewsAPIBadStatus        = errors.New("newsapi bad status")
 	errNewsAPIError            = errors.New("newsapi api error")
+	errNewsAPIRateLimited      = errors.New("newsapi rate limited")
 )
 
 // NewsAPIProvider implements Provider for NewsAPI.
 type NewsAPIProvider struct {
+	baseURL     string
 	apiKey      string
 	httpClient  *http.Client
 	rateLimiter *rate.Limiter
@@ -58,7 +61,8 @@ func NewNewsAPIProvider(cfg NewsAPIConfig) *NewsAPIProvider {
 	rps := float64(rpm) / secondsPerMinute
 
 	return &NewsAPIProvider{
-		apiKey: cfg.APIKey,
+		baseURL: newsAPIBaseURL,
+		apiKey:  cfg.APIKey,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -82,6 +86,18 @@ func (p *NewsAPIProvider) IsAvailable(_ context.Context) bool {
 
 // Search performs a search query against NewsAPI.
 func (p *NewsAPIProvider) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+	return p.search(ctx, query, "", maxResults)
+}
+
+func (p *NewsAPIProvider) SearchWithLanguage(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error) {
+	if isUnknownLanguage(language) || !isNewsAPILanguageSupported(language) {
+		return p.search(ctx, query, "", maxResults)
+	}
+
+	return p.search(ctx, query, normalizeLanguage(language), maxResults)
+}
+
+func (p *NewsAPIProvider) search(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error) {
 	if !p.enabled {
 		return nil, errProviderNotFound
 	}
@@ -90,7 +106,7 @@ func (p *NewsAPIProvider) Search(ctx context.Context, query string, maxResults i
 		return nil, fmt.Errorf("newsapi rate limit: %w", err)
 	}
 
-	searchURL := p.buildSearchURL(query, maxResults)
+	searchURL := p.buildSearchURL(query, language, maxResults)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
 	if err != nil {
@@ -108,26 +124,46 @@ func (p *NewsAPIProvider) Search(ctx context.Context, query string, maxResults i
 		_ = resp.Body.Close()
 	}()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf(errWrapFmtWithCode, errNewsAPIUnexpectedStatus, resp.StatusCode)
-	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read newsapi response: %w", err)
 	}
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, errNewsAPIRateLimited
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		if err := checkNewsAPIError(body); err != nil {
+			return nil, err
+		}
+
+		return nil, fmt.Errorf(errWrapFmtWithCode, errNewsAPIUnexpectedStatus, resp.StatusCode)
+	}
+
 	return p.parseResponse(body, maxResults)
 }
 
-func (p *NewsAPIProvider) buildSearchURL(query string, maxResults int) string {
+func (p *NewsAPIProvider) buildSearchURL(query, language string, maxResults int) string {
 	params := url.Values{}
 	params.Set("q", query)
 	params.Set("pageSize", fmt.Sprintf("%d", maxResults))
 	params.Set("sortBy", "publishedAt")
-	params.Set(newsAPIParamLanguage, "en") // Default to English, can be extended
 
-	return newsAPIBaseURL + "?" + params.Encode()
+	if language != "" {
+		params.Set(newsAPIParamLanguage, language)
+	}
+
+	return p.baseURL + "?" + params.Encode()
+}
+
+func isNewsAPILanguageSupported(language string) bool {
+	switch normalizeLanguage(language) {
+	case "ar", "de", "en", "es", "fr", "he", "it", "nl", "no", "pt", "ru", "sv", "ud", "zh":
+		return true
+	default:
+		return false
+	}
 }
 
 // newsAPIResponse represents the JSON response from NewsAPI.
@@ -195,15 +231,31 @@ func (p *NewsAPIProvider) parseResponse(body []byte, maxResults int) ([]SearchRe
 	return results, nil
 }
 
+type newsAPIErrorResponse struct {
+	Status  string `json:"status"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 func checkNewsAPIError(body []byte) error {
-	if len(body) > 0 && body[0] != '{' && body[0] != '[' {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return nil
+	}
+
+	if trimmed[0] != '{' && trimmed[0] != '[' {
 		// Not JSON, likely an error message or HTML page from NewsAPI
-		errMsg := string(body)
-		if len(errMsg) > 200 {
-			errMsg = errMsg[:200] + "..."
+		errMsg := string(trimmed)
+		if len(errMsg) > responseTruncateLen {
+			errMsg = errMsg[:responseTruncateLen] + "..."
 		}
 
 		return fmt.Errorf(fmtErrWrapStr, errNewsAPIError, errMsg)
+	}
+
+	var errResp newsAPIErrorResponse
+	if err := json.Unmarshal(trimmed, &errResp); err == nil && errResp.Status == "error" {
+		return fmt.Errorf("%w: %s (%s)", errNewsAPIError, errResp.Message, errResp.Code)
 	}
 
 	return nil

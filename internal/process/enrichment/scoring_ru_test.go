@@ -4,6 +4,8 @@ import (
 	"testing"
 )
 
+const expectedMatchedClaims = "expected matched claims"
+
 func TestScorer_Score_RussianVsEnglish(t *testing.T) {
 	s := NewScorer()
 
@@ -33,6 +35,29 @@ func TestScorer_Score_RussianVsEnglish(t *testing.T) {
 	}
 
 	if len(result.MatchedClaims) == 0 {
-		t.Error("expected matched claims")
+		t.Error(expectedMatchedClaims)
+	}
+}
+
+func TestScorer_Score_RussianStemming(t *testing.T) {
+	s := NewScorer()
+
+	itemSummary := "Население Земли растет быстрыми темпами."
+	evidence := &ExtractedEvidence{
+		Claims: []ExtractedClaim{
+			{
+				Text:     "Население Земля растет быстрыми темпами.",
+				Entities: []Entity{},
+			},
+		},
+	}
+
+	result := s.Score(itemSummary, evidence)
+	if result.AgreementScore < 0.2 {
+		t.Errorf("expected score >= 0.2 for RU stemming match, got %f", result.AgreementScore)
+	}
+
+	if len(result.MatchedClaims) == 0 {
+		t.Error(expectedMatchedClaims)
 	}
 }

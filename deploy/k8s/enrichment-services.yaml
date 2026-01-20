@@ -59,7 +59,7 @@ spec:
           set_cfg javastart_Xmx Xmx2048m
           set_cfg adminAccountUserName admin
           set_cfg adminAccountBase64MD5 MD5:fd159b952cf1d0d49c03661e8242bf76
-          set_cfg adminAccountAllPages true
+          set_cfg adminAccountAllPages false
           set_cfg network.unit.dht false
           set_cfg debug.search.remote.dht.off true
           set_cfg network.unit.remotesearch.maxcount 0
@@ -255,6 +255,9 @@ data:
       port: 8080
       secret_key: "change-me"
       limiter: false
+    outgoing:
+      request_timeout: 10.0
+      max_request_timeout: 15.0
     search:
       safe_search: 0
       formats:
@@ -262,6 +265,12 @@ data:
       - json
     engines:
     - name: duckduckgo
+      disabled: true
+    - name: bing
+      disabled: false
+    - name: brave
+      disabled: false
+    - name: qwant
       disabled: false
     - name: wikipedia
       disabled: false

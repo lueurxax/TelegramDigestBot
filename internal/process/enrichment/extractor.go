@@ -35,9 +35,8 @@ const (
 	entityTypeMoney   = "MONEY"
 	entityTypePercent = "PERCENT"
 
-	errWrapFmtWithCode = "%w: %d"
-	httpHeaderContent  = "Content-Type"
-	fieldResponse      = "response"
+	httpHeaderContent = "Content-Type"
+	fieldResponse     = "response"
 )
 
 var (
@@ -474,46 +473,196 @@ func containsNumber(s string) bool {
 
 var (
 	orgPattern     = regexp.MustCompile(`(?i)(Inc|Corp|Ltd|LLC|Company|Group|Organization|Association|Foundation|ООО|ОАО|ЗАО|ПАО|Группа|Компания|Организация|Фонд)`)
-	personPattern  = regexp.MustCompile(`[A-ZА-Я][a-zа-я]+\s+[A-ZА-Я][a-zа-я]+`)
-	locPattern     = regexp.MustCompile(`(?i)(United States|Russia|China|Ukraine|Germany|France|UK|USA|Moscow|Washington|Beijing|London|Paris|Berlin|США|Росси[ияюе]|Кита[еяй]|Украин[аыеу]|Германи[ияюе]|Франци[ияюе]|Великобритани[ияюе]|Москв[аыеу]|Вашингтон[ае]?|Пекин[ае]?|Лондон[ае]?|Париж[ае]?|Берлин[ае]?)`)
+	personPattern  = regexp.MustCompile(`[A-ZА-ЯЁ][a-zа-яё]+(?:-[A-ZА-ЯЁ][a-zа-яё]+)?(?:\s+[A-ZА-ЯЁ][a-zа-яё]+(?:-[A-ZА-ЯЁ][a-zа-яё]+)?){1,2}`)
+	locPattern     = regexp.MustCompile(`(?i)(United States|Russia|China|Ukraine|Germany|France|UK|USA|Moscow|Washington|Beijing|London|Paris|Berlin|США|Росси[ияюе]|Кита[еяй]|Украин[аыеу]|Германи[ияюе]|Франци[ияюе]|Великобритани[ияюе]|Москв[аыеу]|Вашингтон[ае]?|Пекин[ае]?|Лондон[ае]?|Париж[ае]?|Берлин[ае]?|Земл[яеи])`)
 	moneyPattern   = regexp.MustCompile(`\$[\d,.]+\s*(million|billion|trillion)?|\d+\s*(million|billion|trillion)?\s*(dollars|euros|pounds|рублей|долларов|евро)`)
 	percentPattern = regexp.MustCompile(`\d+(?:\.\d+)?%`)
 )
 
+type entityExtractor struct {
+	entities []Entity
+	seen     map[string]bool
+}
+
+func newEntityExtractor() *entityExtractor {
+	return &entityExtractor{
+		entities: []Entity{},
+		seen:     make(map[string]bool),
+	}
+}
+
+func (e *entityExtractor) add(text, typ string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+
+	key := typ + ":" + text
+	if !e.seen[key] {
+		e.seen[key] = true
+		e.entities = append(e.entities, Entity{Text: text, Type: typ})
+	}
+}
+
+func (e *entityExtractor) addFromPattern(pattern *regexp.Regexp, text, typ string) {
+	for _, match := range pattern.FindAllString(text, -1) {
+		e.add(match, typ)
+	}
+}
+
 func extractEntities(text string) []Entity {
-	entities := []Entity{}
-	seen := make(map[string]bool)
+	ext := newEntityExtractor()
+	text = normalizeCyrillic(text)
 
-	addEntity := func(text, typ string) {
-		key := typ + ":" + text
-		if !seen[key] {
-			seen[key] = true
+	ext.addFromPattern(personPattern, text, entityTypePerson)
+	ext.addFromPattern(orgPattern, text, entityTypeOrg)
 
-			entities = append(entities, Entity{Text: text, Type: typ})
+	for _, acronym := range extractCyrillicAcronyms(text) {
+		ext.add(acronym, entityTypeOrg)
+	}
+
+	ext.addFromPattern(locPattern, text, entityTypeLoc)
+	ext.addFromPattern(moneyPattern, text, entityTypeMoney)
+	ext.addFromPattern(percentPattern, text, entityTypePercent)
+
+	if !hasEntityType(ext.entities, entityTypePerson) {
+		for _, phrase := range extractCapitalizedPhrases(text) {
+			ext.add(phrase, entityTypePerson)
 		}
 	}
 
-	for _, match := range personPattern.FindAllString(text, -1) {
-		addEntity(match, entityTypePerson)
+	return ext.entities
+}
+
+func hasEntityType(entities []Entity, typ string) bool {
+	for _, e := range entities {
+		if e.Type == typ {
+			return true
+		}
 	}
 
-	for _, match := range orgPattern.FindAllString(text, -1) {
-		addEntity(match, entityTypeOrg)
+	return false
+}
+
+func extractCyrillicAcronyms(text string) []string {
+	words := strings.FieldsFunc(text, func(r rune) bool {
+		return !unicode.IsLetter(r)
+	})
+
+	acronyms := make([]string, 0)
+	seen := make(map[string]bool)
+
+	for _, word := range words {
+		word = strings.TrimSpace(word)
+
+		if !isCyrillicAcronym(word) {
+			continue
+		}
+
+		if !seen[word] {
+			seen[word] = true
+			acronyms = append(acronyms, word)
+		}
 	}
 
-	for _, match := range locPattern.FindAllString(text, -1) {
-		addEntity(match, entityTypeLoc)
+	return acronyms
+}
+
+func isCyrillicAcronym(word string) bool {
+	length := runeCount(word)
+	if length < 2 || length > 6 {
+		return false
 	}
 
-	for _, match := range moneyPattern.FindAllString(text, -1) {
-		addEntity(match, entityTypeMoney)
+	hasCyrillic := false
+
+	for _, r := range word {
+		if !unicode.IsLetter(r) || !unicode.IsUpper(r) {
+			return false
+		}
+
+		if isCyrillicRune(r) {
+			hasCyrillic = true
+		}
 	}
 
-	for _, match := range percentPattern.FindAllString(text, -1) {
-		addEntity(match, entityTypePercent)
+	return hasCyrillic
+}
+
+func extractCapitalizedPhrases(text string) []string {
+	words := splitWords(text)
+	phrases := make([]string, 0)
+
+	for i := 0; i < len(words); i++ {
+		if !isTitleCaseWord(words[i]) {
+			continue
+		}
+
+		phrase := []string{words[i]}
+		for j := i + 1; j < len(words) && len(phrase) < 3; j++ {
+			if !isTitleCaseWord(words[j]) {
+				break
+			}
+
+			phrase = append(phrase, words[j])
+			i = j
+		}
+
+		if len(phrase) >= 2 {
+			phrases = append(phrases, strings.Join(phrase, " "))
+		}
 	}
 
-	return entities
+	return phrases
+}
+
+func splitWords(text string) []string {
+	fields := strings.Fields(text)
+	words := make([]string, 0, len(fields))
+
+	for _, f := range fields {
+		word := strings.TrimFunc(f, func(r rune) bool {
+			return !unicode.IsLetter(r) && r != '-'
+		})
+
+		if word != "" {
+			words = append(words, word)
+		}
+	}
+
+	return words
+}
+
+func isTitleCaseWord(word string) bool {
+	if word == "" {
+		return false
+	}
+
+	runes := []rune(word)
+
+	first := runes[0]
+	if !unicode.IsUpper(first) {
+		return false
+	}
+
+	hasLetter := false
+
+	for i := 1; i < len(runes); i++ {
+		r := runes[i]
+		if r == '-' {
+			continue
+		}
+
+		if unicode.IsLetter(r) {
+			hasLetter = true
+
+			if !unicode.IsLower(r) {
+				return false
+			}
+		}
+	}
+
+	return hasLetter
 }
 
 func (c ExtractedClaim) EntitiesJSON() []byte {

@@ -84,7 +84,7 @@ func TestProviderRegistry_SearchWithFallback_FirstProvider(t *testing.T) {
 	}
 	registry.Register(mock)
 
-	results, provider, err := registry.SearchWithFallback(ctx, "test query", 5)
+	results, provider, err := registry.SearchWithFallback(ctx, testQueryFull, "", 5)
 	if err != nil {
 		t.Fatalf("first provider search failed: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestProviderRegistry_SearchWithFallback_Fallback(t *testing.T) {
 	}
 	registry.Register(working)
 
-	results, provider, err := registry.SearchWithFallback(ctx, "fallback query", 5)
+	results, provider, err := registry.SearchWithFallback(ctx, "fallback query", "", 5)
 	if err != nil {
 		t.Fatalf("fallback search failed: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestProviderRegistry_SearchWithFallback_SkipsUnavailable(t *testing.T) {
 	}
 	registry.Register(available)
 
-	_, provider, err := registry.SearchWithFallback(ctx, "skip query", 5)
+	_, provider, err := registry.SearchWithFallback(ctx, "skip query", "", 5)
 	if err != nil {
 		t.Fatalf("skip unavailable search failed: %v", err)
 	}
@@ -165,9 +165,42 @@ func TestProviderRegistry_SearchWithFallback_NoProviders(t *testing.T) {
 	ctx := context.Background()
 	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 
-	_, _, err := registry.SearchWithFallback(ctx, "empty query", 5)
+	_, _, err := registry.SearchWithFallback(ctx, "empty query", "", 5)
 	if !errors.Is(err, errNoProvidersAvailable) {
 		t.Errorf("error: got %v, want errNoProvidersAvailable", err)
+	}
+}
+
+type mockLanguageProvider struct {
+	mockProvider
+	lastLanguage string
+}
+
+func (m *mockLanguageProvider) SearchWithLanguage(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error) {
+	m.lastLanguage = language
+	return m.Search(ctx, query, maxResults)
+}
+
+func TestProviderRegistry_SearchWithFallback_UsesLanguageProvider(t *testing.T) {
+	ctx := context.Background()
+	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
+	mock := &mockLanguageProvider{
+		mockProvider: mockProvider{
+			name:      ProviderYaCy,
+			available: true,
+			results:   []SearchResult{{URL: "http://example.com"}},
+		},
+	}
+
+	registry.Register(mock)
+
+	_, _, err := registry.SearchWithFallback(ctx, "test query", "ru", 5)
+	if err != nil {
+		t.Fatalf("language provider search failed: %v", err)
+	}
+
+	if mock.lastLanguage != "ru" {
+		t.Errorf("language: got %q, want %q", mock.lastLanguage, "ru")
 	}
 }
 

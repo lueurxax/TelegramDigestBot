@@ -18,9 +18,8 @@ func (m *mockLLMClient) CompleteText(_ context.Context, _, _ string) (string, er
 }
 
 const (
-	errFmtClaims      = "expected %d claims, got %d"
-	testModel         = "test-model"
-	expectedErrGotNil = "expected error, got nil"
+	errFmtClaims = "expected %d claims, got %d"
+	testModel    = "test-model"
 )
 
 func TestExtractor_ExtractClaimsWithLLM_EmptyContent(t *testing.T) {

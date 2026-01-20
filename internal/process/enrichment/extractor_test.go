@@ -162,6 +162,18 @@ func TestExtractEntities(t *testing.T) {
 			},
 			minEntities: 4,
 		},
+		{
+			name:        "russian entities with accents",
+			text:        "Населе́ние Земли́ по состоянию на январь 2026 года выросло.",
+			expectTypes: map[string]bool{entityTypePerson: true},
+			minEntities: 1,
+		},
+		{
+			name:        "russian acronyms",
+			text:        "ЕС и ООН обсудили новый пакет мер.",
+			expectTypes: map[string]bool{entityTypeOrg: true},
+			minEntities: 2,
+		},
 	}
 
 	for _, tt := range tests {
