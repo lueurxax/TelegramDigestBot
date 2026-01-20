@@ -1,7 +1,7 @@
 package enrichment
 
 import (
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // MD5 is required for HTTP Digest Authentication (RFC 2617)
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -11,38 +11,49 @@ import (
 	"strings"
 )
 
+var (
+	errRequestBodyNotReplayable = errors.New("request body is not replayable")
+	errMissingDigestRealmNonce  = errors.New("missing digest realm/nonce")
+	errYaCyRequestFailed        = errors.New("yacy request failed")
+)
+
 const (
-	digestPrefix = "digest "
-	basicPrefix  = "basic "
+	digestPrefix          = "digest "
+	basicPrefix           = "basic "
+	headerWwwAuthenticate = "Www-Authenticate"
+	fmtThreeStrings       = "%s:%s:%s"
+	fmtErrWrap            = "%w: %w"
+	authQop               = "auth"
+	cnonceLen             = 8
 )
 
 func (p *YaCyProvider) doRequest(req *http.Request) (*http.Response, error) {
 	if p.username == "" || p.password == "" {
-		return p.httpClient.Do(req)
+		resp, err := p.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf(fmtErrWrap, errYaCyRequestFailed, err)
+		}
+
+		return resp, nil
 	}
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf(fmtErrWrap, errYaCyRequestFailed, err)
 	}
 
 	if resp.StatusCode != http.StatusUnauthorized {
 		return resp, nil
 	}
 
-	challenge := findDigestChallenge(resp.Header.Values("Www-Authenticate"))
+	return p.handleUnauthorized(req, resp)
+}
+
+func (p *YaCyProvider) handleUnauthorized(req *http.Request, resp *http.Response) (*http.Response, error) {
+	challenge := findDigestChallenge(resp.Header.Values(headerWwwAuthenticate))
 	if challenge == "" {
-		if hasBasicChallenge(resp.Header.Values("Www-Authenticate")) {
-			_ = resp.Body.Close()
-
-			retry, err := cloneRequest(req)
-			if err != nil {
-				return nil, err
-			}
-
-			retry.SetBasicAuth(p.username, p.password)
-
-			return p.httpClient.Do(retry)
+		if hasBasicChallenge(resp.Header.Values(headerWwwAuthenticate)) {
+			return p.doBasicAuthRetry(req, resp)
 		}
 
 		return resp, nil
@@ -52,9 +63,31 @@ func (p *YaCyProvider) doRequest(req *http.Request) (*http.Response, error) {
 
 	authHeader, err := buildDigestAuthHeader(req, p.username, p.password, challenge)
 	if err != nil {
-		return resp, nil
+		return resp, nil //nolint:nilerr // if digest auth header build fails, return original 401
 	}
 
+	return p.doDigestAuthRetry(req, authHeader)
+}
+
+func (p *YaCyProvider) doBasicAuthRetry(req *http.Request, resp *http.Response) (*http.Response, error) {
+	_ = resp.Body.Close()
+
+	retry, err := cloneRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	retry.SetBasicAuth(p.username, p.password)
+
+	resp, err = p.httpClient.Do(retry)
+	if err != nil {
+		return nil, fmt.Errorf(fmtErrWrap, errYaCyRequestFailed, err)
+	}
+
+	return resp, nil
+}
+
+func (p *YaCyProvider) doDigestAuthRetry(req *http.Request, authHeader string) (*http.Response, error) {
 	retry, err := cloneRequest(req)
 	if err != nil {
 		return nil, err
@@ -62,7 +95,12 @@ func (p *YaCyProvider) doRequest(req *http.Request) (*http.Response, error) {
 
 	retry.Header.Set("Authorization", authHeader)
 
-	return p.httpClient.Do(retry)
+	resp, err := p.httpClient.Do(retry)
+	if err != nil {
+		return nil, fmt.Errorf(fmtErrWrap, errYaCyRequestFailed, err)
+	}
+
+	return resp, nil
 }
 
 func cloneRequest(req *http.Request) (*http.Request, error) {
@@ -72,7 +110,7 @@ func cloneRequest(req *http.Request) (*http.Request, error) {
 	}
 
 	if req.GetBody == nil {
-		return nil, errors.New("request body is not replayable")
+		return nil, errRequestBodyNotReplayable
 	}
 
 	body, err := req.GetBody()
@@ -115,16 +153,16 @@ func buildDigestAuthHeader(req *http.Request, username, password, challenge stri
 	qop := selectQop(params["qop"])
 
 	if realm == "" || nonce == "" {
-		return "", errors.New("missing digest realm/nonce")
+		return "", errMissingDigestRealmNonce
 	}
 
 	uri := req.URL.RequestURI()
-	cnonce := randomHex(8)
+	cnonce := randomHex(cnonceLen)
 	nc := "00000001"
 
-	ha1 := md5Hex(fmt.Sprintf("%s:%s:%s", username, realm, password))
+	ha1 := md5Hex(fmt.Sprintf(fmtThreeStrings, username, realm, password))
 	if strings.EqualFold(algorithm, "MD5-sess") {
-		ha1 = md5Hex(fmt.Sprintf("%s:%s:%s", ha1, nonce, cnonce))
+		ha1 = md5Hex(fmt.Sprintf(fmtThreeStrings, ha1, nonce, cnonce))
 	}
 
 	ha2 := md5Hex(fmt.Sprintf("%s:%s", req.Method, uri))
@@ -133,7 +171,7 @@ func buildDigestAuthHeader(req *http.Request, username, password, challenge stri
 	if qop != "" {
 		response = md5Hex(fmt.Sprintf("%s:%s:%s:%s:%s:%s", ha1, nonce, nc, cnonce, qop, ha2))
 	} else {
-		response = md5Hex(fmt.Sprintf("%s:%s:%s", ha1, nonce, ha2))
+		response = md5Hex(fmt.Sprintf(fmtThreeStrings, ha1, nonce, ha2))
 	}
 
 	parts := []string{
@@ -165,10 +203,11 @@ func buildDigestAuthHeader(req *http.Request, username, password, challenge stri
 
 func selectQop(qop string) string {
 	qop = strings.ToLower(qop)
+
 	for _, part := range strings.Split(qop, ",") {
 		part = strings.TrimSpace(part)
-		if part == "auth" {
-			return "auth"
+		if part == authQop {
+			return authQop
 		}
 	}
 
@@ -178,10 +217,9 @@ func selectQop(qop string) string {
 func parseAuthParams(raw string) map[string]string {
 	params := make(map[string]string)
 	i := 0
+
 	for i < len(raw) {
-		for i < len(raw) && (raw[i] == ' ' || raw[i] == ',') {
-			i++
-		}
+		i = skipSpaceAndComma(raw, i)
 
 		start := i
 		for i < len(raw) && raw[i] != '=' && raw[i] != ',' {
@@ -202,21 +240,9 @@ func parseAuthParams(raw string) map[string]string {
 		var val string
 
 		if raw[i] == '"' {
-			i++
-			valStart := i
-			for i < len(raw) && raw[i] != '"' {
-				i++
-			}
-			val = raw[valStart:i]
-			if i < len(raw) && raw[i] == '"' {
-				i++
-			}
+			val, i = parseQuotedValue(raw, i)
 		} else {
-			valStart := i
-			for i < len(raw) && raw[i] != ',' {
-				i++
-			}
-			val = strings.TrimSpace(raw[valStart:i])
+			val, i = parseUnquotedValue(raw, i)
 		}
 
 		if key != "" {
@@ -225,6 +251,44 @@ func parseAuthParams(raw string) map[string]string {
 	}
 
 	return params
+}
+
+func skipSpaceAndComma(raw string, i int) int {
+	for i < len(raw) && (raw[i] == ' ' || raw[i] == ',') {
+		i++
+	}
+
+	return i
+}
+
+func parseQuotedValue(raw string, i int) (string, int) {
+	i++ // skip opening quote
+
+	valStart := i
+
+	for i < len(raw) && raw[i] != '"' {
+		i++
+	}
+
+	val := raw[valStart:i]
+
+	if i < len(raw) && raw[i] == '"' {
+		i++
+	}
+
+	return val, i
+}
+
+func parseUnquotedValue(raw string, i int) (string, int) {
+	valStart := i
+
+	for i < len(raw) && raw[i] != ',' {
+		i++
+	}
+
+	val := strings.TrimSpace(raw[valStart:i])
+
+	return val, i
 }
 
 func randomHex(n int) string {
@@ -237,6 +301,8 @@ func randomHex(n int) string {
 }
 
 func md5Hex(s string) string {
-	sum := md5.Sum([]byte(s))
-	return hex.EncodeToString(sum[:])
+	h := md5.New() //nolint:gosec // MD5 is required for HTTP Digest Authentication (RFC 2617)
+	h.Write([]byte(s))
+
+	return hex.EncodeToString(h.Sum(nil))
 }
