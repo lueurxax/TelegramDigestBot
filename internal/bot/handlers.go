@@ -18,7 +18,6 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/schedule"
-	"github.com/lueurxax/telegram-digest-bot/internal/platform/settings"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -489,8 +488,7 @@ func (b *Bot) handleSystemNamespace(ctx context.Context, msg *tgbotapi.Message) 
 • <code>/system errors</code> - Recent processing errors
 • <code>/system retry</code> - Retry failed items
 • <code>/system scores</code> - Item importance scores
-• <code>/system factcheck</code> - Fact check status
-• <code>/system link_backfill &lt;hours&gt; [limit]</code> - Backfill message link cache`)
+• <code>/system factcheck</code> - Fact check status`)
 
 		return
 	}
@@ -513,52 +511,9 @@ func (b *Bot) handleSystemNamespace(ctx context.Context, msg *tgbotapi.Message) 
 		b.handleScores(ctx, &newMsg)
 	case CmdFactCheck:
 		b.handleFactCheck(ctx, &newMsg)
-	case "link_backfill":
-		b.handleLinkBackfill(ctx, &newMsg)
 	default:
 		b.reply(msg, fmt.Sprintf("❓ Unknown subcommand: <code>%s</code>\n\n💡 Run <code>/system</code> to see available diagnostics.", html.EscapeString(subcommand)))
 	}
-}
-
-func (b *Bot) handleLinkBackfill(ctx context.Context, msg *tgbotapi.Message) {
-	args := strings.Fields(msg.CommandArguments())
-	if len(args) == 0 {
-		b.reply(msg, "Usage: <code>/system link_backfill &lt;hours&gt; [limit]</code>")
-		return
-	}
-
-	hours, err := strconv.Atoi(args[0])
-	if err != nil || hours <= 0 {
-		b.reply(msg, "❌ Invalid hours. Example: <code>/system link_backfill 24</code>")
-		return
-	}
-
-	limit := settings.DefaultLinkBackfillLimit
-
-	if len(args) > 1 {
-		parsed, err := strconv.Atoi(args[1])
-		if err != nil || parsed <= 0 {
-			b.reply(msg, "❌ Invalid limit. Example: <code>/system link_backfill 24 500</code>")
-
-			return
-		}
-
-		limit = parsed
-	}
-
-	req := settings.LinkBackfillRequest{
-		RequestedAt: time.Now().UTC(),
-		RequestedBy: msg.From.ID,
-		Hours:       hours,
-		Limit:       limit,
-	}
-
-	if err := b.database.SaveSettingWithHistory(ctx, settings.SettingLinkBackfillRequest, req, msg.From.ID); err != nil {
-		b.reply(msg, fmt.Sprintf("❌ Error scheduling backfill: %s", html.EscapeString(err.Error())))
-		return
-	}
-
-	b.reply(msg, fmt.Sprintf("✅ Link backfill queued for the last <code>%d</code> hours (limit <code>%d</code>).", hours, limit))
 }
 
 func (b *Bot) handleTarget(ctx context.Context, msg *tgbotapi.Message) {
@@ -3268,8 +3223,7 @@ func helpSystemMessage() string {
 		"• <code>/system settings</code>\n" +
 		"• <code>/system errors</code>\n" +
 		"• <code>/system retry</code>\n" +
-		"• <code>/system factcheck</code>\n" +
-		"• <code>/system link_backfill &lt;hours&gt; [limit]</code>"
+		"• <code>/system factcheck</code>"
 }
 
 func helpScoresMessage() string {

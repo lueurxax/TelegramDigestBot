@@ -24,9 +24,7 @@ import (
 
 type Repository interface {
 	GetSetting(ctx context.Context, key string, target interface{}) error
-	DeleteSetting(ctx context.Context, key string) error
 	GetUnprocessedMessages(ctx context.Context, limit int) ([]db.RawMessage, error)
-	GetRawMessagesForLinkBackfill(ctx context.Context, since time.Time, limit int) ([]db.RawMessage, error)
 	GetBacklogCount(ctx context.Context) (int, error)
 	GetActiveFilters(ctx context.Context) ([]db.Filter, error)
 	MarkAsProcessed(ctx context.Context, id string) error
@@ -122,12 +120,7 @@ func (p *Pipeline) Run(ctx context.Context) error {
 
 	for {
 		correlationID := uuid.New().String()
-		logger := p.logger.With().Str(LogFieldCorrelationID, correlationID).Logger()
-		logger.Info().Msg("Starting pipeline batch")
-
-		if err := p.runLinkBackfill(ctx, logger); err != nil {
-			logger.Error().Err(err).Msg("failed to run link backfill")
-		}
+		p.logger.Info().Str(LogFieldCorrelationID, correlationID).Msg("Starting pipeline batch")
 
 		if err := p.processNextBatch(ctx, correlationID); err != nil {
 			p.logger.Error().Err(err).Str(LogFieldCorrelationID, correlationID).Msg("failed to process batch")

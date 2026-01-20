@@ -2734,7 +2734,6 @@ func TestHelpSystemMessage(t *testing.T) {
 		"/system settings",
 		"/system errors",
 		"/system retry",
-		"/system link_backfill",
 	}
 
 	for _, part := range wantParts {
