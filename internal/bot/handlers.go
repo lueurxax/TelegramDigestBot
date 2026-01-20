@@ -3096,6 +3096,7 @@ func (b *Bot) handleHelp(_ context.Context, msg *tgbotapi.Message) {
 		"schedule":    helpScheduleMessage(),
 		"config":      helpConfigMessage(),
 		"ai":          helpAIMessage(),
+		"enrichment":  enrichmentHelpMessage(),
 		"system":      helpSystemMessage(),
 		"scores":      helpScoresMessage(),
 		"factcheck":   helpFactCheckMessage(),
@@ -3131,8 +3132,8 @@ func helpSummaryMessage() string {
 		"• <code>/ai</code> - AI features\n" +
 		"• <code>/system</code> - Diagnostics\n\n" +
 		"Data & feedback:\n" +
-		"• <code>/scores</code> <code>/factcheck</code> <code>/ratings</code> <code>/annotate</code> <code>/feedback</code>\n\n" +
-		"More: <code>/help &lt;topic&gt;</code> (channels, discover, filters, schedule, config, ai, system, scores, factcheck, ratings, annotate)\n" +
+		"• <code>/scores</code> <code>/factcheck</code> <code>/enrichment</code> <code>/ratings</code> <code>/annotate</code> <code>/feedback</code>\n\n" +
+		"More: <code>/help &lt;topic&gt;</code> (channels, discover, filters, schedule, config, ai, enrichment, system, scores, factcheck, ratings, annotate)\n" +
 		"Full list: <code>/help all</code>\n" +
 		"BotFather list: <code>/help botfather</code>"
 }
@@ -3255,6 +3256,7 @@ func helpAllMessage() string {
 		helpScheduleMessage() + "\n\n" +
 		helpConfigMessage() + "\n\n" +
 		helpAIMessage() + "\n\n" +
+		enrichmentHelpMessage() + "\n\n" +
 		helpSystemMessage() + "\n\n" +
 		helpScoresMessage() + "\n\n" +
 		helpFactCheckMessage() + "\n\n" +

@@ -57,11 +57,13 @@ func (s *Scorer) Score(itemSummary string, evidence *ExtractedEvidence) ScoringR
 	itemTokens := tokenize(itemSummary)
 	itemEntities := extractEntities(itemSummary)
 
-	var bestScore float32
-	var bestJaccard float64
-	var bestEntityOverlap float64
-	var bestEntityMatches int
-	var bestClaim string
+	var (
+		bestScore         float32
+		bestJaccard       float64
+		bestEntityOverlap float64
+		bestEntityMatches int
+		bestClaim         string
+	)
 
 	var matchedClaims []MatchedClaim
 

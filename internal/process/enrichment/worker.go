@@ -928,6 +928,14 @@ func providerNamesToStrings(names []ProviderName) []string {
 	return strs
 }
 
+func truncateLogClaim(text string) string {
+	if len(text) <= maxLogClaimLen {
+		return text
+	}
+
+	return text[:maxLogClaimLen] + "..."
+}
+
 // shouldCheckBudget returns true if enough time has passed since the last budget check.
 func (w *Worker) shouldCheckBudget(lastCheck time.Time) bool {
 	// If limits are not configured, skip budget checks

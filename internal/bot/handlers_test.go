@@ -2568,6 +2568,7 @@ func TestHelpSummaryMessage(t *testing.T) {
 		"/system",
 		"/scores",
 		"/factcheck",
+		"/enrichment",
 		"/ratings",
 		"/annotate",
 		"/help",
@@ -2794,6 +2795,7 @@ func TestHelpAllMessage(t *testing.T) {
 		"Schedule",            // from helpScheduleMessage
 		"Configuration",       // from helpConfigMessage
 		"AI",                  // from helpAIMessage
+		"Enrichment Commands", // from enrichmentHelpMessage
 		"System",              // from helpSystemMessage
 		"Scores",              // from helpScoresMessage
 		"Fact Check",          // from helpFactCheckMessage

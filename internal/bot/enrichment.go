@@ -9,6 +9,7 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
+	enrichment "github.com/lueurxax/telegram-digest-bot/internal/process/enrichment"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -22,6 +23,7 @@ const (
 
 	// Subcommand names.
 	enrichmentSubCmdDomains = "domains"
+	enrichmentSubCmdHealth  = "health"
 	enrichmentSubCmdHelp    = "help"
 
 	// Domain list types.
@@ -52,6 +54,8 @@ func (b *Bot) handleEnrichmentNamespace(ctx context.Context, msg *tgbotapi.Messa
 	switch subcommand {
 	case enrichmentSubCmdDomains:
 		b.handleEnrichmentDomains(ctx, msg, args[1:])
+	case enrichmentSubCmdHealth:
+		b.handleEnrichmentHealth(ctx, msg)
 	case enrichmentSubCmdHelp:
 		b.reply(msg, enrichmentHelpMessage())
 	default:
@@ -64,6 +68,7 @@ func enrichmentHelpMessage() string {
 
 <b>Status:</b>
 • <code>/enrichment</code> - Show enrichment status
+• <code>/enrichment health</code> - Provider health checks
 
 <b>Domain Management:</b>
 • <code>/enrichment domains</code> - List all domains
@@ -82,6 +87,213 @@ Use <code>/system errors</code> to view and <code>/retry enrichment confirm</cod
 • Allowlist mode: only listed domains are searched
 • Denylist mode: listed domains are excluded
 • If both are set, allowlist takes precedence`
+}
+
+type providerHealth struct {
+	name   string
+	status string
+	emoji  string
+	detail string
+}
+
+func (b *Bot) handleEnrichmentHealth(ctx context.Context, msg *tgbotapi.Message) {
+	health := b.fetchEnrichmentProviderHealth()
+
+	var sb strings.Builder
+
+	sb.WriteString("🩺 <b>Enrichment Provider Health</b>\n\n")
+	statusLabel := StatusDisabled
+	if b.cfg.EnrichmentEnabled {
+		statusLabel = StatusEnabled
+	}
+
+	sb.WriteString(fmt.Sprintf("• <b>Enrichment:</b> %s\n\n", statusLabel))
+
+	for _, entry := range health {
+		fmt.Fprintf(&sb, "• %s <b>%s</b>: %s", entry.emoji, html.EscapeString(entry.name), html.EscapeString(entry.status))
+		if entry.detail != "" {
+			fmt.Fprintf(&sb, " — %s", html.EscapeString(entry.detail))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n<i>Notes: external APIs are marked as “configured” to avoid consuming paid quotas.</i>")
+
+	b.reply(msg, sb.String())
+}
+
+func (b *Bot) fetchEnrichmentProviderHealth() []providerHealth {
+	selection := parseProviderSelection(b.cfg.EnrichmentProviders)
+
+	results := []providerHealth{
+		b.checkYaCyHealth(selection),
+		b.checkSearxNGHealth(selection),
+		b.checkGDELTHealth(selection),
+		b.checkEventRegistryHealth(selection),
+		b.checkNewsAPIHealth(selection),
+		b.checkOpenSearchHealth(selection),
+	}
+
+	return results
+}
+
+func (b *Bot) checkYaCyHealth(selection map[string]bool) providerHealth {
+	selected := isProviderSelected(selection, string(enrichment.ProviderYaCy))
+	if !selected {
+		return providerHealth{name: "YaCy", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
+	}
+
+	if !b.cfg.YaCyEnabled {
+		return providerHealth{name: "YaCy", status: "disabled", emoji: "⚪"}
+	}
+
+	if b.cfg.YaCyBaseURL == "" {
+		return providerHealth{name: "YaCy", status: "misconfigured", emoji: "⚠️", detail: "missing base URL"}
+	}
+
+	provider := enrichment.NewYaCyProvider(enrichment.YaCyConfig{
+		Enabled:  true,
+		BaseURL:  b.cfg.YaCyBaseURL,
+		Timeout:  b.cfg.YaCyTimeout,
+		Username: b.cfg.YaCyUser,
+		Password: b.cfg.YaCyPassword,
+		Resource: b.cfg.YaCyResource,
+	})
+
+	if provider.IsAvailable() {
+		return providerHealth{name: "YaCy", status: "ok", emoji: "✅", detail: b.cfg.YaCyBaseURL}
+	}
+
+	return providerHealth{name: "YaCy", status: "unreachable", emoji: "❌", detail: b.cfg.YaCyBaseURL}
+}
+
+func (b *Bot) checkSearxNGHealth(selection map[string]bool) providerHealth {
+	selected := isProviderSelected(selection, string(enrichment.ProviderSearxNG))
+	if !selected {
+		return providerHealth{name: "SearxNG", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
+	}
+
+	if !b.cfg.SearxNGEnabled {
+		return providerHealth{name: "SearxNG", status: "disabled", emoji: "⚪"}
+	}
+
+	if b.cfg.SearxNGBaseURL == "" {
+		return providerHealth{name: "SearxNG", status: "misconfigured", emoji: "⚠️", detail: "missing base URL"}
+	}
+
+	provider := enrichment.NewSearxNGProvider(enrichment.SearxNGConfig{
+		Enabled: true,
+		BaseURL: b.cfg.SearxNGBaseURL,
+		Timeout: b.cfg.SearxNGTimeout,
+	})
+
+	if provider.IsAvailable() {
+		return providerHealth{name: "SearxNG", status: "ok", emoji: "✅", detail: b.cfg.SearxNGBaseURL}
+	}
+
+	return providerHealth{name: "SearxNG", status: "unreachable", emoji: "❌", detail: b.cfg.SearxNGBaseURL}
+}
+
+func (b *Bot) checkGDELTHealth(selection map[string]bool) providerHealth {
+	selected := isProviderSelected(selection, string(enrichment.ProviderGDELT))
+	if !selected {
+		return providerHealth{name: "GDELT", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
+	}
+
+	if !b.cfg.GDELTEnabled {
+		return providerHealth{name: "GDELT", status: "disabled", emoji: "⚪"}
+	}
+
+	return providerHealth{name: "GDELT", status: "configured", emoji: "🟡"}
+}
+
+func (b *Bot) checkEventRegistryHealth(selection map[string]bool) providerHealth {
+	selected := isProviderSelected(selection, string(enrichment.ProviderEventRegistry))
+	if !selected {
+		return providerHealth{name: "Event Registry", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
+	}
+
+	if !b.cfg.EventRegistryEnabled {
+		return providerHealth{name: "Event Registry", status: "disabled", emoji: "⚪"}
+	}
+
+	if b.cfg.EventRegistryAPIKey == "" {
+		return providerHealth{name: "Event Registry", status: "misconfigured", emoji: "⚠️", detail: "missing API key"}
+	}
+
+	return providerHealth{name: "Event Registry", status: "configured", emoji: "🟡"}
+}
+
+func (b *Bot) checkNewsAPIHealth(selection map[string]bool) providerHealth {
+	selected := isProviderSelected(selection, string(enrichment.ProviderNewsAPI))
+	if !selected {
+		return providerHealth{name: "NewsAPI", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
+	}
+
+	if !b.cfg.NewsAPIEnabled {
+		return providerHealth{name: "NewsAPI", status: "disabled", emoji: "⚪"}
+	}
+
+	if b.cfg.NewsAPIKey == "" {
+		return providerHealth{name: "NewsAPI", status: "misconfigured", emoji: "⚠️", detail: "missing API key"}
+	}
+
+	return providerHealth{name: "NewsAPI", status: "configured", emoji: "🟡"}
+}
+
+func (b *Bot) checkOpenSearchHealth(selection map[string]bool) providerHealth {
+	selected := isProviderSelected(selection, string(enrichment.ProviderOpenSearch))
+	if !selected {
+		return providerHealth{name: "OpenSearch", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
+	}
+
+	if !b.cfg.OpenSearchEnabled {
+		return providerHealth{name: "OpenSearch", status: "disabled", emoji: "⚪"}
+	}
+
+	if b.cfg.OpenSearchBaseURL == "" {
+		return providerHealth{name: "OpenSearch", status: "misconfigured", emoji: "⚠️", detail: "missing base URL"}
+	}
+
+	provider := enrichment.NewOpenSearchProvider(enrichment.OpenSearchConfig{
+		Enabled: true,
+		BaseURL: b.cfg.OpenSearchBaseURL,
+		Index:   b.cfg.OpenSearchIndex,
+		Timeout: b.cfg.OpenSearchTimeout,
+	})
+
+	if provider.IsAvailable() {
+		return providerHealth{name: "OpenSearch", status: "ok", emoji: "✅", detail: b.cfg.OpenSearchBaseURL}
+	}
+
+	return providerHealth{name: "OpenSearch", status: "unreachable", emoji: "❌", detail: b.cfg.OpenSearchBaseURL}
+}
+
+func parseProviderSelection(raw string) map[string]bool {
+	selection := make(map[string]bool)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return selection
+	}
+
+	for _, entry := range strings.Split(raw, ",") {
+		name := strings.ToLower(strings.TrimSpace(entry))
+		if name == "" {
+			continue
+		}
+
+		selection[name] = true
+	}
+
+	return selection
+}
+
+func isProviderSelected(selection map[string]bool, name string) bool {
+	if len(selection) == 0 {
+		return true
+	}
+
+	return selection[strings.ToLower(name)]
 }
 
 func (b *Bot) handleEnrichmentStatus(ctx context.Context, msg *tgbotapi.Message) {

@@ -58,7 +58,7 @@ spec:
           set_cfg javastart_Xms Xms512m
           set_cfg javastart_Xmx Xmx2048m
           set_cfg adminAccountUserName admin
-          set_cfg adminAccountBase64MD5 MD5:ISMvKXpXpadDiUoOSoAfww==
+          set_cfg adminAccountBase64MD5 MD5:fd159b952cf1d0d49c03661e8242bf76
           set_cfg adminAccountAllPages true
           set_cfg network.unit.dht false
           set_cfg debug.search.remote.dht.off true
@@ -84,9 +84,9 @@ spec:
         - containerPort: 8090
         env:
         - name: JAVA_TOOL_OPTIONS
-          value: "-Xms512m -Xmx2048m"
+          value: "-Xms512m -Xmx4096m"
         - name: YACY_JAVASTART_XMX
-          value: "Xmx2048m"
+          value: "Xmx4096m"
         volumeMounts:
         - name: yacy-data
           mountPath: /opt/yacy_search_server/DATA
@@ -95,8 +95,8 @@ spec:
             memory: "1536Mi"
             cpu: "250m"
           limits:
-            memory: "3Gi"
-            cpu: "1000m"
+            memory: "6Gi"
+            cpu: "2000m"
         livenessProbe:
           tcpSocket:
             port: 8090
