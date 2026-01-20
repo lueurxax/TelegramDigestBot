@@ -615,7 +615,9 @@ func (p *Pipeline) groupIndicesByModel(candidates []llm.MessageInput, s *pipelin
 func (p *Pipeline) processModelBatch(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, modelUsed []string, model string, indices []int, s *pipelineSettings) error {
 	groupCandidates := make([]llm.MessageInput, len(indices))
 	for j, idx := range indices {
-		groupCandidates[j] = candidates[idx]
+		candidate := candidates[idx]
+		candidate.Text = p.augmentTextForLLM(candidate, s)
+		groupCandidates[j] = candidate
 	}
 
 	llmStart := time.Now()
@@ -647,6 +649,18 @@ func (p *Pipeline) processModelBatch(ctx context.Context, logger zerolog.Logger,
 	}
 
 	return nil
+}
+
+func (p *Pipeline) augmentTextForLLM(c llm.MessageInput, s *pipelineSettings) string {
+	if strings.Contains(s.linkEnrichmentScope, domain.ScopeSummary) {
+		return p.augmentTextWithLinks(&c, s, domain.ScopeSummary)
+	}
+
+	if strings.Contains(s.linkEnrichmentScope, domain.ScopeTopic) {
+		return p.augmentTextWithLinks(&c, s, domain.ScopeTopic)
+	}
+
+	return c.Text
 }
 
 func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, modelUsed []string, s *pipelineSettings) {
