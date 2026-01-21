@@ -19,10 +19,10 @@ func NewTranslationAdapter(llmClient llm.Client, model string) TranslationClient
 	}
 }
 
-func (a *translationAdapter) TranslateToEnglish(ctx context.Context, text string) (string, error) {
-	res, err := a.llmClient.TranslateText(ctx, text, "en", a.model)
+func (a *translationAdapter) Translate(ctx context.Context, text string, targetLanguage string) (string, error) {
+	res, err := a.llmClient.TranslateText(ctx, text, targetLanguage, a.model)
 	if err != nil {
-		return "", fmt.Errorf("translate text: %w", err)
+		return "", fmt.Errorf(fmtErrTranslateTo, targetLanguage, err)
 	}
 
 	return res, nil

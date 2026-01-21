@@ -59,8 +59,13 @@ type Repository interface {
 	IncrementEnrichmentUsage(ctx context.Context, provider string, cost float64) error
 	IncrementEmbeddingUsage(ctx context.Context, cost float64) error
 	GetLinksForMessage(ctx context.Context, msgID string) ([]domain.ResolvedLink, error)
-	// Settings access for domain lists
+	// Settings access
 	GetSetting(ctx context.Context, key string, target interface{}) error
+	// Translation cache
+	GetTranslation(ctx context.Context, query, targetLang string) (string, error)
+	SaveTranslation(ctx context.Context, query, targetLang, translatedText string, ttl time.Duration) error
+	// History for context detection
+	GetRecentMessagesForChannel(ctx context.Context, channelID string, before time.Time, limit int) ([]string, error)
 }
 
 // EmbeddingClient provides embedding generation for semantic deduplication.
@@ -68,9 +73,9 @@ type EmbeddingClient interface {
 	GetEmbedding(ctx context.Context, text string) ([]float32, error)
 }
 
-// TranslationClient provides query translation for non-EN/RU languages.
+// TranslationClient provides query translation for target languages.
 type TranslationClient interface {
-	TranslateToEnglish(ctx context.Context, text string) (string, error)
+	Translate(ctx context.Context, text string, targetLanguage string) (string, error)
 }
 
 type Worker struct {
@@ -82,8 +87,10 @@ type Worker struct {
 	extractor         *Extractor
 	scorer            *Scorer
 	queryGenerator    *QueryGenerator
+	languageRouter    *LanguageRouter
 	domainFilter      *DomainFilter
 	lastDomainReload  time.Time
+	lastPolicyReload  time.Time
 	logger            *zerolog.Logger
 }
 
@@ -103,6 +110,7 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 		extractor:       extractor,
 		scorer:          NewScorer(),
 		queryGenerator:  NewQueryGenerator(),
+		languageRouter:  NewLanguageRouter(domain.LanguageRoutingPolicy{Default: []string{"en"}}, database),
 		domainFilter:    NewDomainFilter(cfg.EnrichmentAllowlistDomains, cfg.EnrichmentDenylistDomains),
 		logger:          logger,
 	}
@@ -142,6 +150,7 @@ func (w *Worker) runLoop(ctx context.Context) error {
 
 	// Initial domain filter reload from settings
 	w.reloadDomainFilter(ctx)
+	w.reloadLanguagePolicy(ctx)
 
 	for {
 		paused, err := w.handleBudget(ctx, &lastBudgetCheck)
@@ -156,6 +165,11 @@ func (w *Worker) runLoop(ctx context.Context) error {
 		// Reload domain filter periodically
 		if time.Since(w.lastDomainReload) >= domainFilterReloadInterval {
 			w.reloadDomainFilter(ctx)
+		}
+
+		// Reload language policy periodically
+		if time.Since(w.lastPolicyReload) >= domainFilterReloadInterval {
+			w.reloadLanguagePolicy(ctx)
 		}
 
 		w.processNextItem(ctx)
@@ -263,8 +277,8 @@ func (w *Worker) processWithProviders(ctx context.Context, item *db.EnrichmentQu
 	resolvedLinks = w.filterLinksForQueries(item, resolvedLinks)
 	queries := w.generateQueries(item, resolvedLinks)
 
-	// Translate queries if enabled and language is not EN/RU
-	queries = w.translateQueriesIfNeeded(ctx, queries)
+	// Route queries to target languages
+	queries = w.expandQueriesWithRouting(ctx, item, queries)
 
 	w.logger.Debug().
 		Str(logKeyItemID, item.ItemID).
@@ -327,43 +341,83 @@ func (w *Worker) filterLinksForQueries(item *db.EnrichmentQueueItem, links []dom
 	return filtered
 }
 
-// translateQueriesIfNeeded translates queries if translation is enabled and language is not EN/RU.
-func (w *Worker) translateQueriesIfNeeded(ctx context.Context, queries []GeneratedQuery) []GeneratedQuery {
+// expandQueriesWithRouting translates queries based on the routing policy.
+func (w *Worker) expandQueriesWithRouting(ctx context.Context, item *db.EnrichmentQueueItem, queries []GeneratedQuery) []GeneratedQuery {
 	if !w.cfg.EnrichmentQueryTranslate || w.translationClient == nil {
 		return queries
 	}
 
-	// Capacity for original + potentially translated queries
-	result := make([]GeneratedQuery, 0, len(queries)+len(queries))
+	targetLangs := w.languageRouter.GetTargetLanguages(ctx, item)
+	if len(targetLangs) == 0 {
+		return queries
+	}
+
+	// Capacity for original + translated queries
+	result := make([]GeneratedQuery, 0, len(queries)*(len(targetLangs)+1))
 
 	for _, q := range queries {
 		// Always include original query
 		result = append(result, q)
 
-		// For non-EN queries, also add English translation
-		if !isEnglish(q.Language) {
-			translated, err := w.translationClient.TranslateToEnglish(ctx, q.Query)
-			if err != nil {
-				w.logger.Debug().
-					Err(err).
-					Str(logKeyQuery, q.Query).
-					Str(logKeyLanguage, q.Language).
-					Msg("failed to translate query")
+		result = w.appendTranslatedQueries(ctx, q, targetLangs, result)
+	}
 
-				continue
-			}
+	return result
+}
 
-			if translated != "" && translated != q.Query {
-				result = append(result, GeneratedQuery{
-					Query:    translated,
-					Strategy: q.Strategy + "_translated",
-					Language: "en",
-				})
-			}
+func (w *Worker) appendTranslatedQueries(ctx context.Context, q GeneratedQuery, targetLangs []string, result []GeneratedQuery) []GeneratedQuery {
+	// Limit translated queries to avoid explosion (max 2 per original query)
+	translatedCount := 0
+
+	for _, targetLang := range targetLangs {
+		if translatedCount >= 2 {
+			break
+		}
+
+		if q.Language == targetLang {
+			continue
+		}
+
+		translated, err := w.translateWithCache(ctx, q.Query, targetLang)
+		if err != nil {
+			w.logger.Debug().
+				Err(err).
+				Str(logKeyQuery, q.Query).
+				Str(logKeyLanguage, targetLang).
+				Msg("failed to translate query")
+
+			continue
+		}
+
+		if translated != "" && translated != q.Query {
+			result = append(result, GeneratedQuery{
+				Query:    translated,
+				Strategy: q.Strategy + "_translated",
+				Language: targetLang,
+			})
+
+			translatedCount++
 		}
 	}
 
 	return result
+}
+
+func (w *Worker) translateWithCache(ctx context.Context, text, targetLang string) (string, error) {
+	if cached, err := w.db.GetTranslation(ctx, text, targetLang); err == nil && cached != "" {
+		return cached, nil
+	}
+
+	translated, err := w.translationClient.Translate(ctx, text, targetLang)
+	if err != nil {
+		return "", fmt.Errorf(fmtErrTranslateTo, targetLang, err)
+	}
+
+	if err := w.db.SaveTranslation(ctx, text, targetLang, translated, defaultEnrichmentCacheTTL); err != nil {
+		w.logger.Warn().Err(err).Msg("failed to save translation to cache")
+	}
+
+	return translated, nil
 }
 
 func (w *Worker) executeQueries(ctx context.Context, queries []GeneratedQuery, maxResults int) *searchState {
@@ -1062,6 +1116,17 @@ func (w *Worker) reloadDomainFilter(ctx context.Context) {
 
 	w.domainFilter = NewDomainFilter(allowDomains, denyDomains)
 	w.lastDomainReload = time.Now()
+}
+
+func (w *Worker) reloadLanguagePolicy(ctx context.Context) {
+	var policy domain.LanguageRoutingPolicy
+	if err := w.db.GetSetting(ctx, settingEnrichmentLanguagePolicy, &policy); err != nil {
+		w.logger.Debug().Err(err).Msg("failed to load language routing policy, using current")
+		return
+	}
+
+	w.languageRouter = NewLanguageRouter(policy, w.db)
+	w.lastPolicyReload = time.Now()
 }
 
 // loadDomainSetting loads a domain list from settings, falling back to config default.

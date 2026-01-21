@@ -13,11 +13,13 @@ const (
 	responseTruncateLen    = 200
 	unexpectedErrFmt       = "unexpected error: %v"
 	errWrapFmtWithCode     = "%w: %d"
+	fmtErrTranslateTo      = "translate text to %s: %w"
 	secondsPerMinute       = 60.0
 	statusError            = "error"
 	statusSuccess          = "success"
 
 	// Settings keys for domain lists
-	settingEnrichmentAllowDomains = "enrichment_allow_domains"
-	settingEnrichmentDenyDomains  = "enrichment_deny_domains"
+	settingEnrichmentAllowDomains   = "enrichment_allow_domains"
+	settingEnrichmentDenyDomains    = "enrichment_deny_domains"
+	settingEnrichmentLanguagePolicy = "enrichment_language_policy"
 )

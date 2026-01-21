@@ -28,13 +28,16 @@ const (
 )
 
 type EnrichmentQueueItem struct {
-	ID           string
-	ItemID       string
-	RawMessageID string
-	Summary      string
-	Topic        string
-	ChannelTitle string
-	AttemptCount int
+	ID                 string
+	ItemID             string
+	RawMessageID       string
+	Summary            string
+	Topic              string
+	ChannelTitle       string
+	ChannelUsername    string
+	ChannelDescription string
+	ChannelID          string
+	AttemptCount       int
 }
 
 type EnrichmentQueueStat struct {
@@ -98,11 +101,14 @@ func (db *DB) EnqueueEnrichment(ctx context.Context, itemID, summary string) err
 
 func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, error) {
 	var (
-		item     EnrichmentQueueItem
-		queueID  uuid.UUID
-		itemUUID uuid.UUID
-		msgUUID  uuid.UUID
-		topic    pgtype.Text
+		item        EnrichmentQueueItem
+		queueID     uuid.UUID
+		itemUUID    uuid.UUID
+		msgUUID     uuid.UUID
+		channelUUID uuid.UUID
+		topic       pgtype.Text
+		username    pgtype.Text
+		description pgtype.Text
 	)
 
 	err := db.Pool.QueryRow(ctx, `
@@ -124,7 +130,7 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 			WHERE eq.id = picked.id
 			RETURNING eq.id, eq.item_id, eq.summary, eq.attempt_count
 		)
-		SELECT u.id, u.item_id, i.raw_message_id, u.summary, u.attempt_count, i.topic, c.title
+		SELECT u.id, u.item_id, i.raw_message_id, u.summary, u.attempt_count, i.topic, c.title, c.username, c.description, c.id
 		FROM updated u
 		JOIN items i ON i.id = u.item_id
 		JOIN raw_messages rm ON rm.id = i.raw_message_id
@@ -137,6 +143,9 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 		&item.AttemptCount,
 		&topic,
 		&item.ChannelTitle,
+		&username,
+		&description,
+		&channelUUID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -150,6 +159,9 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 	item.ItemID = itemUUID.String()
 	item.RawMessageID = msgUUID.String()
 	item.Topic = topic.String
+	item.ChannelUsername = username.String
+	item.ChannelDescription = description.String
+	item.ChannelID = channelUUID.String()
 
 	return &item, nil
 }
@@ -758,6 +770,53 @@ func (db *DB) RetryFailedEnrichmentItems(ctx context.Context) (int64, error) {
 // CountEnrichmentErrors returns the count of items in error state.
 func (db *DB) CountEnrichmentErrors(ctx context.Context) (int, error) {
 	return db.countEnrichmentByStatus(ctx, EnrichmentStatusError)
+}
+
+func (db *DB) GetTranslation(ctx context.Context, query, targetLang string) (string, error) {
+	var translatedText string
+
+	err := db.Pool.QueryRow(ctx, `
+		SELECT translated_text
+		FROM translation_cache
+		WHERE query = $1 AND target_lang = $2 AND expires_at > now()
+	`, query, targetLang).Scan(&translatedText)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+
+		return "", fmt.Errorf("get translation: %w", err)
+	}
+
+	return translatedText, nil
+}
+
+func (db *DB) SaveTranslation(ctx context.Context, query, targetLang, translatedText string, ttl time.Duration) error {
+	_, err := db.Pool.Exec(ctx, `
+		INSERT INTO translation_cache (query, target_lang, translated_text, expires_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (query, target_lang) DO UPDATE
+		SET translated_text = EXCLUDED.translated_text,
+			expires_at = EXCLUDED.expires_at,
+			created_at = now()
+	`, query, targetLang, translatedText, time.Now().Add(ttl))
+	if err != nil {
+		return fmt.Errorf("save translation: %w", err)
+	}
+
+	return nil
+}
+
+func (db *DB) CleanupExpiredTranslations(ctx context.Context) (int64, error) {
+	tag, err := db.Pool.Exec(ctx, `
+		DELETE FROM translation_cache
+		WHERE expires_at < now()
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup expired translations: %w", err)
+	}
+
+	return tag.RowsAffected(), nil
 }
 
 func (db *DB) countEnrichmentByStatus(ctx context.Context, status string) (int, error) {

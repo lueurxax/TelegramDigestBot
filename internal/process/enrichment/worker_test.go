@@ -138,6 +138,18 @@ func (m *mockRepository) GetSetting(_ context.Context, _ string, _ interface{}) 
 	return errNotImplemented
 }
 
+func (m *mockRepository) GetTranslation(_ context.Context, _, _ string) (string, error) {
+	return "", nil
+}
+
+func (m *mockRepository) SaveTranslation(_ context.Context, _, _, _ string, _ time.Duration) error {
+	return nil
+}
+
+func (m *mockRepository) GetRecentMessagesForChannel(_ context.Context, _ string, _ time.Time, _ int) ([]string, error) {
+	return nil, nil
+}
+
 func TestWorker_generateClaimEmbedding(t *testing.T) {
 	logger := zerolog.Nop()
 
