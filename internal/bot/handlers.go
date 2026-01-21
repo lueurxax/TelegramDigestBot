@@ -274,7 +274,6 @@ func (b *Bot) handleChannelNamespace(ctx context.Context, msg *tgbotapi.Message)
 • <code>/channel add @user</code> - Add channel to tracking
 • <code>/channel remove @user</code> - Remove channel
 • <code>/channel list</code> - List tracked channels
-• <code>/channel context @user &lt;text&gt;</code> - Set channel context
 • <code>/channel metadata @user ...</code> - Set category/tone
 • <code>/channel weight @user</code> - View/set importance weight
 • <code>/channel relevance @user</code> - View/set auto-relevance
@@ -293,8 +292,6 @@ func (b *Bot) handleChannelNamespace(ctx context.Context, msg *tgbotapi.Message)
 		b.handleRemoveChannel(ctx, &newMsg)
 	case CmdList:
 		b.handleListChannels(ctx, &newMsg)
-	case "context":
-		b.handleChannelContext(ctx, &newMsg)
 	case "metadata":
 		b.handleChannelMetadata(ctx, &newMsg)
 	case SubCmdStats:
@@ -2242,37 +2239,6 @@ func clampFloat32(val float32, minVal float32, maxVal float32) float32 {
 	return val
 }
 
-func (b *Bot) handleChannelContext(ctx context.Context, msg *tgbotapi.Message) {
-	args := strings.Fields(msg.CommandArguments())
-
-	if len(args) < 2 {
-		b.reply(msg, "Usage: <code>/channelcontext &lt;@username|ID&gt; &lt;context text&gt;</code>\nTo clear context: <code>/channelcontext &lt;@username|ID&gt; clear</code>")
-
-		return
-	}
-
-	identifier := args[0]
-	contextText := strings.Join(args[1:], " ")
-
-	if strings.ToLower(contextText) == "clear" {
-		contextText = ""
-	}
-
-	username := strings.TrimPrefix(identifier, "@")
-
-	if err := b.database.UpdateChannelContext(ctx, username, contextText); err != nil {
-		b.reply(msg, fmt.Sprintf("❌ Error updating channel context: %s", html.EscapeString(err.Error())))
-
-		return
-	}
-
-	if contextText == "" {
-		b.reply(msg, fmt.Sprintf("✅ Context cleared for <b>%s</b>.", html.EscapeString(identifier)))
-	} else {
-		b.reply(msg, fmt.Sprintf("✅ Context updated for <b>%s</b>.", html.EscapeString(identifier)))
-	}
-}
-
 func (b *Bot) handleFeedback(ctx context.Context, msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 
@@ -3142,7 +3108,6 @@ func helpChannelsMessage() string {
 		"• <code>/channel add &lt;id|@user|link&gt;</code>\n" +
 		"• <code>/channel remove &lt;id|@user&gt;</code>\n" +
 		"• <code>/channel list</code>\n" +
-		"• <code>/channel context &lt;id&gt; &lt;text&gt;</code>\n" +
 		"• <code>/channel weight &lt;@user&gt; [0.1-2.0|auto]</code>\n" +
 		"• <code>/channel relevance &lt;@user&gt; [auto|manual]</code>\n" +
 		"• <code>/channel stats</code>"

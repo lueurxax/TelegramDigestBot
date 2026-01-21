@@ -62,7 +62,6 @@ func (b *Bot) registerSettingCommands(r *commandRegistry) {
 	r.handlers[CmdEnrichment] = b.handleEnrichmentNamespace
 	r.handlers[CmdPrompt] = b.handlePrompt
 	r.handlers[CmdAnnotate] = b.handleAnnotate
-	r.handlers["channelcontext"] = b.handleChannelContext
 	r.handlers["filters"] = b.handleFilters
 	r.handlers[CmdTarget] = b.handleTarget
 	r.handlers[CmdWindow] = b.handleWindow

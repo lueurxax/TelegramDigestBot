@@ -93,5 +93,20 @@ const (
 	ScopeFactCheck = "factcheck"
 )
 
+// LanguageRoutingPolicy defines how enrichment queries are routed to target languages.
+type LanguageRoutingPolicy struct {
+	Default []string            `json:"default"`
+	Topic   map[string][]string `json:"topic"`
+	Context []ContextPolicy     `json:"context"`
+	Channel map[string][]string `json:"channel"`
+}
+
+// ContextPolicy defines language routing for a specific context keyword match.
+type ContextPolicy struct {
+	Name      string   `json:"name"`
+	Languages []string `json:"languages"`
+	Keywords  []string `json:"keywords"`
+}
+
 // ShortMessageThreshold is the character count threshold for a message to be considered short.
 const ShortMessageThreshold = 120

@@ -2594,7 +2594,6 @@ func TestHelpChannelsMessage(t *testing.T) {
 		"/channel add",
 		"/channel remove",
 		"/channel list",
-		"/channel context",
 		"/channel weight",
 		"/channel relevance",
 		"/channel stats",
