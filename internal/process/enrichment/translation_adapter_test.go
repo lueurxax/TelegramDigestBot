@@ -62,6 +62,21 @@ func TestCleanTranslation(t *testing.T) {
 			input:    "Translation: Query: this is a test",
 			expected: "this is a test",
 		},
+		{
+			name:     "with newlines",
+			input:    "Translation:\nthis is a test",
+			expected: "this is a test",
+		},
+		{
+			name:     "internal newlines",
+			input:    "this is\na test",
+			expected: "this is a test",
+		},
+		{
+			name:     "mixed prefixes and newlines",
+			input:    "Query: \"Greek Translation:\nδιακοπές νερού\"",
+			expected: "διακοπές νερού",
+		},
 	}
 
 	for _, tt := range tests {

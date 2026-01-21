@@ -40,6 +40,7 @@ type SearchResult struct {
 	Domain      string
 	PublishedAt time.Time
 	Score       float64
+	Language    string
 }
 
 type Provider interface {

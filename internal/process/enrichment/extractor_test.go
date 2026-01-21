@@ -2,6 +2,8 @@ package enrichment
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestExtractClaims(t *testing.T) {
@@ -245,15 +247,8 @@ func TestCoalesce(t *testing.T) {
 
 func TestNewExtractor(t *testing.T) {
 	ext := NewExtractor(nil)
-	if ext == nil {
-		t.Fatal("expected non-nil extractor")
-	}
 
-	if ext.httpClient == nil {
-		t.Fatal("expected non-nil http client")
-	}
-
-	if ext.httpClient.Timeout != fetchTimeout {
-		t.Errorf("expected timeout %v, got %v", fetchTimeout, ext.httpClient.Timeout)
-	}
+	require.NotNil(t, ext, "expected non-nil extractor")
+	require.NotNil(t, ext.httpClient, "expected non-nil http client")
+	require.Equal(t, fetchTimeout, ext.httpClient.Timeout, "unexpected timeout")
 }

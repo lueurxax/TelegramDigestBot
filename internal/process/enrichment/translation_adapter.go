@@ -31,18 +31,33 @@ func (a *translationAdapter) Translate(ctx context.Context, text string, targetL
 
 func cleanTranslation(text string) string {
 	text = strings.TrimSpace(text)
+
+	// Remove internal newlines for search queries
+	text = strings.ReplaceAll(text, "\n", " ")
+	text = strings.ReplaceAll(text, "\r", " ")
 	text = strings.Trim(text, `"'`)
 
 	prefixes := []string{
 		"translation:", "translated:", "query:", "translated query:",
 		"перевод:", "переведенный запрос:", "запрос:",
+		"greek translation:", "english translation:",
 	}
 
-	lowerText := strings.ToLower(text)
-	for _, p := range prefixes {
-		if strings.HasPrefix(lowerText, p) {
-			text = strings.TrimSpace(text[len(p):])
-			lowerText = strings.ToLower(text)
+	for {
+		changed := false
+		text = strings.Trim(text, `"' `)
+		lowerText := strings.ToLower(text)
+
+		for _, p := range prefixes {
+			if strings.HasPrefix(lowerText, p) {
+				text = strings.TrimSpace(text[len(p):])
+				lowerText = strings.ToLower(text)
+				changed = true
+			}
+		}
+
+		if !changed {
+			break
 		}
 	}
 

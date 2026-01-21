@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -42,25 +44,11 @@ func TestNewWebFetcher(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fetcher := NewWebFetcher(tt.rps, tt.timeout)
 
-			if fetcher == nil {
-				t.Fatal("NewWebFetcher() returned nil")
-			}
-
-			if fetcher.client == nil {
-				t.Error("client is nil")
-			}
-
-			if fetcher.globalLimiter == nil {
-				t.Error("globalLimiter is nil")
-			}
-
-			if fetcher.domainLimiters == nil {
-				t.Error("domainLimiters is nil")
-			}
-
-			if fetcher.userAgent == "" {
-				t.Error("userAgent is empty")
-			}
+			require.NotNil(t, fetcher, "NewWebFetcher() returned nil")
+			require.NotNil(t, fetcher.client, "client is nil")
+			require.NotNil(t, fetcher.globalLimiter, "globalLimiter is nil")
+			require.NotNil(t, fetcher.domainLimiters, "domainLimiters is nil")
+			require.NotEmpty(t, fetcher.userAgent, "userAgent is empty")
 		})
 	}
 }

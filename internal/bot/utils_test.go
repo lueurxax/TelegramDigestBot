@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/lueurxax/telegram-digest-bot/internal/output/digest"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
@@ -468,9 +470,7 @@ func TestFindChannelByIdentifier(t *testing.T) {
 				return
 			}
 
-			if got == nil {
-				t.Fatal(errFindChannelNonNil)
-			}
+			require.NotNil(t, got, errFindChannelNonNil)
 
 			if got.ID != tt.wantID {
 				t.Errorf(errFindChannelIDFmt, got.ID, tt.wantID)

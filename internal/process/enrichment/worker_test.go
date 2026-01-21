@@ -15,6 +15,52 @@ import (
 
 var errNotImplemented = errors.New("not implemented in mock")
 
+func TestWorker_ProcessSingleResult_LanguageEnforcement(t *testing.T) {
+	logger := zerolog.Nop()
+	repo := &mockRepository{}
+	w := &Worker{
+		db:             repo,
+		logger:         &logger,
+		scorer:         NewScorer(),
+		queryGenerator: NewQueryGenerator(),
+		cfg:            &config.Config{EnrichmentMinAgreement: 0.1},
+	}
+
+	t.Run("Skips when language mismatches target", func(t *testing.T) {
+		result := SearchResult{
+			URL:      "http://example.com/ru",
+			Language: "el", // Target was Greek
+		}
+		evidence := &ExtractedEvidence{
+			Source: &db.EvidenceSource{
+				URL:      "http://example.com/ru",
+				Language: "ru", // But source is Russian
+			},
+		}
+
+		if !w.shouldSkipForLanguageMismatch(result, evidence, "ru") {
+			t.Error("expected result to be skipped due to language mismatch")
+		}
+	})
+
+	t.Run("Allows when language matches target", func(t *testing.T) {
+		result := SearchResult{
+			URL:      "http://example.com/el",
+			Language: "el",
+		}
+		evidence := &ExtractedEvidence{
+			Source: &db.EvidenceSource{
+				URL:      "http://example.com/el",
+				Language: "el",
+			},
+		}
+
+		if w.shouldSkipForLanguageMismatch(result, evidence, "el") {
+			t.Error("expected result NOT to be skipped")
+		}
+	})
+}
+
 func TestTruncateText(t *testing.T) {
 	tests := []struct {
 		text     string
@@ -98,6 +144,10 @@ func (m *mockRepository) CleanupExcessEvidencePerItem(_ context.Context, _ int) 
 }
 
 func (m *mockRepository) DeduplicateEvidenceClaims(_ context.Context) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockRepository) CleanupExpiredTranslations(_ context.Context) (int64, error) {
 	return 0, nil
 }
 

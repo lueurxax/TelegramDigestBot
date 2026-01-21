@@ -7,6 +7,8 @@ const (
 	logKeyItemID           = "item_id"
 	logKeyDeleted          = "deleted"
 	logKeyLanguage         = "language"
+	logKeySourceLang       = "source_lang"
+	logKeyTargetLang       = "target_lang"
 	fmtJSON                = "json"
 	fmtErrWrapStr          = "%w: %s"
 	applicationOctetStream = "application/octet-stream"

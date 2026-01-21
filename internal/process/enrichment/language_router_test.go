@@ -90,6 +90,8 @@ func (m *mockRouterRepo) CleanupExcessEvidencePerItem(_ context.Context, _ int) 
 
 func (m *mockRouterRepo) DeduplicateEvidenceClaims(_ context.Context) (int64, error) { return 0, nil }
 
+func (m *mockRouterRepo) CleanupExpiredTranslations(_ context.Context) (int64, error) { return 0, nil }
+
 func (m *mockRouterRepo) FindSimilarClaim(_ context.Context, _ string, _ []float32, _ float32) (*db.EvidenceClaim, error) {
 	return nil, nil //nolint:nilnil
 }
@@ -205,6 +207,18 @@ func TestLanguageRouter_GetTargetLanguages(t *testing.T) {
 		langs := router.GetTargetLanguages(ctx, item)
 		assert.Equal(t, []string{"en"}, langs)
 	})
+
+	t.Run("Confidence priority: title vs summary", func(t *testing.T) {
+		// Cyprus in title (el), but international topic (en).
+		// Title should win over topic/summary.
+		item := &db.EnrichmentQueueItem{
+			ChannelTitle: "Cyprus Daily",
+			Topic:        "Politics", // Not "Local News"
+			Summary:      "Generic news summary.",
+		}
+		langs := router.GetTargetLanguages(ctx, item)
+		assert.Equal(t, []string{"el", "en"}, langs)
+	})
 }
 
 func TestWorker_ExpandQueriesWithRouting(t *testing.T) {
@@ -263,12 +277,13 @@ func TestWorker_ExpandQueriesWithRouting(t *testing.T) {
 		repo.AssertExpectations(t)
 	})
 
-	t.Run("Respect query cap (max 2 translations)", func(t *testing.T) {
+	t.Run("Respect query cap", func(t *testing.T) {
+		w.cfg.EnrichmentMaxQueriesPerItem = 3
 		w.languageRouter.policy.Default = []string{"en", "el", "es"}
 
-		repo.On(methodGetTranslation, ctx, testQueryRouter, "en").Return("en", nil).Once()
-		repo.On(methodGetTranslation, ctx, testQueryRouter, "el").Return("el", nil).Once()
-		// "es" should not be called because of cap
+		repo.On(methodGetTranslation, ctx, testQueryRouter, "en").Return("en q", nil).Once()
+		repo.On(methodGetTranslation, ctx, testQueryRouter, "el").Return("el q", nil).Once()
+		// "es" should not be called because of cap (1 original + 2 translations = 3)
 
 		res := w.expandQueriesWithRouting(ctx, item, queries)
 

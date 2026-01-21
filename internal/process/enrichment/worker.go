@@ -2,6 +2,7 @@ package enrichment
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -22,9 +23,11 @@ const (
 	maxEnrichmentAttempts            = 3
 	defaultRetryDelay                = 10 * time.Minute
 	defaultEnrichmentCacheTTL        = 7 * 24 * time.Hour
+	defaultTranslationCacheTTL       = 24 * time.Hour
 	defaultEnrichmentPollInterval    = 10 * time.Second
 	defaultEnrichmentCleanupInterval = 6 * time.Hour
 	defaultMaxResults                = 5
+	defaultMaxQueriesPerItem         = 5
 	defaultItemTimeout               = 60 * time.Second
 	defaultMaxEvidencePerItem        = 5
 	defaultDedupSimilarity           = 0.98
@@ -50,6 +53,7 @@ type Repository interface {
 	DeleteExpiredEvidenceSources(ctx context.Context) (int64, error)
 	CleanupExcessEvidencePerItem(ctx context.Context, maxPerItem int) (int64, error)
 	DeduplicateEvidenceClaims(ctx context.Context) (int64, error)
+	CleanupExpiredTranslations(ctx context.Context) (int64, error)
 	FindSimilarClaim(ctx context.Context, evidenceID string, embedding []float32, similarity float32) (*db.EvidenceClaim, error)
 	// Budget tracking
 	GetDailyEnrichmentCount(ctx context.Context) (int, error)
@@ -352,55 +356,85 @@ func (w *Worker) expandQueriesWithRouting(ctx context.Context, item *db.Enrichme
 		return queries
 	}
 
-	// Capacity for original + translated queries
-	result := make([]GeneratedQuery, 0, len(queries)*(len(targetLangs)+1))
+	maxQueries := w.getMaxQueriesPerItem()
+	result := w.copyOriginalQueries(queries, maxQueries)
+
+	return w.appendTranslatedQueries(ctx, result, queries, targetLangs, maxQueries)
+}
+
+func (w *Worker) getMaxQueriesPerItem() int {
+	if w.cfg.EnrichmentMaxQueriesPerItem > 0 {
+		return w.cfg.EnrichmentMaxQueriesPerItem
+	}
+
+	return defaultMaxQueriesPerItem
+}
+
+func (w *Worker) copyOriginalQueries(queries []GeneratedQuery, maxQueries int) []GeneratedQuery {
+	result := make([]GeneratedQuery, 0, maxQueries)
 
 	for _, q := range queries {
-		// Always include original query
-		result = append(result, q)
+		if len(result) >= maxQueries {
+			break
+		}
 
-		result = w.appendTranslatedQueries(ctx, q, targetLangs, result)
+		result = append(result, q)
 	}
 
 	return result
 }
 
-func (w *Worker) appendTranslatedQueries(ctx context.Context, q GeneratedQuery, targetLangs []string, result []GeneratedQuery) []GeneratedQuery {
-	// Limit translated queries to avoid explosion (max 2 per original query)
-	translatedCount := 0
-
+func (w *Worker) appendTranslatedQueries(ctx context.Context, result, queries []GeneratedQuery, targetLangs []string, maxQueries int) []GeneratedQuery {
 	for _, targetLang := range targetLangs {
-		if translatedCount >= 2 {
+		if len(result) >= maxQueries {
 			break
 		}
 
-		if q.Language == targetLang {
+		result = w.translateQueriesForLanguage(ctx, result, queries, targetLang, maxQueries)
+	}
+
+	return result
+}
+
+func (w *Worker) translateQueriesForLanguage(ctx context.Context, result, queries []GeneratedQuery, targetLang string, maxQueries int) []GeneratedQuery {
+	for _, originalQ := range queries {
+		if len(result) >= maxQueries {
+			break
+		}
+
+		if originalQ.Language == targetLang {
 			continue
 		}
 
-		translated, err := w.translateWithCache(ctx, q.Query, targetLang)
-		if err != nil {
-			w.logger.Debug().
-				Err(err).
-				Str(logKeyQuery, q.Query).
-				Str(logKeyLanguage, targetLang).
-				Msg("failed to translate query")
-
-			continue
-		}
-
-		if translated != "" && translated != q.Query {
-			result = append(result, GeneratedQuery{
-				Query:    translated,
-				Strategy: q.Strategy + "_translated",
-				Language: targetLang,
-			})
-
-			translatedCount++
+		if translated := w.tryTranslateQuery(ctx, originalQ, targetLang); translated != nil {
+			result = append(result, *translated)
 		}
 	}
 
 	return result
+}
+
+func (w *Worker) tryTranslateQuery(ctx context.Context, originalQ GeneratedQuery, targetLang string) *GeneratedQuery {
+	translated, err := w.translateWithCache(ctx, originalQ.Query, targetLang)
+	if err != nil {
+		w.logger.Debug().
+			Err(err).
+			Str(logKeyQuery, originalQ.Query).
+			Str(logKeyLanguage, targetLang).
+			Msg("failed to translate query")
+
+		return nil
+	}
+
+	if translated == "" || translated == originalQ.Query {
+		return nil
+	}
+
+	return &GeneratedQuery{
+		Query:    translated,
+		Strategy: originalQ.Strategy + "_translated",
+		Language: targetLang,
+	}
 }
 
 func (w *Worker) translateWithCache(ctx context.Context, text, targetLang string) (string, error) {
@@ -413,7 +447,7 @@ func (w *Worker) translateWithCache(ctx context.Context, text, targetLang string
 		return "", fmt.Errorf(fmtErrTranslateTo, targetLang, err)
 	}
 
-	if err := w.db.SaveTranslation(ctx, text, targetLang, translated, defaultEnrichmentCacheTTL); err != nil {
+	if err := w.db.SaveTranslation(ctx, text, targetLang, translated, defaultTranslationCacheTTL); err != nil {
 		w.logger.Warn().Err(err).Msg("failed to save translation to cache")
 	}
 
@@ -478,10 +512,10 @@ func (w *Worker) executeQuery(ctx context.Context, gq GeneratedQuery, maxResults
 	// Track usage for budget controls
 	w.trackUsage(ctx, provider)
 
-	w.collectResults(results, state)
+	w.collectResults(results, gq.Language, state)
 }
 
-func (w *Worker) collectResults(results []SearchResult, state *searchState) {
+func (w *Worker) collectResults(results []SearchResult, language string, state *searchState) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
@@ -496,6 +530,7 @@ func (w *Worker) collectResults(results []SearchResult, state *searchState) {
 			continue
 		}
 
+		result.Language = language
 		state.seenURLs[result.URL] = true
 		state.allResults = append(state.allResults, result)
 	}
@@ -763,14 +798,57 @@ func (w *Worker) processSingleResult(
 	}
 
 	scoringResult := w.scorer.Score(item.Summary, evidence)
-	itemLang := w.queryGenerator.DetectLanguage(item.Summary)
 	claimLang := linkscore.DetectLanguage(scoringResult.BestClaim)
+
+	if w.shouldSkipForLanguageMismatch(result, evidence, claimLang) {
+		return 0, false
+	}
+
+	w.logScoringResult(item, result, evidence, scoringResult, minAgreement, claimLang)
+
+	if scoringResult.AgreementScore < minAgreement {
+		return 0, false
+	}
+
+	if err := w.saveItemEvidence(ctx, item.ItemID, evidence, scoringResult); err != nil {
+		w.logger.Warn().Err(err).Msg("failed to save item evidence")
+
+		return 0, false
+	}
+
+	return scoringResult.AgreementScore, true
+}
+
+func (w *Worker) shouldSkipForLanguageMismatch(result SearchResult, evidence *ExtractedEvidence, claimLang string) bool {
+	if result.Language == "" || result.Language == "auto" {
+		return false
+	}
+
+	sourceLang := evidence.Source.Language
+	if sourceLang == "" {
+		sourceLang = claimLang
+	}
+
+	if sourceLang != "" && sourceLang != result.Language {
+		w.logger.Debug().
+			Str(logKeyURL, result.URL).
+			Str(logKeyTargetLang, result.Language).
+			Str(logKeySourceLang, sourceLang).
+			Msg("skipping result due to language mismatch with target")
+
+		return true
+	}
+
+	return false
+}
+
+func (w *Worker) logScoringResult(item *db.EnrichmentQueueItem, result SearchResult, evidence *ExtractedEvidence, scoringResult ScoringResult, minAgreement float32, claimLang string) {
+	itemLang := w.queryGenerator.DetectLanguage(item.Summary)
 	languageMismatch := itemLang != "" && claimLang != "" && itemLang != claimLang
 	matchReason := w.matchDebugReason(evidence, scoringResult, minAgreement)
 	itemTokens := len(tokenize(item.Summary))
 	claimTokens := len(tokenize(scoringResult.BestClaim))
 
-	// Skip if agreement score is below minimum threshold
 	w.logger.Info().
 		Str(logKeyURL, result.URL).
 		Float32("score", scoringResult.AgreementScore).
@@ -788,22 +866,10 @@ func (w *Worker) processSingleResult(
 		Int("title_len", len(evidence.Source.Title)).
 		Bool("language_mismatch", languageMismatch).
 		Str("item_lang", itemLang).
-		Str("source_lang", evidence.Source.Language).
+		Str(logKeySourceLang, evidence.Source.Language).
 		Str("claim_lang", claimLang).
 		Str("claim", truncateLogClaim(scoringResult.BestClaim)).
 		Msg("processed evidence source matching")
-
-	if scoringResult.AgreementScore < minAgreement {
-		return 0, false
-	}
-
-	if err := w.saveItemEvidence(ctx, item.ItemID, evidence, scoringResult); err != nil {
-		w.logger.Warn().Err(err).Msg("failed to save item evidence")
-
-		return 0, false
-	}
-
-	return scoringResult.AgreementScore, true
 }
 
 func (w *Worker) matchDebugReason(evidence *ExtractedEvidence, scoring ScoringResult, minAgreement float32) string {
@@ -1008,6 +1074,14 @@ func (w *Worker) cleanupCache(ctx context.Context) {
 	} else if deduped > 0 {
 		w.logger.Info().Int64("deduped", deduped).Msg("deduplicated evidence claims")
 	}
+
+	// Clean expired translations
+	deletedTranslations, err := w.db.CleanupExpiredTranslations(ctx)
+	if err != nil {
+		w.logger.Warn().Err(err).Msg("failed to clean expired translations")
+	} else if deletedTranslations > 0 {
+		w.logger.Info().Int64(logKeyDeleted, deletedTranslations).Msg("cleaned expired translations")
+	}
 }
 
 func providerNamesToStrings(names []ProviderName) []string {
@@ -1123,14 +1197,44 @@ func (w *Worker) reloadDomainFilter(ctx context.Context) {
 }
 
 func (w *Worker) reloadLanguagePolicy(ctx context.Context) {
-	var policy domain.LanguageRoutingPolicy
-	if err := w.db.GetSetting(ctx, settingEnrichmentLanguagePolicy, &policy); err != nil {
-		w.logger.Debug().Err(err).Msg("failed to load language routing policy, using current")
-		return
-	}
-
+	policy := w.loadLanguagePolicy(ctx)
 	w.languageRouter = NewLanguageRouter(policy, w.db)
 	w.lastPolicyReload = time.Now()
+}
+
+func (w *Worker) loadLanguagePolicy(ctx context.Context) domain.LanguageRoutingPolicy {
+	var policy domain.LanguageRoutingPolicy
+
+	// 1. Load from environment variable if set.
+	if strings.TrimSpace(w.cfg.EnrichmentLanguagePolicy) != "" {
+		if err := json.Unmarshal([]byte(w.cfg.EnrichmentLanguagePolicy), &policy); err != nil {
+			w.logger.Warn().Err(err).Msg("failed to parse ENRICHMENT_LANGUAGE_POLICY from env")
+			policy.Default = []string{"en"}
+			return policy
+		}
+
+		if isPolicyEmpty(policy) {
+			policy.Default = []string{"en"}
+		}
+
+		return policy
+	}
+
+	// 2. Fallback to database settings (legacy behavior)
+	if err := w.db.GetSetting(ctx, settingEnrichmentLanguagePolicy, &policy); err == nil && !isPolicyEmpty(policy) {
+		return policy
+	}
+
+	// 3. If we still have no policy, use default routing (English)
+	if isPolicyEmpty(policy) {
+		policy.Default = []string{"en"}
+	}
+
+	return policy
+}
+
+func isPolicyEmpty(p domain.LanguageRoutingPolicy) bool {
+	return len(p.Default) == 0 && len(p.Channel) == 0 && len(p.Context) == 0 && len(p.Topic) == 0
 }
 
 // loadDomainSetting loads a domain list from settings, falling back to config default.

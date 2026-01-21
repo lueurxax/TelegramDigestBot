@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
@@ -1959,13 +1961,8 @@ func TestSchedulerNew(t *testing.T) {
 
 	s := New(cfg, nil, nil, nil, nil)
 
-	if s == nil {
-		t.Fatal("New() returned nil")
-	}
-
-	if s.cfg != cfg {
-		t.Error("config not set correctly")
-	}
+	require.NotNil(t, s, "New() returned nil")
+	require.Equal(t, cfg, s.cfg, "config not set correctly")
 }
 
 func TestGetLockIDConsistency(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/stretchr/testify/require"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/schedule"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
@@ -2361,9 +2362,7 @@ func TestFindChannelByIdentifierEdgeCases(t *testing.T) {
 				return
 			}
 
-			if got == nil {
-				t.Fatal("findChannelByIdentifier() = nil, want non-nil")
-			}
+			require.NotNil(t, got, "findChannelByIdentifier() = nil, want non-nil")
 
 			if got.ID != tt.wantID {
 				t.Errorf("findChannelByIdentifier().ID = %q, want %q", got.ID, tt.wantID)

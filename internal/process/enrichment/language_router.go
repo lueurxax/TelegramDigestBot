@@ -25,32 +25,80 @@ const historyLimit = 10
 
 // GetTargetLanguages determines target languages for enrichment based on item context.
 func (r *LanguageRouter) GetTargetLanguages(ctx context.Context, item *db.EnrichmentQueueItem) []string {
-	// 1. Channel username match
-	if item.ChannelUsername != "" {
-		if langs, ok := r.policy.Channel["@"+strings.TrimPrefix(item.ChannelUsername, "@")]; ok {
+	// 1. Direct Channel username match (highest priority)
+	if langs := r.matchChannelUsername(item.ChannelUsername); langs != nil {
+		return langs
+	}
+
+	// 2. Keyword match in Channel Metadata (Highest source confidence)
+	if langs := r.matchContextKeywords(item.ChannelTitle, item.ChannelDescription); len(langs) > 0 {
+		return langs
+	}
+
+	// 3. Topic match (Explicit policy)
+	if langs := r.matchTopic(item.Topic); langs != nil {
+		return langs
+	}
+
+	// 4. Keyword match in Item Content (Medium source confidence)
+	if langs := r.matchContextKeywords(item.Summary, item.Topic); len(langs) > 0 {
+		return langs
+	}
+
+	// 5. Keyword match in History (Lowest source confidence)
+	if langs := r.matchHistory(ctx, item.ChannelID); langs != nil {
+		return langs
+	}
+
+	return r.defaultLanguages()
+}
+
+func (r *LanguageRouter) matchChannelUsername(username string) []string {
+	if username == "" {
+		return nil
+	}
+
+	langs, ok := r.policy.Channel["@"+strings.TrimPrefix(username, "@")]
+	if !ok {
+		return nil
+	}
+
+	return langs
+}
+
+func (r *LanguageRouter) matchTopic(topic string) []string {
+	if topic == "" {
+		return nil
+	}
+
+	langs, ok := r.policy.Topic[topic]
+	if !ok {
+		return nil
+	}
+
+	return langs
+}
+
+func (r *LanguageRouter) matchHistory(ctx context.Context, channelID string) []string {
+	if channelID == "" {
+		return nil
+	}
+
+	history, err := r.db.GetRecentMessagesForChannel(ctx, channelID, time.Now(), historyLimit)
+	if err != nil {
+		return nil
+	}
+
+	for _, msg := range history {
+		if langs := r.matchContextKeywords(msg); len(langs) > 0 {
 			return langs
 		}
 	}
 
-	// 2. Context keyword match (channel description, title, summary, topic, history)
-	detectedContexts := r.detectContexts(ctx, item)
+	return nil
+}
 
-	for _, ctxPolicy := range r.policy.Context {
-		for _, detected := range detectedContexts {
-			if strings.EqualFold(ctxPolicy.Name, detected) {
-				return ctxPolicy.Languages
-			}
-		}
-	}
-
-	// 3. Topic match
-	if item.Topic != "" {
-		if langs, ok := r.policy.Topic[item.Topic]; ok {
-			return langs
-		}
-	}
-
-	// 4. Default
+func (r *LanguageRouter) defaultLanguages() []string {
 	if len(r.policy.Default) > 0 {
 		return r.policy.Default
 	}
@@ -58,36 +106,16 @@ func (r *LanguageRouter) GetTargetLanguages(ctx context.Context, item *db.Enrich
 	return []string{"en"}
 }
 
-func (r *LanguageRouter) detectContexts(ctx context.Context, item *db.EnrichmentQueueItem) []string {
-	var contexts []string
-
-	// Check channel metadata
+func (r *LanguageRouter) matchContextKeywords(texts ...string) []string {
 	for _, cp := range r.policy.Context {
-		if r.matchesKeywords(item.ChannelTitle, cp.Keywords) ||
-			r.matchesKeywords(item.ChannelDescription, cp.Keywords) ||
-			r.matchesKeywords(item.Summary, cp.Keywords) ||
-			r.matchesKeywords(item.Topic, cp.Keywords) {
-			contexts = append(contexts, cp.Name)
-
-			continue
-		}
-
-		// Check history (last 10 messages)
-		if item.ChannelID != "" {
-			history, err := r.db.GetRecentMessagesForChannel(ctx, item.ChannelID, time.Now(), historyLimit)
-			if err == nil {
-				for _, msg := range history {
-					if r.matchesKeywords(msg, cp.Keywords) {
-						contexts = append(contexts, cp.Name)
-
-						break
-					}
-				}
+		for _, text := range texts {
+			if r.matchesKeywords(text, cp.Keywords) {
+				return cp.Languages
 			}
 		}
 	}
 
-	return contexts
+	return nil
 }
 
 func (r *LanguageRouter) matchesKeywords(text string, keywords []string) bool {
