@@ -1209,7 +1209,9 @@ func (w *Worker) loadLanguagePolicy(ctx context.Context) domain.LanguageRoutingP
 	if strings.TrimSpace(w.cfg.EnrichmentLanguagePolicy) != "" {
 		if err := json.Unmarshal([]byte(w.cfg.EnrichmentLanguagePolicy), &policy); err != nil {
 			w.logger.Warn().Err(err).Msg("failed to parse ENRICHMENT_LANGUAGE_POLICY from env")
+
 			policy.Default = []string{"en"}
+
 			return policy
 		}
 
