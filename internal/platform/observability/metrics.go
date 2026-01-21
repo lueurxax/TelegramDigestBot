@@ -93,7 +93,7 @@ var (
 	EnrichmentRequests = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "digest_enrichment_requests_total",
 		Help: "Total number of enrichment requests",
-	}, []string{"provider", "result"})
+	}, []string{"provider", "result", "language"})
 
 	EnrichmentMatches = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "digest_enrichment_matches_total",

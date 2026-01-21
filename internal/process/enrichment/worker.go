@@ -458,18 +458,22 @@ func (w *Worker) executeQuery(ctx context.Context, gq GeneratedQuery, maxResults
 	observability.EnrichmentRequestDuration.WithLabelValues(string(provider)).Observe(time.Since(start).Seconds())
 
 	if err != nil {
-		observability.EnrichmentRequests.WithLabelValues("", statusError).Inc()
+		observability.EnrichmentRequests.WithLabelValues("", statusError, gq.Language).Inc()
 
 		state.mu.Lock()
 		state.lastErr = err
 		state.mu.Unlock()
 
-		w.logger.Debug().Err(err).Str(logKeyQuery, gq.Query).Msg("query failed")
+		w.logger.Debug().
+			Err(err).
+			Str(logKeyQuery, gq.Query).
+			Str(logKeyLanguage, gq.Language).
+			Msg("query failed")
 
 		return
 	}
 
-	observability.EnrichmentRequests.WithLabelValues(string(provider), statusSuccess).Inc()
+	observability.EnrichmentRequests.WithLabelValues(string(provider), statusSuccess, gq.Language).Inc()
 
 	// Track usage for budget controls
 	w.trackUsage(ctx, provider)

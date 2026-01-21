@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/core/links"
 )
 
 const (
@@ -103,6 +105,10 @@ func (p *YaCyProvider) IsAvailable(ctx context.Context) bool {
 }
 
 func (p *YaCyProvider) Search(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+	return p.SearchWithLanguage(ctx, query, "", maxResults)
+}
+
+func (p *YaCyProvider) SearchWithLanguage(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error) {
 	if !p.enabled {
 		return nil, errProviderNotFound
 	}
@@ -111,6 +117,20 @@ func (p *YaCyProvider) Search(ctx context.Context, query string, maxResults int)
 		maxResults = p.maxResults
 	}
 
+	body, err := p.fetchSearchResults(ctx, query, maxResults)
+	if err != nil {
+		return nil, err
+	}
+
+	results, err := p.parseResponse(body)
+	if err != nil {
+		return nil, err
+	}
+
+	return p.filterResultsByLanguage(results, language), nil
+}
+
+func (p *YaCyProvider) fetchSearchResults(ctx context.Context, query string, maxResults int) ([]byte, error) {
 	searchURL := p.buildSearchURL(query, maxResults)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
@@ -136,7 +156,26 @@ func (p *YaCyProvider) Search(ctx context.Context, query string, maxResults int)
 		return nil, fmt.Errorf("read yacy response: %w", err)
 	}
 
-	return p.parseResponse(body)
+	return body, nil
+}
+
+func (p *YaCyProvider) filterResultsByLanguage(results []SearchResult, language string) []SearchResult {
+	if language == "" || isUnknownLanguage(language) {
+		return results
+	}
+
+	// Filter results by language
+	filtered := make([]SearchResult, 0, len(results))
+
+	for _, res := range results {
+		detected := links.DetectLanguage(res.Title + " " + res.Description)
+		// Allow if language matches or if detection is unsure
+		if detected == language || detected == "" {
+			filtered = append(filtered, res)
+		}
+	}
+
+	return filtered
 }
 
 func (p *YaCyProvider) buildSearchURL(query string, maxResults int) string {

@@ -3,6 +3,7 @@ package enrichment
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 )
@@ -25,5 +26,25 @@ func (a *translationAdapter) Translate(ctx context.Context, text string, targetL
 		return "", fmt.Errorf(fmtErrTranslateTo, targetLanguage, err)
 	}
 
-	return res, nil
+	return cleanTranslation(res), nil
+}
+
+func cleanTranslation(text string) string {
+	text = strings.TrimSpace(text)
+	text = strings.Trim(text, `"'`)
+
+	prefixes := []string{
+		"translation:", "translated:", "query:", "translated query:",
+		"перевод:", "переведенный запрос:", "запрос:",
+	}
+
+	lowerText := strings.ToLower(text)
+	for _, p := range prefixes {
+		if strings.HasPrefix(lowerText, p) {
+			text = strings.TrimSpace(text[len(p):])
+			lowerText = strings.ToLower(text)
+		}
+	}
+
+	return strings.Trim(text, `"'`)
 }
