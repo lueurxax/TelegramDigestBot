@@ -45,10 +45,13 @@ var (
 	errNonTextualContent  = errors.New("non-textual content type")
 )
 
+const defaultLLMTimeout = 45 * time.Second
+
 type Extractor struct {
 	httpClient *http.Client
 	llmClient  llm.Client
 	llmModel   string
+	llmTimeout time.Duration
 	logger     *zerolog.Logger
 }
 
@@ -70,6 +73,13 @@ func NewExtractor(logger *zerolog.Logger) *Extractor {
 func (e *Extractor) SetLLMClient(client llm.Client, model string) {
 	e.llmClient = client
 	e.llmModel = model
+}
+
+// SetLLMTimeout sets the timeout for LLM extraction calls.
+func (e *Extractor) SetLLMTimeout(timeout time.Duration) {
+	if timeout > 0 {
+		e.llmTimeout = timeout
+	}
 }
 
 type ExtractedEvidence struct {
@@ -166,7 +176,7 @@ func (e *Extractor) extractClaimsWithLLM(ctx context.Context, content string) ([
 		return nil, nil
 	}
 
-	prompt := `Extract the most significant factual claims from the following text. 
+	prompt := `Extract the most significant factual claims from the following text.
 Return a JSON array of objects, where each object has:
 - "text": the claim text (single sentence)
 - "entities": an array of objects with "text" and "type" (PERSON, ORG, LOC, MONEY, PERCENT)
@@ -174,12 +184,27 @@ Return a JSON array of objects, where each object has:
 Text:
 ` + truncateText(content, llmInputLimit)
 
-	res, err := e.llmClient.CompleteText(ctx, prompt, e.llmModel)
+	// Use dedicated timeout for LLM calls to avoid competing with item processing timeout
+	llmCtx, cancel := e.createLLMContext(ctx)
+	defer cancel()
+
+	res, err := e.llmClient.CompleteText(llmCtx, prompt, e.llmModel)
 	if err != nil {
 		return nil, fmt.Errorf("llm extract claims: %w", err)
 	}
 
 	return e.parseLLMClaims(res)
+}
+
+// createLLMContext creates a context with dedicated LLM timeout.
+// It respects parent cancellation but uses its own deadline.
+func (e *Extractor) createLLMContext(parent context.Context) (context.Context, context.CancelFunc) {
+	timeout := e.llmTimeout
+	if timeout <= 0 {
+		timeout = defaultLLMTimeout
+	}
+
+	return context.WithTimeout(parent, timeout)
 }
 
 func (e *Extractor) parseLLMClaims(res string) ([]ExtractedClaim, error) {

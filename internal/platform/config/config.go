@@ -104,6 +104,7 @@ type Config struct {
 	EnrichmentQueryLLMModel     string        `env:"ENRICHMENT_QUERY_LLM_MODEL" envDefault:""`
 	EnrichmentMaxQueriesPerItem int           `env:"ENRICHMENT_MAX_QUERIES_PER_ITEM" envDefault:"5"`
 	EnrichmentLanguagePolicy    string        `env:"ENRICHMENT_LANGUAGE_POLICY" envDefault:""`
+	EnrichmentLLMTimeout        time.Duration `env:"ENRICHMENT_LLM_TIMEOUT" envDefault:"45s"`
 	TranslationModel            string        `env:"TRANSLATION_MODEL"`
 	EnrichmentDailyBudgetUSD    float64       `env:"ENRICHMENT_DAILY_BUDGET_USD" envDefault:"0"`
 	EnrichmentMonthlyCapUSD     float64       `env:"ENRICHMENT_MONTHLY_CAP_USD" envDefault:"0"`

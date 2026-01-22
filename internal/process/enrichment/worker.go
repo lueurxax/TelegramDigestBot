@@ -145,6 +145,7 @@ func (w *Worker) EnableLLMQueryGeneration(client llm.Client, model string) {
 // EnableLLMExtraction enables optional LLM claim extraction.
 func (w *Worker) EnableLLMExtraction(client llm.Client, model string) {
 	w.extractor.SetLLMClient(client, model)
+	w.extractor.SetLLMTimeout(w.cfg.EnrichmentLLMTimeout)
 }
 
 func (w *Worker) Run(ctx context.Context) error {
