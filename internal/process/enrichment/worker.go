@@ -1276,12 +1276,7 @@ func (w *Worker) loadLanguagePolicy(ctx context.Context) domain.LanguageRoutingP
 		return policy
 	}
 
-	// 2. Fallback to database settings (legacy behavior)
-	if err := w.db.GetSetting(ctx, settingEnrichmentLanguagePolicy, &policy); err == nil && !isPolicyEmpty(policy) {
-		return policy
-	}
-
-	// 3. If we still have no policy, use default routing (English)
+	// 2. If we still have no policy, use default routing (English)
 	if isPolicyEmpty(policy) {
 		policy.Default = []string{"en"}
 	}
