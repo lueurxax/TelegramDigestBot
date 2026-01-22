@@ -723,6 +723,7 @@ func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQu
 	}
 
 	minAgreement := w.cfg.EnrichmentMinAgreement
+	targetLangs := w.languageRouter.GetTargetLanguages(ctx, item)
 
 	var (
 		wg sync.WaitGroup
@@ -744,7 +745,7 @@ func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQu
 		go func(res SearchResult) {
 			defer wg.Done()
 
-			score, ok := w.processSingleResult(ctx, item, res, provider, cacheTTL, minAgreement)
+			score, ok := w.processSingleResult(ctx, item, res, provider, cacheTTL, minAgreement, targetLangs)
 			if !ok {
 				return
 			}
@@ -785,6 +786,7 @@ func (w *Worker) processSingleResult(
 	provider ProviderName,
 	cacheTTL time.Duration,
 	minAgreement float32,
+	targetLangs []string,
 ) (float32, bool) {
 	evidence, err := w.processEvidenceSource(ctx, result, provider, cacheTTL)
 	if err != nil {
@@ -800,7 +802,7 @@ func (w *Worker) processSingleResult(
 	scoringResult := w.scorer.Score(item.Summary, evidence)
 	claimLang := linkscore.DetectLanguage(scoringResult.BestClaim)
 
-	if w.shouldSkipForLanguageMismatch(result, evidence, claimLang) {
+	if w.shouldSkipForLanguageMismatch(result, evidence, claimLang, targetLangs) {
 		return 0, false
 	}
 
@@ -819,17 +821,46 @@ func (w *Worker) processSingleResult(
 	return scoringResult.AgreementScore, true
 }
 
-func (w *Worker) shouldSkipForLanguageMismatch(result SearchResult, evidence *ExtractedEvidence, claimLang string) bool {
-	if result.Language == "" || result.Language == "auto" {
-		return false
-	}
-
+func (w *Worker) shouldSkipForLanguageMismatch(result SearchResult, evidence *ExtractedEvidence, claimLang string, targetLangs []string) bool {
 	sourceLang := evidence.Source.Language
 	if sourceLang == "" {
 		sourceLang = claimLang
 	}
 
-	if sourceLang != "" && sourceLang != result.Language {
+	if sourceLang == "" {
+		sourceLang = linkscore.DetectLanguage(strings.TrimSpace(evidence.Source.Title + " " + evidence.Source.Description + " " + evidence.Source.Content))
+	}
+
+	if len(targetLangs) > 0 {
+		if sourceLang == "" {
+			w.logger.Debug().
+				Str(logKeyURL, result.URL).
+				Str(logKeyTargetLang, strings.Join(targetLangs, ",")).
+				Msg("skipping result due to unknown source language")
+
+			return true
+		}
+
+		for _, target := range targetLangs {
+			if languageMatches(target, sourceLang) {
+				return false
+			}
+		}
+
+		w.logger.Debug().
+			Str(logKeyURL, result.URL).
+			Str(logKeyTargetLang, strings.Join(targetLangs, ",")).
+			Str(logKeySourceLang, sourceLang).
+			Msg("skipping result due to language mismatch with routing policy")
+
+		return true
+	}
+
+	if result.Language == "" || result.Language == "auto" {
+		return false
+	}
+
+	if sourceLang != "" && !languageMatches(result.Language, sourceLang) {
 		w.logger.Debug().
 			Str(logKeyURL, result.URL).
 			Str(logKeyTargetLang, result.Language).

@@ -38,7 +38,7 @@ func TestWorker_ProcessSingleResult_LanguageEnforcement(t *testing.T) {
 			},
 		}
 
-		if !w.shouldSkipForLanguageMismatch(result, evidence, "ru") {
+		if !w.shouldSkipForLanguageMismatch(result, evidence, "ru", []string{"el"}) {
 			t.Error("expected result to be skipped due to language mismatch")
 		}
 	})
@@ -55,7 +55,7 @@ func TestWorker_ProcessSingleResult_LanguageEnforcement(t *testing.T) {
 			},
 		}
 
-		if w.shouldSkipForLanguageMismatch(result, evidence, "el") {
+		if w.shouldSkipForLanguageMismatch(result, evidence, "el", []string{"el"}) {
 			t.Error("expected result NOT to be skipped")
 		}
 	})
