@@ -256,12 +256,12 @@ func TestWorker_ExpandQueriesWithRouting(t *testing.T) {
 
 		res := w.expandQueriesWithRouting(ctx, item, queries)
 
-		assert.Len(t, res, 3)
-		assert.Equal(t, testQueryRouter, res[0].Query)
-		assert.Equal(t, translatedEn, res[1].Query)
-		assert.Equal(t, "en", res[1].Language)
-		assert.Equal(t, translatedEl, res[2].Query)
-		assert.Equal(t, "el", res[2].Language)
+		// Only translated queries are included (original "ru" doesn't match targets "en", "el")
+		assert.Len(t, res, 2)
+		assert.Equal(t, translatedEn, res[0].Query)
+		assert.Equal(t, "en", res[0].Language)
+		assert.Equal(t, translatedEl, res[1].Query)
+		assert.Equal(t, "el", res[1].Language)
 		repo.AssertExpectations(t)
 		trans.AssertExpectations(t)
 	})
@@ -272,23 +272,24 @@ func TestWorker_ExpandQueriesWithRouting(t *testing.T) {
 
 		res := w.expandQueriesWithRouting(ctx, item, queries)
 
-		assert.Len(t, res, 3)
-		assert.Equal(t, cachedEn, res[1].Query)
-		assert.Equal(t, cachedEl, res[2].Query)
+		// Only translated queries are included
+		assert.Len(t, res, 2)
+		assert.Equal(t, cachedEn, res[0].Query)
+		assert.Equal(t, cachedEl, res[1].Query)
 		repo.AssertExpectations(t)
 	})
 
 	t.Run("Respect query cap", func(t *testing.T) {
-		w.cfg.EnrichmentMaxQueriesPerItem = 3
+		w.cfg.EnrichmentMaxQueriesPerItem = 2
 		w.languageRouter.policy.Default = []string{"en", "el", "es"}
 
 		repo.On(methodGetTranslation, ctx, testQueryRouter, "en").Return("en q", nil).Once()
 		repo.On(methodGetTranslation, ctx, testQueryRouter, "el").Return("el q", nil).Once()
-		// "es" should not be called because of cap (1 original + 2 translations = 3)
+		// "es" should not be called because of cap (0 original + 2 translations = 2)
 
 		res := w.expandQueriesWithRouting(ctx, item, queries)
 
-		assert.Len(t, res, 3) // original + 2 translated
+		assert.Len(t, res, 2) // 2 translated (cap reached)
 		repo.AssertExpectations(t)
 	})
 }

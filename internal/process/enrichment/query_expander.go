@@ -33,13 +33,13 @@ func NewQueryExpander(translationClient TranslationClient, cache TranslationCach
 }
 
 // ExpandQueries translates queries to target languages and returns the expanded set.
-// Original queries are included, plus translations to each target language.
+// Only queries matching target languages are included (original or translated).
 func (e *QueryExpander) ExpandQueries(ctx context.Context, queries []GeneratedQuery, targetLangs []string, maxQueries int) []GeneratedQuery {
 	if e.translationClient == nil {
 		return queries
 	}
 
-	result := e.copyOriginalQueries(queries, maxQueries)
+	result := e.copyOriginalQueries(queries, targetLangs, maxQueries)
 	result = e.appendTranslatedQueries(ctx, result, queries, targetLangs, maxQueries)
 
 	return result
@@ -50,7 +50,7 @@ func (e *QueryExpander) HasTranslation() bool {
 	return e.translationClient != nil
 }
 
-func (e *QueryExpander) copyOriginalQueries(queries []GeneratedQuery, maxQueries int) []GeneratedQuery {
+func (e *QueryExpander) copyOriginalQueries(queries []GeneratedQuery, targetLangs []string, maxQueries int) []GeneratedQuery {
 	result := make([]GeneratedQuery, 0, maxQueries)
 
 	for _, q := range queries {
@@ -58,10 +58,27 @@ func (e *QueryExpander) copyOriginalQueries(queries []GeneratedQuery, maxQueries
 			break
 		}
 
-		result = append(result, q)
+		// Only include original queries that match a target language
+		if e.queryMatchesTargetLanguage(q, targetLangs) {
+			result = append(result, q)
+		}
 	}
 
 	return result
+}
+
+func (e *QueryExpander) queryMatchesTargetLanguage(q GeneratedQuery, targetLangs []string) bool {
+	if len(targetLangs) == 0 {
+		return true
+	}
+
+	for _, lang := range targetLangs {
+		if q.Language == lang {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (e *QueryExpander) appendTranslatedQueries(ctx context.Context, result, queries []GeneratedQuery, targetLangs []string, maxQueries int) []GeneratedQuery {
