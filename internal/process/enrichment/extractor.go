@@ -258,26 +258,36 @@ func (e *Extractor) sleepWithContext(ctx context.Context, d time.Duration) error
 	}
 }
 
-// isRetryableError checks if the error is retryable (timeout or cancellation).
+// isRetryableError checks if the error is retryable (timeout only).
+// context.Canceled is NOT retryable as it indicates parent shutdown.
+// Only context.DeadlineExceeded (LLM timeout) should trigger retry.
 func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+	// context.Canceled means parent was shut down - don't retry
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+
+	// context.DeadlineExceeded means LLM timeout - retry
+	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
 
+	// Check for specific timeout patterns in wrapped errors
 	errStr := err.Error()
 
-	return strings.Contains(errStr, "deadline exceeded") ||
-		strings.Contains(errStr, "context canceled") ||
-		strings.Contains(errStr, "timeout")
+	return strings.Contains(errStr, "context deadline exceeded") ||
+		strings.Contains(errStr, "i/o timeout") ||
+		strings.Contains(errStr, "connection timed out")
 }
 
 // createLLMContext creates a context with dedicated LLM timeout.
 // It uses an independent deadline (not bound by parent's deadline) but still
 // respects parent cancellation for graceful shutdown.
+// Uses context.AfterFunc to avoid goroutine leaks.
 func (e *Extractor) createLLMContext(parent context.Context) (context.Context, context.CancelFunc) {
 	timeout := e.llmTimeout
 	if timeout <= 0 {
@@ -287,16 +297,14 @@ func (e *Extractor) createLLMContext(parent context.Context) (context.Context, c
 	// Create a new context with its own deadline, independent of parent's deadline
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
-	// Propagate parent cancellation to the new context
-	go func() {
-		select {
-		case <-parent.Done():
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
+	// Propagate parent cancellation using AfterFunc (no goroutine leak)
+	stop := context.AfterFunc(parent, cancel)
 
-	return ctx, cancel
+	// Return a combined cancel function that stops the AfterFunc and cancels the context
+	return ctx, func() {
+		stop()
+		cancel()
+	}
 }
 
 func (e *Extractor) parseLLMClaims(res string) ([]ExtractedClaim, error) {

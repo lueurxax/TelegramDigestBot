@@ -31,13 +31,19 @@ const (
 	defaultItemTimeout               = 180 * time.Second
 	defaultMaxEvidencePerItem        = 5
 	defaultMaxConcurrentResults      = 3
+	defaultMaxConcurrentQueries      = 3
 	defaultDedupSimilarity           = 0.98
-	maxLogClaimLen                   = 100
-	budgetCheckInterval              = 5 * time.Minute
-	domainFilterReloadInterval       = 5 * time.Minute
-	llmQuerySummaryLimit             = 400
-	llmQueryTextLimit                = 800
-	llmQueryLinksLimit               = 3
+	// resultProcessingMultiplier determines how many results to process to find enough matches.
+	// We process maxEvidence * multiplier results because not all results will match
+	// (some fail extraction, some have low agreement scores, some have language mismatches).
+	// A multiplier of 2 assumes roughly 50% success rate.
+	resultProcessingMultiplier = 2
+	maxLogClaimLen             = 100
+	budgetCheckInterval        = 5 * time.Minute
+	domainFilterReloadInterval = 5 * time.Minute
+	llmQuerySummaryLimit       = 400
+	llmQueryTextLimit          = 800
+	llmQueryLinksLimit         = 3
 )
 
 const (
@@ -687,8 +693,15 @@ func (w *Worker) executeQueries(ctx context.Context, queries []GeneratedQuery, m
 
 	var wg sync.WaitGroup
 
+	// Limit concurrent query execution to avoid overwhelming search providers
+	sem := make(chan struct{}, defaultMaxConcurrentQueries)
+
 	for _, gq := range queries {
 		if ctx.Err() != nil {
+			break
+		}
+
+		if !w.acquireSemaphore(ctx, sem) {
 			break
 		}
 
@@ -696,6 +709,7 @@ func (w *Worker) executeQueries(ctx context.Context, queries []GeneratedQuery, m
 
 		go func(q GeneratedQuery) {
 			defer wg.Done()
+			defer func() { <-sem }()
 
 			w.executeQuery(ctx, q, maxResults, state)
 		}(gq)
@@ -984,7 +998,7 @@ func (w *Worker) processResultsConcurrently(ctx context.Context, results []Searc
 	sem := make(chan struct{}, defaultMaxConcurrentResults)
 
 	for i, result := range results {
-		if ctx.Err() != nil || i >= params.maxEvidence*2 {
+		if ctx.Err() != nil || i >= params.maxEvidence*resultProcessingMultiplier {
 			break
 		}
 
