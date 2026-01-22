@@ -34,7 +34,7 @@ data:
   # Enrichment settings (Phase 2)
   ENRICHMENT_ENABLED: "true"
   ENRICHMENT_MAX_RESULTS: "5"
-  ENRICHMENT_MAX_SECONDS: "120"
+  ENRICHMENT_MAX_SECONDS: "240"
   ENRICHMENT_CACHE_TTL_HOURS: "168"
   ENRICHMENT_QUEUE_MAX: "5000"
   ENRICHMENT_MIN_AGREEMENT: "0.15"
@@ -83,3 +83,4 @@ data:
   "channel": { "@russiancyprusnews": [ "el" ] }
 }'
   ENRICHMENT_QUERY_LLM: "true"
+  ENRICHMENT_LLM_TIMEOUT: "120s"

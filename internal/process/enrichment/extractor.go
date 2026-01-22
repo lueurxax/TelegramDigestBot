@@ -37,6 +37,12 @@ const (
 
 	httpHeaderContent = "Content-Type"
 	fieldResponse     = "response"
+	fieldAttempt      = "attempt"
+
+	// LLM retry settings
+	llmMaxRetries       = 2
+	llmRetryDelay       = 2 * time.Second
+	llmRetryBackoffMult = 2
 )
 
 var (
@@ -176,24 +182,97 @@ func (e *Extractor) extractClaimsWithLLM(ctx context.Context, content string) ([
 		return nil, nil
 	}
 
-	prompt := `Extract the most significant factual claims from the following text.
+	prompt := e.buildClaimExtractionPrompt(content)
+
+	return e.executeWithRetry(ctx, prompt)
+}
+
+func (e *Extractor) buildClaimExtractionPrompt(content string) string {
+	return `Extract the most significant factual claims from the following text.
 Return a JSON array of objects, where each object has:
 - "text": the claim text (single sentence)
 - "entities": an array of objects with "text" and "type" (PERSON, ORG, LOC, MONEY, PERCENT)
 
 Text:
 ` + truncateText(content, llmInputLimit)
+}
 
-	// Use dedicated timeout for LLM calls to avoid competing with item processing timeout
+func (e *Extractor) executeWithRetry(ctx context.Context, prompt string) ([]ExtractedClaim, error) {
+	var lastErr error
+
+	delay := llmRetryDelay
+
+	for attempt := 0; attempt <= llmMaxRetries; attempt++ {
+		if attempt > 0 {
+			e.logger.Debug().
+				Int(fieldAttempt, attempt+1).
+				Dur("delay", delay).
+				Msg("retrying LLM extraction after timeout")
+
+			if err := e.sleepWithContext(ctx, delay); err != nil {
+				return nil, fmt.Errorf("llm extract claims: retry interrupted: %w", err)
+			}
+
+			delay *= llmRetryBackoffMult
+		}
+
+		claims, err := e.tryLLMExtraction(ctx, prompt)
+		if err == nil {
+			return claims, nil
+		}
+
+		lastErr = err
+
+		if !isRetryableError(err) {
+			return nil, fmt.Errorf("llm extract claims: %w", err)
+		}
+
+		e.logger.Warn().
+			Err(err).
+			Int(fieldAttempt, attempt+1).
+			Int("max_retries", llmMaxRetries+1).
+			Msg("LLM extraction failed with retryable error")
+	}
+
+	return nil, fmt.Errorf("llm extract claims: max retries exceeded: %w", lastErr)
+}
+
+func (e *Extractor) tryLLMExtraction(ctx context.Context, prompt string) ([]ExtractedClaim, error) {
 	llmCtx, cancel := e.createLLMContext(ctx)
 	defer cancel()
 
 	res, err := e.llmClient.CompleteText(llmCtx, prompt, e.llmModel)
 	if err != nil {
-		return nil, fmt.Errorf("llm extract claims: %w", err)
+		return nil, fmt.Errorf("llm completion: %w", err)
 	}
 
 	return e.parseLLMClaims(res)
+}
+
+func (e *Extractor) sleepWithContext(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("context done: %w", ctx.Err())
+	case <-time.After(d):
+		return nil
+	}
+}
+
+// isRetryableError checks if the error is retryable (timeout or cancellation).
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+
+	errStr := err.Error()
+
+	return strings.Contains(errStr, "deadline exceeded") ||
+		strings.Contains(errStr, "context canceled") ||
+		strings.Contains(errStr, "timeout")
 }
 
 // createLLMContext creates a context with dedicated LLM timeout.
