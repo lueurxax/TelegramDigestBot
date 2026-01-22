@@ -32,6 +32,7 @@ const (
 	discoveryMinEngagementDefault    = float32(50)
 	msgFactCheckWorkerStopped        = "fact check worker stopped"
 	msgEnrichmentWorkerStopped       = "enrichment worker stopped"
+	llmAPIKeyMock                    = "mock"
 )
 
 // App holds the application dependencies and provides methods to run different modes.
@@ -129,32 +130,47 @@ func (a *App) runFactCheckWorker(ctx context.Context) {
 
 func (a *App) runEnrichmentWorker(ctx context.Context) {
 	llmClient := a.newLLMClient()
-
 	worker := enrichment.NewWorker(a.cfg, a.database, llmClient, a.logger)
 
-	// Wire optional LLM claim extraction
-	if a.cfg.LLMAPIKey != "" && a.cfg.LLMAPIKey != "mock" {
-		worker.EnableLLMExtraction(llmClient, a.cfg.LLMModel)
-	}
-
-	// Wire translation if configured
-	if a.cfg.EnrichmentQueryTranslate {
-		transModel := a.cfg.TranslationModel
-		if transModel == "" {
-			transModel = a.cfg.LLMModel // Fallback to main model
-		}
-
-		worker.SetTranslationClient(enrichment.NewTranslationAdapter(llmClient, transModel))
-	}
+	a.configureEnrichmentWorker(worker, llmClient)
 
 	if err := worker.Run(ctx); err != nil {
 		if errors.Is(err, context.Canceled) {
 			a.logger.Info().Msg(msgEnrichmentWorkerStopped)
+
 			return
 		}
 
 		a.logger.Warn().Err(err).Msg(msgEnrichmentWorkerStopped)
 	}
+}
+
+func (a *App) configureEnrichmentWorker(worker *enrichment.Worker, llmClient llm.Client) {
+	if a.hasValidLLMKey() {
+		worker.EnableLLMExtraction(llmClient, a.cfg.LLMModel)
+	}
+
+	if a.cfg.EnrichmentQueryLLM && a.hasValidLLMKey() {
+		queryModel := a.cfg.EnrichmentQueryLLMModel
+		if queryModel == "" {
+			queryModel = a.cfg.LLMModel
+		}
+
+		worker.EnableLLMQueryGeneration(llmClient, queryModel)
+	}
+
+	if a.cfg.EnrichmentQueryTranslate {
+		transModel := a.cfg.TranslationModel
+		if transModel == "" {
+			transModel = a.cfg.LLMModel
+		}
+
+		worker.SetTranslationClient(enrichment.NewTranslationAdapter(llmClient, transModel))
+	}
+}
+
+func (a *App) hasValidLLMKey() bool {
+	return a.cfg.LLMAPIKey != "" && a.cfg.LLMAPIKey != llmAPIKeyMock
 }
 
 func (a *App) runDiscoveryReconciliation(ctx context.Context) {

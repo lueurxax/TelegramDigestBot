@@ -54,7 +54,7 @@ func TestQueryGenerator_Generate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			queries := gen.Generate(tt.summary, tt.topic, "", nil)
+			queries := gen.Generate(tt.summary, "", tt.topic, "", nil)
 
 			if tt.expectQueries {
 				if len(queries) < tt.minQueries || len(queries) > tt.maxQueries {
@@ -82,7 +82,7 @@ func TestQueryGenerator_NoDuplicates(t *testing.T) {
 	summary := "Apple Inc announced that Apple profits increased in the Apple store segment"
 	topic := "Business"
 
-	queries := gen.Generate(summary, topic, "", nil)
+	queries := gen.Generate(summary, "", topic, "", nil)
 	seen := make(map[string]bool)
 
 	for _, q := range queries {
@@ -485,7 +485,7 @@ func TestGenerateIncludesLanguage(t *testing.T) {
 func assertLanguageInQueries(t *testing.T, gen *QueryGenerator, summary, topic, expectedLang string) {
 	t.Helper()
 
-	queries := gen.Generate(summary, topic, "", nil)
+	queries := gen.Generate(summary, "", topic, "", nil)
 	if len(queries) == 0 {
 		t.Fatalf("no queries generated for %s summary", expectedLang)
 	}

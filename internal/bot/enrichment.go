@@ -784,9 +784,36 @@ func (b *Bot) handleEnrichmentDebugItem(ctx context.Context, msg *tgbotapi.Messa
 
 	targetLangs := b.getTargetLanguagesForItem(ctx, item)
 	queries := b.generateQueriesForItem(item, links)
+	queries = b.expandQueriesForDebug(ctx, queries, targetLangs)
 
-	output := buildEnrichmentDebugOutput(item, links, targetLangs, queries)
+	output := buildEnrichmentDebugOutput(item, links, targetLangs, queries, b.isTranslationEnabled())
 	b.reply(msg, output)
+}
+
+func (b *Bot) expandQueriesForDebug(ctx context.Context, queries []enrichment.GeneratedQuery, targetLangs []string) []enrichment.GeneratedQuery {
+	if !b.isTranslationEnabled() || b.llmClient == nil {
+		return queries
+	}
+
+	model := b.cfg.TranslationModel
+	if model == "" {
+		model = b.cfg.LLMModel
+	}
+
+	translationClient := enrichment.NewTranslationAdapter(b.llmClient, model)
+	// Pass nil for cache - debug doesn't need translation caching
+	expander := enrichment.NewQueryExpander(translationClient, nil, b.logger)
+
+	maxQueries := b.cfg.EnrichmentMaxQueriesPerItem
+	if maxQueries <= 0 {
+		maxQueries = 5
+	}
+
+	return expander.ExpandQueries(ctx, queries, targetLangs, maxQueries)
+}
+
+func (b *Bot) isTranslationEnabled() bool {
+	return b.cfg.EnrichmentQueryTranslate && b.llmClient != nil
 }
 
 func (b *Bot) getTargetLanguagesForItem(ctx context.Context, item *db.ItemDebugDetail) []string {
@@ -806,17 +833,22 @@ func (b *Bot) getTargetLanguagesForItem(ctx context.Context, item *db.ItemDebugD
 func (b *Bot) generateQueriesForItem(item *db.ItemDebugDetail, links []domain.ResolvedLink) []enrichment.GeneratedQuery {
 	queryGenerator := enrichment.NewQueryGenerator()
 
-	return queryGenerator.Generate(item.Summary, item.Topic, item.ChannelTitle, links)
+	return queryGenerator.Generate(item.Summary, item.Text, item.Topic, item.ChannelTitle, links)
 }
 
-func buildEnrichmentDebugOutput(item *db.ItemDebugDetail, links []domain.ResolvedLink, targetLangs []string, queries []enrichment.GeneratedQuery) string {
+func buildEnrichmentDebugOutput(item *db.ItemDebugDetail, links []domain.ResolvedLink, targetLangs []string, queries []enrichment.GeneratedQuery, translationEnabled bool) string {
 	var sb strings.Builder
 
 	sb.WriteString("🔎 <b>Enrichment Debug</b>\n\n")
 	writeEnrichmentDebugItemInfo(&sb, item)
 	writeEnrichmentDebugContent(&sb, item)
 	writeEnrichmentDebugRouting(&sb, targetLangs, links, queries)
-	sb.WriteString("\n<i>Note: translations and provider execution run in the worker.</i>")
+
+	if translationEnabled {
+		sb.WriteString("\n<i>Note: queries shown include translations. Provider execution runs in the worker.</i>")
+	} else {
+		sb.WriteString("\n<i>Note: translation disabled. Provider execution runs in the worker.</i>")
+	}
 
 	return sb.String()
 }

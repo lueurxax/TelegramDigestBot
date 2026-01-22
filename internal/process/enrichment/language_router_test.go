@@ -233,6 +233,7 @@ func TestWorker_ExpandQueriesWithRouting(t *testing.T) {
 	w := &Worker{
 		db:                repo,
 		translationClient: trans,
+		queryExpander:     NewQueryExpander(trans, repo, &logger),
 		languageRouter:    NewLanguageRouter(policy, repo),
 		cfg:               &config.Config{EnrichmentQueryTranslate: true},
 		logger:            &logger,

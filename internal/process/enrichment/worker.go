@@ -34,6 +34,9 @@ const (
 	maxLogClaimLen                   = 100
 	budgetCheckInterval              = 5 * time.Minute
 	domainFilterReloadInterval       = 5 * time.Minute
+	llmQuerySummaryLimit             = 400
+	llmQueryTextLimit                = 800
+	llmQueryLinksLimit               = 3
 )
 
 const (
@@ -87,6 +90,9 @@ type Worker struct {
 	db                Repository
 	embeddingClient   EmbeddingClient
 	translationClient TranslationClient
+	queryLLM          llm.Client
+	queryLLMModel     string
+	queryExpander     *QueryExpander
 	registry          *ProviderRegistry
 	extractor         *Extractor
 	scorer            *Scorer
@@ -123,6 +129,17 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 // SetTranslationClient sets the translation client for query translation.
 func (w *Worker) SetTranslationClient(client TranslationClient) {
 	w.translationClient = client
+	w.queryExpander = NewQueryExpander(client, w.db, w.logger)
+}
+
+// EnableLLMQueryGeneration enables LLM-based query generation.
+func (w *Worker) EnableLLMQueryGeneration(client llm.Client, model string) {
+	if client == nil {
+		return
+	}
+
+	w.queryLLM = client
+	w.queryLLMModel = model
 }
 
 // EnableLLMExtraction enables optional LLM claim extraction.
@@ -279,7 +296,7 @@ func (w *Worker) processWithProviders(ctx context.Context, item *db.EnrichmentQu
 	}
 
 	resolvedLinks = w.filterLinksForQueries(item, resolvedLinks)
-	queries := w.generateQueries(item, resolvedLinks)
+	queries := w.generateQueries(ctx, item, resolvedLinks)
 
 	// Route queries to target languages
 	queries = w.expandQueriesWithRouting(ctx, item, queries)
@@ -306,20 +323,284 @@ func (w *Worker) getMaxResults() int {
 	return w.cfg.EnrichmentMaxResults
 }
 
-func (w *Worker) generateQueries(item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []GeneratedQuery {
-	queries := w.queryGenerator.Generate(item.Summary, item.Topic, item.ChannelTitle, links)
-	if len(queries) == 0 {
-		lang := w.queryGenerator.DetectLanguage(item.Summary)
-
-		query := item.Summary
-		if item.ChannelTitle != "" {
-			query = item.ChannelTitle + " " + item.Summary
+func (w *Worker) generateQueries(ctx context.Context, item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []GeneratedQuery {
+	if w.cfg.EnrichmentQueryLLM && w.queryLLM != nil {
+		if queries := w.generateQueriesWithLLM(ctx, item, links); len(queries) > 0 {
+			return queries
 		}
+	}
 
-		return []GeneratedQuery{{Query: TruncateQuery(query), Strategy: "fallback", Language: lang}}
+	return w.generateQueriesHeuristic(item, links)
+}
+
+func (w *Worker) generateQueriesHeuristic(item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []GeneratedQuery {
+	queries := w.queryGenerator.Generate(item.Summary, item.Text, item.Topic, item.ChannelTitle, links)
+	if len(queries) == 0 {
+		return w.buildFallbackQuery(item)
 	}
 
 	return queries
+}
+
+func (w *Worker) buildFallbackQuery(item *db.EnrichmentQueueItem) []GeneratedQuery {
+	source := strings.TrimSpace(item.Summary)
+
+	if source == "" {
+		source = strings.TrimSpace(item.Text)
+	}
+
+	if source == "" {
+		return nil
+	}
+
+	lang := w.queryGenerator.DetectLanguage(source)
+
+	query := source
+	if item.ChannelTitle != "" {
+		query = item.ChannelTitle + " " + source
+	}
+
+	return []GeneratedQuery{{Query: TruncateQuery(query), Strategy: "fallback", Language: lang}}
+}
+
+func (w *Worker) generateQueriesWithLLM(ctx context.Context, item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []GeneratedQuery {
+	if w.queryLLM == nil {
+		return nil
+	}
+
+	source := strings.TrimSpace(item.Summary)
+
+	if source == "" {
+		source = strings.TrimSpace(item.Text)
+	}
+
+	if source == "" {
+		return nil
+	}
+
+	prompt := w.buildLLMQueryPrompt(item, links)
+	if prompt == "" {
+		return nil
+	}
+
+	model := w.queryLLMModel
+	if model == "" {
+		model = w.cfg.LLMModel
+	}
+
+	resp, err := w.queryLLM.CompleteText(ctx, prompt, model)
+	if err != nil {
+		w.logger.Debug().Err(err).Str(logKeyItemID, item.ItemID).Msg("LLM query generation failed")
+
+		return nil
+	}
+
+	rawQueries := parseLLMQueryOutput(resp)
+	if len(rawQueries) == 0 {
+		w.logger.Debug().Str(logKeyItemID, item.ItemID).Msg("LLM query generation returned no queries")
+
+		return nil
+	}
+
+	fallbackLang := w.queryGenerator.DetectLanguage(source)
+
+	return buildLLMGeneratedQueries(rawQueries, fallbackLang)
+}
+
+func (w *Worker) buildLLMQueryPrompt(item *db.EnrichmentQueueItem, links []domain.ResolvedLink) string {
+	summary := strings.TrimSpace(item.Summary)
+	text := strings.TrimSpace(item.Text)
+	topic := strings.TrimSpace(item.Topic)
+	channel := strings.TrimSpace(item.ChannelTitle)
+
+	if summary == "" && text == "" {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	sb.WriteString("Generate web search queries to corroborate the news item below.\n")
+	sb.WriteString("Return a JSON array of 2-4 concise queries (3-8 words each).\n")
+	sb.WriteString("Use the original language of the item.\n")
+	sb.WriteString("Include key people, organizations, and locations. Avoid filler words.\n")
+	sb.WriteString("Output JSON only.\n\n")
+
+	if summary != "" {
+		sb.WriteString("Summary: ")
+		sb.WriteString(truncateText(summary, llmQuerySummaryLimit))
+		sb.WriteString("\n")
+	}
+
+	if text != "" {
+		sb.WriteString("Text: ")
+		sb.WriteString(truncateText(text, llmQueryTextLimit))
+		sb.WriteString("\n")
+	}
+
+	if topic != "" {
+		sb.WriteString("Topic: ")
+		sb.WriteString(topic)
+		sb.WriteString("\n")
+	}
+
+	if channel != "" {
+		sb.WriteString("Channel: ")
+		sb.WriteString(channel)
+		sb.WriteString("\n")
+	}
+
+	linkHints := buildLinkHints(links, llmQueryLinksLimit)
+	if linkHints != "" {
+		sb.WriteString("Links: ")
+		sb.WriteString(linkHints)
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\nJSON array:")
+
+	return sb.String()
+}
+
+func buildLinkHints(links []domain.ResolvedLink, limit int) string {
+	if len(links) == 0 || limit <= 0 {
+		return ""
+	}
+
+	hints := make([]string, 0, limit)
+
+	for _, link := range links {
+		if len(hints) >= limit {
+			break
+		}
+
+		label := strings.TrimSpace(link.Title)
+
+		if label == "" {
+			label = strings.TrimSpace(link.Domain)
+		}
+
+		if label == "" {
+			continue
+		}
+
+		label = strings.ReplaceAll(label, "\n", " ")
+		label = strings.ReplaceAll(label, "\r", " ")
+		hints = append(hints, label)
+	}
+
+	return strings.Join(hints, "; ")
+}
+
+func parseLLMQueryOutput(output string) []string {
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return nil
+	}
+
+	if queries := tryParseJSONArray(output); queries != nil {
+		return queries
+	}
+
+	return parseQueriesFromLines(output)
+}
+
+func tryParseJSONArray(output string) []string {
+	var queries []string
+	if err := json.Unmarshal([]byte(output), &queries); err == nil {
+		return queries
+	}
+
+	start := strings.Index(output, "[")
+	end := strings.LastIndex(output, "]")
+
+	if start != -1 && end > start {
+		var parsed []string
+
+		if err := json.Unmarshal([]byte(output[start:end+1]), &parsed); err == nil {
+			return parsed
+		}
+	}
+
+	return nil
+}
+
+func parseQueriesFromLines(output string) []string {
+	var queries []string
+
+	lines := strings.Split(output, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		line = cleanQueryLine(line)
+		if line != "" {
+			queries = append(queries, line)
+		}
+	}
+
+	return queries
+}
+
+func cleanQueryLine(line string) string {
+	line = strings.TrimPrefix(line, "-")
+	line = strings.TrimPrefix(line, "•")
+	line = strings.TrimSpace(line)
+
+	if idx := strings.Index(line, ". "); idx > 0 && idx <= 3 {
+		line = strings.TrimSpace(line[idx+1:])
+	}
+
+	return line
+}
+
+func buildLLMGeneratedQueries(raw []string, fallbackLang string) []GeneratedQuery {
+	seen := make(map[string]bool)
+	results := make([]GeneratedQuery, 0, maxQueries)
+
+	for _, entry := range raw {
+		if len(results) >= maxQueries {
+			break
+		}
+
+		query := normalizeLLMQuery(entry)
+		if query == "" {
+			continue
+		}
+
+		lower := strings.ToLower(query)
+		if seen[lower] {
+			continue
+		}
+
+		seen[lower] = true
+
+		lang := detectLanguage(query)
+		if lang == langUnknown {
+			lang = fallbackLang
+		}
+
+		results = append(results, GeneratedQuery{
+			Query:    query,
+			Strategy: "llm",
+			Language: lang,
+		})
+	}
+
+	return results
+}
+
+func normalizeLLMQuery(query string) string {
+	query = strings.TrimSpace(query)
+	query = strings.Trim(query, "\"'`")
+	query = strings.ReplaceAll(query, "\n", " ")
+	query = strings.ReplaceAll(query, "\r", " ")
+	query = strings.Join(strings.Fields(query), " ")
+	query = strings.Trim(query, ".,;:")
+
+	return TruncateQuery(query)
 }
 
 func (w *Worker) filterLinksForQueries(item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []domain.ResolvedLink {
@@ -328,6 +609,10 @@ func (w *Worker) filterLinksForQueries(item *db.EnrichmentQueueItem, links []dom
 	}
 
 	msgLang := linkscore.DetectLanguage(item.Summary)
+	if msgLang == "" {
+		msgLang = linkscore.DetectLanguage(item.Text)
+	}
+
 	filtered := make([]domain.ResolvedLink, 0, len(links))
 
 	for _, link := range links {
@@ -347,7 +632,7 @@ func (w *Worker) filterLinksForQueries(item *db.EnrichmentQueueItem, links []dom
 
 // expandQueriesWithRouting translates queries based on the routing policy.
 func (w *Worker) expandQueriesWithRouting(ctx context.Context, item *db.EnrichmentQueueItem, queries []GeneratedQuery) []GeneratedQuery {
-	if !w.cfg.EnrichmentQueryTranslate || w.translationClient == nil {
+	if !w.cfg.EnrichmentQueryTranslate || w.queryExpander == nil {
 		return queries
 	}
 
@@ -357,9 +642,8 @@ func (w *Worker) expandQueriesWithRouting(ctx context.Context, item *db.Enrichme
 	}
 
 	maxQueries := w.getMaxQueriesPerItem()
-	result := w.copyOriginalQueries(queries, maxQueries)
 
-	return w.appendTranslatedQueries(ctx, result, queries, targetLangs, maxQueries)
+	return w.queryExpander.ExpandQueries(ctx, queries, targetLangs, maxQueries)
 }
 
 func (w *Worker) getMaxQueriesPerItem() int {
@@ -368,90 +652,6 @@ func (w *Worker) getMaxQueriesPerItem() int {
 	}
 
 	return defaultMaxQueriesPerItem
-}
-
-func (w *Worker) copyOriginalQueries(queries []GeneratedQuery, maxQueries int) []GeneratedQuery {
-	result := make([]GeneratedQuery, 0, maxQueries)
-
-	for _, q := range queries {
-		if len(result) >= maxQueries {
-			break
-		}
-
-		result = append(result, q)
-	}
-
-	return result
-}
-
-func (w *Worker) appendTranslatedQueries(ctx context.Context, result, queries []GeneratedQuery, targetLangs []string, maxQueries int) []GeneratedQuery {
-	for _, targetLang := range targetLangs {
-		if len(result) >= maxQueries {
-			break
-		}
-
-		result = w.translateQueriesForLanguage(ctx, result, queries, targetLang, maxQueries)
-	}
-
-	return result
-}
-
-func (w *Worker) translateQueriesForLanguage(ctx context.Context, result, queries []GeneratedQuery, targetLang string, maxQueries int) []GeneratedQuery {
-	for _, originalQ := range queries {
-		if len(result) >= maxQueries {
-			break
-		}
-
-		if originalQ.Language == targetLang {
-			continue
-		}
-
-		if translated := w.tryTranslateQuery(ctx, originalQ, targetLang); translated != nil {
-			result = append(result, *translated)
-		}
-	}
-
-	return result
-}
-
-func (w *Worker) tryTranslateQuery(ctx context.Context, originalQ GeneratedQuery, targetLang string) *GeneratedQuery {
-	translated, err := w.translateWithCache(ctx, originalQ.Query, targetLang)
-	if err != nil {
-		w.logger.Debug().
-			Err(err).
-			Str(logKeyQuery, originalQ.Query).
-			Str(logKeyLanguage, targetLang).
-			Msg("failed to translate query")
-
-		return nil
-	}
-
-	if translated == "" || translated == originalQ.Query {
-		return nil
-	}
-
-	return &GeneratedQuery{
-		Query:    translated,
-		Strategy: originalQ.Strategy + "_translated",
-		Language: targetLang,
-	}
-}
-
-func (w *Worker) translateWithCache(ctx context.Context, text, targetLang string) (string, error) {
-	if cached, err := w.db.GetTranslation(ctx, text, targetLang); err == nil && cached != "" {
-		return cached, nil
-	}
-
-	translated, err := w.translationClient.Translate(ctx, text, targetLang)
-	if err != nil {
-		return "", fmt.Errorf(fmtErrTranslateTo, targetLang, err)
-	}
-
-	if err := w.db.SaveTranslation(ctx, text, targetLang, translated, defaultTranslationCacheTTL); err != nil {
-		w.logger.Warn().Err(err).Msg("failed to save translation to cache")
-	}
-
-	return translated, nil
 }
 
 func (w *Worker) executeQueries(ctx context.Context, queries []GeneratedQuery, maxResults int) *searchState {
@@ -1256,7 +1456,7 @@ func (w *Worker) reloadLanguagePolicy(ctx context.Context) {
 	w.lastPolicyReload = time.Now()
 }
 
-func (w *Worker) loadLanguagePolicy(ctx context.Context) domain.LanguageRoutingPolicy {
+func (w *Worker) loadLanguagePolicy(_ context.Context) domain.LanguageRoutingPolicy {
 	var policy domain.LanguageRoutingPolicy
 
 	// 1. Load from environment variable if set.

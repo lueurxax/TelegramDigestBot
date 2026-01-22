@@ -32,6 +32,7 @@ type EnrichmentQueueItem struct {
 	ItemID             string
 	RawMessageID       string
 	Summary            string
+	Text               string
 	Topic              string
 	ChannelTitle       string
 	ChannelUsername    string
@@ -130,7 +131,7 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 			WHERE eq.id = picked.id
 			RETURNING eq.id, eq.item_id, eq.summary, eq.attempt_count
 		)
-		SELECT u.id, u.item_id, i.raw_message_id, u.summary, u.attempt_count, i.topic, c.title, c.username, c.description, c.id
+		SELECT u.id, u.item_id, i.raw_message_id, u.summary, u.attempt_count, i.topic, rm.text, c.title, c.username, c.description, c.id
 		FROM updated u
 		JOIN items i ON i.id = u.item_id
 		JOIN raw_messages rm ON rm.id = i.raw_message_id
@@ -142,6 +143,7 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 		&item.Summary,
 		&item.AttemptCount,
 		&topic,
+		&item.Text,
 		&item.ChannelTitle,
 		&username,
 		&description,

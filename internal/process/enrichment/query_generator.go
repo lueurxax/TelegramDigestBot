@@ -12,6 +12,7 @@ const (
 	maxQueries          = 4
 	minQueryLength      = 10
 	maxQueryLength      = 150
+	maxQuerySourceLen   = 800
 	minKeywordLength    = 3
 	maxKeywordsPerQuery = 5
 
@@ -79,45 +80,20 @@ func (qb *queryBuilder) add(query, strategy string) {
 	})
 }
 
-// Generate creates 2-4 search queries from an item summary.
+// Generate creates 2-4 search queries from item summary + raw text.
 // Algorithm based on proposal:
 // - Q1: primary_entity + verb + object
 // - Q2: primary_entity + location + date/time
 // - Q3: topic + primary_entity + keyword
 // - Fallback: top keywords if extraction fails.
-func (g *QueryGenerator) Generate(summary, topic, channelTitle string, links []domain.ResolvedLink) []GeneratedQuery {
-	if summary == "" {
-		return nil
-	}
-
-	cleaned := cleanText(summary)
-	if len(cleaned) < minQueryLength {
+func (g *QueryGenerator) Generate(summary, text, topic, channelTitle string, links []domain.ResolvedLink) []GeneratedQuery {
+	cleaned := g.getPrimaryText(summary, text)
+	if cleaned == "" {
 		return nil
 	}
 
 	language := detectLanguage(cleaned)
-	entities := extractQueryEntities(cleaned)
-	locations := extractLocations(cleaned)
-	keywords := extractKeywords(cleaned)
-
-	// If summary is vague, pull more entities/keywords from links
-	if len(cleaned) < 100 || (len(entities) == 0 && len(locations) == 0) {
-		for _, link := range links {
-			linkText := cleanText(link.Title + ". " + link.Content)
-			if len(linkText) < minQueryLength {
-				continue
-			}
-
-			entities = append(entities, extractQueryEntities(linkText)...)
-			locations = append(locations, extractLocations(linkText)...)
-			keywords = append(keywords, extractKeywords(linkText)...)
-		}
-
-		// Deduplicate merged entities/locations
-		entities = uniqueStrings(entities)
-		locations = uniqueStrings(locations)
-		keywords = uniqueStrings(keywords)
-	}
+	entities, locations, keywords := g.extractComponents(cleaned, text, links)
 
 	qb := newQueryBuilder(language)
 
@@ -128,6 +104,64 @@ func (g *QueryGenerator) Generate(summary, topic, channelTitle string, links []d
 	g.addFallbackQuery(qb, cleaned, channelTitle, keywords)
 
 	return qb.queries
+}
+
+func (g *QueryGenerator) getPrimaryText(summary, text string) string {
+	primaryText := strings.TrimSpace(summary)
+
+	if primaryText == "" {
+		primaryText = strings.TrimSpace(text)
+	}
+
+	if primaryText == "" {
+		return ""
+	}
+
+	cleaned := cleanText(primaryText)
+	if len(cleaned) < minQueryLength {
+		fallback := cleanText(text)
+		if len(fallback) < minQueryLength {
+			return ""
+		}
+
+		return fallback
+	}
+
+	return cleaned
+}
+
+func (g *QueryGenerator) extractComponents(cleaned, text string, links []domain.ResolvedLink) (entities, locations, keywords []string) {
+	entities = extractQueryEntities(cleaned)
+	locations = extractLocations(cleaned)
+	keywords = extractKeywords(cleaned)
+
+	if len(cleaned) < 100 || (len(entities) == 0 && len(locations) == 0) {
+		entities, locations, keywords = g.enrichFromSources(entities, locations, keywords, text, links)
+	}
+
+	return entities, locations, keywords
+}
+
+func (g *QueryGenerator) enrichFromSources(entities, locations, keywords []string, text string, links []domain.ResolvedLink) ([]string, []string, []string) {
+	rawText := cleanText(truncateQueryText(text))
+	if len(rawText) >= minQueryLength {
+		entities = append(entities, extractQueryEntities(rawText)...)
+		locations = append(locations, extractLocations(rawText)...)
+		keywords = append(keywords, extractKeywords(rawText)...)
+	}
+
+	for _, link := range links {
+		linkText := cleanText(link.Title + ". " + link.Content)
+		if len(linkText) < minQueryLength {
+			continue
+		}
+
+		entities = append(entities, extractQueryEntities(linkText)...)
+		locations = append(locations, extractLocations(linkText)...)
+		keywords = append(keywords, extractKeywords(linkText)...)
+	}
+
+	return uniqueStrings(entities), uniqueStrings(locations), uniqueStrings(keywords)
 }
 
 func uniqueStrings(s []string) []string {
@@ -215,6 +249,20 @@ func cleanText(text string) string {
 	text = spaceRegex.ReplaceAllString(text, " ")
 
 	return strings.TrimSpace(text)
+}
+
+func truncateQueryText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return text
+	}
+
+	runes := []rune(text)
+	if len(runes) <= maxQuerySourceLen {
+		return text
+	}
+
+	return string(runes[:maxQuerySourceLen])
 }
 
 // removeEmojis removes emoji characters from text.

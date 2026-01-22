@@ -100,6 +100,8 @@ type Config struct {
 	EnrichmentProviderCooldown  time.Duration `env:"ENRICHMENT_PROVIDER_COOLDOWN" envDefault:"10m"`
 	EnrichmentProviderGrace     time.Duration `env:"ENRICHMENT_PROVIDER_GRACE" envDefault:"0s"`
 	EnrichmentQueryTranslate    bool          `env:"ENRICHMENT_QUERY_TRANSLATE" envDefault:"true"`
+	EnrichmentQueryLLM          bool          `env:"ENRICHMENT_QUERY_LLM" envDefault:"false"`
+	EnrichmentQueryLLMModel     string        `env:"ENRICHMENT_QUERY_LLM_MODEL" envDefault:""`
 	EnrichmentMaxQueriesPerItem int           `env:"ENRICHMENT_MAX_QUERIES_PER_ITEM" envDefault:"5"`
 	EnrichmentLanguagePolicy    string        `env:"ENRICHMENT_LANGUAGE_POLICY" envDefault:""`
 	TranslationModel            string        `env:"TRANSLATION_MODEL"`
