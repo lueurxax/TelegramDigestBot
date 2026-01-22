@@ -822,40 +822,63 @@ func (w *Worker) processSingleResult(
 }
 
 func (w *Worker) shouldSkipForLanguageMismatch(result SearchResult, evidence *ExtractedEvidence, claimLang string, targetLangs []string) bool {
-	sourceLang := evidence.Source.Language
-	if sourceLang == "" {
-		sourceLang = claimLang
-	}
-
-	if sourceLang == "" {
-		sourceLang = linkscore.DetectLanguage(strings.TrimSpace(evidence.Source.Title + " " + evidence.Source.Description + " " + evidence.Source.Content))
-	}
+	sourceLang := resolveSourceLanguage(evidence, claimLang)
 
 	if len(targetLangs) > 0 {
-		if sourceLang == "" {
-			w.logger.Debug().
-				Str(logKeyURL, result.URL).
-				Str(logKeyTargetLang, strings.Join(targetLangs, ",")).
-				Msg("skipping result due to unknown source language")
+		return w.checkTargetLanguageMismatch(result, sourceLang, targetLangs)
+	}
 
-			return true
-		}
+	return w.checkResultLanguageMismatch(result, sourceLang)
+}
 
-		for _, target := range targetLangs {
-			if languageMatches(target, sourceLang) {
-				return false
-			}
-		}
+func resolveSourceLanguage(evidence *ExtractedEvidence, claimLang string) string {
+	if evidence.Source.Language != "" {
+		return evidence.Source.Language
+	}
 
+	if claimLang != "" {
+		return claimLang
+	}
+
+	content := strings.TrimSpace(evidence.Source.Title + " " + evidence.Source.Description + " " + evidence.Source.Content)
+
+	return linkscore.DetectLanguage(content)
+}
+
+func (w *Worker) checkTargetLanguageMismatch(result SearchResult, sourceLang string, targetLangs []string) bool {
+	if sourceLang == "" {
 		w.logger.Debug().
 			Str(logKeyURL, result.URL).
 			Str(logKeyTargetLang, strings.Join(targetLangs, ",")).
-			Str(logKeySourceLang, sourceLang).
-			Msg("skipping result due to language mismatch with routing policy")
+			Msg("skipping result due to unknown source language")
 
 		return true
 	}
 
+	if matchesAnyLanguage(sourceLang, targetLangs) {
+		return false
+	}
+
+	w.logger.Debug().
+		Str(logKeyURL, result.URL).
+		Str(logKeyTargetLang, strings.Join(targetLangs, ",")).
+		Str(logKeySourceLang, sourceLang).
+		Msg("skipping result due to language mismatch with routing policy")
+
+	return true
+}
+
+func matchesAnyLanguage(sourceLang string, targetLangs []string) bool {
+	for _, target := range targetLangs {
+		if languageMatches(target, sourceLang) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (w *Worker) checkResultLanguageMismatch(result SearchResult, sourceLang string) bool {
 	if result.Language == "" || result.Language == "auto" {
 		return false
 	}

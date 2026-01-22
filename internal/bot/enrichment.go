@@ -2,13 +2,18 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/google/uuid"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	enrichment "github.com/lueurxax/telegram-digest-bot/internal/process/enrichment"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
@@ -24,11 +29,18 @@ const (
 	// Subcommand names.
 	enrichmentSubCmdDomains = "domains"
 	enrichmentSubCmdHealth  = "health"
+	enrichmentSubCmdDebug   = "debug"
 	enrichmentSubCmdHelp    = "help"
 
 	// Domain list types.
 	domainTypeAllow = "allow"
 	domainTypeDeny  = "deny"
+
+	enrichmentDebugDefaultLimit = 5
+	enrichmentDebugMaxLimit     = 20
+	enrichmentDebugMinQueryLen  = 3
+	enrichmentDebugSummaryLimit = 280
+	enrichmentDebugTextLimit    = 420
 )
 
 type enrichmentStats struct {
@@ -56,6 +68,8 @@ func (b *Bot) handleEnrichmentNamespace(ctx context.Context, msg *tgbotapi.Messa
 		b.handleEnrichmentDomains(ctx, msg, args[1:])
 	case enrichmentSubCmdHealth:
 		b.handleEnrichmentHealth(ctx, msg)
+	case enrichmentSubCmdDebug:
+		b.handleEnrichmentDebug(ctx, msg, args[1:])
 	case enrichmentSubCmdHelp:
 		b.reply(msg, enrichmentHelpMessage())
 	default:
@@ -69,6 +83,7 @@ func enrichmentHelpMessage() string {
 <b>Status:</b>
 • <code>/enrichment</code> - Show enrichment status
 • <code>/enrichment health</code> - Provider health checks
+• <code>/enrichment debug &lt;text|item_id&gt; [limit]</code> - Search items or show debug detail
 
 <b>Domain Management:</b>
 • <code>/enrichment domains</code> - List all domains
@@ -621,4 +636,234 @@ func (b *Bot) renderEnrichmentProviders(sb *strings.Builder) {
 	}
 
 	fmt.Fprintf(sb, "  GDELT: %s\n", gdeltStatus)
+}
+
+func (b *Bot) handleEnrichmentDebug(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	query, limit, ok := parseEnrichmentDebugArgs(args)
+	if !ok {
+		b.reply(msg, "Usage: <code>/enrichment debug &lt;text|item_id&gt; [limit]</code>")
+
+		return
+	}
+
+	if limit > enrichmentDebugMaxLimit {
+		limit = enrichmentDebugMaxLimit
+	}
+
+	if isUUIDString(query) {
+		b.handleEnrichmentDebugItem(ctx, msg, query)
+
+		return
+	}
+
+	if len([]rune(query)) < enrichmentDebugMinQueryLen {
+		b.reply(msg, fmt.Sprintf("Query too short. Use at least %d characters.", enrichmentDebugMinQueryLen))
+
+		return
+	}
+
+	results, err := b.database.SearchItemsByText(ctx, query, limit)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error searching items: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	if len(results) == 0 {
+		b.reply(msg, "No matching items found.")
+
+		return
+	}
+
+	b.reply(msg, renderEnrichmentSearchResults(query, results))
+}
+
+func parseEnrichmentDebugArgs(args []string) (string, int, bool) {
+	if len(args) == 0 {
+		return "", 0, false
+	}
+
+	limit := enrichmentDebugDefaultLimit
+	if len(args) > 1 {
+		last := args[len(args)-1]
+		if parsed, err := strconv.Atoi(last); err == nil {
+			limit = parsed
+			args = args[:len(args)-1]
+		}
+	}
+
+	query := strings.TrimSpace(strings.Join(args, " "))
+	if query == "" || limit <= 0 {
+		return "", 0, false
+	}
+
+	return query, limit, true
+}
+
+func isUUIDString(value string) bool {
+	_, err := uuid.Parse(strings.TrimSpace(value))
+	return err == nil
+}
+
+func renderEnrichmentSearchResults(query string, results []db.ItemSearchResult) string {
+	var sb strings.Builder
+
+	sb.WriteString("🔎 <b>Enrichment Debug Search</b>\n\n")
+	sb.WriteString(fmt.Sprintf("Query: <code>%s</code>\n", html.EscapeString(query)))
+	sb.WriteString(fmt.Sprintf("Matches: <code>%d</code>\n\n", len(results)))
+
+	for _, item := range results {
+		name := formatChannelName(item.ChannelUsername, item.ChannelTitle)
+		snippet := buildEnrichmentSnippet(item.Summary, item.Text, enrichmentDebugSummaryLimit)
+		link := FormatLink(item.ChannelUsername, item.ChannelPeerID, item.MessageID, "Open message")
+
+		sb.WriteString(fmt.Sprintf("• <code>%s</code> — <b>%s</b>\n", item.ID, html.EscapeString(name)))
+		sb.WriteString(fmt.Sprintf("  %s | <code>%s</code>\n", link, item.TGDate.Format(DateTimeFormat)))
+
+		if snippet != "" {
+			sb.WriteString(fmt.Sprintf("  %s\n", html.EscapeString(snippet)))
+		}
+	}
+
+	sb.WriteString("\nUse <code>/enrichment debug &lt;item_id&gt;</code> to show routing and queries.")
+
+	return sb.String()
+}
+
+func buildEnrichmentSnippet(summary, text string, limit int) string {
+	content := strings.TrimSpace(summary)
+	if content == "" {
+		content = strings.TrimSpace(text)
+	}
+	if content == "" {
+		return ""
+	}
+
+	content = htmlutils.StripHTMLTags(content)
+	content = truncateAnnotationText(content, limit)
+	content = strings.ReplaceAll(content, "\n", " ")
+	content = strings.ReplaceAll(content, "\r", " ")
+
+	return strings.TrimSpace(content)
+}
+
+func formatChannelName(username, title string) string {
+	if username != "" {
+		return "@" + strings.TrimPrefix(username, "@")
+	}
+	if title != "" {
+		return title
+	}
+
+	return annotateUnknown
+}
+
+func (b *Bot) handleEnrichmentDebugItem(ctx context.Context, msg *tgbotapi.Message, itemID string) {
+	item, err := b.database.GetItemDebugDetail(ctx, itemID)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Error fetching item: %s", html.EscapeString(err.Error())))
+
+		return
+	}
+
+	if item == nil {
+		b.reply(msg, "Item not found.")
+
+		return
+	}
+
+	links, linksErr := b.database.GetLinksForMessage(ctx, item.RawMessageID)
+	if linksErr != nil {
+		b.logger.Debug().Err(linksErr).Msg("enrichment debug: links lookup failed")
+	}
+
+	policy := parseEnrichmentLanguagePolicy(b.cfg.EnrichmentLanguagePolicy)
+	router := enrichment.NewLanguageRouter(policy, b.database)
+	targetLangs := router.GetTargetLanguages(ctx, &db.EnrichmentQueueItem{
+		Summary:            item.Summary,
+		Topic:              item.Topic,
+		ChannelTitle:       item.ChannelTitle,
+		ChannelUsername:    item.ChannelUsername,
+		ChannelDescription: item.ChannelDesc,
+		ChannelID:          item.ChannelID,
+	})
+
+	queryGenerator := enrichment.NewQueryGenerator()
+	queries := queryGenerator.Generate(item.Summary, item.Topic, item.ChannelTitle, links)
+
+	var sb strings.Builder
+
+	sb.WriteString("🔎 <b>Enrichment Debug</b>\n\n")
+	sb.WriteString(fmt.Sprintf("Item: <code>%s</code>\n", item.ID))
+	sb.WriteString(fmt.Sprintf("Status: <code>%s</code>\n", html.EscapeString(item.Status)))
+	sb.WriteString(fmt.Sprintf("Scores: rel <code>%.2f</code> | imp <code>%.2f</code>\n", item.RelevanceScore, item.ImportanceScore))
+
+	if item.Topic != "" {
+		sb.WriteString(fmt.Sprintf("Topic: <code>%s</code>\n", html.EscapeString(item.Topic)))
+	}
+	if item.Language != "" {
+		sb.WriteString(fmt.Sprintf("Language: <code>%s</code>\n", html.EscapeString(item.Language)))
+	}
+
+	name := formatChannelName(item.ChannelUsername, item.ChannelTitle)
+	link := FormatLink(item.ChannelUsername, item.ChannelPeerID, item.MessageID, "Open message")
+	sb.WriteString(fmt.Sprintf("Channel: <b>%s</b> (%s)\n", html.EscapeString(name), link))
+	sb.WriteString(fmt.Sprintf("Time: <code>%s</code>\n", item.TGDate.Format(DateTimeFormat)))
+
+	summary := buildEnrichmentSnippet(item.Summary, "", enrichmentDebugSummaryLimit)
+	if summary != "" {
+		sb.WriteString("\nSummary:\n")
+		sb.WriteString(fmt.Sprintf(annotateBlockquoteFmt, html.EscapeString(summary)))
+	}
+
+	text := buildEnrichmentSnippet("", item.Text, enrichmentDebugTextLimit)
+	if text != "" {
+		sb.WriteString("Text:\n")
+		sb.WriteString(fmt.Sprintf(annotateBlockquoteFmt, html.EscapeString(text)))
+	}
+
+	sb.WriteString("\nRouting:\n")
+	if len(targetLangs) == 0 {
+		sb.WriteString("• Target languages: <code>none</code>\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("• Target languages: <code>%s</code>\n", html.EscapeString(strings.Join(targetLangs, ", "))))
+	}
+	sb.WriteString(fmt.Sprintf("• Links available: <code>%d</code>\n", len(links)))
+
+	if len(queries) == 0 {
+		sb.WriteString("• Generated queries: <code>0</code>\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("• Generated queries: <code>%d</code>\n", len(queries)))
+		for _, q := range queries {
+			sb.WriteString(fmt.Sprintf("  • <code>%s</code> (%s)\n", html.EscapeString(q.Query), html.EscapeString(q.Language)))
+		}
+	}
+
+	sb.WriteString("\n<i>Note: translations and provider execution run in the worker.</i>")
+
+	b.reply(msg, sb.String())
+}
+
+func parseEnrichmentLanguagePolicy(raw string) domain.LanguageRoutingPolicy {
+	policy := domain.LanguageRoutingPolicy{}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		policy.Default = []string{"en"}
+		return policy
+	}
+
+	if err := json.Unmarshal([]byte(trimmed), &policy); err != nil {
+		policy.Default = []string{"en"}
+		return policy
+	}
+
+	if isLanguagePolicyEmpty(policy) {
+		policy.Default = []string{"en"}
+	}
+
+	return policy
+}
+
+func isLanguagePolicyEmpty(p domain.LanguageRoutingPolicy) bool {
+	return len(p.Default) == 0 && len(p.Channel) == 0 && len(p.Context) == 0 && len(p.Topic) == 0
 }

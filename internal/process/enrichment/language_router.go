@@ -9,12 +9,16 @@ import (
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
-type LanguageRouter struct {
-	policy domain.LanguageRoutingPolicy
-	db     Repository
+type historyRepository interface {
+	GetRecentMessagesForChannel(ctx context.Context, channelID string, before time.Time, limit int) ([]string, error)
 }
 
-func NewLanguageRouter(policy domain.LanguageRoutingPolicy, db Repository) *LanguageRouter {
+type LanguageRouter struct {
+	policy domain.LanguageRoutingPolicy
+	db     historyRepository
+}
+
+func NewLanguageRouter(policy domain.LanguageRoutingPolicy, db historyRepository) *LanguageRouter {
 	return &LanguageRouter{
 		policy: policy,
 		db:     db,

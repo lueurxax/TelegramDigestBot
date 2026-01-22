@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 	"github.com/rs/zerolog"
@@ -78,11 +79,12 @@ func TestWorker_ProcessSearchResults_Parallelism(t *testing.T) {
 	repo := &mockRepository{}
 
 	w := &Worker{
-		db:           repo,
-		logger:       &logger,
-		scorer:       NewScorer(),
-		cfg:          &config.Config{EnrichmentMaxEvidenceItem: 5, EnrichmentMinAgreement: 0.1},
-		domainFilter: NewDomainFilter("", ""),
+		db:             repo,
+		logger:         &logger,
+		scorer:         NewScorer(),
+		cfg:            &config.Config{EnrichmentMaxEvidenceItem: 5, EnrichmentMinAgreement: 0.1},
+		domainFilter:   NewDomainFilter("", ""),
+		languageRouter: NewLanguageRouter(domain.LanguageRoutingPolicy{}, repo),
 		// We can't mock extractor easily, so we just check it doesn't crash
 		// and maybe we can use a very fast one or a failing one.
 		extractor: NewExtractor(nil),

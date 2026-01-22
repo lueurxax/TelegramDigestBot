@@ -62,6 +62,10 @@ type Repository interface {
 	GetScoreDebugStats(ctx context.Context, since time.Time) (db.ScoreDebugStats, error)
 	GetItemStatusStats(ctx context.Context, since time.Time) (db.ItemStatusStats, error)
 	GetDropReasonStats(ctx context.Context, since time.Time, limit int) ([]db.DropReasonStat, error)
+	SearchItemsByText(ctx context.Context, query string, limit int) ([]db.ItemSearchResult, error)
+	GetItemDebugDetail(ctx context.Context, id string) (*db.ItemDebugDetail, error)
+	GetLinksForMessage(ctx context.Context, rawMessageID string) ([]db.ResolvedLink, error)
+	GetRecentMessagesForChannel(ctx context.Context, channelID string, before time.Time, limit int) ([]string, error)
 
 	// Fact check operations
 	GetFactCheckQueueStats(ctx context.Context) ([]db.FactCheckQueueStat, error)
