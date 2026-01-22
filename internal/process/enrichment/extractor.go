@@ -197,14 +197,27 @@ Text:
 }
 
 // createLLMContext creates a context with dedicated LLM timeout.
-// It respects parent cancellation but uses its own deadline.
+// It uses an independent deadline (not bound by parent's deadline) but still
+// respects parent cancellation for graceful shutdown.
 func (e *Extractor) createLLMContext(parent context.Context) (context.Context, context.CancelFunc) {
 	timeout := e.llmTimeout
 	if timeout <= 0 {
 		timeout = defaultLLMTimeout
 	}
 
-	return context.WithTimeout(parent, timeout)
+	// Create a new context with its own deadline, independent of parent's deadline
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
+	// Propagate parent cancellation to the new context
+	go func() {
+		select {
+		case <-parent.Done():
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	return ctx, cancel
 }
 
 func (e *Extractor) parseLLMClaims(res string) ([]ExtractedClaim, error) {

@@ -28,8 +28,9 @@ const (
 	defaultEnrichmentCleanupInterval = 6 * time.Hour
 	defaultMaxResults                = 5
 	defaultMaxQueriesPerItem         = 5
-	defaultItemTimeout               = 60 * time.Second
+	defaultItemTimeout               = 180 * time.Second
 	defaultMaxEvidencePerItem        = 5
+	defaultMaxConcurrentResults      = 3
 	defaultDedupSimilarity           = 0.98
 	maxLogClaimLen                   = 100
 	budgetCheckInterval              = 5 * time.Minute
@@ -937,30 +938,57 @@ func (w *Worker) handleNoResults(itemID string, lastErr error) error {
 }
 
 func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQueueItem, results []SearchResult, provider ProviderName) error {
-	cacheTTL := w.getEvidenceCacheTTL()
-	scores := []float32{}
-	sourceCount := 0
+	params := w.buildResultProcessingParams(ctx, item, provider)
+	scores, sourceCount := w.processResultsConcurrently(ctx, results, params)
 
+	if sourceCount > 0 {
+		w.updateItemScore(ctx, item.ItemID, scores, sourceCount)
+	}
+
+	return nil
+}
+
+type resultProcessingParams struct {
+	cacheTTL     time.Duration
+	maxEvidence  int
+	minAgreement float32
+	targetLangs  []string
+	provider     ProviderName
+	item         *db.EnrichmentQueueItem
+}
+
+func (w *Worker) buildResultProcessingParams(ctx context.Context, item *db.EnrichmentQueueItem, provider ProviderName) resultProcessingParams {
 	maxEvidence := w.cfg.EnrichmentMaxEvidenceItem
 	if maxEvidence <= 0 {
 		maxEvidence = defaultMaxEvidencePerItem
 	}
 
-	minAgreement := w.cfg.EnrichmentMinAgreement
-	targetLangs := w.languageRouter.GetTargetLanguages(ctx, item)
+	return resultProcessingParams{
+		cacheTTL:     w.getEvidenceCacheTTL(),
+		maxEvidence:  maxEvidence,
+		minAgreement: w.cfg.EnrichmentMinAgreement,
+		targetLangs:  w.languageRouter.GetTargetLanguages(ctx, item),
+		provider:     provider,
+		item:         item,
+	}
+}
 
+func (w *Worker) processResultsConcurrently(ctx context.Context, results []SearchResult, params resultProcessingParams) ([]float32, int) {
 	var (
-		wg sync.WaitGroup
-		mu sync.Mutex
+		wg          sync.WaitGroup
+		mu          sync.Mutex
+		scores      []float32
+		sourceCount int
 	)
 
+	sem := make(chan struct{}, defaultMaxConcurrentResults)
+
 	for i, result := range results {
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || i >= params.maxEvidence*2 {
 			break
 		}
 
-		// Limit to processing at most maxEvidence * 2 results to find enough high-quality matches
-		if i >= maxEvidence*2 {
+		if !w.acquireSemaphore(ctx, sem) {
 			break
 		}
 
@@ -968,8 +996,9 @@ func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQu
 
 		go func(res SearchResult) {
 			defer wg.Done()
+			defer func() { <-sem }()
 
-			score, ok := w.processSingleResult(ctx, item, res, provider, cacheTTL, minAgreement, targetLangs)
+			score, ok := w.processSingleResult(ctx, params.item, res, params.provider, params.cacheTTL, params.minAgreement, params.targetLangs)
 			if !ok {
 				return
 			}
@@ -977,7 +1006,7 @@ func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQu
 			mu.Lock()
 			defer mu.Unlock()
 
-			if sourceCount >= maxEvidence {
+			if sourceCount >= params.maxEvidence {
 				return
 			}
 
@@ -991,16 +1020,25 @@ func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQu
 
 	wg.Wait()
 
-	if sourceCount > 0 {
-		avgScore := w.scorer.CalculateOverallScore(scores)
-		tier := w.scorer.DetermineTier(sourceCount, avgScore)
+	return scores, sourceCount
+}
 
-		if err := w.db.UpdateItemFactCheckScore(ctx, item.ItemID, avgScore, tier, ""); err != nil {
-			w.logger.Warn().Err(err).Msg("failed to update item fact check score")
-		}
+func (w *Worker) acquireSemaphore(ctx context.Context, sem chan struct{}) bool {
+	select {
+	case sem <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
 	}
+}
 
-	return nil
+func (w *Worker) updateItemScore(ctx context.Context, itemID string, scores []float32, sourceCount int) {
+	avgScore := w.scorer.CalculateOverallScore(scores)
+	tier := w.scorer.DetermineTier(sourceCount, avgScore)
+
+	if err := w.db.UpdateItemFactCheckScore(ctx, itemID, avgScore, tier, ""); err != nil {
+		w.logger.Warn().Err(err).Msg("failed to update item fact check score")
+	}
 }
 
 func (w *Worker) processSingleResult(
