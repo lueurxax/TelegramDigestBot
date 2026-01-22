@@ -301,10 +301,7 @@ func (w *Worker) processWithProviders(ctx context.Context, item *db.EnrichmentQu
 	// Route queries to target languages
 	queries = w.expandQueriesWithRouting(ctx, item, queries)
 
-	w.logger.Debug().
-		Str(logKeyItemID, item.ItemID).
-		Int("query_count", len(queries)).
-		Msg("generated search queries")
+	w.logGeneratedQueries(item.ItemID, queries)
 
 	state := w.executeQueries(ctx, queries, maxResults)
 
@@ -652,6 +649,32 @@ func (w *Worker) getMaxQueriesPerItem() int {
 	}
 
 	return defaultMaxQueriesPerItem
+}
+
+// logGeneratedQueries logs each generated query with its details.
+func (w *Worker) logGeneratedQueries(itemID string, queries []GeneratedQuery) {
+	if len(queries) == 0 {
+		w.logger.Debug().
+			Str(logKeyItemID, itemID).
+			Msg("no queries generated")
+
+		return
+	}
+
+	for i, q := range queries {
+		w.logger.Debug().
+			Str(logKeyItemID, itemID).
+			Int("index", i).
+			Str(logKeyQuery, q.Query).
+			Str(logKeyLanguage, q.Language).
+			Str("strategy", q.Strategy).
+			Msg("generated query")
+	}
+
+	w.logger.Info().
+		Str(logKeyItemID, itemID).
+		Int("query_count", len(queries)).
+		Msg("generated search queries")
 }
 
 func (w *Worker) executeQueries(ctx context.Context, queries []GeneratedQuery, maxResults int) *searchState {
