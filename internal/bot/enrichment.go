@@ -684,8 +684,10 @@ func parseEnrichmentDebugArgs(args []string) (string, int, bool) {
 	}
 
 	limit := enrichmentDebugDefaultLimit
+
 	if len(args) > 1 {
 		last := args[len(args)-1]
+
 		if parsed, err := strconv.Atoi(last); err == nil {
 			limit = parsed
 			args = args[:len(args)-1]
@@ -732,9 +734,11 @@ func renderEnrichmentSearchResults(query string, results []db.ItemSearchResult) 
 
 func buildEnrichmentSnippet(summary, text string, limit int) string {
 	content := strings.TrimSpace(summary)
+
 	if content == "" {
 		content = strings.TrimSpace(text)
 	}
+
 	if content == "" {
 		return ""
 	}
@@ -751,6 +755,7 @@ func formatChannelName(username, title string) string {
 	if username != "" {
 		return "@" + strings.TrimPrefix(username, "@")
 	}
+
 	if title != "" {
 		return title
 	}
@@ -777,9 +782,18 @@ func (b *Bot) handleEnrichmentDebugItem(ctx context.Context, msg *tgbotapi.Messa
 		b.logger.Debug().Err(linksErr).Msg("enrichment debug: links lookup failed")
 	}
 
+	targetLangs := b.getTargetLanguagesForItem(ctx, item)
+	queries := b.generateQueriesForItem(item, links)
+
+	output := buildEnrichmentDebugOutput(item, links, targetLangs, queries)
+	b.reply(msg, output)
+}
+
+func (b *Bot) getTargetLanguagesForItem(ctx context.Context, item *db.ItemDebugDetail) []string {
 	policy := parseEnrichmentLanguagePolicy(b.cfg.EnrichmentLanguagePolicy)
 	router := enrichment.NewLanguageRouter(policy, b.database)
-	targetLangs := router.GetTargetLanguages(ctx, &db.EnrichmentQueueItem{
+
+	return router.GetTargetLanguages(ctx, &db.EnrichmentQueueItem{
 		Summary:            item.Summary,
 		Topic:              item.Topic,
 		ChannelTitle:       item.ChannelTitle,
@@ -787,68 +801,90 @@ func (b *Bot) handleEnrichmentDebugItem(ctx context.Context, msg *tgbotapi.Messa
 		ChannelDescription: item.ChannelDesc,
 		ChannelID:          item.ChannelID,
 	})
+}
 
+func (b *Bot) generateQueriesForItem(item *db.ItemDebugDetail, links []domain.ResolvedLink) []enrichment.GeneratedQuery {
 	queryGenerator := enrichment.NewQueryGenerator()
-	queries := queryGenerator.Generate(item.Summary, item.Topic, item.ChannelTitle, links)
 
+	return queryGenerator.Generate(item.Summary, item.Topic, item.ChannelTitle, links)
+}
+
+func buildEnrichmentDebugOutput(item *db.ItemDebugDetail, links []domain.ResolvedLink, targetLangs []string, queries []enrichment.GeneratedQuery) string {
 	var sb strings.Builder
 
 	sb.WriteString("🔎 <b>Enrichment Debug</b>\n\n")
-	sb.WriteString(fmt.Sprintf("Item: <code>%s</code>\n", item.ID))
-	sb.WriteString(fmt.Sprintf("Status: <code>%s</code>\n", html.EscapeString(item.Status)))
-	sb.WriteString(fmt.Sprintf("Scores: rel <code>%.2f</code> | imp <code>%.2f</code>\n", item.RelevanceScore, item.ImportanceScore))
+	writeEnrichmentDebugItemInfo(&sb, item)
+	writeEnrichmentDebugContent(&sb, item)
+	writeEnrichmentDebugRouting(&sb, targetLangs, links, queries)
+	sb.WriteString("\n<i>Note: translations and provider execution run in the worker.</i>")
+
+	return sb.String()
+}
+
+func writeEnrichmentDebugItemInfo(sb *strings.Builder, item *db.ItemDebugDetail) {
+	fmt.Fprintf(sb, fmtItemCode, item.ID)
+	fmt.Fprintf(sb, fmtStatusCode, html.EscapeString(item.Status))
+	fmt.Fprintf(sb, fmtScoresCode, item.RelevanceScore, item.ImportanceScore)
 
 	if item.Topic != "" {
-		sb.WriteString(fmt.Sprintf("Topic: <code>%s</code>\n", html.EscapeString(item.Topic)))
+		fmt.Fprintf(sb, fmtTopicCode, html.EscapeString(item.Topic))
 	}
+
 	if item.Language != "" {
-		sb.WriteString(fmt.Sprintf("Language: <code>%s</code>\n", html.EscapeString(item.Language)))
+		fmt.Fprintf(sb, "Language: <code>%s</code>\n", html.EscapeString(item.Language))
 	}
 
 	name := formatChannelName(item.ChannelUsername, item.ChannelTitle)
-	link := FormatLink(item.ChannelUsername, item.ChannelPeerID, item.MessageID, "Open message")
-	sb.WriteString(fmt.Sprintf("Channel: <b>%s</b> (%s)\n", html.EscapeString(name), link))
-	sb.WriteString(fmt.Sprintf("Time: <code>%s</code>\n", item.TGDate.Format(DateTimeFormat)))
+	link := FormatLink(item.ChannelUsername, item.ChannelPeerID, item.MessageID, fmtOpenMessage)
+	fmt.Fprintf(sb, "Channel: <b>%s</b> (%s)\n", html.EscapeString(name), link)
+	fmt.Fprintf(sb, fmtTimeCode, item.TGDate.Format(DateTimeFormat))
+}
 
+func writeEnrichmentDebugContent(sb *strings.Builder, item *db.ItemDebugDetail) {
 	summary := buildEnrichmentSnippet(item.Summary, "", enrichmentDebugSummaryLimit)
+
 	if summary != "" {
-		sb.WriteString("\nSummary:\n")
-		sb.WriteString(fmt.Sprintf(annotateBlockquoteFmt, html.EscapeString(summary)))
+		sb.WriteString(fmtSummaryHdr)
+		fmt.Fprintf(sb, annotateBlockquoteFmt, html.EscapeString(summary))
 	}
 
 	text := buildEnrichmentSnippet("", item.Text, enrichmentDebugTextLimit)
-	if text != "" {
-		sb.WriteString("Text:\n")
-		sb.WriteString(fmt.Sprintf(annotateBlockquoteFmt, html.EscapeString(text)))
-	}
 
+	if text != "" {
+		sb.WriteString(fmtTextHdr)
+		fmt.Fprintf(sb, annotateBlockquoteFmt, html.EscapeString(text))
+	}
+}
+
+func writeEnrichmentDebugRouting(sb *strings.Builder, targetLangs []string, links []domain.ResolvedLink, queries []enrichment.GeneratedQuery) {
 	sb.WriteString("\nRouting:\n")
+
 	if len(targetLangs) == 0 {
 		sb.WriteString("• Target languages: <code>none</code>\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("• Target languages: <code>%s</code>\n", html.EscapeString(strings.Join(targetLangs, ", "))))
+		fmt.Fprintf(sb, "• Target languages: <code>%s</code>\n", html.EscapeString(strings.Join(targetLangs, ", ")))
 	}
-	sb.WriteString(fmt.Sprintf("• Links available: <code>%d</code>\n", len(links)))
+
+	fmt.Fprintf(sb, "• Links available: <code>%d</code>\n", len(links))
 
 	if len(queries) == 0 {
 		sb.WriteString("• Generated queries: <code>0</code>\n")
 	} else {
-		sb.WriteString(fmt.Sprintf("• Generated queries: <code>%d</code>\n", len(queries)))
+		fmt.Fprintf(sb, "• Generated queries: <code>%d</code>\n", len(queries))
+
 		for _, q := range queries {
-			sb.WriteString(fmt.Sprintf("  • <code>%s</code> (%s)\n", html.EscapeString(q.Query), html.EscapeString(q.Language)))
+			fmt.Fprintf(sb, "  • <code>%s</code> (%s)\n", html.EscapeString(q.Query), html.EscapeString(q.Language))
 		}
 	}
-
-	sb.WriteString("\n<i>Note: translations and provider execution run in the worker.</i>")
-
-	b.reply(msg, sb.String())
 }
 
 func parseEnrichmentLanguagePolicy(raw string) domain.LanguageRoutingPolicy {
 	policy := domain.LanguageRoutingPolicy{}
+
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		policy.Default = []string{"en"}
+
 		return policy
 	}
 

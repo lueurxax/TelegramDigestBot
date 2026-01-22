@@ -33,6 +33,16 @@ const (
 	buttonAnnotateBad        = "👎 Bad"
 	buttonAnnotateIrrelevant = "🚫 Irrelevant"
 	buttonAnnotateSkip       = "⏭ Skip"
+
+	// Shared format strings for item display.
+	fmtOpenMessage = "Open message"
+	fmtItemCode    = "Item: <code>%s</code>\n"
+	fmtTimeCode    = "Time: <code>%s</code>\n"
+	fmtStatusCode  = "Status: <code>%s</code>\n"
+	fmtScoresCode  = "Scores: rel <code>%.2f</code> | imp <code>%.2f</code>\n"
+	fmtTopicCode   = "Topic: <code>%s</code>\n"
+	fmtSummaryHdr  = "\nSummary:\n"
+	fmtTextHdr     = "Text:\n"
 )
 
 func (b *Bot) handleAnnotate(ctx context.Context, msg *tgbotapi.Message) {
@@ -201,17 +211,17 @@ func formatAnnotationItem(item *db.AnnotationItem) string {
 	sb.WriteString("<b>Annotation Item</b>\n\n")
 
 	name := annotationChannelName(item)
-	link := FormatLink(item.ChannelUsername, item.ChannelPeerID, item.MessageID, "Open message")
+	link := FormatLink(item.ChannelUsername, item.ChannelPeerID, item.MessageID, fmtOpenMessage)
 
 	sb.WriteString(fmt.Sprintf("Channel: <b>%s</b>\n", html.EscapeString(name)))
 	sb.WriteString(fmt.Sprintf("Message: %s\n", link))
-	sb.WriteString(fmt.Sprintf("Item: <code>%s</code>\n", item.ItemID))
-	sb.WriteString(fmt.Sprintf("Time: <code>%s</code>\n", item.TGDate.Format(DateTimeFormat)))
-	sb.WriteString(fmt.Sprintf("Status: <code>%s</code>\n", html.EscapeString(item.Status)))
-	sb.WriteString(fmt.Sprintf("Scores: rel <code>%.2f</code> | imp <code>%.2f</code>\n", item.RelevanceScore, item.ImportanceScore))
+	sb.WriteString(fmt.Sprintf(fmtItemCode, item.ItemID))
+	sb.WriteString(fmt.Sprintf(fmtTimeCode, item.TGDate.Format(DateTimeFormat)))
+	sb.WriteString(fmt.Sprintf(fmtStatusCode, html.EscapeString(item.Status)))
+	sb.WriteString(fmt.Sprintf(fmtScoresCode, item.RelevanceScore, item.ImportanceScore))
 
 	if item.Topic != "" {
-		sb.WriteString(fmt.Sprintf("Topic: <code>%s</code>\n", html.EscapeString(item.Topic)))
+		sb.WriteString(fmt.Sprintf(fmtTopicCode, html.EscapeString(item.Topic)))
 	}
 
 	summary := strings.TrimSpace(item.Summary)
@@ -224,7 +234,7 @@ func formatAnnotationItem(item *db.AnnotationItem) string {
 	summary = truncateAnnotationText(summary, annotationSummaryLimit)
 	summary = html.EscapeString(summary)
 
-	sb.WriteString("\nSummary:\n")
+	sb.WriteString(fmtSummaryHdr)
 	sb.WriteString(fmt.Sprintf(annotateBlockquoteFmt, summary))
 
 	text := strings.TrimSpace(item.Text)
@@ -232,7 +242,7 @@ func formatAnnotationItem(item *db.AnnotationItem) string {
 		text = truncateAnnotationText(text, annotationTextLimit)
 		text = html.EscapeString(text)
 
-		sb.WriteString("Text:\n")
+		sb.WriteString(fmtTextHdr)
 		sb.WriteString(fmt.Sprintf(annotateBlockquoteFmt, text))
 	}
 
