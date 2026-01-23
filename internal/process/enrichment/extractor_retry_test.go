@@ -45,7 +45,7 @@ func (m *retryMockLLMClient) CompleteText(_ context.Context, _, _ string) (strin
 func TestExtractor_RetryOnDeadlineExceeded(t *testing.T) {
 	logger := zerolog.Nop()
 	m := &retryMockLLMClient{
-		errorUntil: 2, // Fail first 2 attempts
+		errorUntil: 2, // Fail first 2 attempts, succeed on 3rd
 		err:        context.DeadlineExceeded,
 		response:   `[{"text": "Claim 1", "entities": []}]`,
 	}

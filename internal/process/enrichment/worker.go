@@ -33,6 +33,9 @@ const (
 	defaultMaxConcurrentResults      = 3
 	defaultMaxConcurrentQueries      = 3
 	defaultDedupSimilarity           = 0.98
+	// defaultDBTimeout is the independent timeout for database operations.
+	// This prevents DB operations from failing when item context is near expiry.
+	defaultDBTimeout = 30 * time.Second
 	// resultProcessingMultiplier determines how many results to process to find enough matches.
 	// We process maxEvidence * multiplier results because not all results will match
 	// (some fail extraction, some have low agreement scores, some have language mismatches).
@@ -1059,11 +1062,30 @@ func (w *Worker) recoverPanic(operation string) {
 	}
 }
 
+// createDBContext creates a context with independent timeout for database operations.
+// This prevents DB operations from failing when the parent item context is near expiry.
+// Uses context.AfterFunc to avoid goroutine leaks while still propagating cancellation.
+func (w *Worker) createDBContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultDBTimeout)
+
+	// Propagate parent cancellation using AfterFunc (no goroutine leak)
+	stop := context.AfterFunc(parent, cancel)
+
+	return ctx, func() {
+		stop()
+		cancel()
+	}
+}
+
 func (w *Worker) updateItemScore(ctx context.Context, itemID string, scores []float32, sourceCount int) {
 	avgScore := w.scorer.CalculateOverallScore(scores)
 	tier := w.scorer.DetermineTier(sourceCount, avgScore)
 
-	if err := w.db.UpdateItemFactCheckScore(ctx, itemID, avgScore, tier, ""); err != nil {
+	// Use independent DB context for score update
+	dbCtx, dbCancel := w.createDBContext(ctx)
+	defer dbCancel()
+
+	if err := w.db.UpdateItemFactCheckScore(dbCtx, itemID, avgScore, tier, ""); err != nil {
 		w.logger.Warn().Err(err).Msg("failed to update item fact check score")
 	}
 }
@@ -1267,14 +1289,18 @@ func (w *Worker) processEvidenceSource(ctx context.Context, result SearchResult,
 		return nil, err
 	}
 
-	sourceID, err := w.db.SaveEvidenceSource(ctx, evidence.Source)
+	// Use independent DB context to avoid timeout when item context is near expiry
+	dbCtx, dbCancel := w.createDBContext(ctx)
+	defer dbCancel()
+
+	sourceID, err := w.db.SaveEvidenceSource(dbCtx, evidence.Source)
 	if err != nil {
 		return nil, fmt.Errorf("save evidence source: %w", err)
 	}
 
 	evidence.Source.ID = sourceID
 
-	w.saveClaimsWithDedup(ctx, sourceID, evidence.Claims)
+	w.saveClaimsWithDedup(dbCtx, sourceID, evidence.Claims)
 
 	return evidence, nil
 }
@@ -1356,7 +1382,11 @@ func (w *Worker) saveItemEvidence(ctx context.Context, itemID string, evidence *
 		MatchedAt:         time.Now(),
 	}
 
-	if err := w.db.SaveItemEvidence(ctx, ie); err != nil {
+	// Use independent DB context to avoid timeout when item context is near expiry
+	dbCtx, dbCancel := w.createDBContext(ctx)
+	defer dbCancel()
+
+	if err := w.db.SaveItemEvidence(dbCtx, ie); err != nil {
 		return fmt.Errorf("save item evidence: %w", err)
 	}
 

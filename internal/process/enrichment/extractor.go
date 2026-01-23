@@ -41,7 +41,9 @@ const (
 	fieldResponse     = "response"
 	fieldAttempt      = "attempt"
 
-	// LLM retry settings
+	// LLM retry settings.
+	// With 45s timeout × 3 attempts + ~6s delays = ~141s max for LLM.
+	// Item timeout of 300s provides ample room for retries + DB operations.
 	llmMaxRetries       = 2
 	llmRetryDelay       = 2 * time.Second
 	llmRetryBackoffMult = 2
