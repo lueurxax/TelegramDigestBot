@@ -710,6 +710,7 @@ func (w *Worker) executeQueries(ctx context.Context, queries []GeneratedQuery, m
 		go func(q GeneratedQuery) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer w.recoverPanic("executeQuery")
 
 			w.executeQuery(ctx, q, maxResults, state)
 		}(gq)
@@ -1011,6 +1012,7 @@ func (w *Worker) processResultsConcurrently(ctx context.Context, results []Searc
 		go func(res SearchResult) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer w.recoverPanic("processSingleResult")
 
 			score, ok := w.processSingleResult(ctx, params.item, res, params.provider, params.cacheTTL, params.minAgreement, params.targetLangs)
 			if !ok {
@@ -1043,6 +1045,17 @@ func (w *Worker) acquireSemaphore(ctx context.Context, sem chan struct{}) bool {
 		return true
 	case <-ctx.Done():
 		return false
+	}
+}
+
+// recoverPanic logs and recovers from panics in goroutines.
+// Should be called via defer at the start of goroutines.
+func (w *Worker) recoverPanic(operation string) {
+	if r := recover(); r != nil {
+		w.logger.Error().
+			Interface("panic", r).
+			Str("operation", operation).
+			Msg("recovered from panic in worker goroutine")
 	}
 }
 

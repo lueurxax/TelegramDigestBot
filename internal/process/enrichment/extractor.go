@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand/v2"
+	"net"
 	"net/http"
 	"regexp"
 	"sort"
@@ -43,6 +45,7 @@ const (
 	llmMaxRetries       = 2
 	llmRetryDelay       = 2 * time.Second
 	llmRetryBackoffMult = 2
+	llmRetryJitterRatio = 0.3 // Add up to 30% random jitter to prevent thundering herd
 )
 
 var (
@@ -200,10 +203,12 @@ Text:
 func (e *Extractor) executeWithRetry(ctx context.Context, prompt string) ([]ExtractedClaim, error) {
 	var lastErr error
 
-	delay := llmRetryDelay
+	baseDelay := llmRetryDelay
 
 	for attempt := 0; attempt <= llmMaxRetries; attempt++ {
 		if attempt > 0 {
+			delay := addJitter(baseDelay)
+
 			e.logger.Debug().
 				Int(fieldAttempt, attempt+1).
 				Dur("delay", delay).
@@ -213,7 +218,7 @@ func (e *Extractor) executeWithRetry(ctx context.Context, prompt string) ([]Extr
 				return nil, fmt.Errorf("llm extract claims: retry interrupted: %w", err)
 			}
 
-			delay *= llmRetryBackoffMult
+			baseDelay *= llmRetryBackoffMult
 		}
 
 		claims, err := e.tryLLMExtraction(ctx, prompt)
@@ -237,6 +242,14 @@ func (e *Extractor) executeWithRetry(ctx context.Context, prompt string) ([]Extr
 	return nil, fmt.Errorf("llm extract claims: max retries exceeded: %w", lastErr)
 }
 
+// addJitter adds random jitter to a duration to prevent thundering herd.
+func addJitter(d time.Duration) time.Duration {
+	//nolint:gosec // Weak random is fine for jitter - not security-sensitive
+	jitter := time.Duration(float64(d) * llmRetryJitterRatio * rand.Float64())
+
+	return d + jitter
+}
+
 func (e *Extractor) tryLLMExtraction(ctx context.Context, prompt string) ([]ExtractedClaim, error) {
 	llmCtx, cancel := e.createLLMContext(ctx)
 	defer cancel()
@@ -250,10 +263,13 @@ func (e *Extractor) tryLLMExtraction(ctx context.Context, prompt string) ([]Extr
 }
 
 func (e *Extractor) sleepWithContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("context done: %w", ctx.Err())
-	case <-time.After(d):
+	case <-timer.C:
 		return nil
 	}
 }
@@ -276,12 +292,13 @@ func isRetryableError(err error) bool {
 		return true
 	}
 
-	// Check for specific timeout patterns in wrapped errors
-	errStr := err.Error()
+	// Check for network timeout errors using type assertion (more robust than string matching)
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
 
-	return strings.Contains(errStr, "context deadline exceeded") ||
-		strings.Contains(errStr, "i/o timeout") ||
-		strings.Contains(errStr, "connection timed out")
+	return false
 }
 
 // createLLMContext creates a context with dedicated LLM timeout.
