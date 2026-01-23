@@ -1303,18 +1303,19 @@ func (w *Worker) processEvidenceSource(ctx context.Context, result SearchResult,
 	}
 
 	if cached != nil && time.Now().Before(cached.ExpiresAt) {
-		observability.EnrichmentCacheHits.Inc()
-
 		// Load claims from database for cached sources
 		claims, err := w.loadClaimsFromDB(ctx, cached.ID)
 		if err != nil {
-			w.logger.Warn().Err(err).Str("source_id", cached.ID).Msg("failed to load claims for cached source")
-		}
+			// Failed to load claims - fall through to re-extract to avoid returning empty claims
+			w.logger.Warn().Err(err).Str("source_id", cached.ID).Msg("failed to load claims for cached source, falling back to re-extract")
+		} else {
+			observability.EnrichmentCacheHits.Inc()
 
-		return &ExtractedEvidence{
-			Source: cached,
-			Claims: claims,
-		}, nil
+			return &ExtractedEvidence{
+				Source: cached,
+				Claims: claims,
+			}, nil
+		}
 	}
 
 	observability.EnrichmentCacheMisses.Inc()
