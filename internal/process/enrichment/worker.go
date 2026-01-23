@@ -1240,8 +1240,6 @@ func (w *Worker) logScoringResult(item *db.EnrichmentQueueItem, result SearchRes
 	itemLang := w.queryGenerator.DetectLanguage(item.Summary)
 	languageMismatch := itemLang != "" && claimLang != "" && itemLang != claimLang
 	matchReason := w.matchDebugReason(evidence, scoringResult, minAgreement)
-	itemTokens := len(tokenize(item.Summary))
-	claimTokens := len(tokenize(scoringResult.BestClaim))
 
 	w.logger.Info().
 		Str(logKeyURL, result.URL).
@@ -1253,8 +1251,10 @@ func (w *Worker) logScoringResult(item *db.EnrichmentQueueItem, result SearchRes
 		Float64("entity_overlap", scoringResult.BestEntityOverlap).
 		Int("entity_matches", scoringResult.BestEntityMatches).
 		Int("claims", len(evidence.Claims)).
-		Int("item_tokens", itemTokens).
-		Int("claim_tokens", claimTokens).
+		Int("item_tokens_count", len(scoringResult.ItemTokens)).
+		Int("claim_tokens_count", len(scoringResult.BestClaimTokens)).
+		Strs("item_tokens", scoringResult.ItemTokens).
+		Strs("claim_tokens", scoringResult.BestClaimTokens).
 		Int("content_len", len(evidence.Source.Content)).
 		Int("description_len", len(evidence.Source.Description)).
 		Int("title_len", len(evidence.Source.Title)).

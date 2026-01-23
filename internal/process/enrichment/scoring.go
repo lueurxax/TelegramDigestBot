@@ -32,6 +32,9 @@ type ScoringResult struct {
 	BestEntityOverlap float64
 	BestEntityMatches int
 	BestClaim         string
+	// Debug fields for logging
+	ItemTokens      []string
+	BestClaimTokens []string
 }
 
 type MatchedClaim struct {
@@ -63,6 +66,7 @@ func (s *Scorer) Score(itemSummary string, evidence *ExtractedEvidence) ScoringR
 		bestEntityOverlap float64
 		bestEntityMatches int
 		bestClaim         string
+		bestClaimTokens   map[string]bool
 	)
 
 	var matchedClaims []MatchedClaim
@@ -85,6 +89,7 @@ func (s *Scorer) Score(itemSummary string, evidence *ExtractedEvidence) ScoringR
 			bestEntityOverlap = entityOverlap
 			bestEntityMatches = entityMatches
 			bestClaim = claim.Text
+			bestClaimTokens = claimTokens
 		}
 
 		if score > minMatchScore {
@@ -107,6 +112,8 @@ func (s *Scorer) Score(itemSummary string, evidence *ExtractedEvidence) ScoringR
 		BestEntityOverlap: bestEntityOverlap,
 		BestEntityMatches: bestEntityMatches,
 		BestClaim:         bestClaim,
+		ItemTokens:        tokenMapToSlice(itemTokens),
+		BestClaimTokens:   tokenMapToSlice(bestClaimTokens),
 	}
 }
 
@@ -150,7 +157,6 @@ func (s *Scorer) MarshalMatchedClaims(claims []MatchedClaim) []byte {
 
 func tokenize(text string) map[string]bool {
 	tokens := make(map[string]bool)
-	text = normalizeCyrillic(text)
 	words := strings.FieldsFunc(text, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
@@ -163,6 +169,19 @@ func tokenize(text string) map[string]bool {
 	}
 
 	return tokens
+}
+
+func tokenMapToSlice(tokens map[string]bool) []string {
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	result := make([]string, 0, len(tokens))
+	for token := range tokens {
+		result = append(result, token)
+	}
+
+	return result
 }
 
 func jaccardSimilarity(set1, set2 map[string]bool) float64 {
