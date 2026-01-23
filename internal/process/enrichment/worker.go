@@ -1139,7 +1139,10 @@ func (w *Worker) processSingleResult(
 		return 0, false
 	}
 
-	scoringResult := w.scorer.Score(item.Summary, evidence)
+	// Get summary for scoring - translate if language mismatch
+	summaryForScoring := w.getSummaryForScoring(ctx, item.Summary, evidence)
+
+	scoringResult := w.scorer.Score(summaryForScoring, evidence)
 	claimLang := linkscore.DetectLanguage(scoringResult.BestClaim)
 
 	if w.shouldSkipForLanguageMismatch(result, evidence, claimLang, targetLangs) {
@@ -1234,6 +1237,88 @@ func (w *Worker) checkResultLanguageMismatch(result SearchResult, sourceLang str
 	}
 
 	return false
+}
+
+// getSummaryForScoring returns the item summary translated to the evidence language if needed.
+// This enables cross-language comparison by ensuring both texts are in the same language.
+func (w *Worker) getSummaryForScoring(ctx context.Context, summary string, evidence *ExtractedEvidence) string {
+	if w.translationClient == nil {
+		return summary
+	}
+
+	// Detect evidence language from claims or source
+	evidenceLang := w.detectEvidenceLanguage(evidence)
+	if evidenceLang == "" {
+		return summary
+	}
+
+	// Detect item language
+	itemLang := w.queryGenerator.DetectLanguage(summary)
+	if itemLang == "" || languageMatches(itemLang, evidenceLang) {
+		return summary
+	}
+
+	// Translate summary to evidence language for comparison
+	translated, err := w.translateSummaryForScoring(ctx, summary, evidenceLang)
+	if err != nil {
+		w.logger.Debug().Err(err).
+			Str(logKeyItemLang, itemLang).
+			Str(logKeyEvidenceLang, evidenceLang).
+			Msg("failed to translate summary for scoring, using original")
+
+		return summary
+	}
+
+	w.logger.Debug().
+		Str(logKeyItemLang, itemLang).
+		Str(logKeyEvidenceLang, evidenceLang).
+		Msg("translated summary for cross-language scoring")
+
+	return translated
+}
+
+// detectEvidenceLanguage determines the language of evidence claims.
+func (w *Worker) detectEvidenceLanguage(evidence *ExtractedEvidence) string {
+	// First try source language
+	if evidence.Source.Language != "" {
+		return evidence.Source.Language
+	}
+
+	// Try to detect from claims
+	for _, claim := range evidence.Claims {
+		if lang := linkscore.DetectLanguage(claim.Text); lang != "" {
+			return lang
+		}
+	}
+
+	// Fallback to content detection
+	content := strings.TrimSpace(evidence.Source.Title + " " + evidence.Source.Description)
+	if content != "" {
+		return linkscore.DetectLanguage(content)
+	}
+
+	return ""
+}
+
+// translateSummaryForScoring translates the summary to target language with caching.
+func (w *Worker) translateSummaryForScoring(ctx context.Context, summary, targetLang string) (string, error) {
+	// Check cache first
+	if cached, err := w.db.GetTranslation(ctx, summary, targetLang); err == nil && cached != "" {
+		return cached, nil
+	}
+
+	// Translate
+	translated, err := w.translationClient.Translate(ctx, summary, targetLang)
+	if err != nil {
+		return "", fmt.Errorf(fmtErrTranslateForScore, targetLang, err)
+	}
+
+	// Cache the translation
+	if err := w.db.SaveTranslation(ctx, summary, targetLang, translated, defaultTranslationCacheTTL); err != nil {
+		w.logger.Warn().Err(err).Msg("failed to cache summary translation")
+	}
+
+	return translated, nil
 }
 
 func (w *Worker) logScoringResult(item *db.EnrichmentQueueItem, result SearchResult, evidence *ExtractedEvidence, scoringResult ScoringResult, minAgreement float32, claimLang string) {
