@@ -72,6 +72,16 @@ const (
 	NormalizationStddevMinimum = 0.01
 )
 
+// Recovery constants for stuck message handling
+const (
+	// StuckMessageThreshold is how long a message can be claimed before considered stuck.
+	// Should be longer than the typical batch processing time (~2-3 minutes).
+	StuckMessageThreshold = 10 * time.Minute
+
+	// RecoveryInterval is how often to check for and recover stuck messages.
+	RecoveryInterval = 5 * time.Minute
+)
+
 // Relevance gate confidence constants
 const (
 	ConfidenceEmpty    float32 = 1.0

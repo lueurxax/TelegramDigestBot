@@ -774,6 +774,26 @@ func (db *DB) CountEnrichmentErrors(ctx context.Context) (int, error) {
 	return db.countEnrichmentByStatus(ctx, EnrichmentStatusError)
 }
 
+// RecoverStuckEnrichmentItems resets items stuck in "processing" status for too long.
+// This handles cases where a worker crashed or timed out before updating the status.
+// Items are reset to pending with incremented attempt count and a retry delay.
+func (db *DB) RecoverStuckEnrichmentItems(ctx context.Context, stuckThreshold time.Duration) (int64, error) {
+	result, err := db.Pool.Exec(ctx, `
+		UPDATE enrichment_queue
+		SET status = $1,
+			attempt_count = attempt_count + 1,
+			next_retry_at = now() + interval '10 minutes',
+			error_message = 'recovered from stuck processing state'
+		WHERE status = $2
+		  AND updated_at < now() - $3::interval
+	`, EnrichmentStatusPending, EnrichmentStatusProcessing, stuckThreshold.String())
+	if err != nil {
+		return 0, fmt.Errorf("recover stuck enrichment items: %w", err)
+	}
+
+	return result.RowsAffected(), nil
+}
+
 func (db *DB) GetTranslation(ctx context.Context, query, targetLang string) (string, error) {
 	var translatedText string
 

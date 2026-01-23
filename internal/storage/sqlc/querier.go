@@ -73,6 +73,8 @@ type Querier interface {
 	GetRecentSettingHistory(ctx context.Context, limit int32) ([]GetRecentSettingHistoryRow, error)
 	GetRejectedDiscoveries(ctx context.Context, limit int32) ([]GetRejectedDiscoveriesRow, error)
 	GetSetting(ctx context.Context, key string) ([]byte, error)
+	// Uses FOR UPDATE SKIP LOCKED to prevent multiple workers from claiming the same messages.
+	// Atomically claims messages by setting processing_started_at.
 	GetUnprocessedMessages(ctx context.Context, limit int32) ([]GetUnprocessedMessagesRow, error)
 	IncrementDiscoveryResolutionAttempts(ctx context.Context, id pgtype.UUID) error
 	IsChannelDiscoveredRejected(ctx context.Context, arg IsChannelDiscoveredRejectedParams) (bool, error)
@@ -80,7 +82,12 @@ type Querier interface {
 	LinkMessageToLink(ctx context.Context, arg LinkMessageToLinkParams) error
 	MarkAsProcessed(ctx context.Context, id pgtype.UUID) error
 	MarkItemsAsDigested(ctx context.Context, dollar_1 []pgtype.UUID) error
+	// Recovers messages that were claimed but not processed within the timeout.
+	// This handles cases where a worker crashed after claiming messages.
+	RecoverStuckPipelineMessages(ctx context.Context, dollar_1 pgtype.Interval) (int64, error)
 	ReleaseAdvisoryLock(ctx context.Context, pgAdvisoryUnlock int64) error
+	// Releases a claimed message so it can be picked up by another worker (used on error)
+	ReleaseClaimedMessage(ctx context.Context, id pgtype.UUID) error
 	RetryFailedEnrichmentItems(ctx context.Context) error
 	RetryFailedItems(ctx context.Context) error
 	RetryItem(ctx context.Context, id pgtype.UUID) error

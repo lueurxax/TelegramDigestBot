@@ -95,7 +95,7 @@ type Config struct {
 	EnrichmentAllowlistDomains  string        `env:"ENRICHMENT_ALLOWLIST_DOMAINS" envDefault:""`
 	EnrichmentDenylistDomains   string        `env:"ENRICHMENT_DENYLIST_DOMAINS" envDefault:""`
 	EnrichmentDedupSimilarity   float32       `env:"ENRICHMENT_DEDUP_SIMILARITY" envDefault:"0.98"`
-	EnrichmentMaxSeconds        int           `env:"ENRICHMENT_MAX_SECONDS" envDefault:"60"`
+	EnrichmentMaxSeconds        int           `env:"ENRICHMENT_MAX_SECONDS" envDefault:"180"`
 	EnrichmentProviders         string        `env:"ENRICHMENT_PROVIDERS" envDefault:""`
 	EnrichmentProviderCooldown  time.Duration `env:"ENRICHMENT_PROVIDER_COOLDOWN" envDefault:"10m"`
 	EnrichmentProviderGrace     time.Duration `env:"ENRICHMENT_PROVIDER_GRACE" envDefault:"0s"`

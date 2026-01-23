@@ -334,6 +334,7 @@ type RawMessage struct {
 	ProcessedAt          pgtype.Timestamptz `json:"processed_at"`
 	MediaData            []byte             `json:"media_data"`
 	DiscoveriesExtracted pgtype.Bool        `json:"discoveries_extracted"`
+	ProcessingStartedAt  pgtype.Timestamptz `json:"processing_started_at"`
 }
 
 type RawMessageDropLog struct {
@@ -369,4 +370,12 @@ type SettingHistory struct {
 	NewValue  pgtype.Text        `json:"new_value"`
 	ChangedBy int64              `json:"changed_by"`
 	ChangedAt pgtype.Timestamptz `json:"changed_at"`
+}
+
+type TranslationCache struct {
+	Query          string             `json:"query"`
+	TargetLang     string             `json:"target_lang"`
+	TranslatedText string             `json:"translated_text"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
 }

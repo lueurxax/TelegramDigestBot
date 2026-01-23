@@ -39,6 +39,25 @@ UPDATE channels SET is_active = FALSE WHERE username = $1 OR '@' || username = $
 UPDATE channels SET is_active = FALSE WHERE id = $1;
 
 -- name: GetUnprocessedMessages :many
+-- Uses FOR UPDATE SKIP LOCKED to prevent multiple workers from claiming the same messages.
+-- Atomically claims messages by setting processing_started_at.
+WITH eligible AS (
+    SELECT rm.id
+    FROM raw_messages rm
+    LEFT JOIN items i ON rm.id = i.raw_message_id
+    WHERE (rm.processed_at IS NULL AND rm.processing_started_at IS NULL)
+       OR (i.status IN ('error', 'retry') AND i.retry_count < 5 AND (i.next_retry_at IS NULL OR i.next_retry_at < now()))
+    ORDER BY rm.tg_date ASC
+    LIMIT $1
+    FOR UPDATE OF rm SKIP LOCKED
+),
+claimed AS (
+    UPDATE raw_messages rm
+    SET processing_started_at = now()
+    FROM eligible
+    WHERE rm.id = eligible.id
+    RETURNING rm.id
+)
 SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.entities_json, rm.media_json, rm.media_data, rm.canonical_hash, rm.is_forward,
        c.title as channel_title, c.context as channel_context, c.description as channel_description,
        c.category as channel_category, c.tone as channel_tone, c.update_freq as channel_update_freq,
@@ -48,10 +67,8 @@ SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.entities_
        c.relevance_threshold_delta as channel_relevance_threshold_delta
 FROM raw_messages rm
 JOIN channels c ON rm.channel_id = c.id
-LEFT JOIN items i ON rm.id = i.raw_message_id
-WHERE rm.processed_at IS NULL OR (i.status IN ('error', 'retry') AND i.retry_count < 5 AND (i.next_retry_at IS NULL OR i.next_retry_at < now()))
-ORDER BY rm.tg_date ASC
-LIMIT $1;
+WHERE rm.id IN (SELECT id FROM claimed)
+ORDER BY rm.tg_date ASC;
 
 -- name: UpdateChannelContext :exec
 UPDATE channels SET context = $2 WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1;
@@ -60,7 +77,20 @@ UPDATE channels SET context = $2 WHERE username = $1 OR '@' || username = $1 OR 
 UPDATE channels SET category = $2, tone = $3, update_freq = $4, relevance_threshold = $5, importance_threshold = $6 WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1;
 
 -- name: MarkAsProcessed :exec
-UPDATE raw_messages SET processed_at = now() WHERE id = $1;
+UPDATE raw_messages SET processed_at = now(), processing_started_at = NULL WHERE id = $1;
+
+-- name: ReleaseClaimedMessage :exec
+-- Releases a claimed message so it can be picked up by another worker (used on error)
+UPDATE raw_messages SET processing_started_at = NULL WHERE id = $1;
+
+-- name: RecoverStuckPipelineMessages :execrows
+-- Recovers messages that were claimed but not processed within the timeout.
+-- This handles cases where a worker crashed after claiming messages.
+UPDATE raw_messages
+SET processing_started_at = NULL
+WHERE processing_started_at IS NOT NULL
+  AND processed_at IS NULL
+  AND processing_started_at < now() - $1::interval;
 
 -- name: SaveItem :one
 INSERT INTO items (raw_message_id, relevance_score, importance_score, topic, summary, language, status, retry_count, next_retry_at)

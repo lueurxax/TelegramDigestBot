@@ -3,6 +3,7 @@ package enrichment
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -47,6 +48,9 @@ const (
 	llmQuerySummaryLimit       = 400
 	llmQueryTextLimit          = 800
 	llmQueryLinksLimit         = 3
+	// stuckProcessingThreshold is the duration after which a "processing" item
+	// is considered stuck and should be recovered. Set to 2x item timeout.
+	stuckProcessingThreshold = 2 * defaultItemTimeout
 )
 
 const (
@@ -68,6 +72,7 @@ type Repository interface {
 	DeduplicateEvidenceClaims(ctx context.Context) (int64, error)
 	CleanupExpiredTranslations(ctx context.Context) (int64, error)
 	FindSimilarClaim(ctx context.Context, evidenceID string, embedding []float32, similarity float32) (*db.EvidenceClaim, error)
+	RecoverStuckEnrichmentItems(ctx context.Context, stuckThreshold time.Duration) (int64, error)
 	// Budget tracking
 	GetDailyEnrichmentCount(ctx context.Context) (int, error)
 	GetMonthlyEnrichmentCount(ctx context.Context) (int, error)
@@ -955,15 +960,25 @@ func (w *Worker) handleNoResults(itemID string, lastErr error) error {
 	return nil
 }
 
+var errNoEvidenceExtracted = errors.New("no evidence extracted from search results")
+
 func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQueueItem, results []SearchResult, provider ProviderName) error {
 	params := w.buildResultProcessingParams(ctx, item, provider)
 	scores, sourceCount := w.processResultsConcurrently(ctx, results, params)
 
 	if sourceCount > 0 {
 		w.updateItemScore(ctx, item.ItemID, scores, sourceCount)
+
+		return nil
 	}
 
-	return nil
+	// No evidence was successfully extracted - this is retryable
+	w.logger.Warn().
+		Str(logKeyItemID, item.ItemID).
+		Int("results_count", len(results)).
+		Msg("no evidence extracted from any search result")
+
+	return errNoEvidenceExtracted
 }
 
 type resultProcessingParams struct {
@@ -1419,15 +1434,32 @@ func (w *Worker) updateStatus(ctx context.Context, queueID, status, errMsg strin
 }
 
 func (w *Worker) cleanupCache(ctx context.Context) {
-	// Clean expired evidence sources
+	w.recoverStuckItems(ctx)
+	w.cleanExpiredSources(ctx)
+	w.cleanExcessEvidence(ctx)
+	w.deduplicateClaims(ctx)
+	w.cleanExpiredTranslations(ctx)
+}
+
+func (w *Worker) recoverStuckItems(ctx context.Context) {
+	recovered, err := w.db.RecoverStuckEnrichmentItems(ctx, stuckProcessingThreshold)
+	if err != nil {
+		w.logger.Warn().Err(err).Msg("failed to recover stuck enrichment items")
+	} else if recovered > 0 {
+		w.logger.Warn().Int64("recovered", recovered).Msg("recovered stuck enrichment items")
+	}
+}
+
+func (w *Worker) cleanExpiredSources(ctx context.Context) {
 	deleted, err := w.db.DeleteExpiredEvidenceSources(ctx)
 	if err != nil {
 		w.logger.Warn().Err(err).Msg("failed to clean expired evidence sources")
 	} else if deleted > 0 {
 		w.logger.Info().Int64(logKeyDeleted, deleted).Msg("cleaned expired evidence sources")
 	}
+}
 
-	// Clean excess evidence per item
+func (w *Worker) cleanExcessEvidence(ctx context.Context) {
 	maxEvidence := w.cfg.EnrichmentMaxEvidenceItem
 	if maxEvidence <= 0 {
 		maxEvidence = defaultMaxEvidencePerItem
@@ -1439,16 +1471,18 @@ func (w *Worker) cleanupCache(ctx context.Context) {
 	} else if excessDeleted > 0 {
 		w.logger.Info().Int64(logKeyDeleted, excessDeleted).Msg("cleaned excess evidence per item")
 	}
+}
 
-	// Deduplicate evidence claims
+func (w *Worker) deduplicateClaims(ctx context.Context) {
 	deduped, err := w.db.DeduplicateEvidenceClaims(ctx)
 	if err != nil {
 		w.logger.Warn().Err(err).Msg("failed to deduplicate evidence claims")
 	} else if deduped > 0 {
 		w.logger.Info().Int64("deduped", deduped).Msg("deduplicated evidence claims")
 	}
+}
 
-	// Clean expired translations
+func (w *Worker) cleanExpiredTranslations(ctx context.Context) {
 	deletedTranslations, err := w.db.CleanupExpiredTranslations(ctx)
 	if err != nil {
 		w.logger.Warn().Err(err).Msg("failed to clean expired translations")

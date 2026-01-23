@@ -43,7 +43,8 @@ const (
 
 	// LLM retry settings.
 	// With 45s timeout × 3 attempts + ~6s delays = ~141s max for LLM.
-	// Item timeout of 300s provides ample room for retries + DB operations.
+	// Item timeout of 180s leaves ~39s for other operations (search, fetch, DB).
+	// DB operations use independent 30s timeout to avoid failures near item timeout expiry.
 	llmMaxRetries       = 2
 	llmRetryDelay       = 2 * time.Second
 	llmRetryBackoffMult = 2

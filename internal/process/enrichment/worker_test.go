@@ -200,6 +200,10 @@ func (m *mockRepository) GetRecentMessagesForChannel(_ context.Context, _ string
 	return nil, nil
 }
 
+func (m *mockRepository) RecoverStuckEnrichmentItems(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
 func TestWorker_generateClaimEmbedding(t *testing.T) {
 	logger := zerolog.Nop()
 

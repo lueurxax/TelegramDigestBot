@@ -28,6 +28,8 @@ type Repository interface {
 	GetBacklogCount(ctx context.Context) (int, error)
 	GetActiveFilters(ctx context.Context) ([]db.Filter, error)
 	MarkAsProcessed(ctx context.Context, id string) error
+	ReleaseClaimedMessage(ctx context.Context, id string) error
+	RecoverStuckPipelineMessages(ctx context.Context, stuckThreshold time.Duration) (int64, error)
 	GetRecentMessagesForChannel(ctx context.Context, channelID string, before time.Time, limit int) ([]string, error)
 	GetChannelStats(ctx context.Context) (map[string]db.ChannelStats, error)
 	SaveItem(ctx context.Context, item *db.Item) error
@@ -118,7 +120,17 @@ func (p *Pipeline) Run(ctx context.Context) error {
 		pollInterval = DefaultPollInterval
 	}
 
+	// Track last recovery time
+	lastRecovery := time.Now()
+
 	for {
+		// Periodically recover stuck messages
+		if time.Since(lastRecovery) >= RecoveryInterval {
+			p.recoverStuckMessages(ctx)
+
+			lastRecovery = time.Now()
+		}
+
 		correlationID := uuid.New().String()
 		p.logger.Info().Str(LogFieldCorrelationID, correlationID).Msg("Starting pipeline batch")
 
@@ -131,6 +143,20 @@ func (p *Pipeline) Run(ctx context.Context) error {
 			return ctx.Err() //nolint:wrapcheck
 		case <-time.After(pollInterval):
 		}
+	}
+}
+
+// recoverStuckMessages recovers messages that were claimed but never processed.
+// This handles cases where a worker crashed or timed out after claiming messages.
+func (p *Pipeline) recoverStuckMessages(ctx context.Context) {
+	recovered, err := p.database.RecoverStuckPipelineMessages(ctx, StuckMessageThreshold)
+	if err != nil {
+		p.logger.Error().Err(err).Msg("failed to recover stuck pipeline messages")
+		return
+	}
+
+	if recovered > 0 {
+		p.logger.Info().Int64("recovered", recovered).Msg("recovered stuck pipeline messages")
 	}
 }
 

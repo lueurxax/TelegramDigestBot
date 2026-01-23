@@ -108,6 +108,33 @@ func (db *DB) GetBacklogCount(ctx context.Context) (int, error) {
 	return int(count), nil
 }
 
+// ReleaseClaimedMessage releases a claimed message so another worker can process it.
+// Used when processing fails and we want to allow retry.
+func (db *DB) ReleaseClaimedMessage(ctx context.Context, id string) error {
+	if err := db.Queries.ReleaseClaimedMessage(ctx, toUUID(id)); err != nil {
+		return fmt.Errorf("release claimed message: %w", err)
+	}
+
+	return nil
+}
+
+// RecoverStuckPipelineMessages recovers messages that were claimed but not processed
+// within the given timeout. Returns the number of recovered messages.
+func (db *DB) RecoverStuckPipelineMessages(ctx context.Context, stuckThreshold time.Duration) (int64, error) {
+	result, err := db.Pool.Exec(ctx, `
+		UPDATE raw_messages
+		SET processing_started_at = NULL
+		WHERE processing_started_at IS NOT NULL
+		  AND processed_at IS NULL
+		  AND processing_started_at < now() - $1::interval
+	`, stuckThreshold.String())
+	if err != nil {
+		return 0, fmt.Errorf("recover stuck pipeline messages: %w", err)
+	}
+
+	return result.RowsAffected(), nil
+}
+
 func (db *DB) CheckStrictDuplicate(ctx context.Context, hash string, id string) (bool, error) {
 	isDuplicate, err := db.Queries.CheckStrictDuplicate(ctx, sqlc.CheckStrictDuplicateParams{
 		CanonicalHash: hash,

@@ -133,6 +133,10 @@ func (m *mockRouterRepo) SaveTranslation(ctx context.Context, q, l, t string, tt
 	return nil
 }
 
+func (m *mockRouterRepo) RecoverStuckEnrichmentItems(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
 type mockTranslationClient struct {
 	mock.Mock
 }
