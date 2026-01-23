@@ -91,6 +91,8 @@ type Repository interface {
 	SaveTranslation(ctx context.Context, query, targetLang, translatedText string, ttl time.Duration) error
 	// History for context detection
 	GetRecentMessagesForChannel(ctx context.Context, channelID string, before time.Time, limit int) ([]string, error)
+	// Claims retrieval for cached sources
+	GetClaimsForSource(ctx context.Context, sourceID string) ([]db.EvidenceClaim, error)
 }
 
 // EmbeddingClient provides embedding generation for semantic deduplication.
@@ -1303,9 +1305,15 @@ func (w *Worker) processEvidenceSource(ctx context.Context, result SearchResult,
 	if cached != nil && time.Now().Before(cached.ExpiresAt) {
 		observability.EnrichmentCacheHits.Inc()
 
+		// Load claims from database for cached sources
+		claims, err := w.loadClaimsFromDB(ctx, cached.ID)
+		if err != nil {
+			w.logger.Warn().Err(err).Str("source_id", cached.ID).Msg("failed to load claims for cached source")
+		}
+
 		return &ExtractedEvidence{
 			Source: cached,
-			Claims: []ExtractedClaim{},
+			Claims: claims,
 		}, nil
 	}
 
@@ -1368,6 +1376,24 @@ func (w *Worker) saveClaimsWithDedup(ctx context.Context, sourceID string, claim
 			w.logger.Warn().Err(err).Msg("failed to save evidence claim")
 		}
 	}
+}
+
+// loadClaimsFromDB loads claims from the database for a cached evidence source.
+func (w *Worker) loadClaimsFromDB(ctx context.Context, sourceID string) ([]ExtractedClaim, error) {
+	dbClaims, err := w.db.GetClaimsForSource(ctx, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("get claims for source: %w", err)
+	}
+
+	claims := make([]ExtractedClaim, 0, len(dbClaims))
+	for _, dbClaim := range dbClaims {
+		claims = append(claims, ExtractedClaim{
+			Text:     dbClaim.ClaimText,
+			Entities: ParseEntitiesFromJSON(dbClaim.EntitiesRaw),
+		})
+	}
+
+	return claims, nil
 }
 
 // generateClaimEmbedding generates an embedding for a claim text.

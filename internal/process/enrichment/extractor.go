@@ -820,6 +820,20 @@ func (c ExtractedClaim) EntitiesJSON() []byte {
 	return data
 }
 
+// ParseEntitiesFromJSON deserializes entities from JSON stored in the database.
+func ParseEntitiesFromJSON(data []byte) []Entity {
+	if len(data) == 0 {
+		return nil
+	}
+
+	var entities []Entity
+	if err := json.Unmarshal(data, &entities); err != nil {
+		return nil
+	}
+
+	return entities
+}
+
 func coalesce(a, b string) string {
 	if a != "" {
 		return a

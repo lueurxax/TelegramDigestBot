@@ -204,6 +204,10 @@ func (m *mockRepository) RecoverStuckEnrichmentItems(_ context.Context, _ time.D
 	return 0, nil
 }
 
+func (m *mockRepository) GetClaimsForSource(_ context.Context, _ string) ([]db.EvidenceClaim, error) {
+	return nil, nil
+}
+
 func TestWorker_generateClaimEmbedding(t *testing.T) {
 	logger := zerolog.Nop()
 

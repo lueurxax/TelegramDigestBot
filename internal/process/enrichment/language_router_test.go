@@ -137,6 +137,10 @@ func (m *mockRouterRepo) RecoverStuckEnrichmentItems(_ context.Context, _ time.D
 	return 0, nil
 }
 
+func (m *mockRouterRepo) GetClaimsForSource(_ context.Context, _ string) ([]db.EvidenceClaim, error) {
+	return nil, nil
+}
+
 type mockTranslationClient struct {
 	mock.Mock
 }

@@ -855,3 +855,47 @@ func (db *DB) countEnrichmentByStatus(ctx context.Context, status string) (int, 
 
 	return count, nil
 }
+
+// GetClaimsForSource retrieves all claims for a given evidence source.
+func (db *DB) GetClaimsForSource(ctx context.Context, sourceID string) ([]EvidenceClaim, error) {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT id, evidence_id, claim_text, entities_json, embedding, created_at
+		FROM evidence_claims
+		WHERE evidence_id = $1
+		ORDER BY created_at
+	`, toUUID(sourceID))
+	if err != nil {
+		return nil, fmt.Errorf("get claims for source: %w", err)
+	}
+	defer rows.Close()
+
+	var claims []EvidenceClaim
+
+	for rows.Next() {
+		var (
+			claim       EvidenceClaim
+			id          uuid.UUID
+			evidenceUID uuid.UUID
+			entitiesRaw pgtype.Text
+		)
+
+		if err := rows.Scan(&id, &evidenceUID, &claim.ClaimText, &entitiesRaw, &claim.Embedding, &claim.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan claim: %w", err)
+		}
+
+		claim.ID = id.String()
+		claim.EvidenceID = evidenceUID.String()
+
+		if entitiesRaw.Valid {
+			claim.EntitiesRaw = []byte(entitiesRaw.String)
+		}
+
+		claims = append(claims, claim)
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate claims: %w", rows.Err())
+	}
+
+	return claims, nil
+}
