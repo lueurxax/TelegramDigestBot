@@ -27,13 +27,16 @@ const (
 	defaultTranslationCacheTTL       = 24 * time.Hour
 	defaultEnrichmentPollInterval    = 10 * time.Second
 	defaultEnrichmentCleanupInterval = 6 * time.Hour
-	defaultMaxResults                = 5
-	defaultMaxQueriesPerItem         = 5
-	defaultItemTimeout               = 180 * time.Second
-	defaultMaxEvidencePerItem        = 5
-	defaultMaxConcurrentResults      = 3
-	defaultMaxConcurrentQueries      = 3
-	defaultDedupSimilarity           = 0.98
+	// recoveryCheckInterval is how often to check for and recover stuck items.
+	// More frequent than cleanup to catch stuck items quickly.
+	recoveryCheckInterval       = 5 * time.Minute
+	defaultMaxResults           = 5
+	defaultMaxQueriesPerItem    = 5
+	defaultItemTimeout          = 180 * time.Second
+	defaultMaxEvidencePerItem   = 5
+	defaultMaxConcurrentResults = 3
+	defaultMaxConcurrentQueries = 3
+	defaultDedupSimilarity      = 0.98
 	// defaultDBTimeout is the independent timeout for database operations.
 	// This prevents DB operations from failing when item context is near expiry.
 	defaultDBTimeout = 30 * time.Second
@@ -114,6 +117,7 @@ type Worker struct {
 	queryGenerator    *QueryGenerator
 	languageRouter    *LanguageRouter
 	domainFilter      *DomainFilter
+	filterMu          sync.RWMutex // protects domainFilter and languageRouter
 	lastDomainReload  time.Time
 	lastPolicyReload  time.Time
 	logger            *zerolog.Logger
@@ -183,6 +187,7 @@ func (w *Worker) Run(ctx context.Context) error {
 func (w *Worker) runLoop(ctx context.Context) error {
 	pollInterval := w.parsePollInterval()
 	lastCleanup := time.Now()
+	lastRecovery := time.Now()
 	lastBudgetCheck := time.Time{}
 
 	// Initial domain filter reload from settings
@@ -207,6 +212,13 @@ func (w *Worker) runLoop(ctx context.Context) error {
 		// Reload language policy periodically
 		if time.Since(w.lastPolicyReload) >= domainFilterReloadInterval {
 			w.reloadLanguagePolicy(ctx)
+		}
+
+		// Recover stuck items more frequently than full cleanup
+		if time.Since(lastRecovery) >= recoveryCheckInterval {
+			w.recoverStuckItems(ctx)
+
+			lastRecovery = time.Now()
 		}
 
 		w.processNextItem(ctx)
@@ -649,7 +661,7 @@ func (w *Worker) expandQueriesWithRouting(ctx context.Context, item *db.Enrichme
 		return queries
 	}
 
-	targetLangs := w.languageRouter.GetTargetLanguages(ctx, item)
+	targetLangs := w.getTargetLanguages(ctx, item)
 	if len(targetLangs) == 0 {
 		return queries
 	}
@@ -772,7 +784,7 @@ func (w *Worker) collectResults(results []SearchResult, language string, state *
 			continue
 		}
 
-		if !w.domainFilter.IsAllowed(result.Domain) {
+		if !w.isDomainAllowed(result.Domain) {
 			w.logger.Debug().Str("domain", result.Domain).Msg("domain filtered out")
 
 			continue
@@ -1000,7 +1012,7 @@ func (w *Worker) buildResultProcessingParams(ctx context.Context, item *db.Enric
 		cacheTTL:     w.getEvidenceCacheTTL(),
 		maxEvidence:  maxEvidence,
 		minAgreement: w.cfg.EnrichmentMinAgreement,
-		targetLangs:  w.languageRouter.GetTargetLanguages(ctx, item),
+		targetLangs:  w.getTargetLanguages(ctx, item),
 		provider:     provider,
 		item:         item,
 	}
@@ -1434,7 +1446,8 @@ func (w *Worker) updateStatus(ctx context.Context, queueID, status, errMsg strin
 }
 
 func (w *Worker) cleanupCache(ctx context.Context) {
-	w.recoverStuckItems(ctx)
+	// Note: recoverStuckItems is now called separately every 5 minutes
+	// for faster recovery of stuck items.
 	w.cleanExpiredSources(ctx)
 	w.cleanExcessEvidence(ctx)
 	w.deduplicateClaims(ctx)
@@ -1599,14 +1612,40 @@ func (w *Worker) reloadDomainFilter(ctx context.Context) {
 	allowDomains := w.loadDomainSetting(ctx, settingEnrichmentAllowDomains, w.cfg.EnrichmentAllowlistDomains)
 	denyDomains := w.loadDomainSetting(ctx, settingEnrichmentDenyDomains, w.cfg.EnrichmentDenylistDomains)
 
-	w.domainFilter = NewDomainFilter(allowDomains, denyDomains)
+	newFilter := NewDomainFilter(allowDomains, denyDomains)
+
+	w.filterMu.Lock()
+	w.domainFilter = newFilter
+	w.filterMu.Unlock()
+
 	w.lastDomainReload = time.Now()
 }
 
 func (w *Worker) reloadLanguagePolicy(ctx context.Context) {
 	policy := w.loadLanguagePolicy(ctx)
-	w.languageRouter = NewLanguageRouter(policy, w.db)
+	newRouter := NewLanguageRouter(policy, w.db)
+
+	w.filterMu.Lock()
+	w.languageRouter = newRouter
+	w.filterMu.Unlock()
+
 	w.lastPolicyReload = time.Now()
+}
+
+// isDomainAllowed checks if a domain is allowed with thread-safe access.
+func (w *Worker) isDomainAllowed(domain string) bool {
+	w.filterMu.RLock()
+	defer w.filterMu.RUnlock()
+
+	return w.domainFilter.IsAllowed(domain)
+}
+
+// getTargetLanguages gets target languages with thread-safe access.
+func (w *Worker) getTargetLanguages(ctx context.Context, item *db.EnrichmentQueueItem) []string {
+	w.filterMu.RLock()
+	defer w.filterMu.RUnlock()
+
+	return w.languageRouter.GetTargetLanguages(ctx, item)
 }
 
 func (w *Worker) loadLanguagePolicy(_ context.Context) domain.LanguageRoutingPolicy {

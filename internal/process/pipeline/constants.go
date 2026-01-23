@@ -82,6 +82,13 @@ const (
 	RecoveryInterval = 5 * time.Minute
 )
 
+// Timeout constants for pipeline processing
+const (
+	// LLMBatchTimeout is the maximum time to wait for LLM batch processing.
+	// Should be generous enough to handle large batches but prevent indefinite hangs.
+	LLMBatchTimeout = 5 * time.Minute
+)
+
 // Relevance gate confidence constants
 const (
 	ConfidenceEmpty    float32 = 1.0

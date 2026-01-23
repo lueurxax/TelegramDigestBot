@@ -348,6 +348,14 @@ func (p *Pipeline) markProcessed(ctx context.Context, logger zerolog.Logger, msg
 	}
 }
 
+// releaseClaimedMessage releases a claimed message so it can be retried.
+// Used when processing fails due to transient errors like LLM timeouts.
+func (p *Pipeline) releaseClaimedMessage(ctx context.Context, logger zerolog.Logger, msgID string) {
+	if err := p.database.ReleaseClaimedMessage(ctx, msgID); err != nil {
+		logger.Error().Str(LogFieldMsgID, msgID).Err(err).Msg("failed to release claimed message")
+	}
+}
+
 func (p *Pipeline) saveItemError(ctx context.Context, logger zerolog.Logger, msgID string, errMsg string) {
 	errJSON, _ := json.Marshal(map[string]string{"error": errMsg})
 
@@ -639,16 +647,21 @@ func (p *Pipeline) processModelBatch(ctx context.Context, logger zerolog.Logger,
 		groupCandidates[j] = candidate
 	}
 
+	// Use timeout context for LLM call to prevent indefinite hangs
+	llmCtx, cancel := context.WithTimeout(ctx, LLMBatchTimeout)
+	defer cancel()
+
 	llmStart := time.Now()
 
-	groupResults, err := p.llmClient.ProcessBatch(ctx, groupCandidates, s.digestLanguage, model, s.digestTone)
+	groupResults, err := p.llmClient.ProcessBatch(llmCtx, groupCandidates, s.digestLanguage, model, s.digestTone)
 	if err != nil {
 		logger.Error().Err(err).Str(LogFieldModel, model).Msg("LLM batch processing failed")
 		observability.PipelineProcessed.WithLabelValues(StatusError).Add(float64(len(indices)))
 
+		// Release claimed messages so they can be retried by another worker.
+		// This handles transient errors like LLM timeouts.
 		for _, idx := range indices {
-			p.saveItemError(ctx, logger, candidates[idx].ID, err.Error())
-			p.markProcessed(ctx, logger, candidates[idx].ID)
+			p.releaseClaimedMessage(ctx, logger, candidates[idx].ID)
 		}
 
 		return fmt.Errorf("LLM batch processing: %w", err)

@@ -21,6 +21,13 @@ const (
 	defaultFactCheckCacheTTL        = 48 * time.Hour
 	defaultFactCheckPollInterval    = 10 * time.Second
 	defaultFactCheckCleanupInterval = 6 * time.Hour
+	// defaultFactCheckItemTimeout is the maximum time to process a single item.
+	defaultFactCheckItemTimeout = 60 * time.Second
+	// stuckFactCheckThreshold is when a "processing" item is considered stuck.
+	// Set to 2x item timeout to allow for retries before considering stuck.
+	stuckFactCheckThreshold = 2 * defaultFactCheckItemTimeout
+	// recoveryInterval is how often to check for and recover stuck items.
+	recoveryInterval = 5 * time.Minute
 )
 
 type Repository interface {
@@ -30,6 +37,7 @@ type Repository interface {
 	SaveFactCheckCache(ctx context.Context, normalizedClaim string, payload []byte, cachedAt time.Time) error
 	SaveItemFactChecks(ctx context.Context, itemID string, matches []db.FactCheckMatch) error
 	DeleteFactCheckCacheBefore(ctx context.Context, cutoff time.Time) (int64, error)
+	RecoverStuckFactCheckItems(ctx context.Context, stuckThreshold time.Duration) (int64, error)
 	GetLinksForMessage(ctx context.Context, msgID string) ([]domain.ResolvedLink, error)
 }
 
@@ -57,28 +65,27 @@ func (w *Worker) Run(ctx context.Context) error {
 		return nil
 	}
 
+	return w.runLoop(ctx, w.parsePollInterval())
+}
+
+func (w *Worker) parsePollInterval() time.Duration {
 	pollInterval, err := time.ParseDuration(w.cfg.WorkerPollInterval)
 	if err != nil {
 		w.logger.Error().Err(err).Str("interval", w.cfg.WorkerPollInterval).Msg("invalid worker poll interval, using 10s")
 
-		pollInterval = defaultFactCheckPollInterval
+		return defaultFactCheckPollInterval
 	}
 
+	return pollInterval
+}
+
+func (w *Worker) runLoop(ctx context.Context, pollInterval time.Duration) error {
 	lastCleanup := time.Now()
+	lastRecovery := time.Now()
 
 	for {
-		item, err := w.db.ClaimNextFactCheck(ctx)
-		if err != nil {
-			w.logger.Error().Err(err).Msg("failed to claim fact check item")
-		} else if item != nil {
-			w.processItem(ctx, item)
-		}
-
-		if time.Since(lastCleanup) >= defaultFactCheckCleanupInterval {
-			w.cleanupCache(ctx)
-
-			lastCleanup = time.Now()
-		}
+		w.runPeriodicTasks(ctx, &lastRecovery, &lastCleanup)
+		w.processNextItem(ctx)
 
 		select {
 		case <-ctx.Done():
@@ -86,6 +93,53 @@ func (w *Worker) Run(ctx context.Context) error {
 		case <-time.After(pollInterval):
 		}
 	}
+}
+
+func (w *Worker) runPeriodicTasks(ctx context.Context, lastRecovery, lastCleanup *time.Time) {
+	if time.Since(*lastRecovery) >= recoveryInterval {
+		w.recoverStuckItems(ctx)
+
+		*lastRecovery = time.Now()
+	}
+
+	if time.Since(*lastCleanup) >= defaultFactCheckCleanupInterval {
+		w.cleanupCache(ctx)
+
+		*lastCleanup = time.Now()
+	}
+}
+
+func (w *Worker) processNextItem(ctx context.Context) {
+	item, err := w.db.ClaimNextFactCheck(ctx)
+	if err != nil {
+		w.logger.Error().Err(err).Msg("failed to claim fact check item")
+		return
+	}
+
+	if item != nil {
+		w.processItemWithTimeout(ctx, item)
+	}
+}
+
+// recoverStuckItems recovers items that were claimed but never completed.
+func (w *Worker) recoverStuckItems(ctx context.Context) {
+	recovered, err := w.db.RecoverStuckFactCheckItems(ctx, stuckFactCheckThreshold)
+	if err != nil {
+		w.logger.Error().Err(err).Msg("failed to recover stuck fact check items")
+		return
+	}
+
+	if recovered > 0 {
+		w.logger.Info().Int64("recovered", recovered).Msg("recovered stuck fact check items")
+	}
+}
+
+// processItemWithTimeout wraps processItem with a per-item timeout.
+func (w *Worker) processItemWithTimeout(ctx context.Context, item *db.FactCheckQueueItem) {
+	itemCtx, cancel := context.WithTimeout(ctx, defaultFactCheckItemTimeout)
+	defer cancel()
+
+	w.processItem(itemCtx, item)
 }
 
 func (w *Worker) processItem(ctx context.Context, item *db.FactCheckQueueItem) {

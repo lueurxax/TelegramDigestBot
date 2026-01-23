@@ -354,6 +354,25 @@ func (db *DB) CountFactCheckMatchesSince(ctx context.Context, since time.Time) (
 	return int(count), nil
 }
 
+// RecoverStuckFactCheckItems resets items stuck in "processing" status for too long.
+// This handles cases where a worker crashed or timed out before updating the status.
+func (db *DB) RecoverStuckFactCheckItems(ctx context.Context, stuckThreshold time.Duration) (int64, error) {
+	result, err := db.Pool.Exec(ctx, `
+		UPDATE fact_check_queue
+		SET status = $1,
+			attempt_count = attempt_count + 1,
+			next_retry_at = now() + interval '10 minutes',
+			error_message = 'recovered from stuck processing state'
+		WHERE status = $2
+		  AND updated_at < now() - $3::interval
+	`, FactCheckStatusPending, FactCheckStatusProcessing, stuckThreshold.String())
+	if err != nil {
+		return 0, fmt.Errorf("recover stuck fact check items: %w", err)
+	}
+
+	return result.RowsAffected(), nil
+}
+
 func (db *DB) GetRecentFactCheckMatches(ctx context.Context, limit int) ([]FactCheckMatch, error) {
 	rows, err := db.Pool.Query(ctx, `
 		SELECT item_id, claim, url, publisher, rating, matched_at
