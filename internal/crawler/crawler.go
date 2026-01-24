@@ -335,12 +335,51 @@ func isValidCrawlURL(rawURL string) bool {
 		return false
 	}
 
-	// Skip common non-content URLs
-	for _, suffix := range []string{".pdf", ".zip", ".exe", ".dmg", ".mp3", ".mp4", ".avi", ".mov"} {
+	// Skip non-content file extensions
+	skipSuffixes := []string{
+		// Media
+		".pdf", ".zip", ".exe", ".dmg", ".mp3", ".mp4", ".avi", ".mov", ".webm", ".flv",
+		// Images
+		".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp", ".tiff",
+		// Web assets
+		".css", ".js", ".woff", ".woff2", ".ttf", ".eot", ".map",
+		// Data
+		".json", ".xml", ".rss", ".atom",
+	}
+
+	for _, suffix := range skipSuffixes {
 		if len(rawURL) > len(suffix) && rawURL[len(rawURL)-len(suffix):] == suffix {
 			return false
 		}
 	}
 
+	// Skip common non-content URL patterns
+	skipPatterns := []string{
+		"/ajax/",
+		"/api/",
+		"/_next/static/",
+		"/static/css/",
+		"/static/js/",
+		"/wp-content/uploads/",
+		"/wp-includes/",
+	}
+
+	for _, pattern := range skipPatterns {
+		if containsPattern(rawURL, pattern) {
+			return false
+		}
+	}
+
 	return true
+}
+
+// containsPattern checks if a URL contains a pattern.
+func containsPattern(url, pattern string) bool {
+	for i := 0; i <= len(url)-len(pattern); i++ {
+		if url[i:i+len(pattern)] == pattern {
+			return true
+		}
+	}
+
+	return false
 }
