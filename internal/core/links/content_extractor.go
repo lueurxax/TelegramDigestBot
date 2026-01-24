@@ -36,15 +36,20 @@ func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent
 
 	// Extract using readability (Firefox Reader Mode algorithm)
 	article, err := readability.FromReader(bytes.NewReader(htmlBytes), u)
-	if err != nil {
-		// Fall back to meta tags only - readability failure is not fatal
+
+	// Fall back to meta tags if readability fails or returns empty content
+	if err != nil || article.Node == nil {
 		meta := extractMetaTags(htmlBytes)
+		jsonLD := extractJSONLD(htmlBytes)
 		lang := DetectLanguage(meta.Title + " " + meta.Description)
 
 		//nolint:nilerr // fallback to meta tags when readability fails
 		return &WebContent{
-			Title:       meta.Title,
-			Description: meta.Description,
+			Title:       coalesce(jsonLD.Title, meta.OGTitle, meta.Title),
+			Description: coalesce(jsonLD.Description, meta.OGDescription, meta.Description),
+			Author:      coalesce(jsonLD.Author, meta.Author),
+			PublishedAt: coalesceTime(parseDate(jsonLD.PublishedAt), parseDate(meta.PublishedTime)),
+			ImageURL:    coalesce(jsonLD.Image, meta.OGImage),
 			Language:    lang,
 		}, nil
 	}
@@ -52,12 +57,8 @@ func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent
 	meta := extractMetaTags(htmlBytes)
 	jsonLD := extractJSONLD(htmlBytes)
 
-	// Extract text content using v2 API (safe for nil Node)
+	// Extract text content using v2 API
 	textContent := extractArticleText(article)
-
-	// Extract article metadata safely (v2 API methods can panic on nil Node)
-	articleTitle := safeArticleTitle(article)
-	articleByline := safeArticleByline(article)
 
 	lang := DetectLanguage(textContent)
 	if lang == "" {
@@ -65,10 +66,10 @@ func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent
 	}
 
 	return &WebContent{
-		Title:       coalesce(jsonLD.Title, articleTitle, meta.OGTitle, meta.Title),
+		Title:       coalesce(jsonLD.Title, article.Title(), meta.OGTitle, meta.Title),
 		Description: coalesce(jsonLD.Description, meta.OGDescription, meta.Description),
 		Content:     truncate(textContent, maxLen),
-		Author:      coalesce(jsonLD.Author, articleByline, meta.Author),
+		Author:      coalesce(jsonLD.Author, article.Byline(), meta.Author),
 		PublishedAt: coalesceTime(parseDate(jsonLD.PublishedAt), parseDate(meta.PublishedTime)),
 		ImageURL:    coalesce(jsonLD.Image, meta.OGImage),
 		WordCount:   countWords(textContent),
@@ -77,36 +78,13 @@ func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent
 }
 
 // extractArticleText extracts text content from a readability Article using v2 API.
-// Safe for nil Node - returns empty string if article has no content.
 func extractArticleText(article readability.Article) string {
-	if article.Node == nil {
-		return ""
-	}
-
 	var buf bytes.Buffer
 	if err := article.RenderText(&buf); err != nil {
 		return ""
 	}
 
 	return buf.String()
-}
-
-// safeArticleTitle safely extracts title from article, returning empty string if Node is nil.
-func safeArticleTitle(article readability.Article) string {
-	if article.Node == nil {
-		return ""
-	}
-
-	return article.Title()
-}
-
-// safeArticleByline safely extracts byline from article, returning empty string if Node is nil.
-func safeArticleByline(article readability.Article) string {
-	if article.Node == nil {
-		return ""
-	}
-
-	return article.Byline()
 }
 
 func tryExtractFeed(htmlBytes []byte, maxLen int) (*WebContent, bool) {

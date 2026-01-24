@@ -117,7 +117,7 @@ func (c *Crawler) enqueueURL(ctx context.Context, rawURL string, depth int) erro
 		SetField("source", solr.SourceWeb).
 		SetField(fieldURL, rawURL).
 		SetField("url_canonical", rawURL).
-		SetField("domain", parsed.Host).
+		SetField(logKeyDomain, parsed.Host).
 		SetField("crawl_status", solr.CrawlStatusPending).
 		SetField("crawl_depth", depth)
 

@@ -26,6 +26,10 @@ const (
 	contentAttrLen     = 9   // len(`content="`)
 	metaLookbackWindow = 200 // bytes to search backwards for content attr
 	extractorHeaderCT  = "Content-Type"
+
+	// Log/error message constants.
+	msgNoContentExtracted = "no content extracted from page"
+	logKeyDomain          = "domain"
 )
 
 // Extractor errors.
@@ -33,6 +37,7 @@ var (
 	errTooManyRedirects       = errors.New("too many redirects")
 	errHTTPError              = errors.New("HTTP error")
 	errUnsupportedContentType = errors.New("unsupported content type")
+	errNoContentExtracted     = errors.New(msgNoContentExtracted)
 )
 
 // ExtractionResult holds the extracted content from a web page.
@@ -92,6 +97,16 @@ func (e *Extractor) Extract(ctx context.Context, rawURL string) (*ExtractionResu
 		return nil, fmt.Errorf("readability extraction: %w", err)
 	}
 
+	// Skip if readability couldn't extract any content
+	if article.Node == nil {
+		e.logger.Warn().
+			Str("url", rawURL).
+			Str(logKeyDomain, parsed.Host).
+			Msg(msgNoContentExtracted)
+
+		return nil, errNoContentExtracted
+	}
+
 	return e.buildResult(article, parsed, body), nil
 }
 
@@ -133,6 +148,7 @@ func (e *Extractor) fetchPage(ctx context.Context, rawURL string) ([]byte, error
 
 // buildResult builds an ExtractionResult from a readability article.
 // Uses fallback chain: JSON-LD -> OG meta tags -> Readability for better metadata extraction.
+// Note: article.Node must not be nil - caller should check before calling.
 func (e *Extractor) buildResult(article readability.Article, parsed *url.URL, body []byte) *ExtractionResult {
 	htmlContent := string(body)
 
@@ -145,70 +161,33 @@ func (e *Extractor) buildResult(article readability.Article, parsed *url.URL, bo
 	ogLocale := extractMetaContent(htmlContent, "og:locale")
 	articlePublished := extractMetaContent(htmlContent, "article:published_time")
 
-	// Extract text content using v2 API (safe for nil Node)
+	// Extract text content using v2 API
 	textContent := extractArticleText(article)
-
-	// Extract article metadata safely (v2 API methods can panic on nil Node)
-	articleTitle := safeArticleTitle(article)
-	articleExcerpt := safeArticleExcerpt(article)
-	articleByline := safeArticleByline(article)
 
 	// Build result with fallback chain: JSON-LD -> OG -> Readability
 	result := &ExtractionResult{
-		Title:       coalesce(jsonLD.Headline, ogTitle, articleTitle),
+		Title:       coalesce(jsonLD.Headline, ogTitle, article.Title()),
 		Content:     truncateContent(textContent, maxExtractedLength),
-		Description: truncateContent(coalesce(jsonLD.Description, ogDescription, articleExcerpt), maxExcerptLength),
-		Author:      coalesce(jsonLD.Author, articleByline),
+		Description: truncateContent(coalesce(jsonLD.Description, ogDescription, article.Excerpt()), maxExcerptLength),
+		Author:      coalesce(jsonLD.Author, article.Byline()),
 		Domain:      parsed.Host,
 		Links:       extractLinks(htmlContent, parsed),
 	}
 
 	result.PublishedAt = parsePublishedDate(jsonLD.DatePublished, articlePublished, getArticlePublishedTime(article))
-	result.Language = detectLanguage(jsonLD.Language, ogLocale, articleTitle, textContent)
+	result.Language = detectLanguage(jsonLD.Language, ogLocale, article.Title(), textContent)
 
 	return result
 }
 
 // extractArticleText extracts text content from a readability Article using v2 API.
-// Safe for nil Node - returns empty string if article has no content.
 func extractArticleText(article readability.Article) string {
-	if article.Node == nil {
-		return ""
-	}
-
 	var buf bytes.Buffer
 	if err := article.RenderText(&buf); err != nil {
 		return ""
 	}
 
 	return buf.String()
-}
-
-// safeArticleTitle safely extracts title from article, returning empty string if Node is nil.
-func safeArticleTitle(article readability.Article) string {
-	if article.Node == nil {
-		return ""
-	}
-
-	return article.Title()
-}
-
-// safeArticleExcerpt safely extracts excerpt from article, returning empty string if Node is nil.
-func safeArticleExcerpt(article readability.Article) string {
-	if article.Node == nil {
-		return ""
-	}
-
-	return article.Excerpt()
-}
-
-// safeArticleByline safely extracts byline from article, returning empty string if Node is nil.
-func safeArticleByline(article readability.Article) string {
-	if article.Node == nil {
-		return ""
-	}
-
-	return article.Byline()
 }
 
 // getArticlePublishedTime extracts published time from readability Article, returning nil on error.
