@@ -129,34 +129,122 @@ func (e *Extractor) fetchPage(ctx context.Context, rawURL string) ([]byte, error
 }
 
 // buildResult builds an ExtractionResult from a readability article.
+// Uses fallback chain: OG meta tags -> Readability for better metadata extraction.
 func (e *Extractor) buildResult(article readability.Article, parsed *url.URL, body []byte) *ExtractionResult {
-	// Extract links from the page
-	extractedLinks := extractLinks(string(body), parsed)
+	html := string(body)
 
-	// Build result
+	// Extract links from the page
+	extractedLinks := extractLinks(html, parsed)
+
+	// Extract OG meta tags for better metadata (fallback enhancement)
+	ogTitle := extractMetaContent(html, "og:title")
+	ogDescription := extractMetaContent(html, "og:description")
+	ogLocale := extractMetaContent(html, "og:locale")
+	articlePublished := extractMetaContent(html, "article:published_time")
+
+	// Build result with fallback chain: OG -> Readability
 	result := &ExtractionResult{
-		Title:       article.Title,
+		Title:       coalesce(ogTitle, article.Title),
 		Content:     truncateContent(article.TextContent, maxExtractedLength),
-		Description: truncateContent(article.Excerpt, maxExcerptLength),
+		Description: truncateContent(coalesce(ogDescription, article.Excerpt), maxExcerptLength),
 		Author:      article.Byline,
 		Domain:      parsed.Host,
 		Links:       extractedLinks,
 	}
 
-	// Parse published date if available
-	if article.PublishedTime != nil {
+	// Parse published date: article:published_time -> readability
+	if articlePublished != "" {
+		if t, err := time.Parse(time.RFC3339, articlePublished); err == nil {
+			result.PublishedAt = t
+		}
+	}
+
+	if result.PublishedAt.IsZero() && article.PublishedTime != nil {
 		result.PublishedAt = *article.PublishedTime
 	}
 
-	// Detect language from content
-	textForLang := article.Title + " " + article.TextContent
-	if len(textForLang) > 1000 {
-		textForLang = textForLang[:1000]
+	// Detect language: og:locale -> content detection
+	if ogLocale != "" && len(ogLocale) >= 2 {
+		result.Language = strings.ToLower(ogLocale[:2])
+	} else {
+		textForLang := article.Title + " " + article.TextContent
+		if len(textForLang) > 1000 {
+			textForLang = textForLang[:1000]
+		}
+
+		result.Language = links.DetectLanguage(textForLang)
 	}
 
-	result.Language = links.DetectLanguage(textForLang)
-
 	return result
+}
+
+// extractMetaContent extracts content from a meta tag by property or name.
+func extractMetaContent(html, property string) string {
+	// Try common meta tag patterns (OG tags use property=, others use name=)
+	patterns := []string{
+		`property="` + property + `" content="`,
+		`property='` + property + `' content='`,
+		`name="` + property + `" content="`,
+	}
+
+	for _, prefix := range patterns {
+		idx := strings.Index(html, prefix)
+		if idx == -1 {
+			continue
+		}
+
+		start := idx + len(prefix)
+		quote := `"`
+
+		if strings.Contains(prefix, `'`) {
+			quote = `'`
+		}
+
+		end := strings.Index(html[start:], quote)
+
+		if end == -1 {
+			continue
+		}
+
+		return html[start : start+end]
+	}
+
+	// Reverse order: content="..." property="..."
+	propMarker := `property="` + property + `"`
+	idx := strings.Index(html, propMarker)
+
+	if idx != -1 {
+		// Look backwards for content="
+		searchStart := idx - 200
+		if searchStart < 0 {
+			searchStart = 0
+		}
+
+		segment := html[searchStart:idx]
+		contentIdx := strings.LastIndex(segment, `content="`)
+
+		if contentIdx != -1 {
+			start := searchStart + contentIdx + 9
+			end := strings.Index(html[start:], `"`)
+
+			if end != -1 {
+				return html[start : start+end]
+			}
+		}
+	}
+
+	return ""
+}
+
+// coalesce returns the first non-empty string.
+func coalesce(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+
+	return ""
 }
 
 // truncateContent truncates content to maxLen characters.

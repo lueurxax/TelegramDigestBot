@@ -112,14 +112,14 @@ func (c *Crawler) enqueueURL(ctx context.Context, rawURL string, depth int) erro
 		return nil
 	}
 
-	// Add to queue
+	// Add to queue (crawled_at is set when actually crawled, not when enqueued)
 	doc := solr.NewIndexDocument(docID).
 		SetField("source", solr.SourceWeb).
 		SetField(fieldURL, rawURL).
+		SetField("url_canonical", rawURL).
 		SetField("domain", parsed.Host).
 		SetField("crawl_status", solr.CrawlStatusPending).
-		SetField("crawl_depth", depth).
-		SetField("crawled_at", time.Now().UTC().Format(time.RFC3339))
+		SetField("crawl_depth", depth)
 
 	if err := c.client.Index(ctx, doc); err != nil {
 		return fmt.Errorf("index document: %w", err)
