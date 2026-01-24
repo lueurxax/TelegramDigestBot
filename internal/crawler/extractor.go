@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-shiori/go-readability"
+	"codeberg.org/readeck/go-readability/v2"
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links"
@@ -133,31 +134,54 @@ func (e *Extractor) fetchPage(ctx context.Context, rawURL string) ([]byte, error
 // buildResult builds an ExtractionResult from a readability article.
 // Uses fallback chain: JSON-LD -> OG meta tags -> Readability for better metadata extraction.
 func (e *Extractor) buildResult(article readability.Article, parsed *url.URL, body []byte) *ExtractionResult {
-	html := string(body)
+	htmlContent := string(body)
 
 	// Extract JSON-LD structured data (most reliable source)
-	jsonLD := extractJSONLD(html)
+	jsonLD := extractJSONLD(htmlContent)
 
 	// Extract OG meta tags for better metadata (fallback)
-	ogTitle := extractMetaContent(html, "og:title")
-	ogDescription := extractMetaContent(html, "og:description")
-	ogLocale := extractMetaContent(html, "og:locale")
-	articlePublished := extractMetaContent(html, "article:published_time")
+	ogTitle := extractMetaContent(htmlContent, "og:title")
+	ogDescription := extractMetaContent(htmlContent, "og:description")
+	ogLocale := extractMetaContent(htmlContent, "og:locale")
+	articlePublished := extractMetaContent(htmlContent, "article:published_time")
+
+	// Extract text content using v2 API
+	textContent := extractArticleText(article)
 
 	// Build result with fallback chain: JSON-LD -> OG -> Readability
 	result := &ExtractionResult{
-		Title:       coalesce(jsonLD.Headline, ogTitle, article.Title),
-		Content:     truncateContent(article.TextContent, maxExtractedLength),
-		Description: truncateContent(coalesce(jsonLD.Description, ogDescription, article.Excerpt), maxExcerptLength),
-		Author:      coalesce(jsonLD.Author, article.Byline),
+		Title:       coalesce(jsonLD.Headline, ogTitle, article.Title()),
+		Content:     truncateContent(textContent, maxExtractedLength),
+		Description: truncateContent(coalesce(jsonLD.Description, ogDescription, article.Excerpt()), maxExcerptLength),
+		Author:      coalesce(jsonLD.Author, article.Byline()),
 		Domain:      parsed.Host,
-		Links:       extractLinks(html, parsed),
+		Links:       extractLinks(htmlContent, parsed),
 	}
 
-	result.PublishedAt = parsePublishedDate(jsonLD.DatePublished, articlePublished, article.PublishedTime)
-	result.Language = detectLanguage(jsonLD.Language, ogLocale, article.Title, article.TextContent)
+	result.PublishedAt = parsePublishedDate(jsonLD.DatePublished, articlePublished, getArticlePublishedTime(article))
+	result.Language = detectLanguage(jsonLD.Language, ogLocale, article.Title(), textContent)
 
 	return result
+}
+
+// extractArticleText extracts text content from a readability Article using v2 API.
+func extractArticleText(article readability.Article) string {
+	var buf bytes.Buffer
+	if err := article.RenderText(&buf); err != nil {
+		return ""
+	}
+
+	return buf.String()
+}
+
+// getArticlePublishedTime extracts published time from readability Article, returning nil on error.
+func getArticlePublishedTime(article readability.Article) *time.Time {
+	t, err := article.PublishedTime()
+	if err != nil {
+		return nil
+	}
+
+	return &t
 }
 
 // parsePublishedDate extracts published date using fallback chain: JSON-LD -> meta tag -> readability.

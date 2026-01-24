@@ -8,8 +8,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"codeberg.org/readeck/go-readability/v2"
 	"github.com/araddon/dateparse"
-	"github.com/go-shiori/go-readability"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	"github.com/mmcdole/gofeed"
 	"golang.org/x/net/html"
@@ -52,21 +52,34 @@ func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent
 	meta := extractMetaTags(htmlBytes)
 	jsonLD := extractJSONLD(htmlBytes)
 
-	lang := DetectLanguage(article.TextContent)
+	// Extract text content using v2 API
+	textContent := extractArticleText(article)
+
+	lang := DetectLanguage(textContent)
 	if lang == "" {
 		lang = DetectLanguage(meta.Title + " " + meta.Description)
 	}
 
 	return &WebContent{
-		Title:       coalesce(jsonLD.Title, article.Title, meta.OGTitle, meta.Title),
+		Title:       coalesce(jsonLD.Title, article.Title(), meta.OGTitle, meta.Title),
 		Description: coalesce(jsonLD.Description, meta.OGDescription, meta.Description),
-		Content:     truncate(article.TextContent, maxLen),
-		Author:      coalesce(jsonLD.Author, article.Byline, meta.Author),
+		Content:     truncate(textContent, maxLen),
+		Author:      coalesce(jsonLD.Author, article.Byline(), meta.Author),
 		PublishedAt: coalesceTime(parseDate(jsonLD.PublishedAt), parseDate(meta.PublishedTime)),
 		ImageURL:    coalesce(jsonLD.Image, meta.OGImage),
-		WordCount:   countWords(article.TextContent),
+		WordCount:   countWords(textContent),
 		Language:    lang,
 	}, nil
+}
+
+// extractArticleText extracts text content from a readability Article using v2 API.
+func extractArticleText(article readability.Article) string {
+	var buf bytes.Buffer
+	if err := article.RenderText(&buf); err != nil {
+		return ""
+	}
+
+	return buf.String()
 }
 
 func tryExtractFeed(htmlBytes []byte, maxLen int) (*WebContent, bool) {
