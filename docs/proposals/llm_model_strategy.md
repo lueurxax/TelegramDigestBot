@@ -51,7 +51,7 @@ The strategy is designed to:
 ### Provider Priority (Default)
 
 ```
-LLM: Google → Anthropic → OpenAI
+Summarize: Google → OpenAI
 Embeddings: OpenAI → Cohere → Google
 ```
 
@@ -118,8 +118,8 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 
 | Priority | Model | Provider | Cost (1M tokens) |
 |----------|-------|----------|------------------|
-| Default | `gpt-5-nano` | OpenAI | $0.05 in / $0.40 out |
-| Fallback 1 | `gemini-2.0-flash-lite` | Google | $0.10 in / $0.40 out |
+| Default | `gemini-2.0-flash-lite` | Google | $0.10 in / $0.40 out |
+| Fallback 1 | `gpt-5-nano` | OpenAI | $0.05 in / $0.40 out |
 
 ---
 
@@ -280,7 +280,6 @@ EMBEDDING_DEFAULT_MODEL=text-embedding-3-large
 EMBEDDING_FALLBACK_MODEL=embed-multilingual-v3.0
 
 # LLM Configuration
-LLM_PROVIDER_ORDER=openai,anthropic,google
 LLM_SUMMARIZE_MODEL=gpt-5-nano
 LLM_CLUSTER_MODEL=gpt-5
 LLM_NARRATIVE_MODEL=gpt-5.2

@@ -43,6 +43,12 @@ const (
 	logMsgParseRelevanceGateFail = "failed to parse relevance gate response"
 )
 
+// Log key strings
+const (
+	logKeyTask  = "task"
+	logKeyModel = "model"
+)
+
 // Default topic when none is available
 const (
 	DefaultTopic = "General"

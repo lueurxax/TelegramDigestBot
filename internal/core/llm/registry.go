@@ -26,6 +26,7 @@ type Registry struct {
 	providers       map[ProviderName]Provider
 	order           []ProviderName // Priority order (highest first)
 	circuitBreakers map[ProviderName]*embeddings.CircuitBreaker
+	taskConfig      map[TaskType]TaskProviderChain
 	budgetTracker   *BudgetTracker
 	logger          *zerolog.Logger
 }
@@ -39,6 +40,7 @@ func NewRegistry(logger *zerolog.Logger) *Registry {
 		providers:       make(map[ProviderName]Provider),
 		order:           make([]ProviderName, 0),
 		circuitBreakers: make(map[ProviderName]*embeddings.CircuitBreaker),
+		taskConfig:      DefaultTaskConfig(),
 		budgetTracker:   bt,
 		logger:          logger,
 	}
@@ -71,94 +73,103 @@ func (r *Registry) ProviderCount() int {
 	return len(r.providers)
 }
 
-// ProcessBatch implements Client interface with fallback.
+// ProcessBatch implements Client interface with task-aware fallback.
 func (r *Registry) ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage, model, tone string) ([]BatchResult, error) {
-	return executeWithFallback(r, func(p Provider) ([]BatchResult, error) {
-		return p.ProcessBatch(ctx, messages, targetLanguage, model, tone)
+	return executeWithTaskFallback(r, TaskTypeSummarize, model, func(p Provider, m string) ([]BatchResult, error) {
+		return p.ProcessBatch(ctx, messages, targetLanguage, m, tone)
 	})
 }
 
-// TranslateText implements Client interface with fallback.
+// TranslateText implements Client interface with task-aware fallback.
 func (r *Registry) TranslateText(ctx context.Context, text, targetLanguage, model string) (string, error) {
-	return executeWithFallback(r, func(p Provider) (string, error) {
-		return p.TranslateText(ctx, text, targetLanguage, model)
+	return executeWithTaskFallback(r, TaskTypeTranslate, model, func(p Provider, m string) (string, error) {
+		return p.TranslateText(ctx, text, targetLanguage, m)
 	})
 }
 
-// CompleteText implements Client interface with fallback.
+// CompleteText implements Client interface with task-aware fallback.
 func (r *Registry) CompleteText(ctx context.Context, prompt, model string) (string, error) {
-	return executeWithFallback(r, func(p Provider) (string, error) {
-		return p.CompleteText(ctx, prompt, model)
+	return executeWithTaskFallback(r, TaskTypeComplete, model, func(p Provider, m string) (string, error) {
+		return p.CompleteText(ctx, prompt, m)
 	})
 }
 
-// GenerateNarrative implements Client interface with fallback.
+// GenerateNarrative implements Client interface with task-aware fallback.
 func (r *Registry) GenerateNarrative(ctx context.Context, items []domain.Item, targetLanguage, model, tone string) (string, error) {
-	return executeWithFallback(r, func(p Provider) (string, error) {
-		return p.GenerateNarrative(ctx, items, targetLanguage, model, tone)
+	return executeWithTaskFallback(r, TaskTypeNarrative, model, func(p Provider, m string) (string, error) {
+		return p.GenerateNarrative(ctx, items, targetLanguage, m, tone)
 	})
 }
 
-// GenerateNarrativeWithEvidence implements Client interface with fallback.
+// GenerateNarrativeWithEvidence implements Client interface with task-aware fallback.
 func (r *Registry) GenerateNarrativeWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, model, tone string) (string, error) {
-	return executeWithFallback(r, func(p Provider) (string, error) {
-		return p.GenerateNarrativeWithEvidence(ctx, items, evidence, targetLanguage, model, tone)
+	return executeWithTaskFallback(r, TaskTypeNarrative, model, func(p Provider, m string) (string, error) {
+		return p.GenerateNarrativeWithEvidence(ctx, items, evidence, targetLanguage, m, tone)
 	})
 }
 
-// SummarizeCluster implements Client interface with fallback.
+// SummarizeCluster implements Client interface with task-aware fallback.
 func (r *Registry) SummarizeCluster(ctx context.Context, items []domain.Item, targetLanguage, model, tone string) (string, error) {
-	return executeWithFallback(r, func(p Provider) (string, error) {
-		return p.SummarizeCluster(ctx, items, targetLanguage, model, tone)
+	return executeWithTaskFallback(r, TaskTypeClusterSummary, model, func(p Provider, m string) (string, error) {
+		return p.SummarizeCluster(ctx, items, targetLanguage, m, tone)
 	})
 }
 
-// SummarizeClusterWithEvidence implements Client interface with fallback.
+// SummarizeClusterWithEvidence implements Client interface with task-aware fallback.
 func (r *Registry) SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, model, tone string) (string, error) {
-	return executeWithFallback(r, func(p Provider) (string, error) {
-		return p.SummarizeClusterWithEvidence(ctx, items, evidence, targetLanguage, model, tone)
+	return executeWithTaskFallback(r, TaskTypeClusterSummary, model, func(p Provider, m string) (string, error) {
+		return p.SummarizeClusterWithEvidence(ctx, items, evidence, targetLanguage, m, tone)
 	})
 }
 
-// GenerateClusterTopic implements Client interface with fallback.
+// GenerateClusterTopic implements Client interface with task-aware fallback.
 func (r *Registry) GenerateClusterTopic(ctx context.Context, items []domain.Item, targetLanguage, model string) (string, error) {
-	return executeWithFallback(r, func(p Provider) (string, error) {
-		return p.GenerateClusterTopic(ctx, items, targetLanguage, model)
+	return executeWithTaskFallback(r, TaskTypeClusterTopic, model, func(p Provider, m string) (string, error) {
+		return p.GenerateClusterTopic(ctx, items, targetLanguage, m)
 	})
 }
 
-// RelevanceGate implements Client interface with fallback.
+// RelevanceGate implements Client interface with task-aware fallback.
 func (r *Registry) RelevanceGate(ctx context.Context, text, model, prompt string) (RelevanceGateResult, error) {
-	return executeWithFallback(r, func(p Provider) (RelevanceGateResult, error) {
-		return p.RelevanceGate(ctx, text, model, prompt)
+	return executeWithTaskFallback(r, TaskTypeRelevanceGate, model, func(p Provider, m string) (RelevanceGateResult, error) {
+		return p.RelevanceGate(ctx, text, m, prompt)
 	})
 }
 
-// CompressSummariesForCover implements Client interface with fallback.
+// CompressSummariesForCover implements Client interface with task-aware fallback.
 func (r *Registry) CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error) {
-	return executeWithFallback(r, func(p Provider) ([]string, error) {
+	return executeWithTaskFallback(r, TaskTypeCompress, "", func(p Provider, _ string) ([]string, error) {
 		return p.CompressSummariesForCover(ctx, summaries)
 	})
 }
 
 // GenerateDigestCover implements Client interface.
-// Only uses providers that support image generation.
+// Uses task-aware fallback for image generation (OpenAI only).
 func (r *Registry) GenerateDigestCover(ctx context.Context, topics []string, narrative string) ([]byte, error) {
 	r.mu.RLock()
-	providers := r.getActiveProviders()
+	taskChain, hasConfig := r.taskConfig[TaskTypeImageGen]
 	r.mu.RUnlock()
+
+	var providerModels []ProviderModel
+	if hasConfig {
+		providerModels = taskChain.GetProviderChain()
+	}
 
 	var lastErr error
 
-	for _, p := range providers {
-		if !p.SupportsImageGeneration() {
+	for _, pm := range providerModels {
+		r.mu.RLock()
+		p, exists := r.providers[pm.Provider]
+		r.mu.RUnlock()
+
+		if !exists || !p.IsAvailable() || !p.SupportsImageGeneration() {
 			continue
 		}
 
-		cb := r.getCircuitBreaker(p.Name())
+		cb := r.getCircuitBreaker(pm.Provider)
 		if !cb.CanAttempt() {
 			r.logger.Debug().
-				Str(logKeyProvider, string(p.Name())).
+				Str(logKeyProvider, string(pm.Provider)).
 				Msg(logMsgCircuitBreakerOpen)
 
 			continue
@@ -166,13 +177,13 @@ func (r *Registry) GenerateDigestCover(ctx context.Context, topics []string, nar
 
 		result, err := p.GenerateDigestCover(ctx, topics, narrative)
 		if err != nil {
-			cb.RecordFailure(embeddings.ProviderName(p.Name()))
+			cb.RecordFailure(embeddings.ProviderName(pm.Provider))
 
 			lastErr = err
 
 			r.logger.Warn().
 				Err(err).
-				Str(logKeyProvider, string(p.Name())).
+				Str(logKeyProvider, string(pm.Provider)).
 				Msg("image generation failed")
 
 			continue
@@ -190,51 +201,60 @@ func (r *Registry) GenerateDigestCover(ctx context.Context, topics []string, nar
 	return nil, ErrNoImageProvider
 }
 
-// executeWithFallback is a generic helper for fallback execution.
-func executeWithFallback[T any](r *Registry, fn func(Provider) (T, error)) (T, error) {
+// getProviderChainForTask returns the provider/model chain for a task.
+func (r *Registry) getProviderChainForTask(taskType TaskType) []ProviderModel {
 	r.mu.RLock()
-	providers := r.getActiveProviders()
+	taskChain, hasConfig := r.taskConfig[taskType]
 	r.mu.RUnlock()
+
+	if hasConfig {
+		return taskChain.GetProviderChain()
+	}
+
+	// Fallback to global order if no task config
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	providerModels := make([]ProviderModel, 0, len(r.order))
+
+	for _, name := range r.order {
+		providerModels = append(providerModels, ProviderModel{Provider: name, Model: ""})
+	}
+
+	return providerModels
+}
+
+// executeWithTaskFallback is a generic helper for task-aware fallback execution.
+func executeWithTaskFallback[T any](r *Registry, taskType TaskType, modelOverride string, fn func(Provider, string) (T, error)) (T, error) {
+	providerModels := r.getProviderChainForTask(taskType)
 
 	var zero T
 
-	if len(providers) == 0 {
+	if len(providerModels) == 0 {
 		return zero, ErrNoProvidersAvailable
 	}
 
 	var lastErr error
 
-	for _, p := range providers {
-		cb := r.getCircuitBreaker(p.Name())
+	isFirstProvider := true
 
-		if !cb.CanAttempt() {
-			r.logger.Debug().
-				Str(logKeyProvider, string(p.Name())).
-				Msg(logMsgCircuitBreakerOpen)
-
-			continue
-		}
-
-		result, err := fn(p)
+	for _, pm := range providerModels {
+		result, success, err := tryProviderExec(r, pm, modelOverride, taskType, fn)
 		if err != nil {
-			cb.RecordFailure(embeddings.ProviderName(p.Name()))
-
 			lastErr = err
-
-			r.logger.Warn().
-				Err(err).
-				Str(logKeyProvider, string(p.Name())).
-				Msg("LLM provider failed, trying fallback")
+			isFirstProvider = false
 
 			continue
 		}
 
-		cb.RecordSuccess()
+		if !success {
+			continue
+		}
 
-		// Log if we used a fallback provider
-		if len(providers) > 1 && p.Name() != r.order[0] {
+		if !isFirstProvider {
 			r.logger.Info().
-				Str(logKeyProvider, string(p.Name())).
+				Str(logKeyProvider, string(pm.Provider)).
+				Str(logKeyTask, string(taskType)).
 				Msg("used fallback LLM provider")
 		}
 
@@ -248,18 +268,51 @@ func executeWithFallback[T any](r *Registry, fn func(Provider) (T, error)) (T, e
 	return zero, ErrNoProvidersAvailable
 }
 
-// getActiveProviders returns providers that are available.
-func (r *Registry) getActiveProviders() []Provider {
-	active := make([]Provider, 0, len(r.providers))
+// tryProviderExec attempts to execute function with a provider.
+func tryProviderExec[T any](r *Registry, pm ProviderModel, modelOverride string, taskType TaskType, fn func(Provider, string) (T, error)) (T, bool, error) {
+	var zero T
 
-	for _, name := range r.order {
-		p := r.providers[name]
-		if p.IsAvailable() {
-			active = append(active, p)
-		}
+	r.mu.RLock()
+	p, exists := r.providers[pm.Provider]
+	r.mu.RUnlock()
+
+	if !exists || !p.IsAvailable() {
+		return zero, false, nil
 	}
 
-	return active
+	cb := r.getCircuitBreaker(pm.Provider)
+
+	if !cb.CanAttempt() {
+		r.logger.Debug().
+			Str(logKeyProvider, string(pm.Provider)).
+			Str(logKeyTask, string(taskType)).
+			Msg(logMsgCircuitBreakerOpen)
+
+		return zero, false, nil
+	}
+
+	model := pm.Model
+	if modelOverride != "" {
+		model = modelOverride
+	}
+
+	result, err := fn(p, model)
+	if err != nil {
+		cb.RecordFailure(embeddings.ProviderName(pm.Provider))
+
+		r.logger.Warn().
+			Err(err).
+			Str(logKeyProvider, string(pm.Provider)).
+			Str(logKeyModel, model).
+			Str(logKeyTask, string(taskType)).
+			Msg("LLM provider failed, trying fallback")
+
+		return zero, false, err
+	}
+
+	cb.RecordSuccess()
+
+	return result, true, nil
 }
 
 // sortProvidersByPriority sorts providers by priority in descending order.
