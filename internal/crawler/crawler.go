@@ -143,6 +143,11 @@ func (c *Crawler) maybeReseed(ctx context.Context) {
 
 // processNextBatch processes the next batch of URLs from the queue.
 func (c *Crawler) processNextBatch(ctx context.Context) {
+	// Update queue metrics
+	if stats, err := c.GetQueueStats(ctx); err == nil {
+		UpdateQueueMetrics(stats)
+	}
+
 	urls, err := c.claimURLs(ctx, c.cfg.CrawlBatchSize)
 	if err != nil {
 		c.logger.Error().Err(err).Msg("Failed to claim URLs")
@@ -176,11 +181,14 @@ func (c *Crawler) processNextBatch(ctx context.Context) {
 func (c *Crawler) processURL(ctx context.Context, doc *solr.Document) {
 	c.logger.Debug().Str(fieldURL, doc.URL).Int("depth", doc.CrawlDepth).Msg("Processing URL")
 
+	IncrementProcessed()
+
 	// Extract content
 	result, err := c.extractor.Extract(ctx, doc.URL)
 	if err != nil {
 		c.logger.Warn().Err(err).Str(fieldURL, doc.URL).Msg("Extraction failed")
 		c.markError(ctx, doc.ID, err.Error())
+		IncrementExtractionErrors()
 
 		return
 	}

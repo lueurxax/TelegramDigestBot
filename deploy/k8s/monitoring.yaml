@@ -1,0 +1,90 @@
+---
+# VMPodScrape for digest-bot metrics
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: digest-bot
+  namespace: digest
+spec:
+  selector:
+    matchLabels:
+      app: digest-bot
+  podMetricsEndpoints:
+  - targetPort: 8080
+    path: /metrics
+    scheme: http
+  namespaceSelector:
+    matchNames:
+    - digest
+---
+# VMPodScrape for digest-reader metrics
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: digest-reader
+  namespace: digest
+spec:
+  selector:
+    matchLabels:
+      app: digest-reader
+  podMetricsEndpoints:
+  - targetPort: 8080
+    path: /metrics
+    scheme: http
+  namespaceSelector:
+    matchNames:
+    - digest
+---
+# VMPodScrape for digest-worker metrics
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: digest-worker
+  namespace: digest
+spec:
+  selector:
+    matchLabels:
+      app: digest-worker
+  podMetricsEndpoints:
+  - targetPort: 8080
+    path: /metrics
+    scheme: http
+  namespaceSelector:
+    matchNames:
+    - digest
+---
+# VMPodScrape for digest-scheduler metrics
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: digest-scheduler
+  namespace: digest
+spec:
+  selector:
+    matchLabels:
+      app: digest-scheduler
+  podMetricsEndpoints:
+  - targetPort: 8080
+    path: /metrics
+    scheme: http
+  namespaceSelector:
+    matchNames:
+    - digest
+---
+# VMPodScrape for news-crawler metrics
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMPodScrape
+metadata:
+  name: news-crawler
+  namespace: digest
+spec:
+  selector:
+    matchLabels:
+      app: news-crawler
+  podMetricsEndpoints:
+  - targetPort: 8080
+    path: /metrics
+    scheme: http
+  namespaceSelector:
+    matchNames:
+    - digest

@@ -7,12 +7,54 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const (
 	healthCheckTimeoutShort = 5 * time.Second
 	healthCheckTimeoutLong  = 10 * time.Second
 )
+
+// Prometheus metrics for the crawler.
+var (
+	crawlerQueuePending = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "crawler_queue_pending",
+		Help: "Number of pending URLs in the crawl queue",
+	})
+	crawlerQueueProcessing = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "crawler_queue_processing",
+		Help: "Number of URLs currently being processed",
+	})
+	crawlerQueueDone = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "crawler_queue_done",
+		Help: "Number of successfully crawled URLs",
+	})
+	crawlerQueueError = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "crawler_queue_error",
+		Help: "Number of URLs that failed to crawl",
+	})
+	crawlerURLsProcessedTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "crawler_urls_processed_total",
+		Help: "Total number of URLs processed by this crawler instance",
+	})
+	crawlerExtractionErrorsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "crawler_extraction_errors_total",
+		Help: "Total number of extraction errors",
+	})
+)
+
+func init() {
+	prometheus.MustRegister(
+		crawlerQueuePending,
+		crawlerQueueProcessing,
+		crawlerQueueDone,
+		crawlerQueueError,
+		crawlerURLsProcessedTotal,
+		crawlerExtractionErrorsTotal,
+	)
+}
 
 // HealthServer provides health check endpoints for the crawler.
 type HealthServer struct {
@@ -44,6 +86,7 @@ func (hs *HealthServer) Start(ctx context.Context) error {
 	mux.HandleFunc("/healthz", hs.handleHealthz)
 	mux.HandleFunc("/readyz", hs.handleReadyz)
 	mux.HandleFunc("/stats", hs.handleStats)
+	mux.Handle("/metrics", promhttp.Handler())
 
 	hs.server = &http.Server{
 		Addr:              fmt.Sprintf(":%d", hs.port),
@@ -109,4 +152,33 @@ func (hs *HealthServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	_ = json.NewEncoder(w).Encode(stats) //nolint:errcheck,errchkjson // Best-effort encode
+}
+
+// UpdateQueueMetrics updates Prometheus metrics from queue stats.
+func UpdateQueueMetrics(stats map[string]int) {
+	if v, ok := stats["pending"]; ok {
+		crawlerQueuePending.Set(float64(v))
+	}
+
+	if v, ok := stats["processing"]; ok {
+		crawlerQueueProcessing.Set(float64(v))
+	}
+
+	if v, ok := stats["done"]; ok {
+		crawlerQueueDone.Set(float64(v))
+	}
+
+	if v, ok := stats["error"]; ok {
+		crawlerQueueError.Set(float64(v))
+	}
+}
+
+// IncrementProcessed increments the processed URLs counter.
+func IncrementProcessed() {
+	crawlerURLsProcessedTotal.Inc()
+}
+
+// IncrementExtractionErrors increments the extraction errors counter.
+func IncrementExtractionErrors() {
+	crawlerExtractionErrorsTotal.Inc()
 }
