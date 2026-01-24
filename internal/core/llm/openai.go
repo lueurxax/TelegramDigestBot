@@ -124,6 +124,20 @@ func (c *openaiClient) GetProviderStatuses() []ProviderStatus {
 	}
 }
 
+// SetBudgetLimit implements Client interface (no-op for single provider).
+func (c *openaiClient) SetBudgetLimit(_ int64) {}
+
+// GetBudgetStatus implements Client interface (returns zeros for single provider).
+func (c *openaiClient) GetBudgetStatus() (int64, int64, float64) {
+	return 0, 0, 0
+}
+
+// SetBudgetAlertCallback implements Client interface (no-op for single provider).
+func (c *openaiClient) SetBudgetAlertCallback(_ func(alert BudgetAlert)) {}
+
+// RecordTokensForBudget implements Client interface (no-op for single provider).
+func (c *openaiClient) RecordTokensForBudget(_ int) {}
+
 // Ensure openaiClient implements Provider interface.
 var _ Provider = (*openaiClient)(nil)
 
@@ -189,11 +203,13 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	})
 	if err != nil {
 		c.recordFailure()
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskSummarize, 0, 0, false)
 
 		return nil, fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskSummarize, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 
 	content := resp.Choices[0].Message.Content
 	c.logger.Debug().Str("content", content).Msg("LLM response")
@@ -233,11 +249,13 @@ func (c *openaiClient) TranslateText(ctx context.Context, text string, targetLan
 	})
 	if err != nil {
 		c.recordFailure()
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskTranslate, 0, 0, false)
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskTranslate, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
@@ -268,11 +286,13 @@ func (c *openaiClient) CompleteText(ctx context.Context, prompt string, model st
 	})
 	if err != nil {
 		c.recordFailure()
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskComplete, 0, 0, false)
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskComplete, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }

@@ -19,7 +19,7 @@ import (
 // Google model constants.
 const (
 	// ModelGeminiFlashLite is the cheapest/fastest Google model.
-	ModelGeminiFlashLite = "gemini-2.5-flash-lite"
+	ModelGeminiFlashLite = "gemini-2.0-flash-lite"
 
 	// Default model for Google (use cheapest available).
 	defaultGoogleModel = ModelGeminiFlashLite

@@ -14,6 +14,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/output/digest"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
@@ -89,6 +90,12 @@ const (
 const (
 	WeightOverrideManual = "manual"
 	ToggleOff            = "off"
+	ToggleDisable        = "disable"
+)
+
+// Error message templates for handlers.
+const (
+	errMsgFailedToSaveSetting = "Failed to save setting: %v"
 )
 
 // Setting keys.
@@ -101,6 +108,15 @@ const (
 	SettingDiscoveryMinScore  = "discovery_min_engagement"
 	SettingDiscoveryAllow     = "discovery_description_allow"
 	SettingDiscoveryDeny      = "discovery_description_deny"
+)
+
+// LLM override setting keys.
+const (
+	SettingLLMOverrideSummarize = "llm_override_summarize"
+	SettingLLMOverrideCluster   = "llm_override_cluster"
+	SettingLLMOverrideNarrative = "llm_override_narrative"
+	SettingLLMOverrideTopic     = "llm_override_topic"
+	SettingLLMDailyBudget       = "llm_daily_budget"
 )
 
 // Date/time formats.
@@ -183,6 +199,8 @@ const (
 	filterTypeAllow = "allow"
 	filterTypeDeny  = "deny"
 	subCmdHelp      = "help"
+	subCmdSet       = "set"
+	subCmdReset     = "reset"
 )
 
 // Preview field constants.
@@ -1786,7 +1804,7 @@ func (b *Bot) handlePrompt(ctx context.Context, msg *tgbotapi.Message) {
 		b.handlePromptList(ctx, msg)
 	case "show":
 		b.handlePromptShow(ctx, msg, args)
-	case "set":
+	case subCmdSet:
 		b.handlePromptSet(ctx, msg, args)
 	case "activate", "active":
 		b.handlePromptActivate(ctx, msg, args)
@@ -2117,7 +2135,7 @@ func (b *Bot) dispatchRelevanceAction(ctx context.Context, msg *tgbotapi.Message
 	switch strings.ToLower(action) {
 	case "auto", "on", "enable":
 		b.setChannelAutoRelevance(ctx, msg, channel, identifier, true)
-	case WeightOverrideManual, ToggleOff, "disable":
+	case WeightOverrideManual, ToggleOff, ToggleDisable:
 		b.setChannelAutoRelevance(ctx, msg, channel, identifier, false)
 	default:
 		b.replyChannelRelevanceUsage(msg)
@@ -4374,10 +4392,10 @@ func (b *Bot) handleDiscoverCallback(ctx context.Context, query *tgbotapi.Callba
 }
 
 // handleLLMNamespace handles /llm commands.
-func (b *Bot) handleLLMNamespace(_ context.Context, msg *tgbotapi.Message) {
+func (b *Bot) handleLLMNamespace(ctx context.Context, msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 	if len(args) == 0 {
-		b.handleLLMStatus(msg)
+		b.handleLLMStatus(ctx, msg)
 
 		return
 	}
@@ -4386,7 +4404,15 @@ func (b *Bot) handleLLMNamespace(_ context.Context, msg *tgbotapi.Message) {
 
 	switch subCmd {
 	case CmdStatus:
-		b.handleLLMStatus(msg)
+		b.handleLLMStatus(ctx, msg)
+	case subCmdSet:
+		b.handleLLMSet(ctx, msg, args[1:])
+	case subCmdReset:
+		b.handleLLMReset(ctx, msg, args[1:])
+	case "costs":
+		b.handleLLMCosts(msg)
+	case "budget":
+		b.handleLLMBudget(ctx, msg, args[1:])
 	case subCmdHelp:
 		b.reply(msg, llmHelpMessage())
 	default:
@@ -4394,57 +4420,319 @@ func (b *Bot) handleLLMNamespace(_ context.Context, msg *tgbotapi.Message) {
 	}
 }
 
-// handleLLMStatus displays LLM provider status.
-func (b *Bot) handleLLMStatus(msg *tgbotapi.Message) {
+// LLM task names for model overrides.
+var llmTaskSettings = map[string]string{
+	"summarize": SettingLLMOverrideSummarize,
+	"cluster":   SettingLLMOverrideCluster,
+	"narrative": SettingLLMOverrideNarrative,
+	"topic":     SettingLLMOverrideTopic,
+}
+
+// handleLLMStatus displays LLM provider status and current overrides.
+func (b *Bot) handleLLMStatus(ctx context.Context, msg *tgbotapi.Message) {
 	statuses := b.llmClient.GetProviderStatuses()
 
 	var sb strings.Builder
 
 	sb.WriteString("🤖 <b>LLM Provider Status</b>\n\n")
-
-	if len(statuses) == 0 {
-		sb.WriteString("No providers configured.\n")
-		b.reply(msg, sb.String())
-
-		return
-	}
-
-	for i, s := range statuses {
-		var statusIcon string
-		if s.Available && s.CircuitBreakerOK {
-			statusIcon = "✅"
-		} else if s.Available && !s.CircuitBreakerOK {
-			statusIcon = "⚠️"
-		} else {
-			statusIcon = "❌"
-		}
-
-		priority := ""
-		if i == 0 {
-			priority = " (primary)"
-		}
-
-		sb.WriteString(fmt.Sprintf("%s <code>%s</code>%s\n", statusIcon, s.Name, priority))
-
-		if !s.Available {
-			sb.WriteString("   <i>not configured</i>\n")
-		} else if !s.CircuitBreakerOK {
-			sb.WriteString("   <i>circuit breaker open</i>\n")
-		}
-	}
-
+	b.writeLLMProviderStatuses(&sb, statuses)
+	b.writeLLMModelOverrides(ctx, &sb)
 	sb.WriteString("\n<b>Legend:</b>\n")
 	sb.WriteString("✅ healthy | ⚠️ circuit open | ❌ unavailable")
 
 	b.reply(msg, sb.String())
 }
 
+// writeLLMProviderStatuses writes provider status lines to the builder.
+func (b *Bot) writeLLMProviderStatuses(sb *strings.Builder, statuses []llm.ProviderStatus) {
+	if len(statuses) == 0 {
+		sb.WriteString("No providers configured.\n")
+
+		return
+	}
+
+	for i, s := range statuses {
+		icon := llmProviderStatusIcon(s)
+		priority := llmProviderPriorityLabel(i)
+		fmt.Fprintf(sb, "%s <code>%s</code>%s\n", icon, s.Name, priority)
+		sb.WriteString(llmProviderStatusDetail(s))
+	}
+}
+
+// llmProviderStatusIcon returns the status icon for a provider.
+func llmProviderStatusIcon(s llm.ProviderStatus) string {
+	if s.Available && s.CircuitBreakerOK {
+		return "✅"
+	}
+
+	if s.Available {
+		return "⚠️"
+	}
+
+	return "❌"
+}
+
+// llmProviderPriorityLabel returns the priority label for a provider.
+func llmProviderPriorityLabel(index int) string {
+	if index == 0 {
+		return " (primary)"
+	}
+
+	return ""
+}
+
+// llmProviderStatusDetail returns the detail line for a provider status.
+func llmProviderStatusDetail(s llm.ProviderStatus) string {
+	if !s.Available {
+		return "   <i>not configured</i>\n"
+	}
+
+	if !s.CircuitBreakerOK {
+		return "   <i>circuit breaker open</i>\n"
+	}
+
+	return ""
+}
+
+// writeLLMModelOverrides writes model override lines to the builder.
+func (b *Bot) writeLLMModelOverrides(ctx context.Context, sb *strings.Builder) {
+	sb.WriteString("\n<b>Model Overrides:</b>\n")
+
+	hasOverrides := false
+
+	for task, settingKey := range llmTaskSettings {
+		var model string
+		if err := b.database.GetSetting(ctx, settingKey, &model); err == nil && model != "" {
+			fmt.Fprintf(sb, "• %s: <code>%s</code>\n", task, html.EscapeString(model))
+
+			hasOverrides = true
+		}
+	}
+
+	if !hasOverrides {
+		sb.WriteString("<i>None (using defaults)</i>\n")
+	}
+}
+
+// handleLLMSet sets a model override for a specific task.
+func (b *Bot) handleLLMSet(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) < 2 {
+		b.reply(msg, "Usage: <code>/llm set &lt;task&gt; &lt;model&gt;</code>\n\nTasks: summarize, cluster, narrative, topic")
+
+		return
+	}
+
+	task := strings.ToLower(args[0])
+	model := args[1]
+
+	settingKey, ok := llmTaskSettings[task]
+	if !ok {
+		b.reply(msg, fmt.Sprintf("❌ Unknown task: <code>%s</code>\n\nValid tasks: summarize, cluster, narrative, topic", html.EscapeString(task)))
+
+		return
+	}
+
+	if err := b.database.SaveSettingWithHistory(ctx, settingKey, model, msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Failed to save: %s", err.Error()))
+
+		return
+	}
+
+	b.reply(msg, fmt.Sprintf("✅ Set <b>%s</b> model to <code>%s</code>", task, html.EscapeString(model)))
+}
+
+// handleLLMReset resets model override(s) to default.
+func (b *Bot) handleLLMReset(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) == 0 {
+		b.reply(msg, "Usage: <code>/llm reset &lt;task&gt;</code> or <code>/llm reset all</code>\n\nTasks: summarize, cluster, narrative, topic")
+
+		return
+	}
+
+	task := strings.ToLower(args[0])
+
+	if task == "all" {
+		for taskName, settingKey := range llmTaskSettings {
+			if err := b.database.DeleteSettingWithHistory(ctx, settingKey, msg.From.ID); err != nil {
+				b.logger.Warn().Err(err).Str("task", taskName).Msg("failed to reset LLM override")
+			}
+		}
+
+		b.reply(msg, "✅ Reset all LLM model overrides to defaults")
+
+		return
+	}
+
+	settingKey, ok := llmTaskSettings[task]
+	if !ok {
+		b.reply(msg, fmt.Sprintf("❌ Unknown task: <code>%s</code>\n\nValid tasks: summarize, cluster, narrative, topic, all", html.EscapeString(task)))
+
+		return
+	}
+
+	if err := b.database.DeleteSettingWithHistory(ctx, settingKey, msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Failed to reset: %s", err.Error()))
+
+		return
+	}
+
+	b.reply(msg, fmt.Sprintf("✅ Reset <b>%s</b> model to default", task))
+}
+
+// handleLLMCosts displays token usage tracking info.
+func (b *Bot) handleLLMCosts(msg *tgbotapi.Message) {
+	response := `💰 <b>LLM Cost Tracking</b>
+
+Token usage is tracked via Prometheus metrics:
+• <code>digest_llm_tokens_prompt_total</code>
+• <code>digest_llm_tokens_completion_total</code>
+• <code>digest_llm_requests_total</code>
+
+<b>Labels:</b> provider, model, task, status
+
+<b>View in Grafana:</b>
+Check the "Digest Bot Overview" dashboard for:
+• Token usage by provider/model
+• Request counts and error rates
+• Cost estimation panels
+
+<b>Estimated Pricing (per 1M tokens):</b>
+• Google gemini-2.0-flash-lite: $0.075 in / $0.30 out
+• Anthropic claude-3-5-sonnet: $3.00 in / $15.00 out
+• OpenAI gpt-5-nano: $0.05 in / $0.40 out`
+
+	b.reply(msg, response)
+}
+
+// handleLLMBudget handles the /llm budget command.
+func (b *Bot) handleLLMBudget(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) == 0 {
+		b.showLLMBudgetStatus(msg)
+
+		return
+	}
+
+	subCmd := strings.ToLower(args[0])
+
+	switch subCmd {
+	case subCmdSet:
+		b.handleLLMBudgetSet(ctx, msg, args[1:])
+	case "off", "disable":
+		b.handleLLMBudgetDisable(ctx, msg)
+	default:
+		b.showLLMBudgetStatus(msg)
+	}
+}
+
+// showLLMBudgetStatus displays current budget status.
+func (b *Bot) showLLMBudgetStatus(msg *tgbotapi.Message) {
+	dailyTokens, dailyLimit, percentage := b.llmClient.GetBudgetStatus()
+
+	var sb strings.Builder
+
+	sb.WriteString("📊 <b>LLM Budget Status</b>\n\n")
+	fmt.Fprintf(&sb, "<b>Today's Usage:</b> %s tokens\n", formatTokenCount(dailyTokens))
+
+	if dailyLimit > 0 {
+		fmt.Fprintf(&sb, "<b>Daily Limit:</b> %s tokens\n", formatTokenCount(dailyLimit))
+		fmt.Fprintf(&sb, "<b>Usage:</b> %.1f%%\n", percentage*percentageMultiplier)
+
+		if percentage >= llm.BudgetThresholdCritical {
+			sb.WriteString("\n⚠️ <b>Budget exceeded!</b>")
+		} else if percentage >= llm.BudgetThresholdWarning {
+			sb.WriteString("\n⚠️ <b>Approaching budget limit</b>")
+		}
+	} else {
+		sb.WriteString("<b>Daily Limit:</b> Not set\n")
+	}
+
+	sb.WriteString("\n\n<b>Commands:</b>\n")
+	sb.WriteString("• <code>/llm budget set &lt;tokens&gt;</code> - Set daily limit\n")
+	sb.WriteString("• <code>/llm budget off</code> - Disable budget alerts")
+
+	b.reply(msg, sb.String())
+}
+
+// formatTokenCount formats a token count with K/M suffixes.
+func formatTokenCount(tokens int64) string {
+	const (
+		thousand = 1000
+		million  = 1000000
+	)
+
+	switch {
+	case tokens >= million:
+		return fmt.Sprintf("%.1fM", float64(tokens)/float64(million))
+	case tokens >= thousand:
+		return fmt.Sprintf("%.1fK", float64(tokens)/float64(thousand))
+	default:
+		return fmt.Sprintf("%d", tokens)
+	}
+}
+
+// handleLLMBudgetSet sets the daily token budget.
+func (b *Bot) handleLLMBudgetSet(ctx context.Context, msg *tgbotapi.Message, args []string) {
+	if len(args) == 0 {
+		b.reply(msg, "Usage: <code>/llm budget set &lt;tokens&gt;</code>\nExample: <code>/llm budget set 500000</code>")
+
+		return
+	}
+
+	limit, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil || limit <= 0 {
+		b.reply(msg, "Invalid token limit. Please provide a positive number.")
+
+		return
+	}
+
+	// Store in settings
+	if err := b.database.SaveSettingWithHistory(ctx, SettingLLMDailyBudget, args[0], msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf(errMsgFailedToSaveSetting, err))
+
+		return
+	}
+
+	// Update runtime
+	b.llmClient.SetBudgetLimit(limit)
+
+	b.reply(msg, fmt.Sprintf("✅ Daily token budget set to %s tokens.\nAlerts will trigger at 80%% and 100%% usage.", formatTokenCount(limit)))
+}
+
+// handleLLMBudgetDisable disables budget alerts.
+func (b *Bot) handleLLMBudgetDisable(ctx context.Context, msg *tgbotapi.Message) {
+	if err := b.database.SaveSettingWithHistory(ctx, SettingLLMDailyBudget, "0", msg.From.ID); err != nil {
+		b.reply(msg, fmt.Sprintf(errMsgFailedToSaveSetting, err))
+
+		return
+	}
+
+	b.llmClient.SetBudgetLimit(0)
+
+	b.reply(msg, "✅ Budget alerts disabled.")
+}
+
 func llmHelpMessage() string {
 	return `🤖 <b>LLM Commands</b>
 
 <b>Status:</b>
-• <code>/llm</code> - Show provider status
-• <code>/llm status</code> - Show provider status
+• <code>/llm</code> - Show provider status and overrides
+• <code>/llm status</code> - Show provider status and overrides
+
+<b>Model Overrides:</b>
+• <code>/llm set &lt;task&gt; &lt;model&gt;</code> - Set model for task
+• <code>/llm reset &lt;task&gt;</code> - Reset to default
+• <code>/llm reset all</code> - Reset all overrides
+
+<b>Cost Tracking:</b>
+• <code>/llm costs</code> - Show cost info and Prometheus metrics
+• <code>/llm budget</code> - View daily token budget status
+• <code>/llm budget set &lt;tokens&gt;</code> - Set daily limit
+• <code>/llm budget off</code> - Disable budget alerts
+
+<b>Tasks:</b> summarize, cluster, narrative, topic
+
+<b>Example:</b>
+<code>/llm set narrative claude-3-5-sonnet</code>
 
 <b>Current Priority:</b>
 Google → Anthropic → OpenAI`

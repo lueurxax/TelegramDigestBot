@@ -88,3 +88,61 @@ spec:
   namespaceSelector:
     matchNames:
     - digest
+---
+# VMRule for LLM budget alerts
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: digest-llm-alerts
+  namespace: digest
+spec:
+  groups:
+  - name: llm-budget
+    interval: 5m
+    rules:
+    # Alert when daily token usage exceeds threshold
+    - alert: LLMDailyTokenBudgetWarning
+      expr: |
+        sum(increase(digest_llm_tokens_prompt_total[24h])) +
+        sum(increase(digest_llm_tokens_completion_total[24h])) > 500000
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "LLM daily token usage high"
+        description: "Daily token usage ({{ $value | humanize }}) exceeds warning threshold (500k tokens)"
+
+    - alert: LLMDailyTokenBudgetCritical
+      expr: |
+        sum(increase(digest_llm_tokens_prompt_total[24h])) +
+        sum(increase(digest_llm_tokens_completion_total[24h])) > 1000000
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "LLM daily token budget exceeded"
+        description: "Daily token usage ({{ $value | humanize }}) exceeds critical threshold (1M tokens)"
+
+    # Alert when error rate is high
+    - alert: LLMHighErrorRate
+      expr: |
+        sum(rate(digest_llm_requests_total{status="error"}[1h])) /
+        sum(rate(digest_llm_requests_total[1h])) > 0.1
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "LLM error rate is high"
+        description: "LLM error rate is {{ $value | humanizePercentage }} over the last hour"
+
+    # Alert when all providers are failing
+    - alert: LLMAllProvidersFailing
+      expr: |
+        sum(rate(digest_llm_requests_total{status="success"}[15m])) == 0
+        and sum(rate(digest_llm_requests_total{status="error"}[15m])) > 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "All LLM providers failing"
+        description: "No successful LLM requests in the last 15 minutes"

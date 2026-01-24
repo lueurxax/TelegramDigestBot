@@ -142,4 +142,20 @@ var (
 		Name: "digest_enrichment_search_zero_results_total",
 		Help: "Total number of searches that returned zero results",
 	}, []string{"provider"})
+
+	// LLM token usage metrics (Phase 3)
+	LLMTokensPrompt = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_llm_tokens_prompt_total",
+		Help: "Total number of prompt tokens used",
+	}, []string{"provider", "model", "task"})
+
+	LLMTokensCompletion = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_llm_tokens_completion_total",
+		Help: "Total number of completion tokens used",
+	}, []string{"provider", "model", "task"})
+
+	LLMRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_llm_requests_total",
+		Help: "Total number of LLM requests",
+	}, []string{"provider", "model", "task", "status"})
 )

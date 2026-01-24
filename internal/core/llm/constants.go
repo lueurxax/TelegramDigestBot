@@ -83,3 +83,22 @@ const (
 	defaultCircuitThreshold = 5
 	defaultCircuitTimeout   = time.Minute
 )
+
+// LLM task names for metrics tracking.
+const (
+	TaskSummarize     = "summarize"
+	TaskTranslate     = "translate"
+	TaskComplete      = "complete"
+	TaskNarrative     = "narrative"
+	TaskCluster       = "cluster"
+	TaskTopic         = "topic"
+	TaskRelevanceGate = "relevance_gate"
+	TaskCompress      = "compress"
+	TaskImageGen      = "image_gen"
+)
+
+// Request status for metrics.
+const (
+	StatusSuccess = "success"
+	StatusError   = "error"
+)

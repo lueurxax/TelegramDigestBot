@@ -72,6 +72,7 @@ func (a *App) RunBot(ctx context.Context) error {
 	// Create a digest scheduler for preview commands (nil poster since we only need BuildDigest)
 	digestBuilder := digest.New(a.cfg, a.database, nil, llmClient, a.logger)
 
+	//nolint:contextcheck // Budget alert callback fires async with no request context
 	b, err := bot.New(a.cfg, a.database, digestBuilder, llmClient, a.logger)
 	if err != nil {
 		return fmt.Errorf(errBotInit, err)
@@ -331,6 +332,7 @@ func (a *App) RunDigest(ctx context.Context, once bool) error {
 	llmClient := a.newLLMClient(ctx)
 
 	// Create bot as DigestPoster only (nil digestBuilder since bot won't process commands)
+	//nolint:contextcheck // Budget alert callback fires async with no request context
 	b, err := bot.New(a.cfg, a.database, nil, llmClient, a.logger)
 	if err != nil {
 		return fmt.Errorf(errBotInit, err)

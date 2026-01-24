@@ -27,6 +27,8 @@ const (
 	SleepBetweenRichItems = 200 * time.Millisecond
 	// SummaryTruncateLength is the max length for summary in log messages.
 	SummaryTruncateLength = 50
+	// percentageMultiplier converts decimal percentage to display percentage.
+	percentageMultiplier = 100
 )
 
 // Log field constants.
@@ -148,14 +150,52 @@ func New(cfg *config.Config, database Repository, digestBuilder DigestBuilder, l
 		return nil, fmt.Errorf("creating bot API: %w", err)
 	}
 
-	return &Bot{
+	bot := &Bot{
 		cfg:           cfg,
 		database:      database,
 		digestBuilder: digestBuilder,
 		llmClient:     llmClient,
 		api:           api,
 		logger:        logger,
-	}, nil
+	}
+
+	// Initialize budget tracking
+	bot.initBudgetTracking()
+
+	return bot, nil
+}
+
+// initBudgetTracking loads budget settings and sets up alert callbacks.
+func (b *Bot) initBudgetTracking() {
+	// Load budget limit from settings
+	ctx := context.Background()
+
+	var budgetStr string
+	if err := b.database.GetSetting(ctx, "llm_daily_budget", &budgetStr); err == nil && budgetStr != "" {
+		var limit int64
+		if _, err := fmt.Sscanf(budgetStr, "%d", &limit); err == nil && limit > 0 {
+			b.llmClient.SetBudgetLimit(limit)
+			b.logger.Info().Int64("limit", limit).Msg("loaded LLM daily budget limit from settings")
+		}
+	}
+
+	// Set up alert callback - uses context.Background() because this callback is
+	// fired asynchronously from a goroutine in BudgetTracker and there's no
+	// meaningful request context available.
+	b.llmClient.SetBudgetAlertCallback(func(alert llm.BudgetAlert) {
+		var message string
+		if alert.Level == "critical" {
+			message = fmt.Sprintf("🚨 <b>LLM Budget Exceeded!</b>\n\nDaily token usage: %d\nDaily limit: %d\nUsage: %.1f%%",
+				alert.DailyTokens, alert.BudgetLimit, alert.Percentage*percentageMultiplier)
+		} else {
+			message = fmt.Sprintf("⚠️ <b>LLM Budget Warning</b>\n\nDaily token usage approaching limit.\nUsage: %d / %d (%.1f%%)",
+				alert.DailyTokens, alert.BudgetLimit, alert.Percentage*percentageMultiplier)
+		}
+
+		if err := b.SendNotification(context.Background(), message); err != nil {
+			b.logger.Error().Err(err).Msg("failed to send budget alert notification")
+		}
+	})
 }
 
 func (b *Bot) Run(ctx context.Context) error {

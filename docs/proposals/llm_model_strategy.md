@@ -119,8 +119,7 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 | Priority | Model | Provider | Cost (1M tokens) |
 |----------|-------|----------|------------------|
 | Default | `gpt-5-nano` | OpenAI | $0.05 in / $0.40 out |
-| Fallback 1 | `gemini-2.5-flash-lite` | Google | $0.075 in / $0.30 out |
-| Fallback 2 | `llama3.2:8b` | Ollama | Free (local) |
+| Fallback 1 | `gemini-2.0-flash-lite` | Google | $0.075 in / $0.30 out |
 
 ---
 
@@ -136,11 +135,11 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 
 **Model mapping:**
 
-| Priority | Model | Provider | Cost (1M tokens) |
-|----------|-------|----------|------------------|
-| Default | `gpt-5` | OpenAI | $2.50 in / $10 out |
-| Fallback 1 | `claude-3-5-sonnet-20241022` | Anthropic | $3.00 in / $15 out |
-| Fallback 2 | `gemini-2.5-flash-lite` | Google | $0.075 in / $0.30 out |
+| Priority | Model                   | Provider | Cost (1M tokens)      |
+|----------|-------------------------|----------|-----------------------|
+| Default | `cohere-command-r`      | Cohere   | need update           |
+| Fallback 1 | `gpt-5`                 | OpenAI   | $2.50 in / $10 out    |
+| Fallback 2 | `gemini-2.0-flash-lite` | Google   | $0.075 in / $0.30 out |
 
 ---
 
@@ -156,11 +155,11 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 
 **Model mapping:**
 
-| Priority | Model | Provider | Cost (1M tokens)      |
-|----------|-------|----------|-----------------------|
-| Default | `gpt-5-nano` | OpenAI   | $0.05 in / $0.40 out  |
-| Fallback 1 | `gemini-2.5-flash-lite` | Google   | $0.075 in / $0.30 out |
-| Fallback 2 | `mistral-7b-instruct` | OpenRouter     | $0.20 in /$0.20  out  |
+| Priority | Model                   | Provider | Cost (1M tokens)      |
+|----------|-------------------------|----------|-----------------------|
+| Default | `gpt-5-nano`            | OpenAI   | $0.05 in / $0.40 out  |
+| Fallback 1 | `gemini-2.0-flash-lite` | Google   | $0.075 in / $0.30 out |
+| Fallback 2 | `mistral-7b-instruct`   | OpenRouter     | $0.20 in /$0.20  out  |
 
 ---
 
@@ -176,11 +175,11 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 
 **Model mapping:**
 
-| Priority | Model | Provider | Cost (1M tokens) |
-|----------|-------|----------|------------------|
-| Default | `gpt-5.2` | OpenAI | $2.50 in / $10 out |
-| Fallback 1 | `claude-3-5-sonnet-20241022` | Anthropic | $3.00 in / $15 out |
-| Fallback 2 | `gemini-2.5-flash-lite` | Google | $0.075 in / $0.30 out |
+| Priority   | Model                       | Provider | Cost (1M tokens)      |
+|------------|-----------------------------|----------|-----------------------|
+| Default | `gemini-2.0-flash-lite`     | Google | $0.075 in / $0.30 out |
+| Fallback 1 | `claude-haiku-4.5` | Anthropic | $1 in / $5 out        |
+|  Fallback 2   | `gpt-5.2`                   | OpenAI | $2.50 in / $10 out    |
 
 ---
 

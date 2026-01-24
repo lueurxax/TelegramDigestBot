@@ -10,6 +10,7 @@ import (
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/embeddings"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 )
 
 // Registry errors.
@@ -25,15 +26,20 @@ type Registry struct {
 	providers       map[ProviderName]Provider
 	order           []ProviderName // Priority order (highest first)
 	circuitBreakers map[ProviderName]*embeddings.CircuitBreaker
+	budgetTracker   *BudgetTracker
 	logger          *zerolog.Logger
 }
 
 // NewRegistry creates a new provider registry.
 func NewRegistry(logger *zerolog.Logger) *Registry {
+	bt := NewBudgetTracker(0, logger) // 0 means no limit
+	SetGlobalBudgetTracker(bt)
+
 	return &Registry{
 		providers:       make(map[ProviderName]Provider),
 		order:           make([]ProviderName, 0),
 		circuitBreakers: make(map[ProviderName]*embeddings.CircuitBreaker),
+		budgetTracker:   bt,
 		logger:          logger,
 	}
 }
@@ -302,6 +308,62 @@ func (r *Registry) GetProviderStatuses() []ProviderStatus {
 	}
 
 	return statuses
+}
+
+// globalBudgetTracker holds a reference to the active budget tracker for token recording.
+//
+//nolint:gochecknoglobals
+var globalBudgetTracker *BudgetTracker
+
+// SetGlobalBudgetTracker sets the global budget tracker reference.
+func SetGlobalBudgetTracker(bt *BudgetTracker) {
+	globalBudgetTracker = bt
+}
+
+// RecordTokenUsage records token usage metrics for an LLM request.
+func RecordTokenUsage(provider, model, task string, promptTokens, completionTokens int, success bool) {
+	status := StatusSuccess
+	if !success {
+		status = StatusError
+	}
+
+	observability.LLMRequests.WithLabelValues(provider, model, task, status).Inc()
+
+	if promptTokens > 0 {
+		observability.LLMTokensPrompt.WithLabelValues(provider, model, task).Add(float64(promptTokens))
+	}
+
+	if completionTokens > 0 {
+		observability.LLMTokensCompletion.WithLabelValues(provider, model, task).Add(float64(completionTokens))
+	}
+
+	// Record to budget tracker if set
+	if globalBudgetTracker != nil && success {
+		totalTokens := promptTokens + completionTokens
+		if totalTokens > 0 {
+			globalBudgetTracker.RecordTokens(totalTokens)
+		}
+	}
+}
+
+// SetBudgetLimit sets the daily token budget limit.
+func (r *Registry) SetBudgetLimit(limit int64) {
+	r.budgetTracker.SetDailyLimit(limit)
+}
+
+// GetBudgetStatus returns the current budget status.
+func (r *Registry) GetBudgetStatus() (dailyTokens, dailyLimit int64, percentage float64) {
+	return r.budgetTracker.GetStatus()
+}
+
+// SetBudgetAlertCallback sets the callback for budget alerts.
+func (r *Registry) SetBudgetAlertCallback(callback func(alert BudgetAlert)) {
+	r.budgetTracker.SetAlertCallback(callback)
+}
+
+// RecordTokensForBudget records tokens for budget tracking.
+func (r *Registry) RecordTokensForBudget(tokens int) {
+	r.budgetTracker.RecordTokens(tokens)
 }
 
 // Ensure Registry implements Client interface.

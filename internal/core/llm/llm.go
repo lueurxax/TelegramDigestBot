@@ -53,6 +53,11 @@ type Client interface {
 	CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error)
 	GenerateDigestCover(ctx context.Context, topics []string, narrative string) ([]byte, error)
 	GetProviderStatuses() []ProviderStatus
+	// Budget tracking methods
+	SetBudgetLimit(limit int64)
+	GetBudgetStatus() (dailyTokens, dailyLimit int64, percentage float64)
+	SetBudgetAlertCallback(callback func(alert BudgetAlert))
+	RecordTokensForBudget(tokens int)
 }
 
 type RelevanceGateResult struct {
