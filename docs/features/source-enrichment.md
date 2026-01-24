@@ -108,6 +108,57 @@ Or use bot commands:
 /enrichment domains          # List all filters
 ```
 
+### Language Routing
+
+Route enrichment queries to different languages based on context. For example, search English sources for general news but Greek sources for Cyprus-local content.
+
+**Policy Configuration** (JSON format):
+```env
+ENRICHMENT_LANGUAGE_POLICY='{
+  "default": ["en"],
+  "context": [
+    {
+      "name": "cyprus",
+      "languages": ["el"],
+      "keywords": ["cyprus", "nicosia", "limassol", "larnaca", "paphos"]
+    }
+  ],
+  "channel": {
+    "@russiancyprusnews": ["el"]
+  }
+}'
+```
+
+Or store in database via settings:
+```
+/settings set enrichment_language_policy {"default":["en"],"channel":{"@example":["el"]}}
+```
+
+**Policy Structure:**
+
+| Key | Description |
+|-----|-------------|
+| `default` | Languages to use when no other rule matches |
+| `context` | Context-based rules with keyword detection |
+| `channel` | Per-channel language overrides |
+
+**Evaluation Order:** channel → context → default. First match wins.
+
+**Context Detection:**
+1. Channel description (highest confidence)
+2. Historical messages (rolling keyword match)
+3. Current item text (summary + channel title)
+
+**Query Translation:**
+```env
+ENRICHMENT_QUERY_TRANSLATE=true    # Enable LLM translation
+ENRICHMENT_LLM_TIMEOUT=120s        # Translation timeout
+```
+
+When enabled, queries are translated to target languages before searching. The digest output language remains unchanged (typically Russian).
+
+See [proposals/enrichment-language-routing.md](../proposals/enrichment-language-routing.md) for design rationale.
+
 ### Evidence-Enhanced Clustering
 
 When items share evidence sources, their clustering similarity gets boosted:
@@ -338,3 +389,11 @@ who.int, un.org, europa.eu
 ```
 
 See `deploy/k8s/enrichment-services.yaml` for Kubernetes deployment with automated seed crawling.
+
+---
+
+## See Also
+
+- [Corroboration](corroboration.md) - Channel corroboration and Google Fact Check API
+- [Link Enrichment](link-enrichment.md) - URL resolution for message content
+- [Content Quality](content-quality.md) - How enrichment integrates with clustering

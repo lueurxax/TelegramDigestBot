@@ -6,26 +6,32 @@ This directory holds labeled datasets for offline quality evaluation.
 
 Each line is a JSON object with the following fields:
 
-```
+```json
 {"id":"item-1","label":"good","relevance_score":0.86,"importance_score":0.42}
 ```
 
-Fields:
-- `id` (string): optional identifier.
-- `label` (string): `good`, `bad`, or `irrelevant`. (`rating` is also accepted.)
-- `relevance_score` (float): model-assigned relevance score.
-- `importance_score` (float): model-assigned importance score.
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Optional identifier |
+| `label` | string | `good`, `bad`, or `irrelevant` (also accepts `rating`) |
+| `relevance_score` | float | Model-assigned relevance score |
+| `importance_score` | float | Model-assigned importance score |
 
 ## Annotation Workflow
 
-- Queue samples: <code>/annotate enqueue [hours] [limit]</code>
-- Label items: <code>/annotate next</code> then <code>/annotate label &lt;good|bad|irrelevant&gt; [comment]</code>
-- Skip if needed: <code>/annotate skip</code>
-- Check progress: <code>/annotate stats</code>
+```
+/annotate enqueue [hours] [limit]   # Queue samples
+/annotate next                       # Get next item to label
+/annotate label <good|bad|irrelevant> [comment]
+/annotate skip                       # Skip without labeling
+/annotate stats                      # Check progress
+```
+
+See [Annotations](../features/annotations.md) for the complete annotation system documentation.
 
 ## Export Labeled Set
 
-```
+```bash
 go run ./cmd/tools/labels -out docs/eval/golden.jsonl -limit 200
 ```
 
@@ -33,13 +39,15 @@ Requires `POSTGRES_DSN` (or pass `-dsn`).
 
 ## Run the Harness
 
-```
+```bash
 go run ./cmd/tools/eval -input docs/eval/sample.jsonl -relevance-threshold 0.5 -importance-threshold 0.3
 ```
 
-Optional flags:
-- `-ignore-importance` to evaluate relevance only.
-- `-min-precision` / `-max-noise-rate` to fail when thresholds are violated.
+| Flag | Description |
+|------|-------------|
+| `-ignore-importance` | Evaluate relevance only |
+| `-min-precision` | Fail if precision below threshold |
+| `-max-noise-rate` | Fail if noise rate above threshold |
 
 ## Notes
 

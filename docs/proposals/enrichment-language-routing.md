@@ -1,6 +1,16 @@
 # Enrichment Language Routing
 
+> **Status: IMPLEMENTED** (January 2026)
+>
+> This feature has been fully implemented.
+>
+> **For current documentation, see:**
+> - [Source Enrichment](../features/source-enrichment.md) - Full feature documentation including language routing
+>
+> This document is preserved for historical reference and design rationale.
+
 ## Summary
+
 Add language-aware search routing so enrichment queries are translated into the most useful source languages while the digest remains in Russian. This targets two needs: (1) prefer English sources for general news trust, (2) prefer Greek sources for Cyprus-local coverage.
 
 ## User Use Case

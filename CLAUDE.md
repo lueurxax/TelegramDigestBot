@@ -130,8 +130,8 @@ ORDER BY engagement_score DESC;
 
 ### Cyclomatic Complexity (gocyclo)
 When complexity exceeds 10, extract logical blocks into helper functions:
-- `shouldSkipDiscovery` → extracted `shouldSkipForSourceHygiene` and `isSelfDiscovery`
-- `handleDiscoverNamespace` → extracted `handleDiscoverApproveCmd`, `handleDiscoverRejectCmd`, etc.
+- `shouldSkipDiscovery` -> extracted `shouldSkipForSourceHygiene` and `isSelfDiscovery`
+- `handleDiscoverNamespace` -> extracted `handleDiscoverApproveCmd`, `handleDiscoverRejectCmd`, etc.
 
 ### Nested Blocks (nestif)
 Flatten nested conditionals by:
@@ -148,3 +148,9 @@ var errInvalidItemID = errors.New("invalid item id")
 // Usage:
 return fmt.Errorf("%w: %s", errInvalidItemID, itemID)
 ```
+
+## Specialized Agents
+
+Custom agents are defined in `.claude/agents/` for specific tasks:
+
+- **k8s-log-analyzer** - Kubernetes log analysis for production debugging. Use when investigating crashes, errors, or performance issues in deployed services.

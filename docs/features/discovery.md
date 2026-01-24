@@ -314,3 +314,9 @@ It backfills `matched_channel_id` for discoveries that match tracked channels by
 | `internal/storage/queries.sql` | SQL queries |
 | `internal/platform/observability/metrics.go` | Discovery metrics |
 
+---
+
+## See Also
+
+- [Channel Importance](channel-importance-weight.md) - Per-channel importance weighting
+- [Content Quality](content-quality.md) - Relevance gates and threshold tuning

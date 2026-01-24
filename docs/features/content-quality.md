@@ -361,3 +361,12 @@ Track these metrics to measure quality improvements:
 | `MIN_TOPIC_COUNT` | `3` | Topic Balance |
 | `FRESHNESS_DECAY_HOURS` | `36` | Topic Balance |
 | `FRESHNESS_FLOOR` | `0.4` | Topic Balance |
+
+---
+
+## See Also
+
+- [Annotations](annotations.md) - Item labeling for threshold tuning
+- [Channel Importance](channel-importance-weight.md) - Per-channel importance weighting
+- [Source Enrichment](source-enrichment.md) - Evidence-enhanced clustering
+- [Evaluation Harness](../eval/README.md) - Offline quality evaluation

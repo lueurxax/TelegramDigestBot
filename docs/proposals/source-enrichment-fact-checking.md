@@ -1,10 +1,15 @@
 # Source Enrichment & Fact-Checking Pipeline
 
-> **Status: Phase 2 Implemented** (January 2026)
+> **Status: IMPLEMENTED** (January 2026)
 >
-> Both phases are complete. Only USD-based budget caps remain unimplemented (count-based limits work).
-> See [docs/features/corroboration.md](../features/corroboration.md) and [docs/features/source-enrichment.md](../features/source-enrichment.md) for user-facing documentation.
-> Phase 2 is enabled via `ENRICHMENT_ENABLED=true`.
+> This proposal has been fully implemented. Both phases are complete.
+> Only USD-based budget caps remain unimplemented (count-based limits work).
+>
+> **For current documentation, see:**
+> - [Source Enrichment](../features/source-enrichment.md) - Full feature documentation
+> - [Corroboration](../features/corroboration.md) - Channel corroboration and fact-check links
+>
+> This document is preserved for historical reference and design rationale.
 
 ## Summary
 Two-phase rollout:

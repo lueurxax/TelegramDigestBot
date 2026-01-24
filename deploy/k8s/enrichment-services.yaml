@@ -84,18 +84,18 @@ spec:
         - containerPort: 8090
         env:
         - name: JAVA_TOOL_OPTIONS
-          value: "-Xms512m -Xmx4096m"
+          value: "-Xms1g -Xmx6g"
         - name: YACY_JAVASTART_XMX
-          value: "Xmx4096m"
+          value: "Xmx6g"
         volumeMounts:
         - name: yacy-data
           mountPath: /opt/yacy_search_server/DATA
         resources:
           requests:
-            memory: "1536Mi"
+            memory: "6Gi"
             cpu: "250m"
           limits:
-            memory: "6Gi"
+            memory: "12Gi"
             cpu: "2000m"
         livenessProbe:
           tcpSocket:
@@ -206,12 +206,13 @@ metadata:
   name: yacy-seed-bootstrap
   namespace: digest
 spec:
-  schedule: "*/10 * * * *"
+  schedule: "0 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 5
   jobTemplate:
     spec:
+      activeDeadlineSeconds: 300
       template:
         spec:
           restartPolicy: OnFailure
@@ -267,7 +268,7 @@ data:
     - name: duckduckgo
       disabled: true
     - name: bing
-      disabled: false
+      disabled: true
     - name: brave
       disabled: false
     - name: qwant
@@ -322,10 +323,10 @@ spec:
           mountPath: /etc/searxng
         resources:
           requests:
-            memory: "128Mi"
+            memory: "256Mi"
             cpu: "100m"
           limits:
-            memory: "512Mi"
+            memory: "768Mi"
             cpu: "500m"
         livenessProbe:
           httpGet:

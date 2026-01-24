@@ -103,8 +103,8 @@ After labeling, the next item is automatically assigned and displayed.
 ## Queue States
 
 ```
-pending → assigned → labeled
-                  ↘ skipped
+pending -> assigned -> labeled
+                    \-> skipped
 ```
 
 | State | Description |

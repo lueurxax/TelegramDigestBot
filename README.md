@@ -34,38 +34,42 @@ For more detailed technical information, see the [Technical Design](docs/technic
 
 ## Documentation
 
-Feature documentation is available in `docs/features/`:
+See [docs/index.md](docs/index.md) for the complete documentation index.
+
+### Feature Highlights
 
 - [Content Quality](docs/features/content-quality.md) - Relevance gates, feedback loops, clustering, topic balance
-- [Digest Schedule](docs/features/digest-schedule.md) - Timezone-aware scheduling
-- [Channel Importance](docs/features/channel-importance-weight.md) - Per-channel importance weighting
-- [Channel Discovery](docs/features/discovery.md) - Automatic channel discovery, keyword filters, admin review
+- [Source Enrichment](docs/features/source-enrichment.md) - Multi-provider evidence retrieval (YaCy, GDELT, NewsAPI, SearxNG)
+- [Corroboration](docs/features/corroboration.md) - Channel corroboration and Google Fact Check API integration
 - [Editor Mode](docs/features/editor-mode.md) - Narrative rendering, tiered importance, consolidated clusters
-- [Vision & Images](docs/features/vision-images.md) - Vision routing, cover images, AI covers
-- [Annotations](docs/features/annotations.md) - Item labeling for quality evaluation and threshold tuning
-- [Corroboration](docs/features/corroboration.md) - Channel corroboration and fact-check links
-- [Link Enrichment](docs/features/link-enrichment.md) - URL resolution and content extraction for better summaries
+- [Channel Discovery](docs/features/discovery.md) - Automatic channel discovery with keyword filters
+- [Vision & Images](docs/features/vision-images.md) - Vision routing, cover images, AI-generated covers
 
-## Fact Check (Phase 1)
+## Enrichment & Verification
 
-This project can optionally query the Google Fact Check Tools API to attach a “Related fact-check” link to digest items.
+The system supports multi-layer content verification:
 
-### Enable and Configure
-1. Create a Google Cloud project and enable **Fact Check Tools API**.
-2. Create an API key and (recommended) restrict it by IP or referrer.
-3. Set the following in your `.env` or Kubernetes config:
-   - `FACTCHECK_GOOGLE_ENABLED=true`
-   - `FACTCHECK_GOOGLE_API_KEY=...`
-   - `FACTCHECK_GOOGLE_RPM=60` (match your quota)
-   - `FACTCHECK_GOOGLE_MAX_RESULTS=3`
-   - `FACTCHECK_CACHE_TTL_HOURS=48`
-   - `FACTCHECK_MIN_CLAIM_LENGTH=40`
-   - `FACTCHECK_QUEUE_MAX=5000` (backpressure limit)
+### Fact Check (Phase 1)
+Query the Google Fact Check Tools API to attach "Related fact-check" links to digest items.
 
-### Quotas and Limits
-Check your quota in Google Cloud Console:
-**APIs & Services → Fact Check Tools API → Quotas**.  
-Set `FACTCHECK_GOOGLE_RPM` to stay below that limit.
+```env
+FACTCHECK_GOOGLE_ENABLED=true
+FACTCHECK_GOOGLE_API_KEY=...
+FACTCHECK_GOOGLE_RPM=60
+```
+
+See [Corroboration](docs/features/corroboration.md) for full configuration.
+
+### Source Enrichment (Phase 2)
+Search external sources (YaCy, GDELT, NewsAPI, SearxNG) for evidence that supports or contradicts digest items.
+
+```env
+ENRICHMENT_ENABLED=true
+YACY_ENABLED=true
+YACY_BASE_URL=http://yacy:8090
+```
+
+See [Source Enrichment](docs/features/source-enrichment.md) for provider configuration and deployment.
 
 ## Prerequisites
 - Docker and Docker Compose

@@ -203,4 +203,12 @@ The fact-check worker runs as part of the pipeline and:
 
 Phase 2 extends corroboration with multi-provider evidence retrieval. It is **implemented** - only USD-based budget caps remain unimplemented (count-based limits work).
 
-See [source-enrichment.md](source-enrichment.md) for Phase 2 documentation and [proposals/source-enrichment-fact-checking.md](../proposals/source-enrichment-fact-checking.md) for the original proposal.
+See [Source Enrichment](source-enrichment.md) for full documentation.
+
+---
+
+## See Also
+
+- [Source Enrichment](source-enrichment.md) - Multi-provider evidence retrieval
+- [Link Enrichment](link-enrichment.md) - URL resolution for message content
+- [Content Quality](content-quality.md) - Relevance gates and clustering
