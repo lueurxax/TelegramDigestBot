@@ -335,48 +335,79 @@ func isValidCrawlURL(rawURL string) bool {
 		return false
 	}
 
-	// Skip non-content file extensions
+	// Check all skip patterns
+	if matchesSkipPattern(rawURL) {
+		return false
+	}
+
+	// Check file extensions
+	if hasSkipSuffix(rawURL) {
+		return false
+	}
+
+	return true
+}
+
+// matchesSkipPattern checks if URL matches any skip pattern (social share, auth, API, etc).
+func matchesSkipPattern(rawURL string) bool {
+	skipPatterns := []string{
+		// Social share URLs
+		"twitter.com/share", "twitter.com/intent/", "x.com/share", "x.com/intent/",
+		"facebook.com/sharer", "facebook.com/share.php",
+		"pinterest.com/pin/create", "reddit.com/submit",
+		"linkedin.com/shareArticle", "linkedin.com/cws/share",
+		"telegram.me/share", "t.me/share", "bsky.app/intent/",
+		"api.whatsapp.com/send", "wa.me/", "mailto:",
+		"vk.com/share.php", "tumblr.com/share", "getpocket.com/save", "share.flipboard.com",
+		// Auth/login pages
+		"/login", "/signin", "/signup", "/register", "/auth/", "/oauth/", "/cas/login",
+		// API endpoints
+		"/wp-json/", "/graphql", "/.well-known/",
+		// Tracking and ads
+		"/track/", "/pixel/", "/beacon/",
+		"doubleclick.net", "googlesyndication.com", "googleadservices.com",
+		// Print/email versions
+		"/print/", "?print=", "&print=", "/email/", "?email=",
+		// Non-content URL patterns
+		"/ajax/", "/api/", "/_next/static/", "/static/css/", "/static/js/",
+		"/wp-content/uploads/", "/wp-includes/",
+		"/feed/", "/feed", "/rss", "xmlrpc.php",
+		"%7B%7B", "{{", "#",
+		"?replytocom=", "?share=", "?action=", "?utm_", "&utm_",
+	}
+
+	for _, pattern := range skipPatterns {
+		if containsPattern(rawURL, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasSkipSuffix checks if URL ends with a non-content file extension.
+func hasSkipSuffix(rawURL string) bool {
 	skipSuffixes := []string{
 		// Media
 		".pdf", ".zip", ".exe", ".dmg", ".mp3", ".mp4", ".avi", ".mov", ".webm", ".flv",
+		".rar", ".tar", ".gz", ".7z", ".iso", ".bin", ".apk", ".deb", ".rpm",
 		// Images
 		".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp", ".tiff",
 		// Web assets
 		".css", ".js", ".woff", ".woff2", ".ttf", ".eot", ".map", ".webmanifest",
 		// Data
-		".json", ".xml", ".rss", ".atom",
+		".json", ".xml", ".rss", ".atom", ".csv", ".tsv", ".xls", ".xlsx",
+		// Documents (non-HTML)
+		".doc", ".docx", ".ppt", ".pptx", ".odt", ".ods", ".odp",
 	}
 
 	for _, suffix := range skipSuffixes {
 		if len(rawURL) > len(suffix) && rawURL[len(rawURL)-len(suffix):] == suffix {
-			return false
+			return true
 		}
 	}
 
-	// Skip common non-content URL patterns
-	skipPatterns := []string{
-		"/ajax/",
-		"/api/",
-		"/_next/static/",
-		"/static/css/",
-		"/static/js/",
-		"/wp-content/uploads/",
-		"/wp-includes/",
-		"/feed/",
-		"/feed",
-		"/rss",
-		"xmlrpc.php",
-		"%7B%7B", // URL-encoded {{ template markers
-		"{{",     // Template markers
-	}
-
-	for _, pattern := range skipPatterns {
-		if containsPattern(rawURL, pattern) {
-			return false
-		}
-	}
-
-	return true
+	return false
 }
 
 // containsPattern checks if a URL contains a pattern.

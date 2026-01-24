@@ -17,10 +17,11 @@ import (
 
 // Google model constants.
 const (
-	ModelGeminiFlash = "gemini-1.5-flash"
+	// ModelGeminiFlashLite is the cheapest/fastest Google model.
+	ModelGeminiFlashLite = "gemini-2.5-flash-lite"
 
 	// Default model for Google (use cheapest available).
-	defaultGoogleModel = ModelGeminiFlash
+	defaultGoogleModel = ModelGeminiFlashLite
 
 	// Rate limiter settings for Google.
 	googleRateLimiterBurst = 5
@@ -367,7 +368,7 @@ func (p *googleProvider) CompressSummariesForCover(ctx context.Context, summarie
 	}
 
 	prompt := buildCompressSummariesPrompt(summaries)
-	genModel := p.client.GenerativeModel(ModelGeminiFlash)
+	genModel := p.client.GenerativeModel(ModelGeminiFlashLite)
 
 	resp, err := genModel.GenerateContent(ctx, genai.Text(compressSummariesSystemPrompt+"\n\n"+prompt))
 	if err != nil {
