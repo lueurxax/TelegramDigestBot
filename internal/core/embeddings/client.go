@@ -30,6 +30,11 @@ type Config struct {
 	CohereModel     string
 	CohereRateLimit int
 
+	// Google settings
+	GoogleAPIKey    string
+	GoogleModel     string
+	GoogleRateLimit int
+
 	// Circuit breaker settings
 	CircuitBreakerConfig CircuitBreakerConfig
 
@@ -38,7 +43,7 @@ type Config struct {
 }
 
 // NewClient creates a new embedding client with configured providers.
-func NewClient(cfg Config, logger *zerolog.Logger) Client {
+func NewClient(ctx context.Context, cfg Config, logger *zerolog.Logger) Client {
 	if cfg.TargetDimensions == 0 {
 		cfg.TargetDimensions = DefaultDimensions
 	}
@@ -56,7 +61,7 @@ func NewClient(cfg Config, logger *zerolog.Logger) Client {
 		registry.Register(openaiProvider, cfg.CircuitBreakerConfig)
 	}
 
-	// Register Cohere as fallback provider
+	// Register Cohere as first fallback provider
 	if cfg.CohereAPIKey != "" {
 		cohereProvider := NewCohereProvider(CohereConfig{
 			APIKey:    cfg.CohereAPIKey,
@@ -64,6 +69,20 @@ func NewClient(cfg Config, logger *zerolog.Logger) Client {
 			RateLimit: cfg.CohereRateLimit,
 		})
 		registry.Register(cohereProvider, cfg.CircuitBreakerConfig)
+	}
+
+	// Register Google as second fallback provider
+	if cfg.GoogleAPIKey != "" {
+		googleProvider, err := NewGoogleProvider(ctx, GoogleConfig{
+			APIKey:    cfg.GoogleAPIKey,
+			Model:     cfg.GoogleModel,
+			RateLimit: cfg.GoogleRateLimit,
+		})
+		if err != nil {
+			logger.Error().Err(err).Msg("failed to create Google embedding provider")
+		} else if googleProvider.IsAvailable() {
+			registry.Register(googleProvider, cfg.CircuitBreakerConfig)
+		}
 	}
 
 	// If no providers available, return a mock client for testing/development

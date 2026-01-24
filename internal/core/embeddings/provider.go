@@ -12,14 +12,16 @@ type ProviderName string
 const (
 	ProviderOpenAI ProviderName = "openai"
 	ProviderCohere ProviderName = "cohere"
+	ProviderGoogle ProviderName = "google"
 	ProviderMock   ProviderName = "mock"
 )
 
 // Priority constants for provider ordering.
 const (
-	PriorityPrimary  = 100 // Primary provider (OpenAI)
-	PriorityFallback = 50  // Fallback provider (Cohere)
-	PriorityMock     = 0   // Mock provider for testing
+	PriorityPrimary        = 100 // Primary provider (OpenAI)
+	PriorityFallback       = 50  // First fallback provider (Cohere)
+	PrioritySecondFallback = 25  // Second fallback provider (Google)
+	PriorityMock           = 0   // Mock provider for testing
 )
 
 // Default dimensions for embeddings (matches existing DB schema).

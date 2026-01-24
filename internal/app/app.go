@@ -103,7 +103,7 @@ func (a *App) RunWorker(ctx context.Context) error {
 	a.logger.Info().Msg("Starting worker mode")
 
 	llmClient := a.newLLMClient(ctx)
-	embeddingClient := a.newEmbeddingClient()
+	embeddingClient := a.newEmbeddingClient(ctx)
 	resolver := a.newLinkResolver()
 
 	p := pipeline.New(a.cfg, a.database, llmClient, embeddingClient, resolver, a.logger)
@@ -359,10 +359,10 @@ func (a *App) newLLMClient(ctx context.Context) llm.Client {
 }
 
 // newEmbeddingClient creates a new embedding client with multi-provider support.
-func (a *App) newEmbeddingClient() embeddings.Client {
+func (a *App) newEmbeddingClient(ctx context.Context) embeddings.Client {
 	logger := a.logger.With().Str("component", "embeddings").Logger()
 
-	return embeddings.NewClient(embeddings.Config{
+	return embeddings.NewClient(ctx, embeddings.Config{
 		OpenAIAPIKey:     a.cfg.LLMAPIKey,
 		OpenAIModel:      a.cfg.OpenAIEmbeddingModel,
 		OpenAIDimensions: a.cfg.OpenAIEmbeddingDimensions,
@@ -370,6 +370,8 @@ func (a *App) newEmbeddingClient() embeddings.Client {
 		CohereAPIKey:     a.cfg.CohereAPIKey,
 		CohereModel:      a.cfg.CohereEmbeddingModel,
 		CohereRateLimit:  1,
+		GoogleAPIKey:     a.cfg.GoogleAPIKey,
+		GoogleRateLimit:  a.cfg.RateLimitRPS,
 		CircuitBreakerConfig: embeddings.CircuitBreakerConfig{
 			Threshold:  a.cfg.EmbeddingCircuitThreshold,
 			ResetAfter: a.cfg.EmbeddingCircuitTimeout,
