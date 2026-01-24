@@ -4597,7 +4597,7 @@ Check the "Digest Bot Overview" dashboard for:
 • Cost estimation panels
 
 <b>Estimated Pricing (per 1M tokens):</b>
-• Google gemini-2.0-flash-lite: $0.075 in / $0.30 out
+• Google gemini-2.0-flash-lite: $0.10 in / $0.40 out
 • Anthropic claude-haiku-4.5: $1.00 in / $5.00 out
 • OpenAI gpt-5-nano: $0.05 in / $0.40 out`
 

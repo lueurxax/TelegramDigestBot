@@ -119,7 +119,7 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 | Priority | Model | Provider | Cost (1M tokens) |
 |----------|-------|----------|------------------|
 | Default | `gpt-5-nano` | OpenAI | $0.05 in / $0.40 out |
-| Fallback 1 | `gemini-2.0-flash-lite` | Google | $0.075 in / $0.30 out |
+| Fallback 1 | `gemini-2.0-flash-lite` | Google | $0.10 in / $0.40 out |
 
 ---
 
@@ -139,7 +139,7 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 |----------|-------------------------|----------|-----------------------|
 | Default | `cohere-command-r`      | Cohere   | need update           |
 | Fallback 1 | `gpt-5`                 | OpenAI   | $2.50 in / $10 out    |
-| Fallback 2 | `gemini-2.0-flash-lite` | Google   | $0.075 in / $0.30 out |
+| Fallback 2 | `gemini-2.0-flash-lite` | Google   | $0.10 in / $0.40 out |
 
 ---
 
@@ -158,7 +158,7 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 | Priority | Model                   | Provider | Cost (1M tokens)      |
 |----------|-------------------------|----------|-----------------------|
 | Default | `gpt-5-nano`            | OpenAI   | $0.05 in / $0.40 out  |
-| Fallback 1 | `gemini-2.0-flash-lite` | Google   | $0.075 in / $0.30 out |
+| Fallback 1 | `gemini-2.0-flash-lite` | Google   | $0.10 in / $0.40 out |
 | Fallback 2 | `mistral-7b-instruct`   | OpenRouter     | $0.20 in /$0.20  out  |
 
 ---
@@ -177,7 +177,7 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 
 | Priority   | Model                       | Provider | Cost (1M tokens)      |
 |------------|-----------------------------|----------|-----------------------|
-| Default | `gemini-2.0-flash-lite`     | Google | $0.075 in / $0.30 out |
+| Default | `gemini-2.0-flash-lite`     | Google | $0.10 in / $0.40 out |
 | Fallback 1 | `claude-haiku-4.5` | Anthropic | $1 in / $5 out        |
 |  Fallback 2   | `gpt-5.2`                   | OpenAI | $2.50 in / $10 out    |
 
