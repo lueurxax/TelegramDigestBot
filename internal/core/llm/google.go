@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/rs/zerolog"
@@ -29,6 +30,34 @@ const (
 	// Relevance gate default confidence.
 	googleDefaultConfidence = 0.5
 )
+
+// sanitizeUTF8 removes or replaces invalid UTF-8 sequences from a string.
+// Google's protobuf API requires valid UTF-8, and crawled content may contain invalid bytes.
+func sanitizeUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+
+	// Build a new string with only valid UTF-8 runes
+	var builder strings.Builder
+	builder.Grow(len(s))
+
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			// Invalid byte sequence - replace with replacement character
+			builder.WriteRune(utf8.RuneError)
+
+			i++
+		} else {
+			builder.WriteRune(r)
+
+			i += size
+		}
+	}
+
+	return builder.String()
+}
 
 // googleProvider implements the Provider interface for Google Gemini.
 type googleProvider struct {
@@ -132,7 +161,7 @@ func (p *googleProvider) ProcessBatch(ctx context.Context, messages []MessageInp
 	resolvedModel := p.resolveModel(model)
 	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(content.String()))
+	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(content.String())))
 	if err != nil {
 		return nil, fmt.Errorf(errGoogleGenAICompletion, err)
 	}
@@ -190,7 +219,7 @@ func (p *googleProvider) TranslateText(ctx context.Context, text, targetLanguage
 	resolvedModel := p.resolveModel(model)
 	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai translation: %w", err)
 	}
@@ -207,7 +236,7 @@ func (p *googleProvider) CompleteText(ctx context.Context, prompt, model string)
 	resolvedModel := p.resolveModel(model)
 	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai completion: %w", err)
 	}
@@ -229,7 +258,7 @@ func (p *googleProvider) GenerateNarrative(ctx context.Context, items []domain.I
 	resolvedModel := p.resolveModel(model)
 	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai narrative: %w", err)
 	}
@@ -251,7 +280,7 @@ func (p *googleProvider) GenerateNarrativeWithEvidence(ctx context.Context, item
 	resolvedModel := p.resolveModel(model)
 	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai narrative with evidence: %w", err)
 	}
@@ -273,7 +302,7 @@ func (p *googleProvider) SummarizeCluster(ctx context.Context, items []domain.It
 	resolvedModel := p.resolveModel(model)
 	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai cluster summary: %w", err)
 	}
@@ -295,7 +324,7 @@ func (p *googleProvider) SummarizeClusterWithEvidence(ctx context.Context, items
 	resolvedModel := p.resolveModel(model)
 	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai cluster summary with evidence: %w", err)
 	}
@@ -317,7 +346,7 @@ func (p *googleProvider) GenerateClusterTopic(ctx context.Context, items []domai
 	resolvedModel := p.resolveModel(model)
 	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(prompt))
+	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai cluster topic: %w", err)
 	}
@@ -335,7 +364,7 @@ func (p *googleProvider) RelevanceGate(ctx context.Context, text, model, prompt 
 	resolvedModel := p.resolveModel(model)
 	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(fullPrompt))
+	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(fullPrompt)))
 	if err != nil {
 		return RelevanceGateResult{}, fmt.Errorf("google genai relevance gate: %w", err)
 	}
@@ -370,7 +399,7 @@ func (p *googleProvider) CompressSummariesForCover(ctx context.Context, summarie
 	prompt := buildCompressSummariesPrompt(summaries)
 	genModel := p.client.GenerativeModel(ModelGeminiFlashLite)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(compressSummariesSystemPrompt+"\n\n"+prompt))
+	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(compressSummariesSystemPrompt+"\n\n"+prompt)))
 	if err != nil {
 		return nil, fmt.Errorf("google genai compress summaries: %w", err)
 	}
