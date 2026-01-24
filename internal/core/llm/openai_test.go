@@ -22,7 +22,6 @@ var (
 
 const (
 	testErrTruncate                   = "truncate(%q, %d) = %q, want %q"
-	testEmbeddingValue                = 0.1
 	testModelGPT4                     = "gpt-4"
 	testAPIKeyMock                    = "mock"
 	testErrGenerateClusterTopic       = "GenerateClusterTopic() error = %v"
@@ -734,28 +733,6 @@ func TestNew_MockClientExplicit(t *testing.T) {
 	_, ok := client.(*mockClient)
 	if !ok {
 		t.Error("expected mockClient for mock API key")
-	}
-}
-
-func TestMockClient_GetEmbedding(t *testing.T) {
-	cfg := &config.Config{LLMAPIKey: ""}
-	client := New(cfg, nil, nil)
-
-	emb, err := client.GetEmbedding(context.Background(), "test text")
-	if err != nil {
-		t.Fatalf("GetEmbedding() error = %v", err)
-	}
-
-	if len(emb) == 0 {
-		t.Error("GetEmbedding() returned empty embedding")
-	}
-
-	// Check all values are 0.1 (mock behavior)
-	for i, v := range emb {
-		if v != testEmbeddingValue {
-			t.Errorf("GetEmbedding()[%d] = %v, want %v", i, v, testEmbeddingValue)
-			break
-		}
 	}
 }
 

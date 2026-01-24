@@ -26,10 +26,10 @@ const (
 
 // Format strings
 const (
-	toneFormatString       = " Tone: %s."
-	logKeyIndex            = "index"
-	logKeyTotal            = "total"
-	indexedItemFormat      = "[%d] %s\n"
+	toneFormatString  = " Tone: %s."
+	logKeyIndex       = "index"
+	logKeyTotal       = "total"
+	indexedItemFormat = "[%d] %s\n"
 )
 
 // Numeric constants
@@ -41,8 +41,7 @@ const (
 
 // Mock client constants
 const (
-	mockEmbeddingDimensions = 1536
-	mockRelevanceScore      = 0.8
-	mockImportanceScore     = 0.5
-	mockConfidenceScore     = 0.5
+	mockRelevanceScore  = 0.8
+	mockImportanceScore = 0.5
+	mockConfidenceScore = 0.5
 )

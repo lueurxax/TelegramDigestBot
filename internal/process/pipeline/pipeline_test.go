@@ -10,6 +10,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/embeddings"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/process/filters"
@@ -152,16 +153,20 @@ func (m *mockRepo) GetRawMessagesForLinkBackfill(_ context.Context, _ time.Time,
 	return nil, nil
 }
 
-type mockLLM struct {
-	llm.Client
+type mockEmbeddingClient struct {
+	embeddings.Client
 }
 
-func (m *mockLLM) GetEmbedding(_ context.Context, text string) ([]float32, error) {
+func (m *mockEmbeddingClient) GetEmbedding(_ context.Context, text string) ([]float32, error) {
 	if text == "Message 1 that is long enough to pass filters" {
 		return []float32{1.0, 0.0}, nil
 	}
 
 	return []float32{0.0, 1.0}, nil
+}
+
+type mockLLM struct {
+	llm.Client
 }
 
 func (m *mockLLM) ProcessBatch(_ context.Context, messages []llm.MessageInput, _, _, _ string) ([]llm.BatchResult, error) {
@@ -209,10 +214,11 @@ func TestPipeline_processNextBatch(t *testing.T) {
 	}
 
 	llmClient := &mockLLM{}
+	embeddingClient := &mockEmbeddingClient{}
 
 	logger := zerolog.Nop()
 
-	p := New(cfg, repo, llmClient, nil, &logger)
+	p := New(cfg, repo, llmClient, embeddingClient, nil, &logger)
 
 	err := p.processNextBatch(context.Background(), "test-corr-id") //nolint:goconst // test literal
 	if err != nil {
@@ -307,10 +313,11 @@ func TestPipeline_ImportanceWeightApplication(t *testing.T) {
 			}
 
 			llmClient := &mockLLMWithImportance{importance: tt.llmImportance}
+			embeddingClient := &mockEmbeddingClient{}
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, llmClient, nil, &logger)
+			p := New(cfg, repo, llmClient, embeddingClient, nil, &logger)
 
 			err := p.processNextBatch(context.Background(), "test-corr-id")
 			if err != nil {
@@ -334,10 +341,6 @@ func TestPipeline_ImportanceWeightApplication(t *testing.T) {
 type mockLLMWithImportance struct {
 	llm.Client
 	importance float32
-}
-
-func (m *mockLLMWithImportance) GetEmbedding(_ context.Context, _ string) ([]float32, error) {
-	return []float32{1.0, 0.0}, nil
 }
 
 func (m *mockLLMWithImportance) ProcessBatch(_ context.Context, messages []llm.MessageInput, _, _, _ string) ([]llm.BatchResult, error) {
@@ -412,7 +415,7 @@ func TestHasUniqueInfo(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	p := New(cfg, nil, nil, nil, nil)
+	p := New(cfg, nil, nil, nil, nil, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -852,7 +855,7 @@ func TestGroupIndicesByModel(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	p := New(cfg, nil, nil, nil, nil)
+	p := New(cfg, nil, nil, nil, nil, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -954,7 +957,7 @@ func TestDetermineStatus(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	p := New(cfg, nil, nil, nil, nil)
+	p := New(cfg, nil, nil, nil, nil, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1042,7 +1045,7 @@ func TestCalculateImportance(t *testing.T) {
 
 	logger := zerolog.Nop()
 
-	p := New(cfg, nil, nil, nil, &logger)
+	p := New(cfg, nil, nil, nil, nil, &logger)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1153,7 +1156,7 @@ func TestNormalizeResults(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	p := New(cfg, nil, nil, nil, nil)
+	p := New(cfg, nil, nil, nil, nil, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1227,7 +1230,7 @@ func TestEvaluateRelevanceGate(t *testing.T) {
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, llmClient, nil, &logger)
+			p := New(cfg, repo, llmClient, nil, nil, &logger)
 
 			s := &pipelineSettings{
 				relevanceGateEnabled: tt.gateEnabled,
@@ -1328,7 +1331,7 @@ func TestEvaluateGateLLM(t *testing.T) {
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, llmClient, nil, &logger)
+			p := New(cfg, repo, llmClient, nil, nil, &logger)
 
 			s := &pipelineSettings{
 				relevanceGateModel: tt.relevanceGateModel,
@@ -1354,10 +1357,6 @@ type mockLLMForGate struct {
 	decision   string
 	confidence float32
 	err        error
-}
-
-func (m *mockLLMForGate) GetEmbedding(_ context.Context, _ string) ([]float32, error) {
-	return []float32{1.0, 0.0}, nil
 }
 
 func (m *mockLLMForGate) RelevanceGate(_ context.Context, _, _, _ string) (llm.RelevanceGateResult, error) {
@@ -1418,7 +1417,7 @@ func TestLoadGatePrompt(t *testing.T) {
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, nil, nil, &logger)
+			p := New(cfg, repo, nil, nil, nil, &logger)
 
 			prompt, version := p.loadGatePrompt(context.Background(), logger)
 
@@ -1458,7 +1457,7 @@ func TestCreateItem(t *testing.T) {
 
 	logger := zerolog.Nop()
 
-	p := New(cfg, nil, nil, nil, &logger)
+	p := New(cfg, nil, nil, nil, nil, &logger)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1545,7 +1544,7 @@ func TestGetDurationSetting(t *testing.T) {
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, nil, nil, &logger)
+			p := New(cfg, repo, nil, nil, nil, &logger)
 
 			result := p.getDurationSetting(context.Background(), "test_duration", tt.defaultVal, logger)
 
@@ -1615,7 +1614,7 @@ func TestSkipMessage(t *testing.T) {
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, nil, nil, &logger)
+			p := New(cfg, repo, nil, nil, nil, &logger)
 
 			s := &pipelineSettings{
 				skipForwards:          tt.skipForwards,

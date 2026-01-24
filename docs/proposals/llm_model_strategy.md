@@ -43,16 +43,16 @@ The strategy is designed to:
 
 | Provider | Models | Use Cases |
 |----------|--------|-----------|
-| **OpenAI** | gpt-5, gpt-5.2, gpt-5-nano, text-embedding-3-small/large | Primary LLM and embeddings |
+| **OpenAI** | gpt-5, gpt-5.2, gpt-5-nano, text-embedding-3-large | Primary LLM and embeddings |
+| **Cohere** | command-r, command-r-plus, embed-multilingual-v3.0 | Embedding fallback (multilingual) |
 | **Anthropic** | claude-3-5-sonnet, claude-3-5-haiku | Narrative, complex reasoning |
-| **Google** | gemini-2.0-flash, gemini-1.5-pro, text-embedding-004 | Fallback LLM and embeddings |
-| **Ollama** | llama3.2, mistral, nomic-embed-text | Local/free fallback |
-| **Cohere** | command-r, command-r-plus, embed-v3 | Alternative embeddings |
+| **Google** | gemini-2.0-flash, gemini-1.5-pro | Fallback LLM |
 
 ### Provider Priority (Default)
 
 ```
-OpenAI → Google → Ollama (local)
+LLM: OpenAI → Anthropic → Google
+Embeddings: OpenAI → Cohere
 ```
 
 ---
@@ -274,12 +274,12 @@ INSERT INTO settings (key, value) VALUES
 # Provider API Keys
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
-GOOGLE_AI_API_KEY=...
-OLLAMA_URL=http://localhost:11434
+COHERE_API_KEY=...
 
 # Embedding Configuration
-EMBEDDING_PROVIDER_ORDER=google,openai,ollama
-EMBEDDING_DEFAULT_MODEL=text-embedding-004
+EMBEDDING_PROVIDER_ORDER=openai,cohere
+EMBEDDING_DEFAULT_MODEL=text-embedding-3-large
+EMBEDDING_FALLBACK_MODEL=embed-multilingual-v3.0
 
 # LLM Configuration
 LLM_PROVIDER_ORDER=openai,anthropic,google,ollama
@@ -301,24 +301,25 @@ Assuming 10,000 messages/day, 30 digests/month:
 
 | Task | Calls/Month | Tokens/Call | Model | Cost |
 |------|-------------|-------------|-------|------|
-| Embeddings | 300,000 | 500 | text-embedding-004 | $0 (free) |
+| Embeddings | 300,000 | 500 | text-embedding-3-large | ~$19.50 |
 | Summarize | 300,000 | 800 | gpt-5-nano | ~$12 |
 | Cluster Summary | 3,000 | 2,000 | gpt-5 | ~$15 |
 | Cluster Topic | 3,000 | 200 | gpt-5-nano | ~$0.25 |
 | Narrative | 30 | 10,000 | gpt-5.2 | ~$3 |
-| **Total** | | | | **~$30/month** |
+| **Total** | | | | **~$50/month** |
 
 Using gpt-5-nano instead of gpt-4o-mini saves ~$25/month on summarization.
-Using Google embeddings saves ~$3/month vs OpenAI embeddings.
+Using text-embedding-3-large provides highest quality embeddings for better deduplication and clustering accuracy.
 
 ---
 
 ## Summary
 
 This strategy provides:
+- **Quality-first embeddings** using OpenAI's best model (text-embedding-3-large)
+- **Multilingual fallback** using Cohere's embed-multilingual-v3.0 for excellent non-English support
 - **Multi-provider redundancy** to avoid single-vendor outages
-- **Cost optimization** using free tiers and cheaper models for high-volume tasks
 - **Runtime flexibility** via bot commands
 - **Graceful degradation** with automatic fallbacks
 
-Immediate action: Switch embeddings to Google's free `text-embedding-004` to resolve the current OpenAI quota issue.
+Immediate action: Implement Cohere provider as fallback for embeddings to handle OpenAI quota exhaustion gracefully.

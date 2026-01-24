@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
+	"github.com/lueurxax/telegram-digest-bot/internal/core/embeddings"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links/linkextract"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
@@ -54,11 +55,12 @@ type LinkResolver interface {
 }
 
 type Pipeline struct {
-	cfg          *config.Config
-	database     Repository
-	llmClient    llm.Client
-	linkResolver LinkResolver
-	logger       *zerolog.Logger
+	cfg             *config.Config
+	database        Repository
+	llmClient       llm.Client
+	embeddingClient embeddings.Client
+	linkResolver    LinkResolver
+	logger          *zerolog.Logger
 }
 
 type pipelineSettings struct {
@@ -102,13 +104,14 @@ const (
 	dropReasonDedupStrictGlobal   = "dedup_strict_global"
 )
 
-func New(cfg *config.Config, database Repository, llmClient llm.Client, linkResolver LinkResolver, logger *zerolog.Logger) *Pipeline {
+func New(cfg *config.Config, database Repository, llmClient llm.Client, embeddingClient embeddings.Client, linkResolver LinkResolver, logger *zerolog.Logger) *Pipeline {
 	return &Pipeline{
-		cfg:          cfg,
-		database:     database,
-		llmClient:    llmClient,
-		linkResolver: linkResolver,
-		logger:       logger,
+		cfg:             cfg,
+		database:        database,
+		llmClient:       llmClient,
+		embeddingClient: embeddingClient,
+		linkResolver:    linkResolver,
+		logger:          logger,
 	}
 }
 
@@ -527,7 +530,7 @@ func (p *Pipeline) generateEmbeddingIfNeeded(ctx context.Context, logger zerolog
 		}
 	}
 
-	emb, err := p.llmClient.GetEmbedding(ctx, text)
+	emb, err := p.embeddingClient.GetEmbedding(ctx, text)
 	if err != nil {
 		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg("failed to get embedding")
 

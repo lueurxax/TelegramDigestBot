@@ -115,30 +115,6 @@ func (c *openaiClient) recordFailure() {
 	}
 }
 
-func (c *openaiClient) GetEmbedding(ctx context.Context, text string) ([]float32, error) {
-	if err := c.checkCircuit(); err != nil {
-		return nil, err
-	}
-
-	if err := c.rateLimiter.Wait(ctx); err != nil {
-		return nil, fmt.Errorf(errRateLimiter, err)
-	}
-
-	resp, err := c.client.CreateEmbeddings(ctx, openai.EmbeddingRequest{
-		Input: []string{text},
-		Model: openai.SmallEmbedding3,
-	})
-	if err != nil {
-		c.recordFailure()
-
-		return nil, fmt.Errorf("failed to create embeddings: %w", err)
-	}
-
-	c.recordSuccess()
-
-	return resp.Data[0].Embedding, nil
-}
-
 func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage string, model string, tone string) ([]BatchResult, error) {
 	langInstruction := c.buildLangInstruction(targetLanguage, tone)
 	model = c.resolveModel(model)

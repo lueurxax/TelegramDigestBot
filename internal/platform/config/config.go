@@ -158,6 +158,14 @@ type Config struct {
 	SolrTimeout    time.Duration `env:"SOLR_TIMEOUT" envDefault:"10s"`
 	SolrMaxResults int           `env:"SOLR_MAX_RESULTS" envDefault:"10"`
 
+	// Embedding provider settings
+	CohereAPIKey              string        `env:"COHERE_API_KEY" envDefault:""`
+	OpenAIEmbeddingModel      string        `env:"OPENAI_EMBEDDING_MODEL" envDefault:"text-embedding-3-large"`
+	OpenAIEmbeddingDimensions int           `env:"OPENAI_EMBEDDING_DIMENSIONS" envDefault:"1536"`
+	CohereEmbeddingModel      string        `env:"COHERE_EMBEDDING_MODEL" envDefault:"embed-multilingual-v3.0"`
+	EmbeddingCircuitThreshold int           `env:"EMBEDDING_CIRCUIT_THRESHOLD" envDefault:"5"`
+	EmbeddingCircuitTimeout   time.Duration `env:"EMBEDDING_CIRCUIT_TIMEOUT" envDefault:"1m"`
+
 	// Crawler settings (for cmd/crawler)
 	CrawlDepth        int           `env:"CRAWL_DEPTH" envDefault:"2"`
 	CrawlRateLimitRPS float64       `env:"CRAWL_RATE_LIMIT_RPS" envDefault:"2"`

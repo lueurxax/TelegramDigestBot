@@ -27,3 +27,4 @@ deploy/k8s/secrets.yaml
 # Claude Code
 .claude/
 .output.txt
+/crawler

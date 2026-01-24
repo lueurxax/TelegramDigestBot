@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/bot"
+	"github.com/lueurxax/telegram-digest-bot/internal/core/embeddings"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/ingest/reader"
@@ -102,12 +103,13 @@ func (a *App) RunWorker(ctx context.Context) error {
 	a.logger.Info().Msg("Starting worker mode")
 
 	llmClient := a.newLLMClient()
+	embeddingClient := a.newEmbeddingClient()
 	resolver := a.newLinkResolver()
 
-	p := pipeline.New(a.cfg, a.database, llmClient, resolver, a.logger)
+	p := pipeline.New(a.cfg, a.database, llmClient, embeddingClient, resolver, a.logger)
 	go a.runDiscoveryReconciliation(ctx)
 	go a.runFactCheckWorker(ctx)
-	go a.runEnrichmentWorker(ctx)
+	go a.runEnrichmentWorker(ctx, embeddingClient)
 
 	if err := p.Run(ctx); err != nil {
 		return fmt.Errorf("pipeline run: %w", err)
@@ -128,9 +130,9 @@ func (a *App) runFactCheckWorker(ctx context.Context) {
 	}
 }
 
-func (a *App) runEnrichmentWorker(ctx context.Context) {
+func (a *App) runEnrichmentWorker(ctx context.Context, embeddingClient embeddings.Client) {
 	llmClient := a.newLLMClient()
-	worker := enrichment.NewWorker(a.cfg, a.database, llmClient, a.logger)
+	worker := enrichment.NewWorker(a.cfg, a.database, embeddingClient, a.logger)
 
 	a.configureEnrichmentWorker(worker, llmClient)
 
@@ -354,6 +356,26 @@ func (a *App) RunDigest(ctx context.Context, once bool) error {
 // newLLMClient creates a new LLM client.
 func (a *App) newLLMClient() llm.Client {
 	return llm.New(a.cfg, a.database, a.logger)
+}
+
+// newEmbeddingClient creates a new embedding client with multi-provider support.
+func (a *App) newEmbeddingClient() embeddings.Client {
+	logger := a.logger.With().Str("component", "embeddings").Logger()
+
+	return embeddings.NewClient(embeddings.Config{
+		OpenAIAPIKey:     a.cfg.LLMAPIKey,
+		OpenAIModel:      a.cfg.OpenAIEmbeddingModel,
+		OpenAIDimensions: a.cfg.OpenAIEmbeddingDimensions,
+		OpenAIRateLimit:  a.cfg.RateLimitRPS,
+		CohereAPIKey:     a.cfg.CohereAPIKey,
+		CohereModel:      a.cfg.CohereEmbeddingModel,
+		CohereRateLimit:  1,
+		CircuitBreakerConfig: embeddings.CircuitBreakerConfig{
+			Threshold:  a.cfg.EmbeddingCircuitThreshold,
+			ResetAfter: a.cfg.EmbeddingCircuitTimeout,
+		},
+		TargetDimensions: a.cfg.OpenAIEmbeddingDimensions,
+	}, &logger)
 }
 
 // newLinkResolver creates a new link resolver.

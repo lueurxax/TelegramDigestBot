@@ -42,7 +42,6 @@ type EvidenceSource struct {
 type ItemEvidence map[string][]EvidenceSource
 
 type Client interface {
-	GetEmbedding(ctx context.Context, text string) ([]float32, error)
 	ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage string, model string, tone string) ([]BatchResult, error)
 	TranslateText(ctx context.Context, text string, targetLanguage string, model string) (string, error)
 	CompleteText(ctx context.Context, prompt string, model string) (string, error)
@@ -76,17 +75,6 @@ func New(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
 	}
 
 	return NewOpenAI(cfg, store, logger)
-}
-
-func (c *mockClient) GetEmbedding(_ context.Context, _ string) ([]float32, error) {
-	// Mock embedding (dimensions as in schema)
-	emb := make([]float32, mockEmbeddingDimensions)
-	// Fill with some deterministic values based on text for mock consistency
-	for i := 0; i < len(emb); i++ {
-		emb[i] = 0.1
-	}
-
-	return emb, nil
 }
 
 func (c *mockClient) ProcessBatch(_ context.Context, messages []MessageInput, targetLanguage string, model string, tone string) ([]BatchResult, error) {
