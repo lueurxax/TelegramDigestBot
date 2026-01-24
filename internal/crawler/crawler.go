@@ -342,7 +342,7 @@ func isValidCrawlURL(rawURL string) bool {
 		// Images
 		".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp", ".tiff",
 		// Web assets
-		".css", ".js", ".woff", ".woff2", ".ttf", ".eot", ".map",
+		".css", ".js", ".woff", ".woff2", ".ttf", ".eot", ".map", ".webmanifest",
 		// Data
 		".json", ".xml", ".rss", ".atom",
 	}
@@ -362,6 +362,12 @@ func isValidCrawlURL(rawURL string) bool {
 		"/static/js/",
 		"/wp-content/uploads/",
 		"/wp-includes/",
+		"/feed/",
+		"/feed",
+		"/rss",
+		"xmlrpc.php",
+		"%7B%7B", // URL-encoded {{ template markers
+		"{{",     // Template markers
 	}
 
 	for _, pattern := range skipPatterns {
