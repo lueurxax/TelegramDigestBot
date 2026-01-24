@@ -1838,6 +1838,7 @@ func (r *Reader) startAsyncSolrIndexing(ctx context.Context, hpc *historyProcess
 }
 
 // indexToSolr builds and indexes a Telegram message document to Solr.
+// Language is set to "unknown" at ingest; worker will detect and update it later.
 func (r *Reader) indexToSolr(ctx context.Context, ch db.Channel, msg *tg.Message) error {
 	docID := solr.TelegramDocID(ch.TGPeerID, int64(msg.ID))
 	displayURL := solr.TelegramDisplayURL(ch.Username, ch.TGPeerID, int64(msg.ID))
@@ -1846,21 +1847,18 @@ func (r *Reader) indexToSolr(ctx context.Context, ch db.Channel, msg *tg.Message
 	doc := solr.NewIndexDocument(docID).
 		SetField("source", solr.SourceTelegram).
 		SetField("url", displayURL).
+		SetField("domain", "t.me"). // Keep domain consistent (DNS hostname)
 		SetField("title", ch.Title).
 		SetField("content", msg.Message).
-		SetField("channel_name", ch.Username).
+		SetField("language", "unknown"). // Detected later by worker, updated via atomic update
 		SetField("tg_peer_id", ch.TGPeerID).
-		SetField("tg_message_id", int64(msg.ID)).
+		SetField("tg_channel_username", ch.Username). // May be empty for private channels
+		SetField("tg_message_id", msg.ID).
+		SetField("tg_views", msg.Views).
+		SetField("tg_forwards", msg.Forwards).
 		SetField("published_at", msgTime).
-		SetField("indexed_at", time.Now()).
+		SetField("crawled_at", time.Now()).
 		SetField("crawl_status", solr.CrawlStatusDone) // Telegram messages are immediately available
-
-	// Detect language from content (will be updated by worker with LLM detection later)
-	if msg.Message != "" {
-		if lang := links.DetectLanguage(msg.Message); lang != "" {
-			doc.SetField("language", lang)
-		}
-	}
 
 	if err := r.solrClient.Index(ctx, doc); err != nil {
 		return fmt.Errorf("index document: %w", err)

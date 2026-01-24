@@ -44,32 +44,38 @@ type Document struct {
 	Version int64  `json:"_version_,omitempty"` //nolint:tagliatelle // Solr internal field name
 
 	// Common fields
-	Source      string    `json:"source,omitempty"`
-	URL         string    `json:"url,omitempty"`
-	Title       string    `json:"title,omitempty"`
-	Content     string    `json:"content,omitempty"`
-	Description string    `json:"description,omitempty"`
-	Language    string    `json:"language,omitempty"`
-	Domain      string    `json:"domain,omitempty"`
-	PublishedAt time.Time `json:"published_at,omitempty"`
-	IndexedAt   time.Time `json:"indexed_at,omitempty"`
+	Source       string    `json:"source,omitempty"`
+	URL          string    `json:"url,omitempty"`
+	URLCanonical string    `json:"url_canonical,omitempty"`
+	Title        string    `json:"title,omitempty"`
+	Content      string    `json:"content,omitempty"`
+	Description  string    `json:"description,omitempty"`
+	Language     string    `json:"language,omitempty"`
+	Domain       string    `json:"domain,omitempty"`
+	PublishedAt  time.Time `json:"published_at,omitempty"`
+	CrawledAt    time.Time `json:"crawled_at,omitempty"`
 
 	// Telegram-specific fields
-	TGPeerID    int64  `json:"tg_peer_id,omitempty"`
-	TGMessageID int64  `json:"tg_message_id,omitempty"`
-	ChannelName string `json:"channel_name,omitempty"`
+	TGPeerID          int64  `json:"tg_peer_id,omitempty"`
+	TGChannelUsername string `json:"tg_channel_username,omitempty"`
+	TGMessageID       int    `json:"tg_message_id,omitempty"`
+	TGViews           int    `json:"tg_views,omitempty"`
+	TGForwards        int    `json:"tg_forwards,omitempty"`
 
-	// Web crawl fields
-	CrawlStatus string    `json:"crawl_status,omitempty"`
-	CrawlDepth  int       `json:"crawl_depth,omitempty"`
-	CrawledAt   time.Time `json:"crawled_at,omitempty"`
-	ErrorMsg    string    `json:"error_msg,omitempty"`
+	// Web crawl queue fields
+	CrawlStatus    string    `json:"crawl_status,omitempty"`
+	CrawlClaimedAt time.Time `json:"crawl_claimed_at,omitempty"`
+	CrawlClaimedBy string    `json:"crawl_claimed_by,omitempty"`
+	CrawlDepth     int       `json:"crawl_depth,omitempty"`
+	CrawlError     string    `json:"crawl_error,omitempty"`
 
 	// Language-specific dynamic fields (populated during indexing)
 	TitleEN   string `json:"title_en,omitempty"`
 	TitleRU   string `json:"title_ru,omitempty"`
+	TitleEL   string `json:"title_el,omitempty"`
 	ContentEN string `json:"content_en,omitempty"`
 	ContentRU string `json:"content_ru,omitempty"`
+	ContentEL string `json:"content_el,omitempty"`
 }
 
 // IndexDocument is a simplified document for indexing.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -35,6 +36,7 @@ type Crawler struct {
 	logger     *zerolog.Logger
 	seeds      []string
 	lastSeeded time.Time
+	podName    string
 }
 
 // New creates a new Crawler.
@@ -52,7 +54,16 @@ func New(cfg *Config, logger *zerolog.Logger) (*Crawler, error) {
 		return nil, fmt.Errorf("load seeds: %w", err)
 	}
 
-	logger.Info().Int(fieldCount, len(seeds)).Msg("Loaded seed URLs")
+	// Get pod name for claim tracking
+	podName := os.Getenv("POD_NAME")
+	if podName == "" {
+		podName = fmt.Sprintf("crawler-%d", os.Getpid())
+	}
+
+	logger.Info().
+		Int(fieldCount, len(seeds)).
+		Str("pod_name", podName).
+		Msg("Loaded seed URLs")
 
 	return &Crawler{
 		cfg:       cfg,
@@ -62,6 +73,7 @@ func New(cfg *Config, logger *zerolog.Logger) (*Crawler, error) {
 		discovery: NewDiscovery(cfg.CrawlUserAgent, logger),
 		logger:    logger,
 		seeds:     seeds,
+		podName:   podName,
 	}, nil
 }
 
@@ -293,7 +305,7 @@ func (c *Crawler) markError(ctx context.Context, docID, errMsg string) {
 
 	fields := map[string]interface{}{
 		"crawl_status": solr.CrawlStatusError,
-		"error_msg":    errMsg,
+		"crawl_error":  errMsg,
 		"crawled_at":   time.Now(),
 	}
 

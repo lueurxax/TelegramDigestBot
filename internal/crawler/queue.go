@@ -26,15 +26,25 @@ const (
 var errUnsupportedScheme = errors.New("unsupported URL scheme")
 
 // claimURLs claims URLs from the queue for processing.
+// It searches for pending URLs OR stale claims (crawler died mid-processing).
 // Uses optimistic locking via Solr's _version_ field to prevent races.
 func (c *Crawler) claimURLs(ctx context.Context, count int) ([]*solr.Document, error) {
-	// Search for pending URLs
+	now := time.Now().UTC()
+	staleThreshold := now.Add(-c.cfg.CrawlClaimTTL)
+
+	// Build filter: pending URLs OR stale processing claims
+	// Stale claims are URLs that were claimed but not completed within TTL
+	staleFilter := fmt.Sprintf(
+		"crawl_status:(pending OR (processing AND crawl_claimed_at:[* TO %s]))",
+		staleThreshold.Format(time.RFC3339),
+	)
+
 	resp, err := c.client.Search(ctx, allDocsQuery,
-		solr.WithFilterQuery(filterPending),
+		solr.WithFilterQuery(staleFilter),
 		solr.WithFilterQuery(filterSourceWeb),
-		solr.WithRows(count*claimMultiplier), // Fetch more to account for claim failures
-		solr.WithSort("indexed_at asc"),
-		solr.WithFields("id,url,crawl_depth,crawl_status,_version_"),
+		solr.WithRows(count*claimMultiplier),     // Fetch more to account for claim failures
+		solr.WithSort("crawl_depth asc, id asc"), // Breadth-first crawling
+		solr.WithFields("id,url,domain,crawl_depth,crawl_status,_version_"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("search pending URLs: %w", err)
@@ -46,21 +56,22 @@ func (c *Crawler) claimURLs(ctx context.Context, count int) ([]*solr.Document, e
 
 	var claimed []*solr.Document
 
-	claimUntil := time.Now().Add(c.cfg.CrawlClaimTTL)
-
 	for _, doc := range resp.Response.Docs {
 		if len(claimed) >= count {
 			break
 		}
 
 		// Try to claim with optimistic locking
+		// Uses _version_ field - if another crawler modified the doc, version changed and this fails with 409
 		err := c.client.ConditionalUpdate(ctx, doc.ID, doc.Version, map[string]interface{}{
-			"crawl_status": solr.CrawlStatusProcessing,
-			"crawled_at":   claimUntil,
+			"crawl_status":     solr.CrawlStatusProcessing,
+			"crawl_claimed_at": now.Format(time.RFC3339),
+			"crawl_claimed_by": c.podName,
 		})
 		if err != nil {
 			if errors.Is(err, solr.ErrVersionConflict) {
 				// Another worker claimed it, try next
+				c.logger.Debug().Str(fieldDocID, doc.ID).Msg("Claim conflict, skipping")
 				continue
 			}
 
@@ -108,7 +119,7 @@ func (c *Crawler) enqueueURL(ctx context.Context, rawURL string, depth int) erro
 		SetField("domain", parsed.Host).
 		SetField("crawl_status", solr.CrawlStatusPending).
 		SetField("crawl_depth", depth).
-		SetField("indexed_at", time.Now())
+		SetField("crawled_at", time.Now())
 
 	if err := c.client.Index(ctx, doc); err != nil {
 		return fmt.Errorf("index document: %w", err)

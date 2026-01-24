@@ -127,52 +127,91 @@ data:
   schema.xml: |
     <?xml version="1.0" encoding="UTF-8" ?>
     <schema name="news" version="1.6">
-      <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
-      <field name="_version_" type="plong" indexed="false" stored="false"/>
+      <!-- Document ID: SHA256 hash of canonical URL -->
+      <uniqueKey>id</uniqueKey>
 
-      <!-- Common fields -->
-      <field name="source" type="string" indexed="true" stored="true"/>
+      <field name="id" type="string" indexed="true" stored="true" required="true"/>
+      <field name="_version_" type="plong" indexed="false" stored="false"/>
+      <field name="source" type="string" indexed="true" stored="true" default="web"/>
       <field name="url" type="string" indexed="true" stored="true"/>
-      <field name="title" type="text_general" indexed="true" stored="true"/>
-      <field name="content" type="text_general" indexed="true" stored="true"/>
-      <field name="description" type="text_general" indexed="true" stored="true"/>
-      <field name="language" type="string" indexed="true" stored="true"/>
+      <field name="url_canonical" type="string" indexed="true" stored="true"/>
       <field name="domain" type="string" indexed="true" stored="true"/>
+      <field name="language" type="string" indexed="true" stored="true" default="unknown"/>
       <field name="published_at" type="pdate" indexed="true" stored="true"/>
-      <field name="indexed_at" type="pdate" indexed="true" stored="true"/>
+      <field name="crawled_at" type="pdate" indexed="true" stored="true"/>
+
+      <!-- Crawl queue fields (unified: URL queue + indexed content) -->
+      <field name="crawl_status" type="string" indexed="true" stored="true" default="pending"/>
+      <field name="crawl_claimed_at" type="pdate" indexed="true" stored="true"/>
+      <field name="crawl_claimed_by" type="string" indexed="true" stored="true"/>
+      <field name="crawl_depth" type="pint" indexed="true" stored="true" default="0"/>
+      <field name="crawl_error" type="string" indexed="true" stored="true"/>
+
+      <!-- Text fields with general analyzer (stored for display) -->
+      <field name="title" type="text_general" indexed="true" stored="true"/>
+      <field name="description" type="text_general" indexed="true" stored="true"/>
+      <field name="content" type="text_general" indexed="true" stored="true"/>
+
+      <!-- Combined search field -->
+      <field name="text" type="text_general" indexed="true" stored="false" multiValued="true"/>
+      <copyField source="title" dest="text"/>
+      <copyField source="content" dest="text"/>
+      <copyField source="description" dest="text"/>
 
       <!-- Telegram-specific fields -->
       <field name="tg_peer_id" type="plong" indexed="true" stored="true"/>
-      <field name="tg_message_id" type="plong" indexed="true" stored="true"/>
-      <field name="channel_name" type="string" indexed="true" stored="true"/>
+      <field name="tg_channel_username" type="string" indexed="true" stored="true"/>
+      <field name="tg_message_id" type="pint" indexed="true" stored="true"/>
+      <field name="tg_views" type="pint" indexed="true" stored="true"/>
+      <field name="tg_forwards" type="pint" indexed="true" stored="true"/>
 
-      <!-- Web crawl fields -->
-      <field name="crawl_status" type="string" indexed="true" stored="true"/>
-      <field name="crawl_depth" type="pint" indexed="true" stored="true"/>
-      <field name="crawled_at" type="pdate" indexed="true" stored="true"/>
-      <field name="error_msg" type="string" indexed="false" stored="true"/>
-
-      <!-- Language-specific dynamic fields for better search -->
-      <dynamicField name="title_*" type="text_general" indexed="true" stored="true"/>
-      <dynamicField name="content_*" type="text_general" indexed="true" stored="true"/>
-
-      <uniqueKey>id</uniqueKey>
+      <!-- Dynamic fields for language-specific indexing (populated by crawler) -->
+      <dynamicField name="*_en" type="text_en" indexed="true" stored="false"/>
+      <dynamicField name="*_ru" type="text_ru" indexed="true" stored="false"/>
+      <dynamicField name="*_el" type="text_el" indexed="true" stored="false"/>
 
       <!-- Field types -->
       <fieldType name="string" class="solr.StrField" sortMissingLast="true"/>
-      <fieldType name="plong" class="solr.LongPointField" docValues="true"/>
       <fieldType name="pint" class="solr.IntPointField" docValues="true"/>
+      <fieldType name="plong" class="solr.LongPointField" docValues="true"/>
       <fieldType name="pdate" class="solr.DatePointField" docValues="true"/>
+
+      <!-- General text: simple analysis without language-specific processing -->
       <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100">
-        <analyzer type="index">
+        <analyzer>
           <tokenizer class="solr.StandardTokenizerFactory"/>
           <filter class="solr.LowerCaseFilterFactory"/>
-          <filter class="solr.StopFilterFactory" ignoreCase="true" words="stopwords.txt"/>
         </analyzer>
-        <analyzer type="query">
+      </fieldType>
+
+      <!-- English text with stopwords and stemming -->
+      <fieldType name="text_en" class="solr.TextField" positionIncrementGap="100">
+        <analyzer>
           <tokenizer class="solr.StandardTokenizerFactory"/>
           <filter class="solr.LowerCaseFilterFactory"/>
-          <filter class="solr.StopFilterFactory" ignoreCase="true" words="stopwords.txt"/>
+          <filter class="solr.StopFilterFactory" words="lang/stopwords_en.txt" ignoreCase="true"/>
+          <filter class="solr.EnglishPossessiveFilterFactory"/>
+          <filter class="solr.PorterStemFilterFactory"/>
+        </analyzer>
+      </fieldType>
+
+      <!-- Russian text with stopwords and stemming -->
+      <fieldType name="text_ru" class="solr.TextField" positionIncrementGap="100">
+        <analyzer>
+          <tokenizer class="solr.StandardTokenizerFactory"/>
+          <filter class="solr.LowerCaseFilterFactory"/>
+          <filter class="solr.StopFilterFactory" words="lang/stopwords_ru.txt" ignoreCase="true"/>
+          <filter class="solr.SnowballPorterFilterFactory" language="Russian"/>
+        </analyzer>
+      </fieldType>
+
+      <!-- Greek text with stopwords and stemming -->
+      <fieldType name="text_el" class="solr.TextField" positionIncrementGap="100">
+        <analyzer>
+          <tokenizer class="solr.StandardTokenizerFactory"/>
+          <filter class="solr.LowerCaseFilterFactory"/>
+          <filter class="solr.StopFilterFactory" words="lang/stopwords_el.txt" ignoreCase="true"/>
+          <filter class="solr.GreekStemFilterFactory"/>
         </analyzer>
       </fieldType>
     </schema>
@@ -182,101 +221,33 @@ data:
       <luceneMatchVersion>9.4</luceneMatchVersion>
       <dataDir>${solr.data.dir:}</dataDir>
       <directoryFactory name="DirectoryFactory" class="${solr.directoryFactory:solr.NRTCachingDirectoryFactory}"/>
-      <codecFactory class="solr.SchemaCodecFactory"/>
       <schemaFactory class="ClassicIndexSchemaFactory"/>
-
-      <indexConfig>
-        <ramBufferSizeMB>100</ramBufferSizeMB>
-        <maxBufferedDocs>1000</maxBufferedDocs>
-      </indexConfig>
-
-      <updateHandler class="solr.DirectUpdateHandler2">
-        <updateLog>
-          <str name="dir">${solr.ulog.dir:}</str>
-        </updateLog>
-        <autoCommit>
-          <maxTime>${solr.autoCommit.maxTime:15000}</maxTime>
-          <openSearcher>false</openSearcher>
-        </autoCommit>
-        <autoSoftCommit>
-          <maxTime>${solr.autoSoftCommit.maxTime:1000}</maxTime>
-        </autoSoftCommit>
-      </updateHandler>
-
-      <query>
-        <maxBooleanClauses>1024</maxBooleanClauses>
-        <filterCache class="solr.FastLRUCache" size="512" initialSize="512" autowarmCount="0"/>
-        <queryResultCache class="solr.LRUCache" size="512" initialSize="512" autowarmCount="0"/>
-        <documentCache class="solr.LRUCache" size="512" initialSize="512" autowarmCount="0"/>
-        <enableLazyFieldLoading>true</enableLazyFieldLoading>
-        <queryResultWindowSize>20</queryResultWindowSize>
-        <queryResultMaxDocsCached>200</queryResultMaxDocsCached>
-      </query>
-
-      <requestDispatcher>
-        <requestParsers enableRemoteStreaming="false" multipartUploadLimitInKB="2048000" formdataUploadLimitInKB="2048" addHttpRequestToContext="false"/>
-        <httpCaching never304="true"/>
-      </requestDispatcher>
 
       <requestHandler name="/select" class="solr.SearchHandler">
         <lst name="defaults">
           <str name="echoParams">explicit</str>
-          <int name="rows">10</int>
-          <str name="df">content</str>
+          <str name="wt">json</str>
+          <str name="indent">true</str>
+          <str name="df">text</str>
           <str name="defType">edismax</str>
-          <str name="qf">title^3 content^1 description^2</str>
+          <str name="qf">title^2.0 description^1.5 content^1.0</str>
         </lst>
       </requestHandler>
 
       <requestHandler name="/update" class="solr.UpdateRequestHandler"/>
+
       <requestHandler name="/get" class="solr.RealTimeGetHandler">
         <lst name="defaults">
           <str name="omitHeader">true</str>
         </lst>
       </requestHandler>
+
       <requestHandler name="/admin/ping" class="solr.PingRequestHandler">
         <lst name="invariants">
-          <str name="q">solrpingquery</str>
-        </lst>
-        <lst name="defaults">
-          <str name="echoParams">all</str>
+          <str name="q">*:*</str>
         </lst>
       </requestHandler>
     </config>
-  stopwords.txt: |
-    a
-    an
-    and
-    are
-    as
-    at
-    be
-    but
-    by
-    for
-    if
-    in
-    into
-    is
-    it
-    no
-    not
-    of
-    on
-    or
-    such
-    that
-    the
-    their
-    then
-    there
-    these
-    they
-    this
-    to
-    was
-    will
-    with
 ---
 # Solr Headless Service
 apiVersion: v1
@@ -348,26 +319,45 @@ spec:
       - name: upload-config
         image: solr:9.4
         command:
-        - sh
+        - bash
         - -c
         - |
+          set -e
           HOST=$(hostname -s)
           # Only upload from solr-0 to avoid conflicts
-          if [ "$HOST" = "solr-0" ]; then
-            echo "Uploading configset from solr-0..."
-            mkdir -p /tmp/news
-            cp /config/schema.xml /tmp/news/
-            cp /config/solrconfig.xml /tmp/news/
-            cp /config/stopwords.txt /tmp/news/
-
-            # Wait a bit for ZK to be fully ready
-            sleep 5
-
-            # Upload configset
-            /opt/solr/bin/solr zk upconfig -z zookeeper:2181 -n news -d /tmp/news || echo "Config upload failed or already exists"
-          else
+          if [ "$HOST" != "solr-0" ]; then
             echo "Skipping config upload on $HOST"
+            exit 0
           fi
+
+          echo "Uploading configset from solr-0..."
+
+          # Create temp configset directory with lang/ subdirectory
+          mkdir -p /tmp/newsconf/lang
+          cp /config/schema.xml /tmp/newsconf/
+          cp /config/solrconfig.xml /tmp/newsconf/
+
+          # Copy stopword files from Solr's built-in language resources
+          # These are referenced in schema.xml text_en/text_ru/text_el field types
+          cp /opt/solr/server/solr/configsets/_default/conf/lang/stopwords_en.txt /tmp/newsconf/lang/
+
+          # Russian stopwords (may not be in default Solr, fetch from Lucene if needed)
+          if [ -f /opt/solr/server/solr/configsets/_default/conf/lang/stopwords_ru.txt ]; then
+            cp /opt/solr/server/solr/configsets/_default/conf/lang/stopwords_ru.txt /tmp/newsconf/lang/
+          else
+            curl -sL "https://raw.githubusercontent.com/apache/lucene/main/lucene/analysis/common/src/resources/org/apache/lucene/analysis/ru/stopwords.txt" > /tmp/newsconf/lang/stopwords_ru.txt
+          fi
+
+          # Greek stopwords (not in default Solr, fetch from Lucene)
+          curl -sL "https://raw.githubusercontent.com/apache/lucene/main/lucene/analysis/common/src/resources/org/apache/lucene/analysis/el/stopwords.txt" > /tmp/newsconf/lang/stopwords_el.txt
+
+          # Wait a bit for ZK to be fully ready
+          sleep 5
+
+          # Upload configset
+          /opt/solr/bin/solr zk upconfig -z zookeeper:2181 -n news -d /tmp/newsconf
+
+          echo "Configset uploaded successfully"
         volumeMounts:
         - name: config
           mountPath: /config
@@ -507,7 +497,7 @@ spec:
               echo "Deleting stale pending documents..."
               curl -s "http://solr:8983/solr/news/update?commit=true" \
                 -H "Content-Type: application/json" \
-                -d '{"delete":{"query":"crawl_status:pending AND indexed_at:[* TO NOW-7DAYS]"}}'
+                -d '{"delete":{"query":"crawl_status:pending AND crawled_at:[* TO NOW-7DAYS]"}}'
 
               # Delete error URLs older than 30 days
               echo "Deleting old error documents..."

@@ -8,29 +8,31 @@ import (
 	"strings"
 )
 
-// Document ID prefixes.
+// Constants for URL canonicalization.
 const (
-	prefixWeb      = "web:"
-	prefixTelegram = "tg:"
-	portHTTP       = ":80"
-	portHTTPS      = ":443"
-	schemeHTTP     = "http"
-	schemeHTTPS    = "https"
+	portHTTP  = ":80"
+	portHTTPS = ":443"
 )
 
 // WebDocID generates a document ID for a web page URL.
-// The ID is a SHA-256 hash of the canonicalized URL prefixed with "web:".
+// The ID is a full SHA-256 hash of the canonicalized URL.
 func WebDocID(rawURL string) string {
 	canonical := canonicalizeURL(rawURL)
-	hash := sha256.Sum256([]byte(canonical))
-
-	return prefixWeb + hex.EncodeToString(hash[:16])
+	return hashToID(canonical)
 }
 
 // TelegramDocID generates a document ID for a Telegram message.
-// Format: "tg:{peer_id}:{message_id}"
+// Uses the same SHA-256 hash approach as web pages with a canonical tg:// URL.
+// Format: SHA-256 hash of "tg://peer/{peer_id}/msg/{msg_id}"
 func TelegramDocID(peerID, messageID int64) string {
-	return fmt.Sprintf(prefixTelegram+"%d:%d", peerID, messageID)
+	canonicalURL := fmt.Sprintf("tg://peer/%d/msg/%d", peerID, messageID)
+	return hashToID(canonicalURL)
+}
+
+// hashToID generates a document ID from a canonical URL string.
+func hashToID(canonicalURL string) string {
+	hash := sha256.Sum256([]byte(canonicalURL))
+	return hex.EncodeToString(hash[:])
 }
 
 // TelegramDisplayURL generates a display URL for a Telegram message.
@@ -81,46 +83,11 @@ func canonicalizeURL(rawURL string) string {
 // removeDefaultPort removes default ports (80 for http, 443 for https).
 func removeDefaultPort(host, scheme string) string {
 	switch {
-	case scheme == schemeHTTP && strings.HasSuffix(host, portHTTP):
+	case scheme == "http" && strings.HasSuffix(host, portHTTP):
 		return strings.TrimSuffix(host, portHTTP)
-	case scheme == schemeHTTPS && strings.HasSuffix(host, portHTTPS):
+	case scheme == "https" && strings.HasSuffix(host, portHTTPS):
 		return strings.TrimSuffix(host, portHTTPS)
 	default:
 		return host
 	}
-}
-
-// ParseTelegramDocID extracts peer ID and message ID from a Telegram document ID.
-// Returns (0, 0, false) if the ID is not a valid Telegram document ID.
-func ParseTelegramDocID(docID string) (peerID, messageID int64, ok bool) {
-	if !strings.HasPrefix(docID, prefixTelegram) {
-		return 0, 0, false
-	}
-
-	parts := strings.Split(docID[len(prefixTelegram):], ":")
-	if len(parts) != 2 {
-		return 0, 0, false
-	}
-
-	var err error
-
-	if _, err = fmt.Sscanf(parts[0], "%d", &peerID); err != nil {
-		return 0, 0, false
-	}
-
-	if _, err = fmt.Sscanf(parts[1], "%d", &messageID); err != nil {
-		return 0, 0, false
-	}
-
-	return peerID, messageID, true
-}
-
-// IsWebDocID checks if a document ID is for a web page.
-func IsWebDocID(docID string) bool {
-	return strings.HasPrefix(docID, prefixWeb)
-}
-
-// IsTelegramDocID checks if a document ID is for a Telegram message.
-func IsTelegramDocID(docID string) bool {
-	return strings.HasPrefix(docID, prefixTelegram)
 }
