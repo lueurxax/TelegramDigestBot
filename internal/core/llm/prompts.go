@@ -228,6 +228,35 @@ func buildPromptLangInstruction(targetLanguage, tone, context string) string {
 	return sb.String()
 }
 
+// buildBatchPromptContent builds the prompt content for ProcessBatch operations.
+func buildBatchPromptContent(messages []MessageInput, targetLanguage, tone string) string {
+	langInstruction := buildLangInstructionSimple(targetLanguage, tone)
+	promptTemplate := defaultSummarizePrompt
+	promptText := applyPromptTokens(promptTemplate, langInstruction, len(messages))
+
+	var content strings.Builder
+
+	content.WriteString(promptText)
+	content.WriteString("\n\n")
+
+	for i, m := range messages {
+		content.WriteString("[")
+		content.WriteString(strconv.Itoa(i))
+		content.WriteString("] ")
+
+		if m.ChannelTitle != "" {
+			content.WriteString("(Source: ")
+			content.WriteString(m.ChannelTitle)
+			content.WriteString(") ")
+		}
+
+		content.WriteString(m.Text)
+		content.WriteString("\n\n")
+	}
+
+	return content.String()
+}
+
 // formatEvidenceForPrompt formats evidence for inclusion in prompts.
 func formatEvidenceForPrompt(evidence []EvidenceSource) string {
 	if len(evidence) == 0 {

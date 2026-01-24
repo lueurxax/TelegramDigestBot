@@ -446,7 +446,7 @@ func extractTextFromResponse(resp *anthropic.Message) string {
 	var result strings.Builder
 
 	for _, block := range resp.Content {
-		if block.Type == "text" {
+		if block.Type == contentTypeText {
 			result.WriteString(block.Text)
 		}
 	}

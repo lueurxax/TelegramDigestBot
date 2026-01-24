@@ -224,7 +224,6 @@ Provider Status:
   openai: ⚠️ quota warning (80% used)
   google: ✓ healthy
   anthropic: ✓ healthy
-  ollama: ✓ healthy (local)
 ```
 
 ---
@@ -281,7 +280,7 @@ EMBEDDING_DEFAULT_MODEL=text-embedding-3-large
 EMBEDDING_FALLBACK_MODEL=embed-multilingual-v3.0
 
 # LLM Configuration
-LLM_PROVIDER_ORDER=openai,anthropic,google,ollama
+LLM_PROVIDER_ORDER=openai,anthropic,google
 LLM_SUMMARIZE_MODEL=gpt-5-nano
 LLM_CLUSTER_MODEL=gpt-5
 LLM_NARRATIVE_MODEL=gpt-5.2

@@ -64,6 +64,24 @@ const (
 	indexedItemFormat = "[%d] %s\n"
 )
 
+// HTTP header values
+const (
+	contentTypeJSON     = "application/json"
+	contentTypeText     = "text"
+	headerAuthorization = "Authorization"
+	headerContentType   = "Content-Type"
+)
+
+// Error format strings for API clients
+const (
+	errFmtMarshalRequest = "marshal request: %w"
+	errFmtCreateRequest  = "create request: %w"
+	errFmtReadResponse   = "read response: %w"
+	errFmtDecodeResponse = "decode response: %w"
+	errFmtAPIWithMessage = "%w (%d): %s"
+	errFmtAPIStatusOnly  = "%w: status %d"
+)
+
 // Numeric constants
 const (
 	rateLimiterBurst    = 5

@@ -11,10 +11,12 @@ type ProviderName string
 
 // Provider name constants.
 const (
-	ProviderOpenAI    ProviderName = "openai"
-	ProviderAnthropic ProviderName = "anthropic"
-	ProviderGoogle    ProviderName = "google"
-	ProviderMock      ProviderName = "mock"
+	ProviderOpenAI     ProviderName = "openai"
+	ProviderAnthropic  ProviderName = "anthropic"
+	ProviderGoogle     ProviderName = "google"
+	ProviderCohere     ProviderName = "cohere"
+	ProviderOpenRouter ProviderName = "openrouter"
+	ProviderMock       ProviderName = "mock"
 )
 
 // Priority constants for provider ordering.
@@ -22,6 +24,7 @@ const (
 	PriorityPrimary        = 100 // Primary provider (Google)
 	PriorityFallback       = 50  // First fallback (Anthropic)
 	PrioritySecondFallback = 25  // Second fallback (OpenAI)
+	PriorityThirdFallback  = 10  // Third fallback (Cohere)
 	PriorityMock           = 0   // Mock provider for testing
 )
 

@@ -169,8 +169,14 @@ type Config struct {
 	// LLM provider settings (multi-provider fallback)
 	AnthropicAPIKey     string        `env:"ANTHROPIC_API_KEY" envDefault:""`
 	GoogleAPIKey        string        `env:"GOOGLE_API_KEY" envDefault:""`
+	OpenRouterAPIKey    string        `env:"OPENROUTER_API_KEY" envDefault:""`
 	LLMCircuitThreshold int           `env:"LLM_CIRCUIT_THRESHOLD" envDefault:"5"`
 	LLMCircuitTimeout   time.Duration `env:"LLM_CIRCUIT_TIMEOUT" envDefault:"1m"`
+
+	// Per-task LLM model configuration
+	LLMSummarizeModel string `env:"LLM_SUMMARIZE_MODEL" envDefault:""`
+	LLMClusterModel   string `env:"LLM_CLUSTER_MODEL" envDefault:""`
+	LLMNarrativeModel string `env:"LLM_NARRATIVE_MODEL" envDefault:""`
 
 	// Crawler settings (for cmd/crawler)
 	CrawlDepth        int           `env:"CRAWL_DEPTH" envDefault:"2"`

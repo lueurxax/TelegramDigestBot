@@ -70,24 +70,13 @@ type PromptStore interface {
 	GetSetting(ctx context.Context, key string, target interface{}) error
 }
 
-// New creates a new LLM client with multi-provider fallback support.
-// It registers providers in priority order: OpenAI (primary), Anthropic (fallback), Google (second fallback).
-// If no providers are configured, it returns a mock client.
-func New(ctx context.Context, cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
-	// Use a no-op logger if none provided
-	if logger == nil {
-		nopLogger := zerolog.Nop()
-		logger = &nopLogger
-	}
-
-	registry := NewRegistry(logger)
-
+// buildCircuitConfig creates a CircuitBreakerConfig with defaults applied.
+func buildCircuitConfig(cfg *config.Config) embeddings.CircuitBreakerConfig {
 	circuitCfg := embeddings.CircuitBreakerConfig{
 		Threshold:  cfg.LLMCircuitThreshold,
 		ResetAfter: cfg.LLMCircuitTimeout,
 	}
 
-	// Use default values if not configured
 	if circuitCfg.Threshold == 0 {
 		circuitCfg.Threshold = defaultCircuitThreshold
 	}
@@ -96,6 +85,11 @@ func New(ctx context.Context, cfg *config.Config, store PromptStore, logger *zer
 		circuitCfg.ResetAfter = defaultCircuitTimeout
 	}
 
+	return circuitCfg
+}
+
+// registerProviders registers all available LLM providers with the registry.
+func registerProviders(ctx context.Context, registry *Registry, cfg *config.Config, store PromptStore, logger *zerolog.Logger, circuitCfg embeddings.CircuitBreakerConfig) {
 	// Register OpenAI as primary provider
 	if cfg.LLMAPIKey != "" && cfg.LLMAPIKey != llmAPIKeyMock {
 		registry.Register(NewOpenAIProvider(cfg, store, logger), circuitCfg)
@@ -116,10 +110,34 @@ func New(ctx context.Context, cfg *config.Config, store PromptStore, logger *zer
 		}
 	}
 
+	// Register Cohere as third fallback
+	if cfg.CohereAPIKey != "" {
+		registry.Register(NewCohereProvider(cfg, store, logger), circuitCfg)
+	}
+
+	// Register OpenRouter as fourth fallback
+	if cfg.OpenRouterAPIKey != "" {
+		registry.Register(NewOpenRouterProvider(cfg, store, logger), circuitCfg)
+	}
+
 	// If no providers configured, use mock
 	if registry.ProviderCount() == 0 {
 		registry.Register(NewMockProvider(cfg), circuitCfg)
 	}
+}
+
+// New creates a new LLM client with multi-provider fallback support.
+// It registers providers in priority order: OpenAI (primary), Anthropic (fallback), Google (second fallback).
+// If no providers are configured, it returns a mock client.
+func New(ctx context.Context, cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
+	if logger == nil {
+		nopLogger := zerolog.Nop()
+		logger = &nopLogger
+	}
+
+	registry := NewRegistry(logger)
+	circuitCfg := buildCircuitConfig(cfg)
+	registerProviders(ctx, registry, cfg, store, logger, circuitCfg)
 
 	return registry
 }
