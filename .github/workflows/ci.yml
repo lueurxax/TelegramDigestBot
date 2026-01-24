@@ -162,7 +162,7 @@ jobs:
         env:
           NAMESPACE: digest
           IMAGE_NAME: ghcr.io/lueurxax/telegramdigestbot
-          CRAWLER_IMAGE_NAME: ghcr.io/lueurxax/telegram-digest-bot/crawler
+          CRAWLER_IMAGE_NAME: ghcr.io/lueurxax/telegramdigestbot/crawler
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           IMAGE="${IMAGE_NAME}:${SHORT_SHA}"

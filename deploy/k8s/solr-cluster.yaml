@@ -222,6 +222,21 @@ data:
       <dataDir>${solr.data.dir:}</dataDir>
       <directoryFactory name="DirectoryFactory" class="${solr.directoryFactory:solr.NRTCachingDirectoryFactory}"/>
       <schemaFactory class="ClassicIndexSchemaFactory"/>
+      <codecFactory class="solr.SchemaCodecFactory"/>
+
+      <!-- Required for SolrCloud replication -->
+      <updateHandler class="solr.DirectUpdateHandler2">
+        <updateLog>
+          <str name="dir">${solr.ulog.dir:}</str>
+        </updateLog>
+        <autoCommit>
+          <maxTime>15000</maxTime>
+          <openSearcher>false</openSearcher>
+        </autoCommit>
+        <autoSoftCommit>
+          <maxTime>1000</maxTime>
+        </autoSoftCommit>
+      </updateHandler>
 
       <requestHandler name="/select" class="solr.SearchHandler">
         <lst name="defaults">
@@ -368,7 +383,7 @@ spec:
         - containerPort: 8983
           name: solr
         env:
-        - name: SOLR_HOST
+        - name: POD_NAME
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
@@ -380,6 +395,8 @@ spec:
         - bash
         - -c
         - |
+          # Set SOLR_HOST to full DNS name for proper cluster communication
+          export SOLR_HOST="${POD_NAME}.solr-headless.digest.svc.cluster.local"
           exec solr-foreground -c -z ${ZK_HOST}
         volumeMounts:
         - name: data

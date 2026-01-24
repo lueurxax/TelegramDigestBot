@@ -68,7 +68,7 @@ spec:
     spec:
       containers:
       - name: crawler
-        image: ghcr.io/lueurxax/telegram-digest-bot/crawler:latest
+        image: ghcr.io/lueurxax/telegramdigestbot/crawler:latest
         imagePullPolicy: Always
         env:
         - name: SOLR_URL
