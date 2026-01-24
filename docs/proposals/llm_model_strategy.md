@@ -43,7 +43,7 @@ The strategy is designed to:
 
 | Provider | Models | Use Cases |
 |----------|--------|-----------|
-| **OpenAI** | gpt-4o, gpt-4o-mini, text-embedding-3-small/large | Primary LLM and embeddings |
+| **OpenAI** | gpt-5, gpt-5.2, gpt-5-nano, text-embedding-3-small/large | Primary LLM and embeddings |
 | **Anthropic** | claude-3-5-sonnet, claude-3-5-haiku | Narrative, complex reasoning |
 | **Google** | gemini-2.0-flash, gemini-1.5-pro, text-embedding-004 | Fallback LLM and embeddings |
 | **Ollama** | llama3.2, mistral, nomic-embed-text | Local/free fallback |
@@ -117,7 +117,7 @@ This uses Google's free tier first, falls back to OpenAI, then local Ollama.
 
 | Priority | Model | Provider | Cost (1M tokens) |
 |----------|-------|----------|------------------|
-| Default | `gpt-4o-mini` | OpenAI | $0.15 in / $0.60 out |
+| Default | `gpt-5-nano` | OpenAI | $0.05 in / $0.40 out |
 | Fallback 1 | `gemini-2.0-flash` | Google | $0.075 in / $0.30 out |
 | Fallback 2 | `llama3.2:8b` | Ollama | Free (local) |
 
@@ -137,7 +137,7 @@ This uses Google's free tier first, falls back to OpenAI, then local Ollama.
 
 | Priority | Model | Provider | Cost (1M tokens) |
 |----------|-------|----------|------------------|
-| Default | `gpt-4o` | OpenAI | $2.50 in / $10 out |
+| Default | `gpt-5` | OpenAI | $2.50 in / $10 out |
 | Fallback 1 | `claude-3-5-sonnet-20241022` | Anthropic | $3.00 in / $15 out |
 | Fallback 2 | `gemini-1.5-pro` | Google | $1.25 in / $5.00 out |
 
@@ -157,7 +157,7 @@ This uses Google's free tier first, falls back to OpenAI, then local Ollama.
 
 | Priority | Model | Provider | Cost (1M tokens) |
 |----------|-------|----------|------------------|
-| Default | `gpt-4o-mini` | OpenAI | $0.15 in / $0.60 out |
+| Default | `gpt-5-nano` | OpenAI | $0.05 in / $0.40 out |
 | Fallback 1 | `gemini-2.0-flash` | Google | $0.075 in / $0.30 out |
 | Fallback 2 | `mistral:7b` | Ollama | Free (local) |
 
@@ -177,7 +177,7 @@ This uses Google's free tier first, falls back to OpenAI, then local Ollama.
 
 | Priority | Model | Provider | Cost (1M tokens) |
 |----------|-------|----------|------------------|
-| Default | `gpt-4o` | OpenAI | $2.50 in / $10 out |
+| Default | `gpt-5.2` | OpenAI | $2.50 in / $10 out |
 | Fallback 1 | `claude-3-5-sonnet-20241022` | Anthropic | $3.00 in / $15 out |
 | Fallback 2 | `gemini-1.5-pro` | Google | $1.25 in / $5.00 out |
 
@@ -282,9 +282,9 @@ EMBEDDING_DEFAULT_MODEL=text-embedding-004
 
 # LLM Configuration
 LLM_PROVIDER_ORDER=openai,anthropic,google,ollama
-LLM_SUMMARIZE_MODEL=gpt-4o-mini
-LLM_CLUSTER_MODEL=gpt-4o
-LLM_NARRATIVE_MODEL=gpt-4o
+LLM_SUMMARIZE_MODEL=gpt-5-nano
+LLM_CLUSTER_MODEL=gpt-5
+LLM_NARRATIVE_MODEL=gpt-5.2
 
 # Fallback behavior
 LLM_FALLBACK_ENABLED=true
@@ -301,12 +301,13 @@ Assuming 10,000 messages/day, 30 digests/month:
 | Task | Calls/Month | Tokens/Call | Model | Cost |
 |------|-------------|-------------|-------|------|
 | Embeddings | 300,000 | 500 | text-embedding-004 | $0 (free) |
-| Summarize | 300,000 | 800 | gpt-4o-mini | ~$36 |
-| Cluster Summary | 3,000 | 2,000 | gpt-4o | ~$15 |
-| Cluster Topic | 3,000 | 200 | gpt-4o-mini | ~$0.50 |
-| Narrative | 30 | 10,000 | gpt-4o | ~$3 |
-| **Total** | | | | **~$55/month** |
+| Summarize | 300,000 | 800 | gpt-5-nano | ~$12 |
+| Cluster Summary | 3,000 | 2,000 | gpt-5 | ~$15 |
+| Cluster Topic | 3,000 | 200 | gpt-5-nano | ~$0.25 |
+| Narrative | 30 | 10,000 | gpt-5.2 | ~$3 |
+| **Total** | | | | **~$30/month** |
 
+Using gpt-5-nano instead of gpt-4o-mini saves ~$25/month on summarization.
 Using Google embeddings saves ~$3/month vs OpenAI embeddings.
 
 ---
