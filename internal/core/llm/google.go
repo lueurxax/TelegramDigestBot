@@ -17,7 +17,7 @@ import (
 
 // Google model constants.
 const (
-	ModelGeminiFlash = "gemini-2.0-flash"
+	ModelGeminiFlash = "gemini-1.5-flash-8b"
 	ModelGeminiPro   = "gemini-1.5-pro"
 
 	// Default model for Google.
