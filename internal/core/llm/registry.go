@@ -274,5 +274,35 @@ func (r *Registry) getCircuitBreaker(name ProviderName) *embeddings.CircuitBreak
 	return r.circuitBreakers[name]
 }
 
+// ProviderStatus holds status information for a provider.
+type ProviderStatus struct {
+	Name             ProviderName
+	Priority         int
+	Available        bool
+	CircuitBreakerOK bool
+}
+
+// GetProviderStatuses returns status information for all registered providers.
+func (r *Registry) GetProviderStatuses() []ProviderStatus {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	statuses := make([]ProviderStatus, 0, len(r.order))
+
+	for _, name := range r.order {
+		p := r.providers[name]
+		cb := r.circuitBreakers[name]
+
+		statuses = append(statuses, ProviderStatus{
+			Name:             name,
+			Priority:         p.Priority(),
+			Available:        p.IsAvailable(),
+			CircuitBreakerOK: cb.CanAttempt(),
+		})
+	}
+
+	return statuses
+}
+
 // Ensure Registry implements Client interface.
 var _ Client = (*Registry)(nil)

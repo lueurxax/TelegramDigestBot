@@ -103,12 +103,25 @@ func (c *openaiClient) IsAvailable() bool {
 
 // Priority returns the provider priority.
 func (c *openaiClient) Priority() int {
-	return PriorityPrimary
+	return PrioritySecondFallback
 }
 
 // SupportsImageGeneration returns true as OpenAI supports DALL-E.
 func (c *openaiClient) SupportsImageGeneration() bool {
 	return true
+}
+
+// GetProviderStatuses implements Client interface for backward compatibility.
+// Returns status of this single provider only.
+func (c *openaiClient) GetProviderStatuses() []ProviderStatus {
+	return []ProviderStatus{
+		{
+			Name:             c.Name(),
+			Priority:         c.Priority(),
+			Available:        c.IsAvailable(),
+			CircuitBreakerOK: c.checkCircuit() == nil,
+		},
+	}
 }
 
 // Ensure openaiClient implements Provider interface.

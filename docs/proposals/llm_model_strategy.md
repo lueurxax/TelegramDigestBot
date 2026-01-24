@@ -43,16 +43,16 @@ The strategy is designed to:
 
 | Provider | Models | Use Cases |
 |----------|--------|-----------|
-| **OpenAI** | gpt-5, gpt-5.2, gpt-5-nano, text-embedding-3-large | Primary LLM and embeddings |
+| **OpenAI** | gpt-5, gpt-5.2, gpt-5-nano, text-embedding-3-large | Fallback LLM, primary embeddings |
 | **Cohere** | command-r, command-r-plus, embed-multilingual-v3.0 | Embedding fallback (multilingual) |
 | **Anthropic** | claude-3-5-sonnet, claude-3-5-haiku | Narrative, complex reasoning |
-| **Google** | gemini-2.0-flash, gemini-1.5-pro | Fallback LLM |
+| **Google** | gemini-2.5-flash-lite, gemini-embedding-001 | Primary LLM, embedding fallback |
 
 ### Provider Priority (Default)
 
 ```
-LLM: OpenAI → Anthropic → Google
-Embeddings: OpenAI → Cohere
+LLM: Google → Anthropic → OpenAI
+Embeddings: OpenAI → Cohere → Google
 ```
 
 ---
@@ -83,7 +83,7 @@ Embeddings are the highest-volume API calls:
 | text-embedding-3-large | OpenAI | $0.13 | Best quality, 3072 dimensions |
 | text-embedding-3-small | OpenAI | $0.02 | Good quality/price ratio |
 | embed-multilingual-v3.0 | Cohere | $0.10 | Excellent multilingual support |
-| text-embedding-004 | Google | $0.00 (free tier) | 1500 req/min free |
+| gemini-embedding-001 | Google | $0.00 (free tier) | 3072 dimensions, 1500 req/min free |
 
 ### Recommended Configuration
 
@@ -119,7 +119,7 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 | Priority | Model | Provider | Cost (1M tokens) |
 |----------|-------|----------|------------------|
 | Default | `gpt-5-nano` | OpenAI | $0.05 in / $0.40 out |
-| Fallback 1 | `gemini-2.0-flash` | Google | $0.075 in / $0.30 out |
+| Fallback 1 | `gemini-2.5-flash-lite` | Google | $0.075 in / $0.30 out |
 | Fallback 2 | `llama3.2:8b` | Ollama | Free (local) |
 
 ---
@@ -140,7 +140,7 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 |----------|-------|----------|------------------|
 | Default | `gpt-5` | OpenAI | $2.50 in / $10 out |
 | Fallback 1 | `claude-3-5-sonnet-20241022` | Anthropic | $3.00 in / $15 out |
-| Fallback 2 | `gemini-1.5-pro` | Google | $1.25 in / $5.00 out |
+| Fallback 2 | `gemini-2.5-flash-lite` | Google | $0.075 in / $0.30 out |
 
 ---
 
@@ -156,11 +156,11 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 
 **Model mapping:**
 
-| Priority | Model | Provider | Cost (1M tokens) |
-|----------|-------|----------|------------------|
-| Default | `gpt-5-nano` | OpenAI | $0.05 in / $0.40 out |
-| Fallback 1 | `gemini-2.0-flash` | Google | $0.075 in / $0.30 out |
-| Fallback 2 | `mistral:7b` | Ollama | Free (local) |
+| Priority | Model | Provider | Cost (1M tokens)      |
+|----------|-------|----------|-----------------------|
+| Default | `gpt-5-nano` | OpenAI   | $0.05 in / $0.40 out  |
+| Fallback 1 | `gemini-2.5-flash-lite` | Google   | $0.075 in / $0.30 out |
+| Fallback 2 | `mistral-7b-instruct` | OpenRouter     | $0.20 in /$0.20  out  |
 
 ---
 
@@ -180,7 +180,7 @@ EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 |----------|-------|----------|------------------|
 | Default | `gpt-5.2` | OpenAI | $2.50 in / $10 out |
 | Fallback 1 | `claude-3-5-sonnet-20241022` | Anthropic | $3.00 in / $15 out |
-| Fallback 2 | `gemini-1.5-pro` | Google | $1.25 in / $5.00 out |
+| Fallback 2 | `gemini-2.5-flash-lite` | Google | $0.075 in / $0.30 out |
 
 ---
 
@@ -198,7 +198,7 @@ bot override → environment override → default → fallback chain
 ```
 /llm set summarize gpt-4o
 /llm set narrative claude-3-5-sonnet-20241022
-/llm set embeddings text-embedding-004
+/llm set embeddings gemini-embedding-001
 ```
 
 **Reset overrides:**
@@ -215,7 +215,7 @@ bot override → environment override → default → fallback chain
 **Example output:**
 ```
 LLM Configuration:
-  embeddings: text-embedding-004 (google) [override]
+  embeddings: gemini-embedding-001 (google) [override]
   summarize: gpt-4o-mini (openai) [default]
   cluster_summary: gpt-4o (openai) [default]
   cluster_topic: gpt-4o-mini (openai) [default]
@@ -236,7 +236,7 @@ Overrides stored in `settings` table:
 
 ```sql
 INSERT INTO settings (key, value) VALUES
-  ('llm_override_embeddings', 'text-embedding-004'),
+  ('llm_override_embeddings', 'gemini-embedding-001'),
   ('llm_override_summarize', NULL),  -- NULL = use default
   ('llm_override_narrative', 'claude-3-5-sonnet-20241022');
 ```

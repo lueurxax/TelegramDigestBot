@@ -19,9 +19,9 @@ const (
 
 // Priority constants for provider ordering.
 const (
-	PriorityPrimary        = 100 // Primary provider (OpenAI)
+	PriorityPrimary        = 100 // Primary provider (Google)
 	PriorityFallback       = 50  // First fallback (Anthropic)
-	PrioritySecondFallback = 25  // Second fallback (Google)
+	PrioritySecondFallback = 25  // Second fallback (OpenAI)
 	PriorityMock           = 0   // Mock provider for testing
 )
 

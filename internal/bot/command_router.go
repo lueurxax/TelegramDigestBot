@@ -47,6 +47,7 @@ func (b *Bot) registerCoreCommands(r *commandRegistry) {
 	r.handlers["ai"] = b.handleAINamespace
 	r.handlers["system"] = b.handleSystemNamespace
 	r.handlers["discover"] = b.handleDiscoverNamespace
+	r.handlers[CmdLLM] = b.handleLLMNamespace
 }
 
 func (b *Bot) registerSettingCommands(r *commandRegistry) {

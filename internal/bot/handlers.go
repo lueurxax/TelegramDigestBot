@@ -4372,3 +4372,80 @@ func (b *Bot) handleDiscoverCallback(ctx context.Context, query *tgbotapi.Callba
 		b.logger.Error().Err(err).Msg("failed to send callback response")
 	}
 }
+
+// handleLLMNamespace handles /llm commands.
+func (b *Bot) handleLLMNamespace(_ context.Context, msg *tgbotapi.Message) {
+	args := strings.Fields(msg.CommandArguments())
+	if len(args) == 0 {
+		b.handleLLMStatus(msg)
+
+		return
+	}
+
+	subCmd := strings.ToLower(args[0])
+
+	switch subCmd {
+	case CmdStatus:
+		b.handleLLMStatus(msg)
+	case subCmdHelp:
+		b.reply(msg, llmHelpMessage())
+	default:
+		b.reply(msg, llmHelpMessage())
+	}
+}
+
+// handleLLMStatus displays LLM provider status.
+func (b *Bot) handleLLMStatus(msg *tgbotapi.Message) {
+	statuses := b.llmClient.GetProviderStatuses()
+
+	var sb strings.Builder
+
+	sb.WriteString("🤖 <b>LLM Provider Status</b>\n\n")
+
+	if len(statuses) == 0 {
+		sb.WriteString("No providers configured.\n")
+		b.reply(msg, sb.String())
+
+		return
+	}
+
+	for i, s := range statuses {
+		var statusIcon string
+		if s.Available && s.CircuitBreakerOK {
+			statusIcon = "✅"
+		} else if s.Available && !s.CircuitBreakerOK {
+			statusIcon = "⚠️"
+		} else {
+			statusIcon = "❌"
+		}
+
+		priority := ""
+		if i == 0 {
+			priority = " (primary)"
+		}
+
+		sb.WriteString(fmt.Sprintf("%s <code>%s</code>%s\n", statusIcon, s.Name, priority))
+
+		if !s.Available {
+			sb.WriteString("   <i>not configured</i>\n")
+		} else if !s.CircuitBreakerOK {
+			sb.WriteString("   <i>circuit breaker open</i>\n")
+		}
+	}
+
+	sb.WriteString("\n<b>Legend:</b>\n")
+	sb.WriteString("✅ healthy | ⚠️ circuit open | ❌ unavailable")
+
+	b.reply(msg, sb.String())
+}
+
+func llmHelpMessage() string {
+	return `🤖 <b>LLM Commands</b>
+
+<b>Status:</b>
+• <code>/llm</code> - Show provider status
+• <code>/llm status</code> - Show provider status
+
+<b>Current Priority:</b>
+Google → Anthropic → OpenAI`
+}

@@ -52,6 +52,7 @@ type Client interface {
 	RelevanceGate(ctx context.Context, text string, model string, prompt string) (RelevanceGateResult, error)
 	CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error)
 	GenerateDigestCover(ctx context.Context, topics []string, narrative string) ([]byte, error)
+	GetProviderStatuses() []ProviderStatus
 }
 
 type RelevanceGateResult struct {

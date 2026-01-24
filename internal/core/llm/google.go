@@ -112,7 +112,7 @@ func (p *googleProvider) IsAvailable() bool {
 
 // Priority returns the provider priority.
 func (p *googleProvider) Priority() int {
-	return PrioritySecondFallback
+	return PriorityPrimary
 }
 
 // SupportsImageGeneration returns false as Google Gemini doesn't support image generation in this context.

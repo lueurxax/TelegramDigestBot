@@ -90,6 +90,7 @@ const (
 	CmdInlineImagesAlt    = "inlineimages"
 	CmdOthersNarrative    = "others_narrative"
 	CmdOthersNarrativeAlt = "othersnarrative"
+	CmdLLM                = "llm"
 )
 
 // Setting keys.
