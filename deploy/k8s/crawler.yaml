@@ -87,7 +87,7 @@ spec:
           value: "TelegramDigestBot/1.0 (+https://github.com/lueurxax/telegram-digest-bot)"
         - name: CRAWL_SEEDS_FILE
           value: "/config/seeds.txt"
-        - name: HEALTH_PORT
+        - name: CRAWL_HEALTH_PORT
           value: "8080"
         - name: LOG_LEVEL
           value: "info"

@@ -95,9 +95,9 @@ func (p *SolrProvider) SearchWithLanguage(ctx context.Context, query, language s
 	return p.filterResultsByLanguage(results, language), nil
 }
 
-// buildSearchOptions constructs Solr search options with language-specific boosting.
+// buildSearchOptions constructs Solr search options with language filtering and boosting.
 func (p *SolrProvider) buildSearchOptions(_, language string, maxResults int) []solr.SearchOption {
-	const optsCapacity = 5
+	const optsCapacity = 6
 
 	opts := make([]solr.SearchOption, 0, optsCapacity)
 	opts = append(opts,
@@ -108,11 +108,39 @@ func (p *SolrProvider) buildSearchOptions(_, language string, maxResults int) []
 		solr.WithSort("score desc, published_at desc"),
 	)
 
+	// Add language filter at Solr level if language is specified and not "unknown"
+	// This is more efficient than post-filtering in Go and ensures correct results
+	normalizedLang := normalizeLanguageCode(language)
+	if normalizedLang != "" && normalizedLang != langUnknown {
+		// Filter by language OR include documents with unknown language as fallback
+		opts = append(opts, solr.WithFilterQuery("language:("+normalizedLang+" OR unknown)"))
+	}
+
 	// Use edismax with language-specific field boosting
 	qf := p.buildQueryFields(language)
 	opts = append(opts, solr.WithEdismax(qf))
 
 	return opts
+}
+
+// normalizeLanguageCode normalizes language names to ISO codes.
+func normalizeLanguageCode(language string) string {
+	switch strings.ToLower(language) {
+	case langEnglish, langNameEnglish:
+		return langEnglish
+	case langRussian, langNameRussian:
+		return langRussian
+	case langGreek, langNameGreek:
+		return langGreek
+	case langGerman, langNameGerman:
+		return langGerman
+	case langFrench, langNameFrench:
+		return langFrench
+	case langUnknown, "":
+		return langUnknown
+	default:
+		return strings.ToLower(language)
+	}
 }
 
 // buildQueryFields returns query fields with language-specific boosting.
@@ -122,15 +150,15 @@ func (p *SolrProvider) buildQueryFields(language string) string {
 
 	// Add language-specific field boosting if language is specified
 	switch strings.ToLower(language) {
-	case "en", "english":
+	case langEnglish, langNameEnglish:
 		qf = "title_en^4 content_en^1.5 title^3 content^1 description^2"
-	case "ru", "russian":
+	case langRussian, langNameRussian:
 		qf = "title_ru^4 content_ru^1.5 title^3 content^1 description^2"
-	case "el", "greek":
+	case langGreek, langNameGreek:
 		qf = "title_el^4 content_el^1.5 title^3 content^1 description^2"
-	case "de", "german":
+	case langGerman, langNameGerman:
 		qf = "title_de^4 content_de^1.5 title^3 content^1 description^2"
-	case "fr", "french":
+	case langFrench, langNameFrench:
 		qf = "title_fr^4 content_fr^1.5 title^3 content^1 description^2"
 	}
 

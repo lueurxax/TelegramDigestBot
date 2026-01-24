@@ -23,7 +23,7 @@ type Config struct {
 	SeedsFile         string        `env:"CRAWL_SEEDS_FILE" envDefault:"/config/seeds.txt"`
 
 	// Health server
-	HealthPort int `env:"HEALTH_PORT" envDefault:"8080"`
+	HealthPort int `env:"CRAWL_HEALTH_PORT" envDefault:"8080"`
 
 	// Logging
 	LogLevel string `env:"LOG_LEVEL" envDefault:"info"`

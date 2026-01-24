@@ -169,6 +169,8 @@ data:
       <dynamicField name="*_en" type="text_en" indexed="true" stored="false"/>
       <dynamicField name="*_ru" type="text_ru" indexed="true" stored="false"/>
       <dynamicField name="*_el" type="text_el" indexed="true" stored="false"/>
+      <dynamicField name="*_de" type="text_de" indexed="true" stored="false"/>
+      <dynamicField name="*_fr" type="text_fr" indexed="true" stored="false"/>
 
       <!-- Field types -->
       <fieldType name="string" class="solr.StrField" sortMissingLast="true"/>
@@ -212,6 +214,28 @@ data:
           <filter class="solr.LowerCaseFilterFactory"/>
           <filter class="solr.StopFilterFactory" words="lang/stopwords_el.txt" ignoreCase="true"/>
           <filter class="solr.GreekStemFilterFactory"/>
+        </analyzer>
+      </fieldType>
+
+      <!-- German text with stopwords and stemming -->
+      <fieldType name="text_de" class="solr.TextField" positionIncrementGap="100">
+        <analyzer>
+          <tokenizer class="solr.StandardTokenizerFactory"/>
+          <filter class="solr.LowerCaseFilterFactory"/>
+          <filter class="solr.StopFilterFactory" words="lang/stopwords_de.txt" ignoreCase="true"/>
+          <filter class="solr.GermanNormalizationFilterFactory"/>
+          <filter class="solr.GermanLightStemFilterFactory"/>
+        </analyzer>
+      </fieldType>
+
+      <!-- French text with stopwords and stemming -->
+      <fieldType name="text_fr" class="solr.TextField" positionIncrementGap="100">
+        <analyzer>
+          <tokenizer class="solr.StandardTokenizerFactory"/>
+          <filter class="solr.ElisionFilterFactory" articles="lang/contractions_fr.txt"/>
+          <filter class="solr.LowerCaseFilterFactory"/>
+          <filter class="solr.StopFilterFactory" words="lang/stopwords_fr.txt" ignoreCase="true"/>
+          <filter class="solr.FrenchLightStemFilterFactory"/>
         </analyzer>
       </fieldType>
     </schema>
@@ -365,6 +389,38 @@ spec:
 
           # Greek stopwords (not in default Solr, fetch from Lucene)
           curl -sL "https://raw.githubusercontent.com/apache/lucene/main/lucene/analysis/common/src/resources/org/apache/lucene/analysis/el/stopwords.txt" > /tmp/newsconf/lang/stopwords_el.txt
+
+          # German stopwords
+          if [ -f /opt/solr/server/solr/configsets/_default/conf/lang/stopwords_de.txt ]; then
+            cp /opt/solr/server/solr/configsets/_default/conf/lang/stopwords_de.txt /tmp/newsconf/lang/
+          else
+            curl -sL "https://raw.githubusercontent.com/apache/lucene/main/lucene/analysis/common/src/resources/org/apache/lucene/analysis/de/stopwords.txt" > /tmp/newsconf/lang/stopwords_de.txt
+          fi
+
+          # French stopwords
+          if [ -f /opt/solr/server/solr/configsets/_default/conf/lang/stopwords_fr.txt ]; then
+            cp /opt/solr/server/solr/configsets/_default/conf/lang/stopwords_fr.txt /tmp/newsconf/lang/
+          else
+            curl -sL "https://raw.githubusercontent.com/apache/lucene/main/lucene/analysis/common/src/resources/org/apache/lucene/analysis/fr/stopwords.txt" > /tmp/newsconf/lang/stopwords_fr.txt
+          fi
+
+          # French contractions for ElisionFilter (l', d', etc.)
+          cat > /tmp/newsconf/lang/contractions_fr.txt << 'CONTRACTIONS'
+# French contractions for ElisionFilter
+l
+m
+t
+qu
+n
+s
+j
+d
+c
+jusqu
+quoiqu
+lorsqu
+puisqu
+CONTRACTIONS
 
           # Wait a bit for ZK to be fully ready
           sleep 5

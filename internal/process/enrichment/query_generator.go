@@ -21,7 +21,16 @@ const (
 	langRussian   = "ru"
 	langUkrainian = "uk"
 	langGreek     = "el"
+	langGerman    = "de"
+	langFrench    = "fr"
 	langUnknown   = "unknown"
+
+	// Language names (full)
+	langNameEnglish = "english"
+	langNameRussian = "russian"
+	langNameGreek   = "greek"
+	langNameGerman  = "german"
+	langNameFrench  = "french"
 
 	// Language detection thresholds
 	cyrillicThreshold = 0.3 // If >30% Cyrillic, consider Russian

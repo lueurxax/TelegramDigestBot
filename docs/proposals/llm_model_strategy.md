@@ -70,34 +70,35 @@ Embeddings are the highest-volume API calls:
 
 ### Embedding Model Mapping
 
-| Task | Default Model | Fallback 1 | Fallback 2 | Dimensions |
-|------|---------------|------------|------------|------------|
-| Message dedup | `text-embedding-3-small` | `text-embedding-004` | `nomic-embed-text` | 1536 / 768 / 768 |
-| Clustering | `text-embedding-3-small` | `text-embedding-004` | `nomic-embed-text` | 1536 / 768 / 768 |
-| Semantic search | `text-embedding-3-small` | `text-embedding-004` | `nomic-embed-text` | 1536 / 768 / 768 |
+| Task | Default Model | Fallback | Dimensions |
+|------|---------------|----------|------------|
+| Message dedup | `text-embedding-3-large` | `embed-multilingual-v3.0` | 3072 / 1024 |
+| Clustering | `text-embedding-3-large` | `embed-multilingual-v3.0` | 3072 / 1024 |
+| Semantic search | `text-embedding-3-large` | `embed-multilingual-v3.0` | 3072 / 1024 |
 
 ### Cost Comparison (per 1M tokens)
 
 | Model | Provider | Price | Notes |
 |-------|----------|-------|-------|
-| text-embedding-3-small | OpenAI | $0.02 | Best quality/price |
-| text-embedding-3-large | OpenAI | $0.13 | Higher quality |
+| text-embedding-3-large | OpenAI | $0.13 | Best quality, 3072 dimensions |
+| text-embedding-3-small | OpenAI | $0.02 | Good quality/price ratio |
+| embed-multilingual-v3.0 | Cohere | $0.10 | Excellent multilingual support |
 | text-embedding-004 | Google | $0.00 (free tier) | 1500 req/min free |
-| embed-v3 | Cohere | $0.10 | Good multilingual |
-| nomic-embed-text | Ollama | $0.00 | Local, unlimited |
 
 ### Recommended Configuration
 
-For cost optimization with redundancy:
+For quality-first with multilingual fallback:
 
 ```yaml
-EMBEDDING_PROVIDER_ORDER: "google,openai,ollama"
-EMBEDDING_DEFAULT_MODEL: "text-embedding-004"
-EMBEDDING_FALLBACK_MODEL: "text-embedding-3-small"
-EMBEDDING_LOCAL_MODEL: "nomic-embed-text"
+EMBEDDING_PROVIDER_ORDER: "openai,cohere"
+EMBEDDING_DEFAULT_MODEL: "text-embedding-3-large"
+EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
 ```
 
-This uses Google's free tier first, falls back to OpenAI, then local Ollama.
+**Rationale:**
+- `text-embedding-3-large` provides highest quality embeddings (3072 dimensions)
+- `embed-multilingual-v3.0` is excellent fallback with strong multilingual support (100+ languages)
+- Both models handle Russian, Greek, and other non-English content well
 
 ---
 

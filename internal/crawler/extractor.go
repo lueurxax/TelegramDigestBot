@@ -17,14 +17,14 @@ import (
 )
 
 const (
-	extractionTimeout   = 30 * time.Second
-	maxContentLength    = 10 * 1024 * 1024 // 10MB
-	maxExtractedLength  = 100000           // 100KB of text
-	maxExcerptLength    = 500
-	hrefPrefixLen       = 6   // len(`href="`)
-	contentAttrLen      = 9   // len(`content="`)
-	metaLookbackWindow  = 200 // bytes to search backwards for content attr
-	extractorHeaderCT   = "Content-Type"
+	extractionTimeout  = 30 * time.Second
+	maxContentLength   = 10 * 1024 * 1024 // 10MB
+	maxExtractedLength = 100000           // 100KB of text
+	maxExcerptLength   = 500
+	hrefPrefixLen      = 6   // len(`href="`)
+	contentAttrLen     = 9   // len(`content="`)
+	metaLookbackWindow = 200 // bytes to search backwards for content attr
+	extractorHeaderCT  = "Content-Type"
 )
 
 // Extractor errors.
@@ -131,53 +131,187 @@ func (e *Extractor) fetchPage(ctx context.Context, rawURL string) ([]byte, error
 }
 
 // buildResult builds an ExtractionResult from a readability article.
-// Uses fallback chain: OG meta tags -> Readability for better metadata extraction.
+// Uses fallback chain: JSON-LD -> OG meta tags -> Readability for better metadata extraction.
 func (e *Extractor) buildResult(article readability.Article, parsed *url.URL, body []byte) *ExtractionResult {
 	html := string(body)
 
-	// Extract links from the page
-	extractedLinks := extractLinks(html, parsed)
+	// Extract JSON-LD structured data (most reliable source)
+	jsonLD := extractJSONLD(html)
 
-	// Extract OG meta tags for better metadata (fallback enhancement)
+	// Extract OG meta tags for better metadata (fallback)
 	ogTitle := extractMetaContent(html, "og:title")
 	ogDescription := extractMetaContent(html, "og:description")
 	ogLocale := extractMetaContent(html, "og:locale")
 	articlePublished := extractMetaContent(html, "article:published_time")
 
-	// Build result with fallback chain: OG -> Readability
+	// Build result with fallback chain: JSON-LD -> OG -> Readability
 	result := &ExtractionResult{
-		Title:       coalesce(ogTitle, article.Title),
+		Title:       coalesce(jsonLD.Headline, ogTitle, article.Title),
 		Content:     truncateContent(article.TextContent, maxExtractedLength),
-		Description: truncateContent(coalesce(ogDescription, article.Excerpt), maxExcerptLength),
-		Author:      article.Byline,
+		Description: truncateContent(coalesce(jsonLD.Description, ogDescription, article.Excerpt), maxExcerptLength),
+		Author:      coalesce(jsonLD.Author, article.Byline),
 		Domain:      parsed.Host,
-		Links:       extractedLinks,
+		Links:       extractLinks(html, parsed),
 	}
 
-	// Parse published date: article:published_time -> readability
-	if articlePublished != "" {
-		if t, err := time.Parse(time.RFC3339, articlePublished); err == nil {
-			result.PublishedAt = t
-		}
-	}
-
-	if result.PublishedAt.IsZero() && article.PublishedTime != nil {
-		result.PublishedAt = *article.PublishedTime
-	}
-
-	// Detect language: og:locale -> content detection
-	if ogLocale != "" && len(ogLocale) >= 2 {
-		result.Language = strings.ToLower(ogLocale[:2])
-	} else {
-		textForLang := article.Title + " " + article.TextContent
-		if len(textForLang) > 1000 {
-			textForLang = textForLang[:1000]
-		}
-
-		result.Language = links.DetectLanguage(textForLang)
-	}
+	result.PublishedAt = parsePublishedDate(jsonLD.DatePublished, articlePublished, article.PublishedTime)
+	result.Language = detectLanguage(jsonLD.Language, ogLocale, article.Title, article.TextContent)
 
 	return result
+}
+
+// parsePublishedDate extracts published date using fallback chain: JSON-LD -> meta tag -> readability.
+func parsePublishedDate(jsonLDDate, metaDate string, readabilityTime *time.Time) time.Time {
+	if jsonLDDate != "" {
+		if t, err := time.Parse(time.RFC3339, jsonLDDate); err == nil {
+			return t
+		}
+	}
+
+	if metaDate != "" {
+		if t, err := time.Parse(time.RFC3339, metaDate); err == nil {
+			return t
+		}
+	}
+
+	if readabilityTime != nil {
+		return *readabilityTime
+	}
+
+	return time.Time{}
+}
+
+// detectLanguage detects language using fallback chain: JSON-LD -> og:locale -> content detection.
+func detectLanguage(jsonLDLang, ogLocale, title, content string) string {
+	const minLangCodeLen = 2
+
+	if jsonLDLang != "" && len(jsonLDLang) >= minLangCodeLen {
+		return strings.ToLower(jsonLDLang[:minLangCodeLen])
+	}
+
+	if ogLocale != "" && len(ogLocale) >= minLangCodeLen {
+		return strings.ToLower(ogLocale[:minLangCodeLen])
+	}
+
+	const maxLangDetectionLen = 1000
+
+	textForLang := title + " " + content
+	if len(textForLang) > maxLangDetectionLen {
+		textForLang = textForLang[:maxLangDetectionLen]
+	}
+
+	return links.DetectLanguage(textForLang)
+}
+
+// jsonLDData holds extracted JSON-LD structured data.
+type jsonLDData struct {
+	Headline      string
+	Description   string
+	Author        string
+	DatePublished string
+	Language      string
+}
+
+// extractJSONLD extracts structured data from JSON-LD script tags.
+func extractJSONLD(html string) jsonLDData {
+	var data jsonLDData
+
+	// Find JSON-LD script tag
+	const (
+		scriptStart = `<script type="application/ld+json">`
+		scriptEnd   = `</script>`
+	)
+
+	idx := strings.Index(html, scriptStart)
+	if idx == -1 {
+		return data
+	}
+
+	start := idx + len(scriptStart)
+	end := strings.Index(html[start:], scriptEnd)
+
+	if end == -1 {
+		return data
+	}
+
+	jsonStr := strings.TrimSpace(html[start : start+end])
+
+	// Extract fields using simple string matching (avoids full JSON parsing)
+	data.Headline = extractJSONField(jsonStr, "headline")
+	data.Description = extractJSONField(jsonStr, "description")
+	data.DatePublished = extractJSONField(jsonStr, "datePublished")
+	data.Language = extractJSONField(jsonStr, "inLanguage")
+
+	// Author can be a string or object
+	author := extractJSONField(jsonStr, "author")
+	if author == "" {
+		// Try nested author.name
+		authorIdx := strings.Index(jsonStr, `"author"`)
+		if authorIdx != -1 {
+			nameIdx := strings.Index(jsonStr[authorIdx:], `"name"`)
+			if nameIdx != -1 && nameIdx < 200 {
+				data.Author = extractJSONField(jsonStr[authorIdx:], "name")
+			}
+		}
+	} else {
+		data.Author = author
+	}
+
+	return data
+}
+
+// extractJSONField extracts a simple string field from JSON.
+func extractJSONField(json, field string) string {
+	pattern := `"` + field + `"`
+	idx := strings.Index(json, pattern)
+
+	if idx == -1 {
+		return ""
+	}
+
+	// Skip past field name, colon, and whitespace to find opening quote
+	start := skipJSONFieldPrefix(json, idx+len(pattern))
+	if start == -1 {
+		return ""
+	}
+
+	// Find closing quote
+	end := findJSONStringEnd(json, start)
+	if end == -1 {
+		return ""
+	}
+
+	return json[start:end]
+}
+
+// skipJSONFieldPrefix skips colon and whitespace after a field name, returning position after opening quote.
+func skipJSONFieldPrefix(json string, start int) int {
+	for start < len(json) && (json[start] == ':' || json[start] == ' ' || json[start] == '\t' || json[start] == '\n') {
+		start++
+	}
+
+	if start >= len(json) || json[start] != '"' {
+		return -1
+	}
+
+	return start + 1 // Position after opening quote
+}
+
+// findJSONStringEnd finds the closing quote of a JSON string, handling escapes.
+func findJSONStringEnd(json string, start int) int {
+	for i := start; i < len(json); i++ {
+		if json[i] == '\\' && i+1 < len(json) {
+			i++ // Skip escaped character
+
+			continue
+		}
+
+		if json[i] == '"' {
+			return i
+		}
+	}
+
+	return -1
 }
 
 // extractMetaContent extracts content from a meta tag by property or name.
