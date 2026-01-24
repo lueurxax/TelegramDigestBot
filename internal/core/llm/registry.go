@@ -202,23 +202,33 @@ func (r *Registry) GenerateDigestCover(ctx context.Context, topics []string, nar
 }
 
 // getProviderChainForTask returns the provider/model chain for a task.
+// It returns task-specific providers first, then falls back to all registered providers.
 func (r *Registry) getProviderChainForTask(taskType TaskType) []ProviderModel {
 	r.mu.RLock()
 	taskChain, hasConfig := r.taskConfig[taskType]
+	order := r.order
 	r.mu.RUnlock()
 
+	var providerModels []ProviderModel
+
+	// Add task-specific providers first
 	if hasConfig {
-		return taskChain.GetProviderChain()
+		providerModels = taskChain.GetProviderChain()
 	}
 
-	// Fallback to global order if no task config
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	// Track which providers are already in the chain
+	seen := make(map[ProviderName]bool)
 
-	providerModels := make([]ProviderModel, 0, len(r.order))
+	for _, pm := range providerModels {
+		seen[pm.Provider] = true
+	}
 
-	for _, name := range r.order {
-		providerModels = append(providerModels, ProviderModel{Provider: name, Model: ""})
+	// Add remaining registered providers as fallbacks
+	for _, name := range order {
+		if !seen[name] {
+			providerModels = append(providerModels, ProviderModel{Provider: name, Model: ""})
+			seen[name] = true
+		}
 	}
 
 	return providerModels

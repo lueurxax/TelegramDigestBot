@@ -99,9 +99,9 @@ func DefaultTaskConfig() map[TaskType]TaskProviderChain {
 			},
 		},
 
-		// ImageGen: OpenAI only (DALL-E)
+		// ImageGen: OpenAI only
 		TaskTypeImageGen: {
-			Default:   ProviderModel{Provider: ProviderOpenAI, Model: "dall-e-3"},
+			Default:   ProviderModel{Provider: ProviderOpenAI, Model: "gpt-image-1.5"},
 			Fallbacks: []ProviderModel{},
 		},
 	}
