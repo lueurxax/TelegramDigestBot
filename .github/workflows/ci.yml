@@ -106,12 +106,35 @@ jobs:
             type=sha,prefix=
             type=raw,value=latest
 
-      - name: Build and push
+      - name: Build and push main image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract crawler metadata
+        id: crawler-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/crawler
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Build and push crawler image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.crawler
+          push: true
+          tags: ${{ steps.crawler-meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -139,21 +162,26 @@ jobs:
         env:
           NAMESPACE: digest
           IMAGE_NAME: ghcr.io/lueurxax/telegramdigestbot
+          CRAWLER_IMAGE_NAME: ghcr.io/lueurxax/telegram-digest-bot/crawler
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           IMAGE="${IMAGE_NAME}:${SHORT_SHA}"
+          CRAWLER_IMAGE="${CRAWLER_IMAGE_NAME}:${SHORT_SHA}"
 
           kubectl -n "${NAMESPACE}" set image deployment/digest-bot bot="${IMAGE}"
           kubectl -n "${NAMESPACE}" set image deployment/digest-reader reader="${IMAGE}"
           kubectl -n "${NAMESPACE}" set image deployment/digest-worker worker="${IMAGE}"
           kubectl -n "${NAMESPACE}" set image deployment/digest-scheduler scheduler="${IMAGE}"
+          kubectl -n "${NAMESPACE}" set image deployment/news-crawler crawler="${CRAWLER_IMAGE}" || true
 
           kubectl -n "${NAMESPACE}" annotate deployment/digest-bot deploy-sha="${SHORT_SHA}" --overwrite
           kubectl -n "${NAMESPACE}" annotate deployment/digest-reader deploy-sha="${SHORT_SHA}" --overwrite
           kubectl -n "${NAMESPACE}" annotate deployment/digest-worker deploy-sha="${SHORT_SHA}" --overwrite
           kubectl -n "${NAMESPACE}" annotate deployment/digest-scheduler deploy-sha="${SHORT_SHA}" --overwrite
+          kubectl -n "${NAMESPACE}" annotate deployment/news-crawler deploy-sha="${SHORT_SHA}" --overwrite || true
 
           kubectl -n "${NAMESPACE}" rollout status deployment/digest-bot
           kubectl -n "${NAMESPACE}" rollout status deployment/digest-reader
           kubectl -n "${NAMESPACE}" rollout status deployment/digest-worker
           kubectl -n "${NAMESPACE}" rollout status deployment/digest-scheduler
+          kubectl -n "${NAMESPACE}" rollout status deployment/news-crawler || true
