@@ -17,12 +17,14 @@ import (
 )
 
 const (
-	extractionTimeout  = 30 * time.Second
-	maxContentLength   = 10 * 1024 * 1024 // 10MB
-	maxExtractedLength = 100000           // 100KB of text
-	maxExcerptLength   = 500
-	hrefPrefixLen      = 6 // len(`href="`)
-	extractorHeaderCT  = "Content-Type"
+	extractionTimeout   = 30 * time.Second
+	maxContentLength    = 10 * 1024 * 1024 // 10MB
+	maxExtractedLength  = 100000           // 100KB of text
+	maxExcerptLength    = 500
+	hrefPrefixLen       = 6   // len(`href="`)
+	contentAttrLen      = 9   // len(`content="`)
+	metaLookbackWindow  = 200 // bytes to search backwards for content attr
+	extractorHeaderCT   = "Content-Type"
 )
 
 // Extractor errors.
@@ -215,7 +217,7 @@ func extractMetaContent(html, property string) string {
 
 	if idx != -1 {
 		// Look backwards for content="
-		searchStart := idx - 200
+		searchStart := idx - metaLookbackWindow
 		if searchStart < 0 {
 			searchStart = 0
 		}
@@ -224,7 +226,7 @@ func extractMetaContent(html, property string) string {
 		contentIdx := strings.LastIndex(segment, `content="`)
 
 		if contentIdx != -1 {
-			start := searchStart + contentIdx + 9
+			start := searchStart + contentIdx + contentAttrLen
 			end := strings.Index(html[start:], `"`)
 
 			if end != -1 {
