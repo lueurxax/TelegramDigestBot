@@ -119,7 +119,7 @@ func (c *Crawler) enqueueURL(ctx context.Context, rawURL string, depth int) erro
 		SetField("domain", parsed.Host).
 		SetField("crawl_status", solr.CrawlStatusPending).
 		SetField("crawl_depth", depth).
-		SetField("crawled_at", time.Now())
+		SetField("crawled_at", time.Now().UTC().Format(time.RFC3339))
 
 	if err := c.client.Index(ctx, doc); err != nil {
 		return fmt.Errorf("index document: %w", err)

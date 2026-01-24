@@ -1842,7 +1842,7 @@ func (r *Reader) startAsyncSolrIndexing(ctx context.Context, hpc *historyProcess
 func (r *Reader) indexToSolr(ctx context.Context, ch db.Channel, msg *tg.Message) error {
 	docID := solr.TelegramDocID(ch.TGPeerID, int64(msg.ID))
 	displayURL := solr.TelegramDisplayURL(ch.Username, ch.TGPeerID, int64(msg.ID))
-	msgTime := time.Unix(int64(msg.Date), 0)
+	msgTime := time.Unix(int64(msg.Date), 0).UTC().Format(time.RFC3339)
 
 	doc := solr.NewIndexDocument(docID).
 		SetField("source", solr.SourceTelegram).
@@ -1857,7 +1857,7 @@ func (r *Reader) indexToSolr(ctx context.Context, ch db.Channel, msg *tg.Message
 		SetField("tg_views", msg.Views).
 		SetField("tg_forwards", msg.Forwards).
 		SetField("published_at", msgTime).
-		SetField("crawled_at", time.Now()).
+		SetField("crawled_at", time.Now().UTC().Format(time.RFC3339)).
 		SetField("crawl_status", solr.CrawlStatusDone) // Telegram messages are immediately available
 
 	if err := r.solrClient.Index(ctx, doc); err != nil {

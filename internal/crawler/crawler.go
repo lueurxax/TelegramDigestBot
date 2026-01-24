@@ -264,11 +264,12 @@ func (c *Crawler) updateWithContent(ctx context.Context, docID string, result *E
 		"language":     result.Language,
 		"domain":       result.Domain,
 		"crawl_status": solr.CrawlStatusDone,
-		"crawled_at":   time.Now(),
+		"crawled_at":   time.Now().UTC().Format(time.RFC3339),
 	}
 
 	if !result.PublishedAt.IsZero() {
-		fields["published_at"] = result.PublishedAt
+		// Convert to UTC and format for Solr compatibility
+		fields["published_at"] = result.PublishedAt.UTC().Format(time.RFC3339)
 	}
 
 	// Add language-specific fields
@@ -306,7 +307,7 @@ func (c *Crawler) markError(ctx context.Context, docID, errMsg string) {
 	fields := map[string]interface{}{
 		"crawl_status": solr.CrawlStatusError,
 		"crawl_error":  errMsg,
-		"crawled_at":   time.Now(),
+		"crawled_at":   time.Now().UTC().Format(time.RFC3339),
 	}
 
 	if err := c.client.AtomicUpdate(ctx, docID, fields); err != nil {
