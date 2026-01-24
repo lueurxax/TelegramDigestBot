@@ -9,6 +9,7 @@ metadata:
     app: zookeeper
 spec:
   clusterIP: None
+  publishNotReadyAddresses: true
   ports:
   - name: client
     port: 2181
@@ -43,6 +44,7 @@ metadata:
 spec:
   serviceName: zookeeper-headless
   replicas: 3
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: zookeeper
@@ -286,6 +288,7 @@ metadata:
     app: solr
 spec:
   clusterIP: None
+  publishNotReadyAddresses: true
   ports:
   - name: solr
     port: 8983
@@ -316,6 +319,7 @@ metadata:
 spec:
   serviceName: solr-headless
   replicas: 3
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: solr
@@ -324,6 +328,11 @@ spec:
       labels:
         app: solr
     spec:
+      enableServiceLinks: false
+      securityContext:
+        fsGroup: 8983
+        runAsUser: 8983
+        runAsGroup: 8983
       initContainers:
       - name: init-zk
         image: busybox:1.36
@@ -440,14 +449,14 @@ spec:
             echo "Waiting for Solr..."
             sleep 10
           done
-          # Wait for all 3 nodes
+          # Wait for at least 2 nodes (minimum for replication)
           for i in 1 2 3 4 5 6 7 8 9 10; do
             LIVE=$(wget -qO- "http://solr:8983/solr/admin/collections?action=CLUSTERSTATUS" | grep -o '"live_nodes":\[[^]]*\]' | grep -o 'solr-' | wc -l)
-            if [ "$LIVE" -ge 3 ]; then
-              echo "All Solr nodes are live"
+            if [ "$LIVE" -ge 2 ]; then
+              echo "Sufficient Solr nodes are live ($LIVE)"
               break
             fi
-            echo "Waiting for all Solr nodes ($LIVE/3)..."
+            echo "Waiting for Solr nodes ($LIVE/2)..."
             sleep 10
           done
       containers:
@@ -465,7 +474,7 @@ spec:
           fi
 
           echo "Creating collection 'news'..."
-          curl -s "http://solr:8983/solr/admin/collections?action=CREATE&name=news&numShards=1&replicationFactor=3&collection.configName=news"
+          curl -s "http://solr:8983/solr/admin/collections?action=CREATE&name=news&numShards=1&replicationFactor=2&collection.configName=news"
 
           echo "Verifying collection..."
           sleep 5
