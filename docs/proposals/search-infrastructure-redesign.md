@@ -1,8 +1,8 @@
 # Search Infrastructure Redesign: YaCy Replacement
 
-> **Status: Proposal** (January 2026)
+> **Status: Ready for Implementation** (January 2026)
 >
-> This proposal addresses the operational challenges with YaCy and proposes a more Kubernetes-native architecture using separate crawler and search index components.
+> Complete replacement of YaCy with Kubernetes-native SolrCloud architecture. All components deployed together in a single step - no phased migration.
 
 ## Summary
 
@@ -10,7 +10,7 @@ Replace the monolithic YaCy deployment with a modular architecture:
 1. **Apache SolrCloud** - 3-node search cluster with ZooKeeper for HA (no single point of failure)
 2. **News Crawler** - Go Deployment with shared Solr work queue for true load balancing across replicas
 3. **Search Adapter** - Thin wrapper implementing the existing `Provider` interface
-4. **Telegram Index** *(future)* - Dual-write from Reader for cross-channel verification
+4. **Telegram Index** - Dual-write from Reader for cross-channel verification
 
 ## Problem Statement
 
@@ -1438,7 +1438,7 @@ type solrDoc struct {
 }
 ```
 
-### Component 4: Telegram Index (Future Enhancement)
+### Component 4: Telegram Index
 
 **Purpose**: Index Telegram messages for cross-channel evidence verification
 
@@ -1568,7 +1568,7 @@ func (p *SolrProvider) Search(ctx context.Context, query, language string, maxRe
 **Message Lifecycle** (deletions/edits):
 - **Immutable by default**: Once indexed, messages stay in Solr even if deleted on Telegram
 - **Rationale**: Evidence should be preserved; deleted messages may still be relevant for fact-checking
-- **Optional soft-delete**: Add `tg_deleted: true` field if deletion tracking is needed later
+- **Soft-delete support**: `tg_deleted: true` field available for deletion tracking
 - **Edits**: Not tracked; original message preserved (Telegram edit history is limited anyway)
 
 **Benefits**:
@@ -1577,25 +1577,27 @@ func (p *SolrProvider) Search(ctx context.Context, query, language string, maxRe
 - Real-time (Telegram breaks news before traditional media)
 - Same language/context (Russian Telegram finds Russian sources)
 
-**Future: Solr as Primary Store**:
-Once Telegram indexing is proven, consider migrating message storage entirely to Solr:
-- Solr supports all current query patterns
-- Unified search across web + Telegram
-- Simpler architecture (one store instead of two)
-- Trade-off: PostgreSQL better for relational queries, Solr better for full-text
+## Deployment
 
-## Migration Plan
+Deploy all components together. YaCy is removed entirely.
 
-### Phase 1: Deploy Solr (Week 1)
+### Steps
 
-1. Apply ConfigMap with schema and solrconfig
-2. Deploy StatefulSet with init container
-3. Verify collection is created and healthy
-4. Keep YaCy running in parallel
+1. Apply ZooKeeper StatefulSet (wait for 3/3 ready)
+2. Apply Solr StatefulSet (wait for 3/3 ready)
+3. Run collection creation Job
+4. Apply Crawler Deployment
+5. Apply Cleanup CronJob
+6. Update enrichment config to use Solr provider
+7. Remove YaCy manifests
 
-**Verification**:
+### Verification
+
 ```bash
-# Check SolrCloud cluster status
+# Check ZooKeeper ensemble (all 3 nodes should show leader/follower)
+for i in 0 1 2; do echo "zk-$i:"; kubectl exec -n digest zookeeper-$i -- sh -c 'echo stat | nc localhost 2181 | grep Mode'; done
+
+# Check SolrCloud cluster status (3 live nodes)
 kubectl exec -n digest solr-0 -- curl -s 'http://localhost:8983/solr/admin/collections?action=CLUSTERSTATUS' | jq '.cluster.live_nodes'
 
 # Check collection health (all 3 replicas active)
@@ -1604,20 +1606,7 @@ kubectl exec -n digest solr-0 -- curl -s 'http://localhost:8983/solr/admin/colle
 # Verify schema fields
 kubectl exec -n digest solr-0 -- curl -s 'http://localhost:8983/solr/news/schema/fields' | jq '.fields[].name'
 
-# Check ZooKeeper ensemble
-for i in 0 1 2; do echo "zk-$i:"; kubectl exec -n digest zookeeper-$i -- sh -c 'echo stat | nc localhost 2181 | grep Mode'; done
-```
-
-### Phase 2: Deploy Crawler (Week 1-2)
-
-1. Implement crawler in Go (new `cmd/crawler/` binary)
-2. Deploy as Deployment with shared work queue
-3. Verify queue processing (seeds enqueued, URLs claimed and indexed)
-4. Monitor indexing progress via logs and Solr queue status
-
-**Verification**:
-```bash
-# Check indexed document count (crawl_status:done)
+# Check indexed document count
 kubectl exec -n digest solr-0 -- curl -s 'http://localhost:8983/solr/news/select?q=*:*&fq=crawl_status:done&rows=0' | jq '.response.numFound'
 
 # Check queue status
@@ -1629,27 +1618,12 @@ kubectl exec -n digest solr-0 -- curl -s 'http://localhost:8983/solr/news/select
 # Check crawl coverage by domain
 kubectl exec -n digest solr-0 -- curl -s 'http://localhost:8983/solr/news/select?q=*:*&fq=crawl_status:done&rows=0&facet=true&facet.field=domain'
 
-# Check crawler logs (queue processing)
+# Check crawler logs
 kubectl logs -n digest -l app=news-crawler --tail=50 | grep "processing batch"
 
-# Check crawler Deployment status
-kubectl get deployment -n digest news-crawler
-kubectl get pods -n digest -l app=news-crawler
+# Check all pods
+kubectl get pods -n digest -l 'app in (zookeeper,solr,news-crawler)'
 ```
-
-### Phase 3: Integrate Search Adapter (Week 2)
-
-1. Implement `SolrProvider` in enrichment package
-2. Add configuration options
-3. Add to provider registry (priority before SearXNG)
-4. Deploy and verify evidence extraction
-
-### Phase 4: Deprecate YaCy (Week 3)
-
-1. Monitor Solr-based enrichment for 1 week
-2. Compare evidence extraction rates
-3. Scale YaCy to 0 replicas
-4. Remove YaCy manifests after 2 weeks stable
 
 ## Configuration
 
@@ -1789,7 +1763,7 @@ data:
 ### 2. Meilisearch
 - **Pros**: Very fast, easy setup, low memory
 - **Cons**: Less mature, limited language support for RU/EL
-- **Decision**: Consider for future if Solr is overkill
+- **Decision**: Solr chosen for better multi-language support
 
 ### 3. Fix YaCy configuration
 - **Pros**: No migration needed
@@ -1809,16 +1783,6 @@ data:
 4. **Resource efficiency**: Runs on 3-node cluster (3×6GB nodes minimum; 8Gi total request, 16Gi total limit)
 5. **Crawl coverage**: 3,000+ documents indexed within 1 week (30 seeds × 100 pages/domain)
 
-## Timeline
-
-| Week | Milestone |
-|------|-----------|
-| 1 | Deploy Solr with schema, verify collection works |
-| 1-2 | Implement and deploy crawler |
-| 2 | Implement SolrProvider, integrate with workers |
-| 3 | Monitor, tune, deprecate YaCy |
-| 4 | Remove YaCy manifests, document |
-
 ## Resolved Questions
 
 | Question | Decision |
@@ -1836,11 +1800,13 @@ data:
 | **Telegram URL format** | Canonical: `tg://peer/<peer_id>/msg/<msg_id>` (for ID hash); Display: `https://t.me/<username>/<id>` (public) or `tg://channel/<peer_id>/<id>` (private, non-clickable) |
 | **Telegram language update** | Shared `solrindex.TelegramDocID()` helper; Worker computes same docID from `item.TgPeerID` + `item.TgMessageID` |
 
-## Open Questions
+## Additional Decisions
 
-1. ~~**Crawl frequency**: Hourly sufficient or need continuous?~~ **Resolved**: Crawlers run continuously, pulling from shared queue. No fixed interval - work processed as fast as rate limits allow.
-2. **Index retention**: How long to keep old documents? (Propose: 30 days, then delete via Solr TTL policy)
-3. **Backup strategy**: PVC snapshots via cloud provider? (Recommend: Daily snapshots)
+| Topic | Decision |
+|-------|----------|
+| **Crawl frequency** | Continuous; crawlers pull from shared queue as fast as rate limits allow |
+| **Index retention** | 90 days for done documents; 7 days for pending; 30 days for errors (via cleanup CronJob) |
+| **Backup strategy** | Daily PVC snapshots via cloud provider |
 
 ## Gaps, Risks & Mitigations
 
@@ -1874,7 +1840,7 @@ data:
 **Mitigations**:
 1. **RSS/Sitemap discovery** - fetch `/sitemap.xml`, `/feed`, `/rss` for efficient new article discovery
 2. **Dynamic limits** - adjust `CRAWL_MAX_PAGES_PER_DOMAIN` per site based on volume
-3. **Source curation process** - quarterly review of seed list
+3. **Source curation** - expandable seed list via ConfigMap
 4. **Monitoring**: Track pages indexed per domain; alert if major site stops updating
 
 ### Content Extraction Quality
@@ -1911,19 +1877,6 @@ data:
 | Coverage per domain | Solr facet | 0 for any seed (site broken) |
 
 **Recommended Stack**: Prometheus + Grafana with Solr exporter
-
----
-
-## Future Enhancements (Out of Scope)
-
-These items are valuable but deferred to future iterations:
-
-1. **Clustering/MLT** - Group related articles using Solr's MoreLikeThis or Carrot2
-2. **Fact-check sources** - Add Snopes, PolitiFact, FactCheck.org to seeds
-3. **Stance analysis** - Tag articles as pro/contra on topics via enrichment
-4. **Semantic search** - Vector embeddings for similarity (Solr 9.x supports dense vectors)
-5. **User feedback** - Thumbs up/down on results to tune relevance
-6. **Multi-shard scaling** - Add shards when index exceeds single-node capacity
 
 ---
 

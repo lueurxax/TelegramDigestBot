@@ -18,6 +18,7 @@ import (
 
 	links "github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links/linkextract"
+	"github.com/lueurxax/telegram-digest-bot/internal/core/solr"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
@@ -28,6 +29,7 @@ const (
 	// Concurrency limits
 	concurrentDownloadsLimit = 5
 	maxWorkerCount           = 10
+	solrConcurrencyLimit     = 5
 
 	// Wait times in seconds
 	errorWaitSeconds       = 10
@@ -108,6 +110,9 @@ type Reader struct {
 	downloadSem chan struct{}
 	// Worker pool for parallel channel processing
 	workerSem chan struct{}
+	// Solr client for dual-write indexing (optional, nil if disabled)
+	solrClient *solr.Client
+	solrSem    chan struct{}
 }
 
 func New(cfg *config.Config, database Repository, linkCache links.LinkCacheRepository, channelRepo links.ChannelRepository, logger *zerolog.Logger) *Reader {
@@ -124,7 +129,7 @@ func New(cfg *config.Config, database Repository, linkCache links.LinkCacheRepos
 		workerCount = maxWorkerCount // Cap at maxWorkerCount to avoid overwhelming Telegram API
 	}
 
-	return &Reader{
+	r := &Reader{
 		cfg:         cfg,
 		database:    database,
 		linkCache:   linkCache,
@@ -133,6 +138,21 @@ func New(cfg *config.Config, database Repository, linkCache links.LinkCacheRepos
 		downloadSem: make(chan struct{}, concurrentDownloadsLimit), // limit concurrent downloads
 		workerSem:   make(chan struct{}, workerCount),              // limit concurrent channel fetches
 	}
+
+	// Initialize Solr client if enabled
+	if cfg.SolrEnabled && cfg.SolrBaseURL != "" {
+		r.solrClient = solr.New(solr.Config{
+			Enabled:    true,
+			BaseURL:    cfg.SolrBaseURL,
+			Timeout:    cfg.SolrTimeout,
+			MaxResults: cfg.SolrMaxResults,
+		})
+		r.solrSem = make(chan struct{}, solrConcurrencyLimit)
+
+		logger.Info().Str("solr_url", cfg.SolrBaseURL).Msg("Solr dual-write indexing enabled")
+	}
+
+	return r
 }
 
 func (r *Reader) Run(ctx context.Context) error {
@@ -982,6 +1002,7 @@ func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessin
 	r.startAsyncMediaDownload(ctx, hpc, msg, rawMsg)
 	r.startAsyncLinkResolution(ctx, msg.Message, entitiesJSON, mediaJSON)
 	r.startAsyncDiscoveryExtraction(ctx, hpc, msg)
+	r.startAsyncSolrIndexing(ctx, hpc, msg)
 
 	return true
 }
@@ -1790,4 +1811,60 @@ func (r *Reader) extractFromRequestedPeers(peers []tg.PeerClass, fromChannelID s
 	}
 
 	return discoveries
+}
+
+// startAsyncSolrIndexing indexes a Telegram message to Solr in the background.
+// This enables dual-write to both PostgreSQL and Solr for search functionality.
+func (r *Reader) startAsyncSolrIndexing(ctx context.Context, hpc *historyProcessingContext, msg *tg.Message) {
+	if r.solrClient == nil {
+		return
+	}
+
+	go func(ctx context.Context, ch db.Channel, m *tg.Message) {
+		select {
+		case r.solrSem <- struct{}{}:
+			defer func() { <-r.solrSem }()
+		case <-ctx.Done():
+			return
+		}
+
+		if err := r.indexToSolr(ctx, ch, m); err != nil {
+			r.logger.Warn().Err(err).
+				Int64(logFieldPeerID, ch.TGPeerID).
+				Int(logFieldMsgID, m.ID).
+				Msg("failed to index message to Solr")
+		}
+	}(ctx, hpc.ch, msg)
+}
+
+// indexToSolr builds and indexes a Telegram message document to Solr.
+func (r *Reader) indexToSolr(ctx context.Context, ch db.Channel, msg *tg.Message) error {
+	docID := solr.TelegramDocID(ch.TGPeerID, int64(msg.ID))
+	displayURL := solr.TelegramDisplayURL(ch.Username, ch.TGPeerID, int64(msg.ID))
+	msgTime := time.Unix(int64(msg.Date), 0)
+
+	doc := solr.NewIndexDocument(docID).
+		SetField("source", solr.SourceTelegram).
+		SetField("url", displayURL).
+		SetField("title", ch.Title).
+		SetField("content", msg.Message).
+		SetField("channel_name", ch.Username).
+		SetField("tg_peer_id", ch.TGPeerID).
+		SetField("tg_message_id", int64(msg.ID)).
+		SetField("published_at", msgTime).
+		SetField("indexed_at", time.Now()).
+		SetField("crawl_status", solr.CrawlStatusDone) // Telegram messages are immediately available
+
+	// Detect language from content (will be updated by worker with LLM detection later)
+	if msg.Message != "" {
+		if lang := links.DetectLanguage(msg.Message); lang != "" {
+			doc.SetField("language", lang)
+		}
+	}
+
+	if err := r.solrClient.Index(ctx, doc); err != nil {
+		return fmt.Errorf("index document: %w", err)
+	}
+
+	return nil
 }

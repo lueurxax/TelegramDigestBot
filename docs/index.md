@@ -49,7 +49,7 @@ These documents describe features under consideration or in development.
 |----------|--------|-------------|
 | [Source Enrichment](proposals/source-enrichment-fact-checking.md) | Implemented | Original design for Phase 1 and Phase 2 enrichment |
 | [Language Routing](proposals/enrichment-language-routing.md) | Implemented | Language-aware search query routing |
-| [Search Infrastructure](proposals/search-infrastructure-redesign.md) | Proposal | YaCy replacement with SolrCloud |
+| [Search Infrastructure](proposals/search-infrastructure-redesign.md) | Ready | YaCy replacement with SolrCloud (single-step deployment) |
 | [Research & Visualization](proposals/research-interactivity-visualization.md) | Proposal | Interactive research UI and analytics |
 
 ## Other

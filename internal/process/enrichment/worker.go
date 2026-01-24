@@ -15,6 +15,7 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	linkscore "github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
+	"github.com/lueurxax/telegram-digest-bot/internal/core/solr"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
@@ -123,6 +124,8 @@ type Worker struct {
 	lastDomainReload  time.Time
 	lastPolicyReload  time.Time
 	logger            *zerolog.Logger
+	// Solr client for updating Telegram document language (optional, nil if disabled)
+	solrClient *solr.Client
 }
 
 func NewWorker(cfg *config.Config, database Repository, embeddingClient EmbeddingClient, logger *zerolog.Logger) *Worker {
@@ -133,7 +136,7 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 	extractor := NewExtractor(logger)
 	// The actual wiring of LLM client happens in app.go.
 
-	return &Worker{
+	w := &Worker{
 		cfg:             cfg,
 		db:              database,
 		embeddingClient: embeddingClient,
@@ -145,6 +148,19 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 		domainFilter:    NewDomainFilter(cfg.EnrichmentAllowlistDomains, cfg.EnrichmentDenylistDomains),
 		logger:          logger,
 	}
+
+	// Initialize Solr client for language updates if enabled
+	if cfg.SolrEnabled && cfg.SolrBaseURL != "" {
+		w.solrClient = solr.New(solr.Config{
+			Enabled:    true,
+			BaseURL:    cfg.SolrBaseURL,
+			Timeout:    cfg.SolrTimeout,
+			MaxResults: cfg.SolrMaxResults,
+		})
+		logger.Info().Str("solr_url", cfg.SolrBaseURL).Msg("Solr language update enabled in enrichment worker")
+	}
+
+	return w
 }
 
 // SetTranslationClient sets the translation client for query translation.
@@ -300,6 +316,9 @@ func (w *Worker) processItem(ctx context.Context, item *db.EnrichmentQueueItem) 
 	}
 
 	w.updateStatus(ctx, item.ID, db.EnrichmentStatusDone, "", nil)
+
+	// Update Telegram document language in Solr (fire-and-forget)
+	w.updateTelegramLanguage(ctx, item)
 }
 
 // searchState tracks the state of search execution across multiple queries.
@@ -806,6 +825,8 @@ func registerProviders(cfg *config.Config, registry *ProviderRegistry) {
 
 func registerProvider(cfg *config.Config, registry *ProviderRegistry, name ProviderName) {
 	switch name {
+	case ProviderSolr:
+		registerSolr(cfg, registry)
 	case ProviderYaCy:
 		registerYaCy(cfg, registry)
 	case ProviderGDELT:
@@ -818,6 +839,18 @@ func registerProvider(cfg *config.Config, registry *ProviderRegistry, name Provi
 		registerNewsAPI(cfg, registry)
 	case ProviderOpenSearch:
 		registerOpenSearch(cfg, registry)
+	}
+}
+
+func registerSolr(cfg *config.Config, registry *ProviderRegistry) {
+	if cfg.SolrEnabled && cfg.SolrBaseURL != "" {
+		solrProvider := NewSolrProvider(SolrConfig{
+			Enabled:    true,
+			BaseURL:    cfg.SolrBaseURL,
+			Timeout:    cfg.SolrTimeout,
+			MaxResults: cfg.SolrMaxResults,
+		})
+		registry.Register(solrProvider)
 	}
 }
 
@@ -896,8 +929,9 @@ func registerOpenSearch(cfg *config.Config, registry *ProviderRegistry) {
 }
 
 // defaultProviderOrder is the fallback order per the proposal:
-// YaCy → GDELT → Event Registry → NewsAPI → SearxNG → OpenSearch
+// Solr → YaCy → GDELT → Event Registry → NewsAPI → SearxNG → OpenSearch
 var defaultProviderOrder = []ProviderName{
+	ProviderSolr,
 	ProviderYaCy,
 	ProviderGDELT,
 	ProviderEventRegistry,
@@ -921,7 +955,7 @@ func providerOrder(raw string) []ProviderName {
 		}
 
 		switch name {
-		case ProviderYaCy, ProviderGDELT, ProviderSearxNG, ProviderEventRegistry, ProviderNewsAPI, ProviderOpenSearch:
+		case ProviderSolr, ProviderYaCy, ProviderGDELT, ProviderSearxNG, ProviderEventRegistry, ProviderNewsAPI, ProviderOpenSearch:
 			if seen[name] {
 				continue
 			}
@@ -1801,4 +1835,89 @@ func (w *Worker) loadDomainSetting(ctx context.Context, settingKey, configDefaul
 	}
 
 	return configDefault
+}
+
+// updateTelegramLanguage updates the Telegram document language in Solr.
+// This populates language-specific dynamic fields for better search relevance.
+func (w *Worker) updateTelegramLanguage(_ context.Context, item *db.EnrichmentQueueItem) {
+	if w.solrClient == nil {
+		return
+	}
+
+	// Only update if we have valid Telegram identifiers
+	if item.TGPeerID == 0 || item.TGMessageID == 0 {
+		return
+	}
+
+	lang := w.detectItemLanguage(item)
+	if lang == "" {
+		return // Can't update without language detection
+	}
+
+	docID := solr.TelegramDocID(item.TGPeerID, item.TGMessageID)
+	fields := buildLanguageFields(lang, item.ChannelTitle, item.Text)
+
+	//nolint:contextcheck // Fire-and-forget update uses background context
+	w.fireAndForgetSolrUpdate(docID, fields, lang, item.TGPeerID, item.TGMessageID)
+}
+
+// detectItemLanguage detects language from item summary or text.
+func (w *Worker) detectItemLanguage(item *db.EnrichmentQueueItem) string {
+	lang := linkscore.DetectLanguage(item.Summary)
+	if lang == "" {
+		lang = linkscore.DetectLanguage(item.Text)
+	}
+
+	return lang
+}
+
+// buildLanguageFields builds the fields map for a language update.
+func buildLanguageFields(lang, title, content string) map[string]interface{} {
+	fields := map[string]interface{}{
+		"language": lang,
+	}
+
+	// Populate language-specific dynamic fields for better search
+	switch lang {
+	case "en":
+		fields["title_en"] = title
+		fields["content_en"] = content
+	case "ru":
+		fields["title_ru"] = title
+		fields["content_ru"] = content
+	case "el":
+		fields["title_el"] = title
+		fields["content_el"] = content
+	case "de":
+		fields["title_de"] = title
+		fields["content_de"] = content
+	case "fr":
+		fields["title_fr"] = title
+		fields["content_fr"] = content
+	}
+
+	return fields
+}
+
+// fireAndForgetSolrUpdate performs an async Solr update.
+func (w *Worker) fireAndForgetSolrUpdate(docID string, fields map[string]interface{}, lang string, peerID, messageID int64) {
+	solrClient := w.solrClient
+	logger := w.logger
+	solrTimeout := w.cfg.SolrTimeout
+
+	go func(docID string, fields map[string]interface{}, lang string) {
+		updateCtx, cancel := context.WithTimeout(context.Background(), solrTimeout)
+		defer cancel()
+
+		if err := solrClient.AtomicUpdate(updateCtx, docID, fields); err != nil {
+			// Don't log ErrNotFound - the document might not be indexed yet
+			if !errors.Is(err, solr.ErrNotFound) {
+				logger.Warn().Err(err).
+					Int64("tg_peer_id", peerID).
+					Int64("tg_message_id", messageID).
+					Str("language", lang).
+					Msg("failed to update Telegram document language in Solr")
+			}
+		}
+	}(docID, fields, lang)
 }

@@ -1,0 +1,515 @@
+---
+# ZooKeeper Headless Service for cluster communication
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper-headless
+  namespace: digest
+  labels:
+    app: zookeeper
+spec:
+  clusterIP: None
+  ports:
+  - name: client
+    port: 2181
+  - name: peer
+    port: 2888
+  - name: leader-election
+    port: 3888
+  selector:
+    app: zookeeper
+---
+# ZooKeeper Client Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  namespace: digest
+  labels:
+    app: zookeeper
+spec:
+  ports:
+  - name: client
+    port: 2181
+  selector:
+    app: zookeeper
+---
+# ZooKeeper StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  namespace: digest
+spec:
+  serviceName: zookeeper-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+    spec:
+      containers:
+      - name: zookeeper
+        image: zookeeper:3.9
+        ports:
+        - containerPort: 2181
+          name: client
+        - containerPort: 2888
+          name: peer
+        - containerPort: 3888
+          name: leader-election
+        env:
+        - name: ZOO_MY_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: ZOO_SERVERS
+          value: "server.1=zookeeper-0.zookeeper-headless.digest.svc.cluster.local:2888:3888;2181 server.2=zookeeper-1.zookeeper-headless.digest.svc.cluster.local:2888:3888;2181 server.3=zookeeper-2.zookeeper-headless.digest.svc.cluster.local:2888:3888;2181"
+        - name: ZOO_4LW_COMMANDS_WHITELIST
+          value: "stat,ruok,conf,srvr"
+        command:
+        - sh
+        - -c
+        - |
+          # Extract pod ordinal from hostname
+          HOST=$(hostname -s)
+          ORDINAL=${HOST##*-}
+          MY_ID=$((ORDINAL + 1))
+          echo $MY_ID > /data/myid
+          exec /docker-entrypoint.sh zkServer.sh start-foreground
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - 'echo ruok | nc localhost 2181 | grep imok'
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - 'echo stat | nc localhost 2181 | grep Mode'
+          initialDelaySeconds: 10
+          periodSeconds: 10
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 5Gi
+---
+# Solr ConfigMap for schema and config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: solr-config
+  namespace: digest
+data:
+  schema.xml: |
+    <?xml version="1.0" encoding="UTF-8" ?>
+    <schema name="news" version="1.6">
+      <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
+      <field name="_version_" type="plong" indexed="false" stored="false"/>
+
+      <!-- Common fields -->
+      <field name="source" type="string" indexed="true" stored="true"/>
+      <field name="url" type="string" indexed="true" stored="true"/>
+      <field name="title" type="text_general" indexed="true" stored="true"/>
+      <field name="content" type="text_general" indexed="true" stored="true"/>
+      <field name="description" type="text_general" indexed="true" stored="true"/>
+      <field name="language" type="string" indexed="true" stored="true"/>
+      <field name="domain" type="string" indexed="true" stored="true"/>
+      <field name="published_at" type="pdate" indexed="true" stored="true"/>
+      <field name="indexed_at" type="pdate" indexed="true" stored="true"/>
+
+      <!-- Telegram-specific fields -->
+      <field name="tg_peer_id" type="plong" indexed="true" stored="true"/>
+      <field name="tg_message_id" type="plong" indexed="true" stored="true"/>
+      <field name="channel_name" type="string" indexed="true" stored="true"/>
+
+      <!-- Web crawl fields -->
+      <field name="crawl_status" type="string" indexed="true" stored="true"/>
+      <field name="crawl_depth" type="pint" indexed="true" stored="true"/>
+      <field name="crawled_at" type="pdate" indexed="true" stored="true"/>
+      <field name="error_msg" type="string" indexed="false" stored="true"/>
+
+      <!-- Language-specific dynamic fields for better search -->
+      <dynamicField name="title_*" type="text_general" indexed="true" stored="true"/>
+      <dynamicField name="content_*" type="text_general" indexed="true" stored="true"/>
+
+      <uniqueKey>id</uniqueKey>
+
+      <!-- Field types -->
+      <fieldType name="string" class="solr.StrField" sortMissingLast="true"/>
+      <fieldType name="plong" class="solr.LongPointField" docValues="true"/>
+      <fieldType name="pint" class="solr.IntPointField" docValues="true"/>
+      <fieldType name="pdate" class="solr.DatePointField" docValues="true"/>
+      <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100">
+        <analyzer type="index">
+          <tokenizer class="solr.StandardTokenizerFactory"/>
+          <filter class="solr.LowerCaseFilterFactory"/>
+          <filter class="solr.StopFilterFactory" ignoreCase="true" words="stopwords.txt"/>
+        </analyzer>
+        <analyzer type="query">
+          <tokenizer class="solr.StandardTokenizerFactory"/>
+          <filter class="solr.LowerCaseFilterFactory"/>
+          <filter class="solr.StopFilterFactory" ignoreCase="true" words="stopwords.txt"/>
+        </analyzer>
+      </fieldType>
+    </schema>
+  solrconfig.xml: |
+    <?xml version="1.0" encoding="UTF-8" ?>
+    <config>
+      <luceneMatchVersion>9.4</luceneMatchVersion>
+      <dataDir>${solr.data.dir:}</dataDir>
+      <directoryFactory name="DirectoryFactory" class="${solr.directoryFactory:solr.NRTCachingDirectoryFactory}"/>
+      <codecFactory class="solr.SchemaCodecFactory"/>
+      <schemaFactory class="ClassicIndexSchemaFactory"/>
+
+      <indexConfig>
+        <ramBufferSizeMB>100</ramBufferSizeMB>
+        <maxBufferedDocs>1000</maxBufferedDocs>
+      </indexConfig>
+
+      <updateHandler class="solr.DirectUpdateHandler2">
+        <updateLog>
+          <str name="dir">${solr.ulog.dir:}</str>
+        </updateLog>
+        <autoCommit>
+          <maxTime>${solr.autoCommit.maxTime:15000}</maxTime>
+          <openSearcher>false</openSearcher>
+        </autoCommit>
+        <autoSoftCommit>
+          <maxTime>${solr.autoSoftCommit.maxTime:1000}</maxTime>
+        </autoSoftCommit>
+      </updateHandler>
+
+      <query>
+        <maxBooleanClauses>1024</maxBooleanClauses>
+        <filterCache class="solr.FastLRUCache" size="512" initialSize="512" autowarmCount="0"/>
+        <queryResultCache class="solr.LRUCache" size="512" initialSize="512" autowarmCount="0"/>
+        <documentCache class="solr.LRUCache" size="512" initialSize="512" autowarmCount="0"/>
+        <enableLazyFieldLoading>true</enableLazyFieldLoading>
+        <queryResultWindowSize>20</queryResultWindowSize>
+        <queryResultMaxDocsCached>200</queryResultMaxDocsCached>
+      </query>
+
+      <requestDispatcher>
+        <requestParsers enableRemoteStreaming="false" multipartUploadLimitInKB="2048000" formdataUploadLimitInKB="2048" addHttpRequestToContext="false"/>
+        <httpCaching never304="true"/>
+      </requestDispatcher>
+
+      <requestHandler name="/select" class="solr.SearchHandler">
+        <lst name="defaults">
+          <str name="echoParams">explicit</str>
+          <int name="rows">10</int>
+          <str name="df">content</str>
+          <str name="defType">edismax</str>
+          <str name="qf">title^3 content^1 description^2</str>
+        </lst>
+      </requestHandler>
+
+      <requestHandler name="/update" class="solr.UpdateRequestHandler"/>
+      <requestHandler name="/get" class="solr.RealTimeGetHandler">
+        <lst name="defaults">
+          <str name="omitHeader">true</str>
+        </lst>
+      </requestHandler>
+      <requestHandler name="/admin/ping" class="solr.PingRequestHandler">
+        <lst name="invariants">
+          <str name="q">solrpingquery</str>
+        </lst>
+        <lst name="defaults">
+          <str name="echoParams">all</str>
+        </lst>
+      </requestHandler>
+    </config>
+  stopwords.txt: |
+    a
+    an
+    and
+    are
+    as
+    at
+    be
+    but
+    by
+    for
+    if
+    in
+    into
+    is
+    it
+    no
+    not
+    of
+    on
+    or
+    such
+    that
+    the
+    their
+    then
+    there
+    these
+    they
+    this
+    to
+    was
+    will
+    with
+---
+# Solr Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: solr-headless
+  namespace: digest
+  labels:
+    app: solr
+spec:
+  clusterIP: None
+  ports:
+  - name: solr
+    port: 8983
+  selector:
+    app: solr
+---
+# Solr Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: solr
+  namespace: digest
+  labels:
+    app: solr
+spec:
+  ports:
+  - name: solr
+    port: 8983
+  selector:
+    app: solr
+---
+# Solr StatefulSet
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: solr
+  namespace: digest
+spec:
+  serviceName: solr-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: solr
+  template:
+    metadata:
+      labels:
+        app: solr
+    spec:
+      initContainers:
+      - name: init-zk
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          until nc -z zookeeper 2181; do
+            echo "Waiting for ZooKeeper..."
+            sleep 5
+          done
+          echo "ZooKeeper is ready"
+      - name: upload-config
+        image: solr:9.4
+        command:
+        - sh
+        - -c
+        - |
+          HOST=$(hostname -s)
+          # Only upload from solr-0 to avoid conflicts
+          if [ "$HOST" = "solr-0" ]; then
+            echo "Uploading configset from solr-0..."
+            mkdir -p /tmp/news
+            cp /config/schema.xml /tmp/news/
+            cp /config/solrconfig.xml /tmp/news/
+            cp /config/stopwords.txt /tmp/news/
+
+            # Wait a bit for ZK to be fully ready
+            sleep 5
+
+            # Upload configset
+            /opt/solr/bin/solr zk upconfig -z zookeeper:2181 -n news -d /tmp/news || echo "Config upload failed or already exists"
+          else
+            echo "Skipping config upload on $HOST"
+          fi
+        volumeMounts:
+        - name: config
+          mountPath: /config
+      containers:
+      - name: solr
+        image: solr:9.4
+        ports:
+        - containerPort: 8983
+          name: solr
+        env:
+        - name: SOLR_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: SOLR_JAVA_MEM
+          value: "-Xms1g -Xmx2g"
+        - name: ZK_HOST
+          value: "zookeeper:2181"
+        command:
+        - bash
+        - -c
+        - |
+          exec solr-foreground -c -z ${ZK_HOST}
+        volumeMounts:
+        - name: data
+          mountPath: /var/solr/data
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "250m"
+          limits:
+            memory: "4Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /solr/admin/info/system
+            port: 8983
+          initialDelaySeconds: 60
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /solr/admin/info/system
+            port: 8983
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: config
+        configMap:
+          name: solr-config
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 20Gi
+---
+# Job to create the news collection
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: solr-create-collection
+  namespace: digest
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+      - name: wait-for-solr
+        image: busybox:1.36
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for Solr cluster to be ready..."
+          until wget -qO- "http://solr:8983/solr/admin/collections?action=CLUSTERSTATUS" | grep -q '"live_nodes"'; do
+            echo "Waiting for Solr..."
+            sleep 10
+          done
+          # Wait for all 3 nodes
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            LIVE=$(wget -qO- "http://solr:8983/solr/admin/collections?action=CLUSTERSTATUS" | grep -o '"live_nodes":\[[^]]*\]' | grep -o 'solr-' | wc -l)
+            if [ "$LIVE" -ge 3 ]; then
+              echo "All Solr nodes are live"
+              break
+            fi
+            echo "Waiting for all Solr nodes ($LIVE/3)..."
+            sleep 10
+          done
+      containers:
+      - name: create-collection
+        image: curlimages/curl:8.6.0
+        command:
+        - sh
+        - -c
+        - |
+          echo "Checking if collection exists..."
+          STATUS=$(curl -s "http://solr:8983/solr/admin/collections?action=LIST")
+          if echo "$STATUS" | grep -q '"news"'; then
+            echo "Collection 'news' already exists"
+            exit 0
+          fi
+
+          echo "Creating collection 'news'..."
+          curl -s "http://solr:8983/solr/admin/collections?action=CREATE&name=news&numShards=1&replicationFactor=3&collection.configName=news"
+
+          echo "Verifying collection..."
+          sleep 5
+          curl -s "http://solr:8983/solr/admin/collections?action=CLUSTERSTATUS" | grep -q '"news"' && echo "Collection created successfully" || exit 1
+---
+# CronJob for cleanup
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: solr-cleanup
+  namespace: digest
+spec:
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: cleanup
+            image: curlimages/curl:8.6.0
+            command:
+            - sh
+            - -c
+            - |
+              # Delete pending URLs older than 7 days
+              echo "Deleting stale pending documents..."
+              curl -s "http://solr:8983/solr/news/update?commit=true" \
+                -H "Content-Type: application/json" \
+                -d '{"delete":{"query":"crawl_status:pending AND indexed_at:[* TO NOW-7DAYS]"}}'
+
+              # Delete error URLs older than 30 days
+              echo "Deleting old error documents..."
+              curl -s "http://solr:8983/solr/news/update?commit=true" \
+                -H "Content-Type: application/json" \
+                -d '{"delete":{"query":"crawl_status:error AND crawled_at:[* TO NOW-30DAYS]"}}'
+
+              # Delete done URLs older than 90 days
+              echo "Deleting old done documents..."
+              curl -s "http://solr:8983/solr/news/update?commit=true" \
+                -H "Content-Type: application/json" \
+                -d '{"delete":{"query":"crawl_status:done AND source:web AND crawled_at:[* TO NOW-90DAYS]"}}'
+
+              echo "Cleanup complete"

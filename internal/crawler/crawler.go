@@ -1,0 +1,325 @@
+package crawler
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/rs/zerolog"
+	"golang.org/x/time/rate"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/core/solr"
+)
+
+// Crawler errors.
+var errCrawlerStopped = errors.New("crawler stopped")
+
+const (
+	seedQueueInterval   = 10 * time.Minute
+	discoveryInterval   = 5 * time.Minute
+	batchProcessTimeout = 30 * time.Second
+	fieldCount          = "count"
+	fieldSitemap        = "sitemap"
+	fieldURL            = "url"
+	maxErrorMsgLen      = 500
+)
+
+// Crawler is a web crawler that uses Solr as a work queue.
+type Crawler struct {
+	cfg        *Config
+	client     *solr.Client
+	limiter    *rate.Limiter
+	extractor  *Extractor
+	discovery  *Discovery
+	logger     *zerolog.Logger
+	seeds      []string
+	lastSeeded time.Time
+}
+
+// New creates a new Crawler.
+func New(cfg *Config, logger *zerolog.Logger) (*Crawler, error) {
+	client := solr.New(solr.Config{
+		Enabled:    true,
+		BaseURL:    cfg.SolrURL,
+		Timeout:    cfg.SolrTimeout,
+		MaxResults: cfg.CrawlBatchSize,
+	})
+
+	// Load seed URLs
+	seeds, err := cfg.LoadSeeds()
+	if err != nil {
+		return nil, fmt.Errorf("load seeds: %w", err)
+	}
+
+	logger.Info().Int(fieldCount, len(seeds)).Msg("Loaded seed URLs")
+
+	return &Crawler{
+		cfg:       cfg,
+		client:    client,
+		limiter:   rate.NewLimiter(rate.Limit(cfg.CrawlRateLimitRPS), 1),
+		extractor: NewExtractor(cfg.CrawlUserAgent, logger),
+		discovery: NewDiscovery(cfg.CrawlUserAgent, logger),
+		logger:    logger,
+		seeds:     seeds,
+	}, nil
+}
+
+// Run starts the crawler main loop.
+func (c *Crawler) Run(ctx context.Context) error {
+	c.logger.Info().
+		Str("solr_url", c.cfg.SolrURL).
+		Float64("rate_limit_rps", c.cfg.CrawlRateLimitRPS).
+		Int("batch_size", c.cfg.CrawlBatchSize).
+		Msg("Starting crawler")
+
+	// Seed the queue on startup
+	c.seedQueue(ctx)
+
+	ticker := time.NewTicker(batchProcessTimeout)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.logger.Info().Msg("Crawler shutting down")
+			return fmt.Errorf("%w: %w", errCrawlerStopped, ctx.Err())
+		case <-ticker.C:
+			c.processNextBatch(ctx)
+			c.maybeReseed(ctx)
+		}
+	}
+}
+
+// seedQueue adds seed URLs to the crawl queue.
+func (c *Crawler) seedQueue(ctx context.Context) {
+	if len(c.seeds) == 0 {
+		return
+	}
+
+	c.logger.Info().Int(fieldCount, len(c.seeds)).Msg("Seeding crawl queue")
+
+	for _, seedURL := range c.seeds {
+		if err := c.enqueueURL(ctx, seedURL, 0); err != nil {
+			c.logger.Warn().Err(err).Str(fieldURL, seedURL).Msg("Failed to enqueue seed URL")
+		}
+	}
+
+	c.lastSeeded = time.Now()
+}
+
+// maybeReseed re-seeds the queue periodically.
+func (c *Crawler) maybeReseed(ctx context.Context) {
+	if time.Since(c.lastSeeded) < seedQueueInterval {
+		return
+	}
+
+	// Check if queue is empty or nearly empty
+	resp, err := c.client.Search(ctx, "*:*",
+		solr.WithFilterQuery("crawl_status:pending"),
+		solr.WithRows(0),
+	)
+	if err != nil {
+		c.logger.Warn().Err(err).Msg("Failed to check queue status")
+		return
+	}
+
+	if resp.Response.NumFound < c.cfg.CrawlBatchSize {
+		c.seedQueue(ctx)
+	}
+}
+
+// processNextBatch processes the next batch of URLs from the queue.
+func (c *Crawler) processNextBatch(ctx context.Context) {
+	urls, err := c.claimURLs(ctx, c.cfg.CrawlBatchSize)
+	if err != nil {
+		c.logger.Error().Err(err).Msg("Failed to claim URLs")
+		return
+	}
+
+	if len(urls) == 0 {
+		c.logger.Debug().Msg("No URLs to process")
+		return
+	}
+
+	c.logger.Debug().Int(fieldCount, len(urls)).Msg("Processing batch")
+
+	for _, doc := range urls {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Rate limit
+		if err := c.limiter.Wait(ctx); err != nil {
+			return
+		}
+
+		c.processURL(ctx, doc)
+	}
+}
+
+// processURL crawls a single URL.
+func (c *Crawler) processURL(ctx context.Context, doc *solr.Document) {
+	c.logger.Debug().Str(fieldURL, doc.URL).Int("depth", doc.CrawlDepth).Msg("Processing URL")
+
+	// Extract content
+	result, err := c.extractor.Extract(ctx, doc.URL)
+	if err != nil {
+		c.logger.Warn().Err(err).Str(fieldURL, doc.URL).Msg("Extraction failed")
+		c.markError(ctx, doc.ID, err.Error())
+
+		return
+	}
+
+	// Update document with extracted content
+	if err := c.updateWithContent(ctx, doc.ID, result); err != nil {
+		c.logger.Warn().Err(err).Str(fieldURL, doc.URL).Msg("Failed to update document")
+		return
+	}
+
+	// Discover new URLs if not at max depth
+	if doc.CrawlDepth < c.cfg.CrawlDepth {
+		c.discoverURLs(ctx, doc.URL, result.Links, doc.CrawlDepth+1)
+	}
+}
+
+// discoverURLs enqueues discovered URLs.
+func (c *Crawler) discoverURLs(ctx context.Context, sourceURL string, links []string, depth int) {
+	c.enqueueLinks(ctx, links, depth)
+
+	// Also try RSS/Sitemap discovery
+	feeds, sitemaps := c.discovery.DiscoverFeeds(ctx, sourceURL)
+	c.processFeedURLs(ctx, feeds, depth)
+	c.processSitemapURLs(ctx, sitemaps, depth)
+}
+
+// enqueueLinks enqueues a list of links.
+func (c *Crawler) enqueueLinks(ctx context.Context, links []string, depth int) {
+	for _, link := range links {
+		if !isValidCrawlURL(link) {
+			continue
+		}
+
+		if err := c.enqueueURL(ctx, link, depth); err != nil {
+			// Log but don't fail - duplicates are expected
+			c.logger.Debug().Err(err).Str(fieldURL, link).Msg("Failed to enqueue discovered URL")
+		}
+	}
+}
+
+// processFeedURLs fetches and enqueues entries from feed URLs.
+func (c *Crawler) processFeedURLs(ctx context.Context, feeds []string, depth int) {
+	for _, feedURL := range feeds {
+		entries, err := c.discovery.FetchFeed(ctx, feedURL)
+		if err != nil {
+			c.logger.Debug().Err(err).Str("feed", feedURL).Msg("Failed to fetch feed")
+			continue
+		}
+
+		for _, entry := range entries {
+			if err := c.enqueueURL(ctx, entry, depth); err != nil {
+				c.logger.Debug().Err(err).Str(fieldURL, entry).Msg("Failed to enqueue feed entry")
+			}
+		}
+	}
+}
+
+// processSitemapURLs fetches and enqueues entries from sitemap URLs.
+func (c *Crawler) processSitemapURLs(ctx context.Context, sitemaps []string, depth int) {
+	for _, sitemapURL := range sitemaps {
+		entries, err := c.discovery.FetchSitemap(ctx, sitemapURL)
+		if err != nil {
+			c.logger.Debug().Err(err).Str(fieldSitemap, sitemapURL).Msg("Failed to fetch sitemap")
+			continue
+		}
+
+		for _, entry := range entries {
+			if err := c.enqueueURL(ctx, entry, depth); err != nil {
+				c.logger.Debug().Err(err).Str(fieldURL, entry).Msg("Failed to enqueue sitemap entry")
+			}
+		}
+	}
+}
+
+// updateWithContent updates a document with extracted content.
+func (c *Crawler) updateWithContent(ctx context.Context, docID string, result *ExtractionResult) error {
+	fields := map[string]interface{}{
+		"title":        result.Title,
+		"content":      result.Content,
+		"description":  result.Description,
+		"language":     result.Language,
+		"domain":       result.Domain,
+		"crawl_status": solr.CrawlStatusDone,
+		"crawled_at":   time.Now(),
+	}
+
+	if !result.PublishedAt.IsZero() {
+		fields["published_at"] = result.PublishedAt
+	}
+
+	// Add language-specific fields
+	switch result.Language {
+	case "en":
+		fields["title_en"] = result.Title
+		fields["content_en"] = result.Content
+	case "ru":
+		fields["title_ru"] = result.Title
+		fields["content_ru"] = result.Content
+	case "el":
+		fields["title_el"] = result.Title
+		fields["content_el"] = result.Content
+	case "de":
+		fields["title_de"] = result.Title
+		fields["content_de"] = result.Content
+	case "fr":
+		fields["title_fr"] = result.Title
+		fields["content_fr"] = result.Content
+	}
+
+	if err := c.client.AtomicUpdate(ctx, docID, fields); err != nil {
+		return fmt.Errorf("update document content: %w", err)
+	}
+
+	return nil
+}
+
+// markError marks a document as having an error.
+func (c *Crawler) markError(ctx context.Context, docID, errMsg string) {
+	if len(errMsg) > maxErrorMsgLen {
+		errMsg = errMsg[:maxErrorMsgLen]
+	}
+
+	fields := map[string]interface{}{
+		"crawl_status": solr.CrawlStatusError,
+		"error_msg":    errMsg,
+		"crawled_at":   time.Now(),
+	}
+
+	if err := c.client.AtomicUpdate(ctx, docID, fields); err != nil {
+		c.logger.Warn().Err(err).Str("doc_id", docID).Msg("Failed to mark document as error")
+	}
+}
+
+// isValidCrawlURL checks if a URL should be crawled.
+func isValidCrawlURL(rawURL string) bool {
+	// Basic validation
+	if len(rawURL) < 8 {
+		return false
+	}
+
+	// Must be HTTP(S)
+	if rawURL[:7] != "http://" && rawURL[:8] != "https://" {
+		return false
+	}
+
+	// Skip common non-content URLs
+	for _, suffix := range []string{".pdf", ".zip", ".exe", ".dmg", ".mp3", ".mp4", ".avi", ".mov"} {
+		if len(rawURL) > len(suffix) && rawURL[len(rawURL)-len(suffix):] == suffix {
+			return false
+		}
+	}
+
+	return true
+}

@@ -39,6 +39,9 @@ type EnrichmentQueueItem struct {
 	ChannelDescription string
 	ChannelID          string
 	AttemptCount       int
+	// Telegram identifiers for Solr language update
+	TGPeerID    int64
+	TGMessageID int64
 }
 
 type EnrichmentQueueStat struct {
@@ -110,6 +113,8 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 		topic       pgtype.Text
 		username    pgtype.Text
 		description pgtype.Text
+		tgPeerID    pgtype.Int8
+		tgMessageID pgtype.Int8
 	)
 
 	err := db.Pool.QueryRow(ctx, `
@@ -131,7 +136,8 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 			WHERE eq.id = picked.id
 			RETURNING eq.id, eq.item_id, eq.summary, eq.attempt_count
 		)
-		SELECT u.id, u.item_id, i.raw_message_id, u.summary, u.attempt_count, i.topic, rm.text, c.title, c.username, c.description, c.id
+		SELECT u.id, u.item_id, i.raw_message_id, u.summary, u.attempt_count, i.topic, rm.text,
+		       c.title, c.username, c.description, c.id, c.tg_peer_id, rm.tg_message_id
 		FROM updated u
 		JOIN items i ON i.id = u.item_id
 		JOIN raw_messages rm ON rm.id = i.raw_message_id
@@ -148,6 +154,8 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 		&username,
 		&description,
 		&channelUUID,
+		&tgPeerID,
+		&tgMessageID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -164,6 +172,14 @@ func (db *DB) ClaimNextEnrichment(ctx context.Context) (*EnrichmentQueueItem, er
 	item.ChannelUsername = username.String
 	item.ChannelDescription = description.String
 	item.ChannelID = channelUUID.String()
+
+	if tgPeerID.Valid {
+		item.TGPeerID = tgPeerID.Int64
+	}
+
+	if tgMessageID.Valid {
+		item.TGMessageID = tgMessageID.Int64
+	}
 
 	return &item, nil
 }

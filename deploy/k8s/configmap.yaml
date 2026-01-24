@@ -43,9 +43,15 @@ data:
   ENRICHMENT_ALLOWLIST_DOMAINS: ""
   ENRICHMENT_DENYLIST_DOMAINS: "didaktorika.gr,arxiv.org"
   ENRICHMENT_QUERY_TRANSLATE: "true"
-  ENRICHMENT_PROVIDERS: "yacy,gdelt,newsapi,searxng"
+  ENRICHMENT_PROVIDERS: "solr,yacy,gdelt,newsapi,searxng"
   ENRICHMENT_PROVIDER_COOLDOWN: "10m"
   ENRICHMENT_PROVIDER_GRACE: "3s"
+  # Solr provider (SolrCloud)
+  SOLR_ENABLED: "true"
+  SOLR_URL: "http://solr:8983/solr/news"
+  SOLR_TIMEOUT: "10s"
+  SOLR_MAX_RESULTS: "10"
+  # YaCy provider (legacy - can be disabled once Solr is stable)
   ENRICHMENT_YACY_ENABLED: "true"
   ENRICHMENT_YACY_URL: "http://yacy:8090"
   ENRICHMENT_YACY_TIMEOUT: "10s"

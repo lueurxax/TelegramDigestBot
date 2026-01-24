@@ -16,92 +16,73 @@ const (
 	promptCountPlaceholder  = "{{MESSAGE_COUNT}}"
 )
 
-const defaultSummarizePrompt = `Summarize and score these {{MESSAGE_COUNT}} Telegram messages. Return a JSON object with a 'results' key containing an array of objects. It is CRITICAL that you return exactly {{MESSAGE_COUNT}} objects in the 'results' array, one for each message provided, in the same order.{{LANG_INSTRUCTION}}
+const defaultSummarizePrompt = `Summarize these {{MESSAGE_COUNT}} Telegram messages and return a JSON object with a 'results' array of length {{MESSAGE_COUNT}} (one object per input message, in the same order).
 
-Each result object MUST have:
-- index (integer, matching the [ID] below)
-- relevance_score (0-1): How relevant is this to the channel's typical audience?
-  - 0.0-0.3: Off-topic, spam, or personal messages
-  - 0.4-0.6: Tangentially related or routine updates
-  - 0.7-0.9: Directly relevant to channel theme
-  - 1.0: Breaking news or highly significant content
-- importance_score (0-1): How newsworthy or time-sensitive is this?
-  - 0.0-0.3: Opinion, commentary, or evergreen content
-  - 0.4-0.6: Notable but not urgent
-  - 0.7-0.9: Significant development or announcement
-  - 1.0: Breaking news requiring immediate attention
-- topic (string): Assign a topic from this list (or create a specific one if none fit): Technology, Finance, Politics, Sports, Entertainment, Science, Health, Business, World News, Local News, Culture, Education, Humor (for jokes, satire, memes, ironic content).
-  IMPORTANT: Check the "Channel Description" if provided. If it mentions satire, parody, fiction, humor, jokes, or similar terms (e.g., "сатирический вымысел", "satirical fiction", "parody account"), you MUST assign topic "Humor" regardless of the message content appearing serious.
-- summary (string): A single, self-contained sentence that states the key fact or development. Include WHO, WHAT, and WHY if applicable. Avoid meta-language like "The article discusses...". Format summaries using minimal HTML:
-  - Use <b>bold</b> for: company names, person names, products, specific numbers/percentages
-  - Use <i>italic</i> for: direct quotes only
-  - Keep formatting minimal—maximum 3-4 bold elements per summary
-  - Never use <code>, <u>, or other tags in summaries
-  For satirical/parody channels: Prefix summary with [Сатира] or [Satire] to warn readers the content is fictional.
-- language (2-letter code of the source message)
-- source_channel (string): Echo back EXACTLY the "Source Channel" name provided for this message. This is CRITICAL for alignment.
+Each result object should include:
+- index: integer (match the [ID] of the message)
+- relevance_score: number (0.0–1.0) — How relevant is this message to the channel’s typical audience?
+  - 0.0–0.3 = off-topic, spam, or personal content
+  - 0.4–0.6 = tangentially related or routine updates
+  - 0.7–0.9 = directly relevant to the channel’s theme
+  - 1.0 = breaking news or highly significant content
+- importance_score: number (0.0–1.0) — How newsworthy or time-sensitive is this message?
+  - 0.0–0.3 = opinion, commentary, or evergreen content
+  - 0.4–0.6 = notable but not urgent
+  - 0.7–0.9 = significant development or announcement
+  - 1.0 = breaking news requiring immediate attention
+- topic: string — A topic label for the message. Use one from this list (or create a specific one if none fit): Technology, Finance, Politics, Sports, Entertainment, Science, Health, Business, World News, Local News, Culture, Education, Humor. (If the channel’s description indicates satire or parody — e.g. contains "сатирический" or "parody" — then use "Humor" as the topic regardless of the message content.)
+- summary: string — One sentence stating the key fact or development (include who, what, and why if relevant). Avoid meta-language like "The article discusses...". Use minimal HTML: <b> for names, organizations, and important numbers (limit ~3 bolded terms per summary); <i> for direct quotes. Do not use other tags (no <code>, <u>, etc.). For satirical/parody channels, prefix the summary with [Сатира] or [Satire] to indicate fictional content.
+- language: string — 2-letter code of the message’s language (e.g. "en", "ru").
+- source_channel: string — Exactly the "Source Channel" name provided for this message (copy it verbatim).
 
-Example of GOOD summary: "<b>Apple</b> announced <b>M4 chip</b> with <b>40%</b> faster neural engine."
-Example of BAD summary: "The channel posted about technology."
+Important: Each input will have a ">>> MESSAGE TO SUMMARIZE <<<" section. Only summarize that section. DO NOT summarize any "BACKGROUND CONTEXT" (which is provided only to help you understand the channel’s tone).
 
-CRITICAL: Each message has a clearly marked ">>> MESSAGE TO SUMMARIZE <<<" section. You MUST summarize ONLY that section, NOT the background context. The "BACKGROUND CONTEXT" is provided ONLY to help you understand the channel's tone and theme - DO NOT summarize it.
-
-Some messages may have images or referenced content (links). If an image is provided, analyze it to improve the summary of the MESSAGE section.
-
-When "Referenced Content" is provided for a message:
-1. Use the linked content as the PRIMARY source for summarization.
-2. The Telegram message may just be commentary - focus on facts from the referenced source.
-3. For Telegram links: consider the source channel and view count for importance.
-4. For web links: use the article title and content for accurate summarization.
-5. Increase importance_score if linked content contains breaking news.
-6. Attribute information to the original source when relevant.
+If "Referenced Content" (a link or forwarded post) is provided for a message:
+1. Use that content as the primary source for the summary (the message text may just be commentary on it).
+2. If it’s a Telegram link, consider the source channel’s identity and the view count for importance; if it’s a web link, incorporate key details from the article’s title and content.
+3. Increase the importance_score if the referenced content contains breaking news.
+4. If you include facts from the referenced content, mention or credit the original source as appropriate.
 
 Messages:
 `
 
-const defaultNarrativePrompt = `You are an expert editor-in-chief. Your task is to take the following summaries of news stories and write a single, cohesive, and engaging narrative. Group related stories together, identify broader trends, and provide a high-quality overview.
+const defaultNarrativePrompt = `You are an editor-in-chief. Write a single cohesive and engaging news digest from the following summaries. Group related stories, highlight trends, and provide a concise high-level overview.
 
-Format for Telegram using HTML with VISUAL APPEAL:
-- Use emojis at the START of section headers for visual scanning
-- Use <b>bold</b> for section headers and key entities (names, numbers)
-- Use <i>italic</i> for direct quotes and context
-- Use bullet points (•) within sections when listing multiple developments
-- Separate sections with blank lines for readability
-- Keep paragraphs SHORT (2-3 sentences max)
-- Total length: 150-250 words
+Format (Telegram HTML):
+- Begin each section with an emoji and a bolded title.
+- Use <b> for section headers and for key names or numbers; use <i> for direct quotes.
+- Use bullet points (•) to list multiple developments in a section.
+- Separate sections with blank lines; keep each paragraph 2–3 sentences.
+- Aim for a total length of about 150–250 words.
 
-REQUIRED STRUCTURE with emojis:
+Required structure and sections:
 
-🔥 <b>Главное</b>
-[Most significant story - 2-3 sentences with <b>key entities</b> highlighted. What happened, who is involved, why it matters.]
+🔥 <b>Главное</b> – 2–3 sentences on the most significant story (what happened, who is involved, why it matters).
 
-📌 <b>Важно</b>
-[Secondary developments - can use bullet points if multiple stories:]
-• First notable story
-• Second notable story
+📌 <b>Важно</b> – notable secondary developments (use bullet points if more than one):
+• First additional key update or story.
+• Second additional key update.
 
-📖 <b>Контекст</b>
-[Additional background information derived from the "Background Context" provided for the summaries. Use this section to explain WHY something is happening or provide historical context. Skip if no background info provided.]
+📖 <b>Контекст</b> – background context or explanation (from provided "Background Context" inputs) to explain why events are happening or historical context. (Skip this section if no background info is provided.)
 
-🔮 <b>Следим за</b>
-[Brief outlook - what to expect next, 1-2 sentences]
+🔮 <b>Следим за</b> – 1–2 sentences about what to watch for next or upcoming developments.
 
-RULES:
-- Every fact MUST appear in source summaries or background context - no speculation
-- Make it scannable - reader should get key info in 10 seconds
-- Use dynamic verbs, avoid passive voice
-- Bold ALL names, numbers, percentages, money amounts
-- Use ONLY <b>, <i>, <u> tags. Ensure tags are properly closed.{{LANG_INSTRUCTION}}
+Rules:
+- Every fact must come from the input summaries or background context (no new information or speculation).
+- Make the digest easy to scan; the reader should grasp key points quickly.
+- Use active voice and strong verbs (avoid passive constructions).
+- Bold all names, organizations, and significant numbers or percentages.
+- Use only <b>, <i>, and <u> HTML tags, and ensure all tags are properly closed.{{LANG_INSTRUCTION}}
 
 Summaries:
 `
 
-const defaultClusterSummaryPrompt = `You are an expert news editor. Your task is to take the following related summaries of a single news story or discussion and merge them into a single, concise, and high-quality summary (1-2 sentences). Eliminate duplicate information and ensure the final summary is coherent and representative of all the provided points. Merge these summaries into one sentence. Preserve HTML formatting from inputs. Ensure the final summary has <b>bold</b> on key entities (1-3 entities max).{{LANG_INSTRUCTION}}
+const defaultClusterSummaryPrompt = `You are an expert news editor. Merge the following related summaries (all about one event or topic) into one concise, coherent summary. Eliminate any duplicate information so that the final result covers all key points without repetition. Try to express this in a **single sentence** (use a second sentence only if absolutely necessary). Preserve any HTML formatting from the inputs (e.g. keep <b> tags on names). Ensure the final summary has at most 3 bolded key entities.{{LANG_INSTRUCTION}}
 
 Related Summaries:
 `
 
-const defaultClusterTopicPrompt = `You are an expert news editor. Given these related news summaries, generate a very concise (2-4 words) topic label that captures the main theme. Do not use punctuation at the end.{{LANG_INSTRUCTION}}
+const defaultClusterTopicPrompt = `You are an expert news editor. Based on the following related summaries, generate a very short topic label (around 2–4 words) that encapsulates the main theme of these stories. It should read like a brief headline or category, with no ending punctuation.{{LANG_INSTRUCTION}}
 
 Summaries:
 `

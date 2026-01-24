@@ -151,6 +151,20 @@ type Config struct {
 	OpenSearchIndex          string        `env:"ENRICHMENT_OPENSEARCH_INDEX" envDefault:"news"`
 	OpenSearchRequestsPerMin int           `env:"ENRICHMENT_OPENSEARCH_RPM" envDefault:"60"`
 	OpenSearchTimeout        time.Duration `env:"ENRICHMENT_OPENSEARCH_TIMEOUT" envDefault:"30s"`
+
+	// Solr provider
+	SolrEnabled    bool          `env:"SOLR_ENABLED" envDefault:"false"`
+	SolrBaseURL    string        `env:"SOLR_URL" envDefault:"http://solr:8983/solr/news"`
+	SolrTimeout    time.Duration `env:"SOLR_TIMEOUT" envDefault:"10s"`
+	SolrMaxResults int           `env:"SOLR_MAX_RESULTS" envDefault:"10"`
+
+	// Crawler settings (for cmd/crawler)
+	CrawlDepth        int           `env:"CRAWL_DEPTH" envDefault:"2"`
+	CrawlRateLimitRPS float64       `env:"CRAWL_RATE_LIMIT_RPS" envDefault:"2"`
+	CrawlBatchSize    int           `env:"CRAWL_BATCH_SIZE" envDefault:"10"`
+	CrawlClaimTTL     time.Duration `env:"CRAWL_CLAIM_TTL" envDefault:"5m"`
+	CrawlUserAgent    string        `env:"CRAWL_USER_AGENT" envDefault:"TelegramDigestBot/1.0"`
+	CrawlSeedsFile    string        `env:"CRAWL_SEEDS_FILE" envDefault:"/config/seeds.txt"`
 }
 
 func Load() (*Config, error) {

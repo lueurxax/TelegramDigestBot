@@ -1,0 +1,149 @@
+package crawler
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/url"
+	"time"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/core/solr"
+)
+
+// Queue constants.
+const (
+	allDocsQuery    = "*:*"
+	filterPending   = "crawl_status:pending"
+	filterSourceWeb = "source:web"
+	fieldDocID      = "doc_id"
+	schemeHTTP      = "http"
+	schemeHTTPS     = "https"
+	claimMultiplier = 2
+	wrapErrFmt      = "%w: %s"
+)
+
+// Queue errors.
+var errUnsupportedScheme = errors.New("unsupported URL scheme")
+
+// claimURLs claims URLs from the queue for processing.
+// Uses optimistic locking via Solr's _version_ field to prevent races.
+func (c *Crawler) claimURLs(ctx context.Context, count int) ([]*solr.Document, error) {
+	// Search for pending URLs
+	resp, err := c.client.Search(ctx, allDocsQuery,
+		solr.WithFilterQuery(filterPending),
+		solr.WithFilterQuery(filterSourceWeb),
+		solr.WithRows(count*claimMultiplier), // Fetch more to account for claim failures
+		solr.WithSort("indexed_at asc"),
+		solr.WithFields("id,url,crawl_depth,crawl_status,_version_"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("search pending URLs: %w", err)
+	}
+
+	if len(resp.Response.Docs) == 0 {
+		return nil, nil
+	}
+
+	var claimed []*solr.Document
+
+	claimUntil := time.Now().Add(c.cfg.CrawlClaimTTL)
+
+	for _, doc := range resp.Response.Docs {
+		if len(claimed) >= count {
+			break
+		}
+
+		// Try to claim with optimistic locking
+		err := c.client.ConditionalUpdate(ctx, doc.ID, doc.Version, map[string]interface{}{
+			"crawl_status": solr.CrawlStatusProcessing,
+			"crawled_at":   claimUntil,
+		})
+		if err != nil {
+			if errors.Is(err, solr.ErrVersionConflict) {
+				// Another worker claimed it, try next
+				continue
+			}
+
+			c.logger.Warn().Err(err).Str(fieldDocID, doc.ID).Msg("Failed to claim URL")
+
+			continue
+		}
+
+		docCopy := doc
+		claimed = append(claimed, &docCopy)
+	}
+
+	return claimed, nil
+}
+
+// enqueueURL adds a URL to the crawl queue if it doesn't already exist.
+func (c *Crawler) enqueueURL(ctx context.Context, rawURL string, depth int) error {
+	// Validate and normalize URL
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	if parsed.Scheme != schemeHTTP && parsed.Scheme != schemeHTTPS {
+		return fmt.Errorf(wrapErrFmt, errUnsupportedScheme, parsed.Scheme)
+	}
+
+	docID := solr.WebDocID(rawURL)
+
+	// Check if already exists
+	existing, err := c.client.Get(ctx, docID)
+	if err != nil && !errors.Is(err, solr.ErrNotFound) {
+		return fmt.Errorf("check existing: %w", err)
+	}
+
+	if existing != nil {
+		// URL already in queue or processed
+		return nil
+	}
+
+	// Add to queue
+	doc := solr.NewIndexDocument(docID).
+		SetField("source", solr.SourceWeb).
+		SetField(fieldURL, rawURL).
+		SetField("domain", parsed.Host).
+		SetField("crawl_status", solr.CrawlStatusPending).
+		SetField("crawl_depth", depth).
+		SetField("indexed_at", time.Now())
+
+	if err := c.client.Index(ctx, doc); err != nil {
+		return fmt.Errorf("index document: %w", err)
+	}
+
+	return nil
+}
+
+// GetQueueStats returns statistics about the crawl queue.
+func (c *Crawler) GetQueueStats(ctx context.Context) (map[string]int, error) {
+	resp, err := c.client.Search(ctx, allDocsQuery,
+		solr.WithFilterQuery(filterSourceWeb),
+		solr.WithRows(0),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("search queue stats: %w", err)
+	}
+
+	stats := map[string]int{
+		"total": resp.Response.NumFound,
+	}
+
+	// Get counts by status
+	for _, status := range []string{solr.CrawlStatusPending, solr.CrawlStatusProcessing, solr.CrawlStatusDone, solr.CrawlStatusError} {
+		statusResp, err := c.client.Search(ctx, allDocsQuery,
+			solr.WithFilterQuery(filterSourceWeb),
+			solr.WithFilterQuery(fmt.Sprintf("crawl_status:%s", status)),
+			solr.WithRows(0),
+		)
+		if err != nil {
+			continue
+		}
+
+		stats[status] = statusResp.Response.NumFound
+	}
+
+	return stats, nil
+}

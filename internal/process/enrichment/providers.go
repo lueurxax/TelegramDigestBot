@@ -13,6 +13,7 @@ import (
 type ProviderName string
 
 const (
+	ProviderSolr          ProviderName = "solr"
 	ProviderYaCy          ProviderName = "yacy"
 	ProviderGDELT         ProviderName = "gdelt"
 	ProviderSearxNG       ProviderName = "searxng"
