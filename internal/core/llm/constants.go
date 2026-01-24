@@ -1,5 +1,7 @@
 package llm
 
+import "time"
+
 // Link type constants (matching linkextract package values)
 const (
 	LinkTypeTelegram = "telegram"
@@ -8,8 +10,37 @@ const (
 
 // Error message templates
 const (
-	errRateLimiter          = "rate limiter error: %w"
-	errOpenAIChatCompletion = "openai chat completion error: %w"
+	errRateLimiter           = "rate limiter error: %w"
+	errRateLimiterSimple     = "rate limiter: %w"
+	errOpenAIChatCompletion  = "openai chat completion error: %w"
+	errGoogleGenAICompletion = "google genai completion: %w"
+	errParseResponse         = "failed to parse response: %w"
+)
+
+// Model mapping strings
+const (
+	modelPrefixGPT4   = "gpt-4"
+	modelPrefixGPT5   = "gpt-5"
+	modelPrefixNano   = "nano"
+	modelPrefixMini   = "mini"
+	modelPrefixClaude = "claude"
+	modelPrefixGemini = "gemini"
+	llmAPIKeyMock     = "mock"
+)
+
+// Prompt format strings
+const (
+	indexedPrefixFormat = "[%d] "
+	sourceChannelFormat = "(Source: %s) "
+	translatePromptFmt  = "Translate the following text to %s. Return only the translated text, no explanations.\n\nText: %s"
+	relevanceGateFormat = "%s\n\nText to evaluate:\n%s\n\nRespond in JSON format with fields: decision (relevant/irrelevant), confidence (0-1), reason"
+)
+
+// Log message strings
+const (
+	logMsgCircuitBreakerOpen     = "skipping provider - circuit breaker open"
+	logMsgEvidenceHeader         = "   [Supporting Evidence:"
+	logMsgParseRelevanceGateFail = "failed to parse relevance gate response"
 )
 
 // Default topic when none is available
@@ -29,6 +60,7 @@ const (
 	toneFormatString  = " Tone: %s."
 	logKeyIndex       = "index"
 	logKeyTotal       = "total"
+	logKeyResponse    = "response"
 	indexedItemFormat = "[%d] %s\n"
 )
 
@@ -44,4 +76,10 @@ const (
 	mockRelevanceScore  = 0.8
 	mockImportanceScore = 0.5
 	mockConfidenceScore = 0.5
+)
+
+// Circuit breaker defaults
+const (
+	defaultCircuitThreshold = 5
+	defaultCircuitTimeout   = time.Minute
 )

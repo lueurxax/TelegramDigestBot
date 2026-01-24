@@ -67,7 +67,7 @@ func (a *App) StartHealthServer(ctx context.Context) error {
 func (a *App) RunBot(ctx context.Context) error {
 	a.logger.Info().Msg("Starting bot mode")
 
-	llmClient := a.newLLMClient()
+	llmClient := a.newLLMClient(ctx)
 
 	// Create a digest scheduler for preview commands (nil poster since we only need BuildDigest)
 	digestBuilder := digest.New(a.cfg, a.database, nil, llmClient, a.logger)
@@ -102,7 +102,7 @@ func (a *App) RunReader(ctx context.Context) error {
 func (a *App) RunWorker(ctx context.Context) error {
 	a.logger.Info().Msg("Starting worker mode")
 
-	llmClient := a.newLLMClient()
+	llmClient := a.newLLMClient(ctx)
 	embeddingClient := a.newEmbeddingClient()
 	resolver := a.newLinkResolver()
 
@@ -131,7 +131,7 @@ func (a *App) runFactCheckWorker(ctx context.Context) {
 }
 
 func (a *App) runEnrichmentWorker(ctx context.Context, embeddingClient embeddings.Client) {
-	llmClient := a.newLLMClient()
+	llmClient := a.newLLMClient(ctx)
 	worker := enrichment.NewWorker(a.cfg, a.database, embeddingClient, a.logger)
 
 	a.configureEnrichmentWorker(worker, llmClient)
@@ -328,7 +328,7 @@ func (a *App) getDiscoveryKeywordFilterStats(ctx context.Context, minSeen int, m
 func (a *App) RunDigest(ctx context.Context, once bool) error {
 	a.logger.Info().Bool("once", once).Msg("Starting digest mode")
 
-	llmClient := a.newLLMClient()
+	llmClient := a.newLLMClient(ctx)
 
 	// Create bot as DigestPoster only (nil digestBuilder since bot won't process commands)
 	b, err := bot.New(a.cfg, a.database, nil, llmClient, a.logger)
@@ -353,9 +353,9 @@ func (a *App) RunDigest(ctx context.Context, once bool) error {
 	return nil
 }
 
-// newLLMClient creates a new LLM client.
-func (a *App) newLLMClient() llm.Client {
-	return llm.New(a.cfg, a.database, a.logger)
+// newLLMClient creates a new LLM client with multi-provider fallback.
+func (a *App) newLLMClient(ctx context.Context) llm.Client {
+	return llm.New(ctx, a.cfg, a.database, a.logger)
 }
 
 // newEmbeddingClient creates a new embedding client with multi-provider support.

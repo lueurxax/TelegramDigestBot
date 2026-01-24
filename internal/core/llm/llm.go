@@ -2,12 +2,11 @@ package llm
 
 import (
 	"context"
-	"fmt"
-	"strings"
 
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
+	"github.com/lueurxax/telegram-digest-bot/internal/core/embeddings"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 )
 
@@ -65,96 +64,56 @@ type PromptStore interface {
 	GetSetting(ctx context.Context, key string, target interface{}) error
 }
 
-type mockClient struct {
-	cfg *config.Config
-}
-
-func New(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
-	if cfg.LLMAPIKey == "" || cfg.LLMAPIKey == "mock" {
-		return &mockClient{cfg: cfg}
+// New creates a new LLM client with multi-provider fallback support.
+// It registers providers in priority order: OpenAI (primary), Anthropic (fallback), Google (second fallback).
+// If no providers are configured, it returns a mock client.
+func New(ctx context.Context, cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
+	// Use a no-op logger if none provided
+	if logger == nil {
+		nopLogger := zerolog.Nop()
+		logger = &nopLogger
 	}
 
-	return NewOpenAI(cfg, store, logger)
-}
+	registry := NewRegistry(logger)
 
-func (c *mockClient) ProcessBatch(_ context.Context, messages []MessageInput, targetLanguage string, model string, tone string) ([]BatchResult, error) {
-	// In a real implementation, this would call OpenAI or another LLM provider.
-	// Construct prompt (simplified)
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf("Summarize and score these Telegram messages in JSON format (target language: %s, model: %s, tone: %s):\n", targetLanguage, model, tone))
-
-	for i, m := range messages {
-		sb.WriteString(fmt.Sprintf("%d. [Context: %v] %s\n", i, m.Context, m.Text))
+	circuitCfg := embeddings.CircuitBreakerConfig{
+		Threshold:  cfg.LLMCircuitThreshold,
+		ResetAfter: cfg.LLMCircuitTimeout,
 	}
 
-	// Mocking LLM response
-	results := make([]BatchResult, len(messages))
-	for i := range messages {
-		results[i] = BatchResult{
-			Index:           i,
-			RelevanceScore:  mockRelevanceScore,
-			ImportanceScore: mockImportanceScore,
-			Topic:           DefaultTopic,
-			Summary:         "This is a summary of the message.",
-			Language:        "en",
-			SourceChannel:   messages[i].ChannelTitle,
+	// Use default values if not configured
+	if circuitCfg.Threshold == 0 {
+		circuitCfg.Threshold = defaultCircuitThreshold
+	}
+
+	if circuitCfg.ResetAfter == 0 {
+		circuitCfg.ResetAfter = defaultCircuitTimeout
+	}
+
+	// Register OpenAI as primary provider
+	if cfg.LLMAPIKey != "" && cfg.LLMAPIKey != llmAPIKeyMock {
+		registry.Register(NewOpenAIProvider(cfg, store, logger), circuitCfg)
+	}
+
+	// Register Anthropic as first fallback
+	if cfg.AnthropicAPIKey != "" {
+		registry.Register(NewAnthropicProvider(cfg, store, logger), circuitCfg)
+	}
+
+	// Register Google as second fallback
+	if cfg.GoogleAPIKey != "" {
+		googleProvider, err := NewGoogleProvider(ctx, cfg, store, logger)
+		if err != nil {
+			logger.Warn().Err(err).Msg("failed to create Google LLM provider")
+		} else {
+			registry.Register(googleProvider, circuitCfg)
 		}
 	}
 
-	return results, nil
-}
-
-func (c *mockClient) TranslateText(_ context.Context, text string, _ string, _ string) (string, error) {
-	return text, nil
-}
-
-func (c *mockClient) CompleteText(_ context.Context, prompt string, _ string) (string, error) {
-	if strings.Contains(prompt, "JSON array") {
-		return `[{"text": "Mock claim", "entities": [{"text": "Mock entity", "type": "ORG"}]}]`, nil
+	// If no providers configured, use mock
+	if registry.ProviderCount() == 0 {
+		registry.Register(NewMockProvider(cfg), circuitCfg)
 	}
 
-	return "Mock response", nil
-}
-
-func (c *mockClient) GenerateNarrative(_ context.Context, items []domain.Item, _ string, _ string, tone string) (string, error) {
-	return "This is a mock cohesive narrative of the latest news based on " + fmt.Sprint(len(items)) + " items in " + tone + " tone.", nil
-}
-
-func (c *mockClient) GenerateNarrativeWithEvidence(ctx context.Context, items []domain.Item, _ ItemEvidence, targetLanguage string, model string, tone string) (string, error) {
-	return c.GenerateNarrative(ctx, items, targetLanguage, model, tone)
-}
-
-func (c *mockClient) SummarizeCluster(_ context.Context, items []domain.Item, _ string, _ string, tone string) (string, error) {
-	return "This is a mock consolidated summary of " + fmt.Sprint(len(items)) + " related items in " + tone + " tone.", nil
-}
-
-func (c *mockClient) SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, _ ItemEvidence, targetLanguage string, model string, tone string) (string, error) {
-	return c.SummarizeCluster(ctx, items, targetLanguage, model, tone)
-}
-
-func (c *mockClient) GenerateClusterTopic(_ context.Context, items []domain.Item, _ string, _ string) (string, error) {
-	if len(items) > 0 {
-		return items[0].Topic, nil
-	}
-
-	return DefaultTopic, nil
-}
-
-func (c *mockClient) RelevanceGate(_ context.Context, _ string, _ string, _ string) (RelevanceGateResult, error) {
-	return RelevanceGateResult{
-		Decision:   "relevant",
-		Confidence: mockConfidenceScore,
-		Reason:     "mock",
-	}, nil
-}
-
-func (c *mockClient) CompressSummariesForCover(_ context.Context, summaries []string) ([]string, error) {
-	// Mock returns summaries as-is
-	return summaries, nil
-}
-
-func (c *mockClient) GenerateDigestCover(_ context.Context, _ []string, _ string) ([]byte, error) {
-	// Mock returns nil - no image generated
-	return nil, nil
+	return registry
 }

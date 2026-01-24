@@ -4,6 +4,8 @@ import (
 	"context"
 	"strconv"
 	"strings"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 )
 
 const (
@@ -128,4 +130,131 @@ func applyPromptTokens(prompt string, langInstruction string, count int) string 
 	}
 
 	return withCount
+}
+
+// buildNarrativePrompt builds a prompt for narrative generation.
+func buildNarrativePrompt(items []domain.Item, evidence ItemEvidence, targetLanguage, tone, promptTemplate string) string {
+	langInstruction := buildPromptLangInstruction(targetLanguage, tone, "narrative")
+
+	var sb strings.Builder
+
+	sb.WriteString(applyPromptTokens(promptTemplate, langInstruction, len(items)))
+
+	for i, item := range items {
+		sb.WriteString("[")
+		sb.WriteString(strconv.Itoa(i + 1))
+		sb.WriteString("] Topic: ")
+		sb.WriteString(item.Topic)
+		sb.WriteString(" - ")
+		sb.WriteString(item.Summary)
+		sb.WriteString("\n")
+
+		// Add evidence context if available
+		if evidence != nil {
+			if ev, ok := evidence[item.ID]; ok && len(ev) > 0 {
+				sb.WriteString(formatEvidenceForPrompt(ev))
+			}
+		}
+	}
+
+	return sb.String()
+}
+
+// buildClusterSummaryPrompt builds a prompt for cluster summarization.
+func buildClusterSummaryPrompt(items []domain.Item, evidence ItemEvidence, targetLanguage, tone, promptTemplate string) string {
+	langInstruction := buildPromptLangInstruction(targetLanguage, tone, "summary")
+
+	var sb strings.Builder
+
+	sb.WriteString(applyPromptTokens(promptTemplate, langInstruction, len(items)))
+
+	for i, item := range items {
+		sb.WriteString("[")
+		sb.WriteString(strconv.Itoa(i + 1))
+		sb.WriteString("] ")
+		sb.WriteString(item.Summary)
+		sb.WriteString("\n")
+
+		// Add evidence context if available
+		if evidence != nil {
+			if ev, ok := evidence[item.ID]; ok && len(ev) > 0 {
+				sb.WriteString(formatEvidenceForPrompt(ev))
+			}
+		}
+	}
+
+	return sb.String()
+}
+
+// buildClusterTopicPrompt builds a prompt for cluster topic generation.
+func buildClusterTopicPrompt(items []domain.Item, targetLanguage, promptTemplate string) string {
+	langInstruction := ""
+	if targetLanguage != "" {
+		langInstruction = " IMPORTANT: Write the topic in " + targetLanguage + " language."
+	}
+
+	var sb strings.Builder
+
+	sb.WriteString(applyPromptTokens(promptTemplate, langInstruction, len(items)))
+
+	for i, item := range items {
+		sb.WriteString("[")
+		sb.WriteString(strconv.Itoa(i + 1))
+		sb.WriteString("] ")
+		sb.WriteString(item.Summary)
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// buildPromptLangInstruction builds a language instruction for prompts.
+func buildPromptLangInstruction(targetLanguage, tone, context string) string {
+	var sb strings.Builder
+
+	if targetLanguage != "" {
+		sb.WriteString(" IMPORTANT: Write the ")
+		sb.WriteString(context)
+		sb.WriteString(" in ")
+		sb.WriteString(targetLanguage)
+		sb.WriteString(" language.")
+	}
+
+	if tone != "" {
+		sb.WriteString(" Tone: ")
+		sb.WriteString(getToneInstruction(tone))
+	}
+
+	return sb.String()
+}
+
+// formatEvidenceForPrompt formats evidence for inclusion in prompts.
+func formatEvidenceForPrompt(evidence []EvidenceSource) string {
+	if len(evidence) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	sb.WriteString("   [Supporting Evidence:")
+
+	for _, ev := range evidence {
+		if ev.IsContradiction {
+			sb.WriteString(" ⚠️ CONTRADICTS: ")
+			sb.WriteString(ev.Title)
+			sb.WriteString(" (")
+			sb.WriteString(ev.Domain)
+			sb.WriteString(")")
+		} else {
+			sb.WriteString(" ✓ ")
+			sb.WriteString(ev.Title)
+			sb.WriteString(" (")
+			sb.WriteString(ev.Domain)
+			sb.WriteString(")")
+		}
+	}
+
+	sb.WriteString("]\n")
+
+	return sb.String()
 }

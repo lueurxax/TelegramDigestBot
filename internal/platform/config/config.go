@@ -166,6 +166,12 @@ type Config struct {
 	EmbeddingCircuitThreshold int           `env:"EMBEDDING_CIRCUIT_THRESHOLD" envDefault:"5"`
 	EmbeddingCircuitTimeout   time.Duration `env:"EMBEDDING_CIRCUIT_TIMEOUT" envDefault:"1m"`
 
+	// LLM provider settings (multi-provider fallback)
+	AnthropicAPIKey     string        `env:"ANTHROPIC_API_KEY" envDefault:""`
+	GoogleAPIKey        string        `env:"GOOGLE_API_KEY" envDefault:""`
+	LLMCircuitThreshold int           `env:"LLM_CIRCUIT_THRESHOLD" envDefault:"5"`
+	LLMCircuitTimeout   time.Duration `env:"LLM_CIRCUIT_TIMEOUT" envDefault:"1m"`
+
 	// Crawler settings (for cmd/crawler)
 	CrawlDepth        int           `env:"CRAWL_DEPTH" envDefault:"2"`
 	CrawlRateLimitRPS float64       `env:"CRAWL_RATE_LIMIT_RPS" envDefault:"2"`

@@ -73,7 +73,8 @@ Rules:
 - Do not number the phrases`
 )
 
-func NewOpenAI(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
+// NewOpenAIProvider creates a new OpenAI LLM provider.
+func NewOpenAIProvider(cfg *config.Config, store PromptStore, logger *zerolog.Logger) *openaiClient {
 	return &openaiClient{
 		cfg:         cfg,
 		client:      openai.NewClient(cfg.LLMAPIKey),
@@ -82,6 +83,36 @@ func NewOpenAI(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Cl
 		promptStore: store,
 	}
 }
+
+// NewOpenAI creates a new OpenAI client (for backward compatibility).
+//
+// Deprecated: Use NewOpenAIProvider with Registry for multi-provider support.
+func NewOpenAI(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
+	return NewOpenAIProvider(cfg, store, logger)
+}
+
+// Name returns the provider identifier.
+func (c *openaiClient) Name() ProviderName {
+	return ProviderOpenAI
+}
+
+// IsAvailable returns true if the provider is configured and available.
+func (c *openaiClient) IsAvailable() bool {
+	return c.cfg.LLMAPIKey != "" && c.cfg.LLMAPIKey != "mock"
+}
+
+// Priority returns the provider priority.
+func (c *openaiClient) Priority() int {
+	return PriorityPrimary
+}
+
+// SupportsImageGeneration returns true as OpenAI supports DALL-E.
+func (c *openaiClient) SupportsImageGeneration() bool {
+	return true
+}
+
+// Ensure openaiClient implements Provider interface.
+var _ Provider = (*openaiClient)(nil)
 
 func (c *openaiClient) checkCircuit() error {
 	c.mu.Lock()
@@ -922,7 +953,7 @@ func formatEvidenceContext(evidence []EvidenceSource) string {
 
 	var sb strings.Builder
 
-	sb.WriteString("   [Supporting Evidence:")
+	sb.WriteString(logMsgEvidenceHeader)
 
 	for _, ev := range evidence {
 		if ev.IsContradiction {
