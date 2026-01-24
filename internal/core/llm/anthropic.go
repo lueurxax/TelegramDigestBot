@@ -17,11 +17,10 @@ import (
 
 // Anthropic model constants.
 const (
-	ModelClaudeSonnet = "claude-sonnet-4-20250514"
-	ModelClaudeHaiku  = "claude-3-5-haiku-20241022"
+	ModelClaudeHaiku = "claude-haiku-4.5"
 
 	// Default model for Anthropic.
-	defaultAnthropicModel = ModelClaudeSonnet
+	defaultAnthropicModel = ModelClaudeHaiku
 
 	// Rate limiter settings for Anthropic.
 	anthropicRateLimiterBurst = 5
@@ -91,19 +90,12 @@ func (p *anthropicProvider) resolveModel(model string) string {
 	}
 
 	// Map OpenAI model names to Anthropic equivalents
-	switch {
-	case strings.Contains(strings.ToLower(model), modelPrefixGPT4) || strings.Contains(strings.ToLower(model), modelPrefixGPT5):
-		return ModelClaudeSonnet
-	case strings.Contains(strings.ToLower(model), modelPrefixNano) || strings.Contains(strings.ToLower(model), modelPrefixMini):
-		return ModelClaudeHaiku
-	default:
-		// If it's already a Claude model name, use it directly
-		if strings.HasPrefix(model, modelPrefixClaude) {
-			return model
-		}
-
-		return defaultAnthropicModel
+	// All models map to Haiku since it's the only configured Anthropic model
+	if strings.HasPrefix(model, modelPrefixClaude) {
+		return model
 	}
+
+	return ModelClaudeHaiku
 }
 
 // ProcessBatch implements Provider interface.

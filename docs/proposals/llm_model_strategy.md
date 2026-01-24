@@ -45,8 +45,8 @@ The strategy is designed to:
 |----------|--------|-----------|
 | **OpenAI** | gpt-5, gpt-5.2, gpt-5-nano, text-embedding-3-large | Fallback LLM, primary embeddings |
 | **Cohere** | command-r, command-r-plus, embed-multilingual-v3.0 | Embedding fallback (multilingual) |
-| **Anthropic** | claude-3-5-sonnet, claude-3-5-haiku | Narrative, complex reasoning |
-| **Google** | gemini-2.5-flash-lite, gemini-embedding-001 | Primary LLM, embedding fallback |
+| **Anthropic** | claude-haiku-4.5 | Narrative, complex reasoning |
+| **Google** | gemini-2.0-flash-lite, gemini-embedding-001 | Primary LLM, embedding fallback |
 
 ### Provider Priority (Default)
 
@@ -196,7 +196,7 @@ bot override → environment override → default → fallback chain
 **Set override:**
 ```
 /llm set summarize gpt-4o
-/llm set narrative claude-3-5-sonnet-20241022
+/llm set narrative claude-haiku-4.5
 /llm set embeddings gemini-embedding-001
 ```
 
@@ -237,7 +237,7 @@ Overrides stored in `settings` table:
 INSERT INTO settings (key, value) VALUES
   ('llm_override_embeddings', 'gemini-embedding-001'),
   ('llm_override_summarize', NULL),  -- NULL = use default
-  ('llm_override_narrative', 'claude-3-5-sonnet-20241022');
+  ('llm_override_narrative', 'claude-haiku-4.5');
 ```
 
 ---
