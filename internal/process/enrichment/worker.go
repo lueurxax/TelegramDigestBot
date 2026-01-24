@@ -790,6 +790,15 @@ func (w *Worker) executeQuery(ctx context.Context, gq GeneratedQuery, maxResults
 
 	observability.EnrichmentRequests.WithLabelValues(string(provider), statusSuccess, gq.Language).Inc()
 
+	// Track search result counts
+	resultCount := float64(len(results))
+	observability.EnrichmentSearchResults.WithLabelValues(string(provider)).Observe(resultCount)
+	observability.EnrichmentSearchResultsTotal.WithLabelValues(string(provider)).Add(resultCount)
+
+	if len(results) == 0 {
+		observability.EnrichmentSearchZeroResults.WithLabelValues(string(provider)).Inc()
+	}
+
 	// Track usage for budget controls
 	w.trackUsage(ctx, provider)
 

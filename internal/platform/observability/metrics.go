@@ -125,4 +125,21 @@ var (
 		Name: "digest_corroboration_coverage_total",
 		Help: "Total number of items with and without channel corroboration",
 	}, []string{"has_corroboration"})
+
+	// Search result metrics - track how many results each provider returns
+	EnrichmentSearchResults = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "digest_enrichment_search_results",
+		Help:    "Distribution of search result counts per query by provider",
+		Buckets: []float64{0, 1, 2, 5, 10, 20, 50, 100},
+	}, []string{"provider"})
+
+	EnrichmentSearchResultsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_enrichment_search_results_total",
+		Help: "Total number of search results returned by provider",
+	}, []string{"provider"})
+
+	EnrichmentSearchZeroResults = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_enrichment_search_zero_results_total",
+		Help: "Total number of searches that returned zero results",
+	}, []string{"provider"})
 )
