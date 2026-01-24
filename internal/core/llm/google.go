@@ -17,10 +17,9 @@ import (
 
 // Google model constants.
 const (
-	ModelGeminiFlash = "gemini-1.5-flash-8b"
-	ModelGeminiPro   = "gemini-1.5-pro"
+	ModelGeminiFlash = "gemini-1.5-flash"
 
-	// Default model for Google.
+	// Default model for Google (use cheapest available).
 	defaultGoogleModel = ModelGeminiFlash
 
 	// Rate limiter settings for Google.
@@ -92,25 +91,15 @@ func (p *googleProvider) SupportsImageGeneration() bool {
 }
 
 // resolveModel returns the appropriate model name for Google.
+// Always uses the cheapest model (gemini-1.5-flash) regardless of input.
 func (p *googleProvider) resolveModel(model string) string {
-	if model == "" {
-		return defaultGoogleModel
+	// If it's already a Gemini model name, use it directly
+	if strings.HasPrefix(model, modelPrefixGemini) {
+		return model
 	}
 
-	// Map OpenAI model names to Google equivalents
-	switch {
-	case strings.Contains(strings.ToLower(model), modelPrefixGPT4) || strings.Contains(strings.ToLower(model), modelPrefixGPT5):
-		return ModelGeminiPro
-	case strings.Contains(strings.ToLower(model), modelPrefixNano) || strings.Contains(strings.ToLower(model), modelPrefixMini):
-		return ModelGeminiFlash
-	default:
-		// If it's already a Gemini model name, use it directly
-		if strings.HasPrefix(model, modelPrefixGemini) {
-			return model
-		}
-
-		return defaultGoogleModel
-	}
+	// Always use cheapest model for fallback
+	return defaultGoogleModel
 }
 
 // ProcessBatch implements Provider interface.
