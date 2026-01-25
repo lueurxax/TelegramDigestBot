@@ -99,7 +99,8 @@ func (c *Crawler) enqueueURL(ctx context.Context, rawURL string, depth int) erro
 		return fmt.Errorf(wrapErrFmt, errUnsupportedScheme, parsed.Scheme)
 	}
 
-	docID := solr.WebDocID(rawURL)
+	canonicalURL := solr.CanonicalizeURL(rawURL)
+	docID := solr.WebDocID(canonicalURL)
 
 	// Check if already exists
 	existing, err := c.client.Get(ctx, docID)
@@ -116,10 +117,11 @@ func (c *Crawler) enqueueURL(ctx context.Context, rawURL string, depth int) erro
 	doc := solr.NewIndexDocument(docID).
 		SetField("source", solr.SourceWeb).
 		SetField(fieldURL, rawURL).
-		SetField("url_canonical", rawURL).
+		SetField("url_canonical", canonicalURL).
 		SetField(logKeyDomain, parsed.Host).
 		SetField("crawl_status", solr.CrawlStatusPending).
-		SetField("crawl_depth", depth)
+		SetField("crawl_depth", depth).
+		SetField("indexed_at", time.Now().UTC().Format(time.RFC3339))
 
 	if err := c.client.Index(ctx, doc); err != nil {
 		return fmt.Errorf("index document: %w", err)

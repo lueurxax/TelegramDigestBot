@@ -399,7 +399,7 @@ func (p *anthropicProvider) RelevanceGate(ctx context.Context, text, model, prom
 }
 
 // CompressSummariesForCover implements Provider interface.
-func (p *anthropicProvider) CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error) {
+func (p *anthropicProvider) CompressSummariesForCover(ctx context.Context, summaries []string, model string) ([]string, error) {
 	if len(summaries) == 0 {
 		return nil, nil
 	}
@@ -410,8 +410,10 @@ func (p *anthropicProvider) CompressSummariesForCover(ctx context.Context, summa
 
 	prompt := buildCompressSummariesPrompt(summaries)
 
+	resolvedModel := anthropic.Model(p.resolveModel(model))
+
 	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     ModelClaudeHaiku,
+		Model:     resolvedModel,
 		MaxTokens: anthropicMaxTokensTiny,
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock(compressSummariesSystemPrompt + "\n\n" + prompt)),

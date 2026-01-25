@@ -1790,7 +1790,7 @@ func TestGenerateClusterTopicEmpty(t *testing.T) {
 func TestCompressSummariesForCoverEmpty(t *testing.T) {
 	c := &openaiClient{cfg: &config.Config{}, logger: testLogger()}
 
-	result, err := c.CompressSummariesForCover(context.Background(), []string{})
+	result, err := c.CompressSummariesForCover(context.Background(), []string{}, "")
 	if err != nil {
 		t.Fatalf(testErrCompressSummaries, err)
 	}

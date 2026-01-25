@@ -387,7 +387,7 @@ func (p *googleProvider) RelevanceGate(ctx context.Context, text, model, prompt 
 }
 
 // CompressSummariesForCover implements Provider interface.
-func (p *googleProvider) CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error) {
+func (p *googleProvider) CompressSummariesForCover(ctx context.Context, summaries []string, model string) ([]string, error) {
 	if len(summaries) == 0 {
 		return nil, nil
 	}
@@ -397,7 +397,7 @@ func (p *googleProvider) CompressSummariesForCover(ctx context.Context, summarie
 	}
 
 	prompt := buildCompressSummariesPrompt(summaries)
-	genModel := p.client.GenerativeModel(ModelGeminiFlashLite)
+	genModel := p.client.GenerativeModel(p.resolveModel(model))
 
 	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(compressSummariesSystemPrompt+"\n\n"+prompt)))
 	if err != nil {

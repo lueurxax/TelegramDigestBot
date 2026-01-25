@@ -143,6 +143,7 @@ data:
       <field name="language" type="string" indexed="true" stored="true" default="unknown"/>
       <field name="published_at" type="pdate" indexed="true" stored="true"/>
       <field name="crawled_at" type="pdate" indexed="true" stored="true"/>
+      <field name="indexed_at" type="pdate" indexed="true" stored="true"/>
 
       <!-- Crawl queue fields (unified: URL queue + indexed content) -->
       <field name="crawl_status" type="string" indexed="true" stored="true" default="pending"/>
@@ -574,7 +575,7 @@ spec:
               echo "Deleting stale pending documents..."
               curl -s "http://solr:8983/solr/news/update?commit=true" \
                 -H "Content-Type: application/json" \
-                -d '{"delete":{"query":"crawl_status:pending AND crawled_at:[* TO NOW-7DAYS]"}}'
+                -d '{"delete":{"query":"crawl_status:pending AND indexed_at:[* TO NOW-7DAYS]"}}'
 
               # Delete error URLs older than 30 days
               echo "Deleting old error documents..."

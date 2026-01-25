@@ -138,8 +138,8 @@ func (r *Registry) RelevanceGate(ctx context.Context, text, model, prompt string
 
 // CompressSummariesForCover implements Client interface with task-aware fallback.
 func (r *Registry) CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error) {
-	return executeWithTaskFallback(r, TaskTypeCompress, "", func(p Provider, _ string) ([]string, error) {
-		return p.CompressSummariesForCover(ctx, summaries)
+	return executeWithTaskFallback(r, TaskTypeCompress, "", func(p Provider, m string) ([]string, error) {
+		return p.CompressSummariesForCover(ctx, summaries, m)
 	})
 }
 

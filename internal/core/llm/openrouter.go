@@ -162,9 +162,9 @@ func (p *openRouterProvider) resolveModel(model string) string {
 }
 
 // callOpenRouterAPI makes the HTTP request to OpenRouter Chat API.
-func (p *openRouterProvider) callOpenRouterAPI(ctx context.Context, prompt string, maxTokens int) (string, error) {
+func (p *openRouterProvider) callOpenRouterAPI(ctx context.Context, prompt, model string, maxTokens int) (string, error) {
 	reqBody := openRouterChatRequest{
-		Model: p.resolveModel(""),
+		Model: p.resolveModel(model),
 		Messages: []openRouterChatMessage{
 			{Role: "user", Content: prompt},
 		},
@@ -229,14 +229,14 @@ func (p *openRouterProvider) extractResponseText(body []byte) (string, error) {
 }
 
 // ProcessBatch implements Provider interface.
-func (p *openRouterProvider) ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage, _, tone string) ([]BatchResult, error) {
+func (p *openRouterProvider) ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage, model, tone string) ([]BatchResult, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf(errRateLimiterSimple, err)
 	}
 
 	promptContent := buildBatchPromptContent(messages, targetLanguage, tone)
 
-	responseText, err := p.callOpenRouterAPI(ctx, promptContent, openRouterMaxTokensDefault)
+	responseText, err := p.callOpenRouterAPI(ctx, promptContent, model, openRouterMaxTokensDefault)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +274,7 @@ func (p *openRouterProvider) parseProcessBatchResponse(responseText string, mess
 }
 
 // TranslateText implements Provider interface.
-func (p *openRouterProvider) TranslateText(ctx context.Context, text, targetLanguage, _ string) (string, error) {
+func (p *openRouterProvider) TranslateText(ctx context.Context, text, targetLanguage, model string) (string, error) {
 	if strings.TrimSpace(text) == "" || strings.TrimSpace(targetLanguage) == "" {
 		return text, nil
 	}
@@ -285,7 +285,7 @@ func (p *openRouterProvider) TranslateText(ctx context.Context, text, targetLang
 
 	prompt := fmt.Sprintf(translatePromptFmt, targetLanguage, text)
 
-	responseText, err := p.callOpenRouterAPI(ctx, prompt, openRouterMaxTokensShort)
+	responseText, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensShort)
 	if err != nil {
 		return "", err
 	}
@@ -294,12 +294,12 @@ func (p *openRouterProvider) TranslateText(ctx context.Context, text, targetLang
 }
 
 // CompleteText implements Provider interface.
-func (p *openRouterProvider) CompleteText(ctx context.Context, prompt, _ string) (string, error) {
+func (p *openRouterProvider) CompleteText(ctx context.Context, prompt, model string) (string, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
 		return "", fmt.Errorf(errRateLimiterSimple, err)
 	}
 
-	responseText, err := p.callOpenRouterAPI(ctx, prompt, openRouterMaxTokensDefault)
+	responseText, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensDefault)
 	if err != nil {
 		return "", err
 	}
@@ -308,7 +308,7 @@ func (p *openRouterProvider) CompleteText(ctx context.Context, prompt, _ string)
 }
 
 // GenerateNarrative implements Provider interface.
-func (p *openRouterProvider) GenerateNarrative(ctx context.Context, items []domain.Item, targetLanguage, _, tone string) (string, error) {
+func (p *openRouterProvider) GenerateNarrative(ctx context.Context, items []domain.Item, targetLanguage, model, tone string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
 	}
@@ -319,7 +319,7 @@ func (p *openRouterProvider) GenerateNarrative(ctx context.Context, items []doma
 
 	prompt := buildNarrativePrompt(items, nil, targetLanguage, tone, defaultNarrativePrompt)
 
-	responseText, err := p.callOpenRouterAPI(ctx, prompt, openRouterMaxTokensDefault)
+	responseText, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensDefault)
 	if err != nil {
 		return "", err
 	}
@@ -328,7 +328,7 @@ func (p *openRouterProvider) GenerateNarrative(ctx context.Context, items []doma
 }
 
 // GenerateNarrativeWithEvidence implements Provider interface.
-func (p *openRouterProvider) GenerateNarrativeWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, _, tone string) (string, error) {
+func (p *openRouterProvider) GenerateNarrativeWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, model, tone string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
 	}
@@ -339,7 +339,7 @@ func (p *openRouterProvider) GenerateNarrativeWithEvidence(ctx context.Context, 
 
 	prompt := buildNarrativePrompt(items, evidence, targetLanguage, tone, defaultNarrativePrompt)
 
-	responseText, err := p.callOpenRouterAPI(ctx, prompt, openRouterMaxTokensDefault)
+	responseText, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensDefault)
 	if err != nil {
 		return "", err
 	}
@@ -348,7 +348,7 @@ func (p *openRouterProvider) GenerateNarrativeWithEvidence(ctx context.Context, 
 }
 
 // SummarizeCluster implements Provider interface.
-func (p *openRouterProvider) SummarizeCluster(ctx context.Context, items []domain.Item, targetLanguage, _, tone string) (string, error) {
+func (p *openRouterProvider) SummarizeCluster(ctx context.Context, items []domain.Item, targetLanguage, model, tone string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
 	}
@@ -359,7 +359,7 @@ func (p *openRouterProvider) SummarizeCluster(ctx context.Context, items []domai
 
 	prompt := buildClusterSummaryPrompt(items, nil, targetLanguage, tone, defaultClusterSummaryPrompt)
 
-	responseText, err := p.callOpenRouterAPI(ctx, prompt, openRouterMaxTokensTiny)
+	responseText, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensTiny)
 	if err != nil {
 		return "", err
 	}
@@ -368,7 +368,7 @@ func (p *openRouterProvider) SummarizeCluster(ctx context.Context, items []domai
 }
 
 // SummarizeClusterWithEvidence implements Provider interface.
-func (p *openRouterProvider) SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, _, tone string) (string, error) {
+func (p *openRouterProvider) SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, model, tone string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
 	}
@@ -379,7 +379,7 @@ func (p *openRouterProvider) SummarizeClusterWithEvidence(ctx context.Context, i
 
 	prompt := buildClusterSummaryPrompt(items, evidence, targetLanguage, tone, defaultClusterSummaryPrompt)
 
-	responseText, err := p.callOpenRouterAPI(ctx, prompt, openRouterMaxTokensTiny)
+	responseText, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensTiny)
 	if err != nil {
 		return "", err
 	}
@@ -388,7 +388,7 @@ func (p *openRouterProvider) SummarizeClusterWithEvidence(ctx context.Context, i
 }
 
 // GenerateClusterTopic implements Provider interface.
-func (p *openRouterProvider) GenerateClusterTopic(ctx context.Context, items []domain.Item, targetLanguage, _ string) (string, error) {
+func (p *openRouterProvider) GenerateClusterTopic(ctx context.Context, items []domain.Item, targetLanguage, model string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
 	}
@@ -399,7 +399,7 @@ func (p *openRouterProvider) GenerateClusterTopic(ctx context.Context, items []d
 
 	prompt := buildClusterTopicPrompt(items, targetLanguage, defaultClusterTopicPrompt)
 
-	responseText, err := p.callOpenRouterAPI(ctx, prompt, openRouterMaxTokensNano)
+	responseText, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensNano)
 	if err != nil {
 		return "", err
 	}
@@ -408,14 +408,14 @@ func (p *openRouterProvider) GenerateClusterTopic(ctx context.Context, items []d
 }
 
 // RelevanceGate implements Provider interface.
-func (p *openRouterProvider) RelevanceGate(ctx context.Context, text, _, prompt string) (RelevanceGateResult, error) {
+func (p *openRouterProvider) RelevanceGate(ctx context.Context, text, model, prompt string) (RelevanceGateResult, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
 		return RelevanceGateResult{}, fmt.Errorf(errRateLimiterSimple, err)
 	}
 
 	fullPrompt := fmt.Sprintf(relevanceGateFormat, prompt, text)
 
-	responseText, err := p.callOpenRouterAPI(ctx, fullPrompt, openRouterMaxTokensMicro)
+	responseText, err := p.callOpenRouterAPI(ctx, fullPrompt, model, openRouterMaxTokensMicro)
 	if err != nil {
 		return RelevanceGateResult{}, err
 	}
@@ -437,7 +437,7 @@ func (p *openRouterProvider) RelevanceGate(ctx context.Context, text, _, prompt 
 }
 
 // CompressSummariesForCover implements Provider interface.
-func (p *openRouterProvider) CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error) {
+func (p *openRouterProvider) CompressSummariesForCover(ctx context.Context, summaries []string, model string) ([]string, error) {
 	if len(summaries) == 0 {
 		return nil, nil
 	}
@@ -448,7 +448,7 @@ func (p *openRouterProvider) CompressSummariesForCover(ctx context.Context, summ
 
 	prompt := buildCompressSummariesPrompt(summaries)
 
-	responseText, err := p.callOpenRouterAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, openRouterMaxTokensTiny)
+	responseText, err := p.callOpenRouterAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, model, openRouterMaxTokensTiny)
 	if err != nil {
 		return nil, err
 	}

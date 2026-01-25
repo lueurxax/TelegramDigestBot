@@ -162,9 +162,9 @@ func (p *cohereProvider) resolveModel(model string) string {
 }
 
 // callCohereAPI makes the HTTP request to Cohere Chat API.
-func (p *cohereProvider) callCohereAPI(ctx context.Context, prompt string, maxTokens int) (string, error) {
+func (p *cohereProvider) callCohereAPI(ctx context.Context, prompt, model string, maxTokens int) (string, error) {
 	reqBody := cohereChatRequest{
-		Model: p.resolveModel(""),
+		Model: p.resolveModel(model),
 		Messages: []cohereChatMessage{
 			{Role: "user", Content: prompt},
 		},
@@ -236,14 +236,14 @@ func (p *cohereProvider) extractResponseText(body []byte) (string, error) {
 }
 
 // ProcessBatch implements Provider interface.
-func (p *cohereProvider) ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage, _, tone string) ([]BatchResult, error) {
+func (p *cohereProvider) ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage, model, tone string) ([]BatchResult, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf(errRateLimiterSimple, err)
 	}
 
 	promptContent := buildBatchPromptContent(messages, targetLanguage, tone)
 
-	responseText, err := p.callCohereAPI(ctx, promptContent, cohereMaxTokensDefault)
+	responseText, err := p.callCohereAPI(ctx, promptContent, model, cohereMaxTokensDefault)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +281,7 @@ func (p *cohereProvider) parseProcessBatchResponse(responseText string, messages
 }
 
 // TranslateText implements Provider interface.
-func (p *cohereProvider) TranslateText(ctx context.Context, text, targetLanguage, _ string) (string, error) {
+func (p *cohereProvider) TranslateText(ctx context.Context, text, targetLanguage, model string) (string, error) {
 	if strings.TrimSpace(text) == "" || strings.TrimSpace(targetLanguage) == "" {
 		return text, nil
 	}
@@ -292,7 +292,7 @@ func (p *cohereProvider) TranslateText(ctx context.Context, text, targetLanguage
 
 	prompt := fmt.Sprintf(translatePromptFmt, targetLanguage, text)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, cohereMaxTokensShort)
+	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensShort)
 	if err != nil {
 		return "", err
 	}
@@ -301,12 +301,12 @@ func (p *cohereProvider) TranslateText(ctx context.Context, text, targetLanguage
 }
 
 // CompleteText implements Provider interface.
-func (p *cohereProvider) CompleteText(ctx context.Context, prompt, _ string) (string, error) {
+func (p *cohereProvider) CompleteText(ctx context.Context, prompt, model string) (string, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
 		return "", fmt.Errorf(errRateLimiterSimple, err)
 	}
 
-	responseText, err := p.callCohereAPI(ctx, prompt, cohereMaxTokensDefault)
+	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
 	if err != nil {
 		return "", err
 	}
@@ -315,7 +315,7 @@ func (p *cohereProvider) CompleteText(ctx context.Context, prompt, _ string) (st
 }
 
 // GenerateNarrative implements Provider interface.
-func (p *cohereProvider) GenerateNarrative(ctx context.Context, items []domain.Item, targetLanguage, _, tone string) (string, error) {
+func (p *cohereProvider) GenerateNarrative(ctx context.Context, items []domain.Item, targetLanguage, model, tone string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
 	}
@@ -326,7 +326,7 @@ func (p *cohereProvider) GenerateNarrative(ctx context.Context, items []domain.I
 
 	prompt := buildNarrativePrompt(items, nil, targetLanguage, tone, defaultNarrativePrompt)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, cohereMaxTokensDefault)
+	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
 	if err != nil {
 		return "", err
 	}
@@ -335,7 +335,7 @@ func (p *cohereProvider) GenerateNarrative(ctx context.Context, items []domain.I
 }
 
 // GenerateNarrativeWithEvidence implements Provider interface.
-func (p *cohereProvider) GenerateNarrativeWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, _, tone string) (string, error) {
+func (p *cohereProvider) GenerateNarrativeWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, model, tone string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
 	}
@@ -346,7 +346,7 @@ func (p *cohereProvider) GenerateNarrativeWithEvidence(ctx context.Context, item
 
 	prompt := buildNarrativePrompt(items, evidence, targetLanguage, tone, defaultNarrativePrompt)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, cohereMaxTokensDefault)
+	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
 	if err != nil {
 		return "", err
 	}
@@ -355,7 +355,7 @@ func (p *cohereProvider) GenerateNarrativeWithEvidence(ctx context.Context, item
 }
 
 // SummarizeCluster implements Provider interface.
-func (p *cohereProvider) SummarizeCluster(ctx context.Context, items []domain.Item, targetLanguage, _, tone string) (string, error) {
+func (p *cohereProvider) SummarizeCluster(ctx context.Context, items []domain.Item, targetLanguage, model, tone string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
 	}
@@ -366,7 +366,7 @@ func (p *cohereProvider) SummarizeCluster(ctx context.Context, items []domain.It
 
 	prompt := buildClusterSummaryPrompt(items, nil, targetLanguage, tone, defaultClusterSummaryPrompt)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, cohereMaxTokensTiny)
+	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensTiny)
 	if err != nil {
 		return "", err
 	}
@@ -375,7 +375,7 @@ func (p *cohereProvider) SummarizeCluster(ctx context.Context, items []domain.It
 }
 
 // SummarizeClusterWithEvidence implements Provider interface.
-func (p *cohereProvider) SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, _, tone string) (string, error) {
+func (p *cohereProvider) SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, model, tone string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
 	}
@@ -386,7 +386,7 @@ func (p *cohereProvider) SummarizeClusterWithEvidence(ctx context.Context, items
 
 	prompt := buildClusterSummaryPrompt(items, evidence, targetLanguage, tone, defaultClusterSummaryPrompt)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, cohereMaxTokensTiny)
+	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensTiny)
 	if err != nil {
 		return "", err
 	}
@@ -395,7 +395,7 @@ func (p *cohereProvider) SummarizeClusterWithEvidence(ctx context.Context, items
 }
 
 // GenerateClusterTopic implements Provider interface.
-func (p *cohereProvider) GenerateClusterTopic(ctx context.Context, items []domain.Item, targetLanguage, _ string) (string, error) {
+func (p *cohereProvider) GenerateClusterTopic(ctx context.Context, items []domain.Item, targetLanguage, model string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
 	}
@@ -406,7 +406,7 @@ func (p *cohereProvider) GenerateClusterTopic(ctx context.Context, items []domai
 
 	prompt := buildClusterTopicPrompt(items, targetLanguage, defaultClusterTopicPrompt)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, cohereMaxTokensNano)
+	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensNano)
 	if err != nil {
 		return "", err
 	}
@@ -415,14 +415,14 @@ func (p *cohereProvider) GenerateClusterTopic(ctx context.Context, items []domai
 }
 
 // RelevanceGate implements Provider interface.
-func (p *cohereProvider) RelevanceGate(ctx context.Context, text, _, prompt string) (RelevanceGateResult, error) {
+func (p *cohereProvider) RelevanceGate(ctx context.Context, text, model, prompt string) (RelevanceGateResult, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
 		return RelevanceGateResult{}, fmt.Errorf(errRateLimiterSimple, err)
 	}
 
 	fullPrompt := fmt.Sprintf(relevanceGateFormat, prompt, text)
 
-	responseText, err := p.callCohereAPI(ctx, fullPrompt, cohereMaxTokensMicro)
+	responseText, err := p.callCohereAPI(ctx, fullPrompt, model, cohereMaxTokensMicro)
 	if err != nil {
 		return RelevanceGateResult{}, err
 	}
@@ -444,7 +444,7 @@ func (p *cohereProvider) RelevanceGate(ctx context.Context, text, _, prompt stri
 }
 
 // CompressSummariesForCover implements Provider interface.
-func (p *cohereProvider) CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error) {
+func (p *cohereProvider) CompressSummariesForCover(ctx context.Context, summaries []string, model string) ([]string, error) {
 	if len(summaries) == 0 {
 		return nil, nil
 	}
@@ -455,7 +455,7 @@ func (p *cohereProvider) CompressSummariesForCover(ctx context.Context, summarie
 
 	prompt := buildCompressSummariesPrompt(summaries)
 
-	responseText, err := p.callCohereAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, cohereMaxTokensTiny)
+	responseText, err := p.callCohereAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, model, cohereMaxTokensTiny)
 	if err != nil {
 		return nil, err
 	}

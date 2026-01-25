@@ -53,7 +53,7 @@ type Provider interface {
 	SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, model, tone string) (string, error)
 	GenerateClusterTopic(ctx context.Context, items []domain.Item, targetLanguage, model string) (string, error)
 	RelevanceGate(ctx context.Context, text, model, prompt string) (RelevanceGateResult, error)
-	CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error)
+	CompressSummariesForCover(ctx context.Context, summaries []string, model string) ([]string, error)
 
 	// Optional capability - not all providers support image generation
 	SupportsImageGeneration() bool

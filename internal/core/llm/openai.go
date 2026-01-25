@@ -84,13 +84,6 @@ func NewOpenAIProvider(cfg *config.Config, store PromptStore, logger *zerolog.Lo
 	}
 }
 
-// NewOpenAI creates a new OpenAI client (for backward compatibility).
-//
-// Deprecated: Use NewOpenAIProvider with Registry for multi-provider support.
-func NewOpenAI(cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
-	return NewOpenAIProvider(cfg, store, logger)
-}
-
 // Name returns the provider identifier.
 func (c *openaiClient) Name() ProviderName {
 	return ProviderOpenAI
@@ -1025,7 +1018,7 @@ func formatEvidenceContext(evidence []EvidenceSource) string {
 // GenerateDigestCover generates a cover image for the digest using DALL-E.
 // CompressSummariesForCover takes raw summaries and compresses them into short English phrases
 // suitable for DALL-E image generation prompts.
-func (c *openaiClient) CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error) {
+func (c *openaiClient) CompressSummariesForCover(ctx context.Context, summaries []string, model string) ([]string, error) {
 	if len(summaries) == 0 {
 		return nil, nil
 	}
@@ -1040,8 +1033,13 @@ func (c *openaiClient) CompressSummariesForCover(ctx context.Context, summaries 
 
 	prompt := buildCompressSummariesPrompt(summaries)
 
+	modelToUse := c.resolveModel(model)
+	if modelToUse == "" {
+		modelToUse = openai.GPT4oMini
+	}
+
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model: openai.GPT4oMini,
+		Model: modelToUse,
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleSystem, Content: compressSummariesSystemPrompt},
 			{Role: openai.ChatMessageRoleUser, Content: prompt},

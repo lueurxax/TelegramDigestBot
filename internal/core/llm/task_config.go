@@ -67,35 +67,35 @@ func DefaultTaskConfig() map[TaskType]TaskProviderChain {
 			},
 		},
 
-		// Translate: Google → OpenAI (not explicitly in proposal, using summarize pattern)
+		// Translate: OpenRouter (Llama) → OpenAI
 		TaskTypeTranslate: {
-			Default: ProviderModel{Provider: ProviderGoogle, Model: "gemini-2.0-flash-lite"},
+			Default: ProviderModel{Provider: ProviderOpenRouter, Model: "meta-llama/llama-3.1-8b-instruct"},
 			Fallbacks: []ProviderModel{
 				{Provider: ProviderOpenAI, Model: "gpt-5-nano"},
 			},
 		},
 
-		// Complete: Google → OpenAI (general purpose)
+		// Complete: OpenRouter (Llama) → OpenAI
 		TaskTypeComplete: {
-			Default: ProviderModel{Provider: ProviderGoogle, Model: "gemini-2.0-flash-lite"},
+			Default: ProviderModel{Provider: ProviderOpenRouter, Model: "meta-llama/llama-3.1-8b-instruct"},
 			Fallbacks: []ProviderModel{
-				{Provider: ProviderOpenAI, Model: "gpt-5-nano"},
+				{Provider: ProviderOpenAI, Model: "gpt-4o-mini"},
 			},
 		},
 
-		// RelevanceGate: Google → OpenAI (lightweight task)
+		// RelevanceGate: OpenRouter (Llama) → OpenAI
 		TaskTypeRelevanceGate: {
-			Default: ProviderModel{Provider: ProviderGoogle, Model: "gemini-2.0-flash-lite"},
+			Default: ProviderModel{Provider: ProviderOpenRouter, Model: "meta-llama/llama-3.1-8b-instruct"},
 			Fallbacks: []ProviderModel{
 				{Provider: ProviderOpenAI, Model: "gpt-5-nano"},
 			},
 		},
 
-		// Compress: Google → OpenAI (lightweight task)
+		// Compress: OpenAI → OpenRouter
 		TaskTypeCompress: {
-			Default: ProviderModel{Provider: ProviderGoogle, Model: "gemini-2.0-flash-lite"},
+			Default: ProviderModel{Provider: ProviderOpenAI, Model: "gpt-4o-mini"},
 			Fallbacks: []ProviderModel{
-				{Provider: ProviderOpenAI, Model: "gpt-5-nano"},
+				{Provider: ProviderOpenRouter, Model: "openai/gpt-oss-120b"},
 			},
 		},
 

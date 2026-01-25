@@ -45,6 +45,11 @@ func TelegramDisplayURL(username string, peerID, messageID int64) string {
 	return fmt.Sprintf("tg://channel/%d/%d", peerID, messageID)
 }
 
+// CanonicalizeURL exposes the canonicalization logic for other packages.
+func CanonicalizeURL(rawURL string) string {
+	return canonicalizeURL(rawURL)
+}
+
 // canonicalizeURL normalizes a URL for consistent document ID generation.
 // It lowercases the scheme and host, removes default ports, removes fragments,
 // sorts query parameters, and removes trailing slashes from the path.

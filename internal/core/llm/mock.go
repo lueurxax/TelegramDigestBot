@@ -120,7 +120,7 @@ func (p *mockProvider) RelevanceGate(_ context.Context, _, _, _ string) (Relevan
 }
 
 // CompressSummariesForCover implements Provider interface.
-func (p *mockProvider) CompressSummariesForCover(_ context.Context, summaries []string) ([]string, error) {
+func (p *mockProvider) CompressSummariesForCover(_ context.Context, summaries []string, _ string) ([]string, error) {
 	return summaries, nil
 }
 

@@ -109,11 +109,10 @@ func (p *SolrProvider) buildSearchOptions(_, language string, maxResults int) []
 	)
 
 	// Add language filter at Solr level if language is specified and not "unknown"
-	// This is more efficient than post-filtering in Go and ensures correct results
+	// This is more efficient than post-filtering in Go and avoids cross-language noise
 	normalizedLang := normalizeLanguageCode(language)
 	if normalizedLang != "" && normalizedLang != langUnknown {
-		// Filter by language OR include documents with unknown language as fallback
-		opts = append(opts, solr.WithFilterQuery("language:("+normalizedLang+" OR unknown)"))
+		opts = append(opts, solr.WithFilterQuery("language:"+normalizedLang))
 	}
 
 	// Use edismax with language-specific field boosting
@@ -207,7 +206,11 @@ func (p *SolrProvider) filterResultsByLanguage(results []SearchResult, language 
 
 		// Fall back to detection from content
 		detected := links.DetectLanguage(res.Title + " " + res.Description)
-		if detected == language || detected == "" {
+		if detected == "" {
+			continue
+		}
+
+		if detected == language {
 			filtered = append(filtered, res)
 		}
 	}
