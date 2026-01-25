@@ -411,8 +411,9 @@ func tryProviderExec[T any](r *Registry, pm ProviderModel, modelOverride string,
 	cb := r.getCircuitBreaker(pm.Provider)
 
 	if !cb.CanAttempt() {
-		// Track circuit breaker state as open
+		// Track circuit breaker state as open and provider as unavailable
 		observability.LLMCircuitBreakerState.WithLabelValues(string(pm.Provider)).Set(MetricValueCBOpen)
+		observability.LLMProviderAvailable.WithLabelValues(string(pm.Provider)).Set(MetricValueUnavailable)
 
 		r.logger.Debug().
 			Str(logKeyProvider, string(pm.Provider)).
@@ -450,6 +451,7 @@ func tryProviderExec[T any](r *Registry, pm ProviderModel, modelOverride string,
 		if !wasOpen && isNowOpen {
 			observability.LLMCircuitBreakerOpens.WithLabelValues(string(pm.Provider)).Inc()
 			observability.LLMCircuitBreakerState.WithLabelValues(string(pm.Provider)).Set(MetricValueCBOpen)
+			observability.LLMProviderAvailable.WithLabelValues(string(pm.Provider)).Set(MetricValueUnavailable)
 		}
 
 		r.logger.Warn().
@@ -465,8 +467,9 @@ func tryProviderExec[T any](r *Registry, pm ProviderModel, modelOverride string,
 
 	cb.RecordSuccess()
 
-	// Circuit breaker recovered - mark as closed
+	// Circuit breaker recovered - mark as closed and provider as available
 	observability.LLMCircuitBreakerState.WithLabelValues(string(pm.Provider)).Set(MetricValueCBClosed)
+	observability.LLMProviderAvailable.WithLabelValues(string(pm.Provider)).Set(MetricValueAvailable)
 
 	return result, true, nil
 }
@@ -541,6 +544,16 @@ func SetGlobalUsageStore(store UsageStore) {
 
 // RecordTokenUsage records token usage metrics for an LLM request.
 func RecordTokenUsage(provider, model, task string, promptTokens, completionTokens int, success bool) {
+	recordTokenMetrics(provider, model, task, promptTokens, completionTokens, success)
+
+	cost := estimateCost(provider, model, promptTokens, completionTokens)
+	recordCostMetric(provider, model, task, cost, success)
+	recordToBudgetTracker(promptTokens, completionTokens, success)
+	persistUsageToDatabase(provider, model, task, promptTokens, completionTokens, cost, success)
+}
+
+// recordTokenMetrics records Prometheus metrics for token usage.
+func recordTokenMetrics(provider, model, task string, promptTokens, completionTokens int, success bool) {
 	status := StatusSuccess
 	if !success {
 		status = StatusError
@@ -555,35 +568,45 @@ func RecordTokenUsage(provider, model, task string, promptTokens, completionToke
 	if completionTokens > 0 {
 		observability.LLMTokensCompletion.WithLabelValues(provider, model, task).Add(float64(completionTokens))
 	}
+}
 
-	// Record to budget tracker if set
-	if globalBudgetTracker != nil && success {
-		totalTokens := promptTokens + completionTokens
-		if totalTokens > 0 {
-			globalBudgetTracker.RecordTokens(totalTokens)
-		}
+// recordCostMetric records the estimated cost metric in millicents.
+func recordCostMetric(provider, model, task string, cost float64, success bool) {
+	if cost > 0 && success {
+		costMillicents := cost * usdToMillicents
+		observability.LLMEstimatedCost.WithLabelValues(provider, model, task).Add(costMillicents)
+	}
+}
+
+// recordToBudgetTracker records token usage to the budget tracker.
+func recordToBudgetTracker(promptTokens, completionTokens int, success bool) {
+	if globalBudgetTracker == nil || !success {
+		return
 	}
 
-	// Persist to database if store is configured and request succeeded
-	if globalUsageStore != nil && success {
-		// Estimate cost (rough approximation - actual costs vary by model)
-		cost := estimateCost(provider, model, promptTokens, completionTokens)
-
-		// Use background context since this is fire-and-forget.
-		// The context is intentionally not passed from callers because:
-		// 1. RecordTokenUsage is called synchronously and should not block on DB writes
-		// 2. Usage storage is best-effort and shouldn't fail the LLM request if it fails
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), usageStorageTimeout)
-			defer cancel()
-
-			if err := globalUsageStore.IncrementLLMUsage(ctx, provider, model, task, promptTokens, completionTokens, cost); err != nil {
-				// Log error but don't fail the request
-				// This is intentionally a no-op since we don't want to impact request latency
-				_ = err
-			}
-		}()
+	totalTokens := promptTokens + completionTokens
+	if totalTokens > 0 {
+		globalBudgetTracker.RecordTokens(totalTokens)
 	}
+}
+
+// persistUsageToDatabase stores usage in the database asynchronously.
+func persistUsageToDatabase(provider, model, task string, promptTokens, completionTokens int, cost float64, success bool) {
+	if globalUsageStore == nil || !success {
+		return
+	}
+
+	// Use background context since this is fire-and-forget.
+	// The context is intentionally not passed from callers because:
+	// 1. RecordTokenUsage is called synchronously and should not block on DB writes
+	// 2. Usage storage is best-effort and shouldn't fail the LLM request if it fails
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), usageStorageTimeout)
+		defer cancel()
+
+		//nolint:errcheck,gosec // fire-and-forget: errors are intentionally ignored
+		globalUsageStore.IncrementLLMUsage(ctx, provider, model, task, promptTokens, completionTokens, cost)
+	}()
 }
 
 // SetBudgetLimit sets the daily token budget limit.

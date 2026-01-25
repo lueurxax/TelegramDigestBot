@@ -113,6 +113,11 @@ const (
 	usageStorageTimeout = 5 * time.Second
 )
 
+// Cost conversion
+const (
+	usdToMillicents = 100000.0 // 1 USD = 100,000 millicents
+)
+
 // Log field keys
 const (
 	logKeyProvider = "provider"
