@@ -58,6 +58,10 @@ const (
 	LogFieldRatingCount       = "rating_count"
 	LogFieldMsgID             = "msg_id"
 	LogFieldItemsWithEvidence = "items_with_evidence"
+	LogFieldReliability       = "reliability"
+	LogFieldThreshold         = "threshold"
+	LogFieldItems             = "items"
+	LogFieldDelta             = "delta"
 )
 
 // Error message constants

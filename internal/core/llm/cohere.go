@@ -162,7 +162,7 @@ func (p *cohereProvider) resolveModel(model string) string {
 }
 
 // callCohereAPI makes the HTTP request to Cohere Chat API.
-func (p *cohereProvider) callCohereAPI(ctx context.Context, prompt, model string, maxTokens int) (string, error) {
+func (p *cohereProvider) callCohereAPI(ctx context.Context, prompt, model string, maxTokens int) (cohereResult, error) {
 	reqBody := cohereChatRequest{
 		Model: p.resolveModel(model),
 		Messages: []cohereChatMessage{
@@ -173,12 +173,12 @@ func (p *cohereProvider) callCohereAPI(ctx context.Context, prompt, model string
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(reqBody); err != nil {
-		return "", fmt.Errorf(errFmtMarshalRequest, err)
+		return cohereResult{}, fmt.Errorf(errFmtMarshalRequest, err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, CohereAPIEndpoint, &buf)
 	if err != nil {
-		return "", fmt.Errorf(errFmtCreateRequest, err)
+		return cohereResult{}, fmt.Errorf(errFmtCreateRequest, err)
 	}
 
 	req.Header.Set(headerAuthorization, "Bearer "+p.cfg.CohereAPIKey)
@@ -187,17 +187,17 @@ func (p *cohereProvider) callCohereAPI(ctx context.Context, prompt, model string
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("cohere request: %w", err)
+		return cohereResult{}, fmt.Errorf("cohere request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf(errFmtReadResponse, err)
+		return cohereResult{}, fmt.Errorf(errFmtReadResponse, err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", p.parseAPIError(body, resp.StatusCode)
+		return cohereResult{}, p.parseAPIError(body, resp.StatusCode)
 	}
 
 	return p.extractResponseText(body)
@@ -213,15 +213,22 @@ func (p *cohereProvider) parseAPIError(body []byte, statusCode int) error {
 	return fmt.Errorf(errFmtAPIStatusOnly, ErrCohereAPIFailure, statusCode)
 }
 
-// extractResponseText extracts the text content from Cohere response.
-func (p *cohereProvider) extractResponseText(body []byte) (string, error) {
+// cohereResult holds the API response with usage info.
+type cohereResult struct {
+	Text             string
+	PromptTokens     int
+	CompletionTokens int
+}
+
+// extractResponseText extracts the text content and usage from Cohere response.
+func (p *cohereProvider) extractResponseText(body []byte) (cohereResult, error) {
 	var resp cohereChatResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return "", fmt.Errorf(errFmtDecodeResponse, err)
+		return cohereResult{}, fmt.Errorf(errFmtDecodeResponse, err)
 	}
 
 	if len(resp.Message.Content) == 0 {
-		return "", ErrCohereEmptyResponse
+		return cohereResult{}, ErrCohereEmptyResponse
 	}
 
 	var result strings.Builder
@@ -232,7 +239,11 @@ func (p *cohereProvider) extractResponseText(body []byte) (string, error) {
 		}
 	}
 
-	return result.String(), nil
+	return cohereResult{
+		Text:             result.String(),
+		PromptTokens:     resp.Usage.Tokens.InputTokens,
+		CompletionTokens: resp.Usage.Tokens.OutputTokens,
+	}, nil
 }
 
 // ProcessBatch implements Provider interface.
@@ -242,13 +253,17 @@ func (p *cohereProvider) ProcessBatch(ctx context.Context, messages []MessageInp
 	}
 
 	promptContent := buildBatchPromptContent(messages, targetLanguage, tone)
+	resolvedModel := p.resolveModel(model)
 
-	responseText, err := p.callCohereAPI(ctx, promptContent, model, cohereMaxTokensDefault)
+	result, err := p.callCohereAPI(ctx, promptContent, model, cohereMaxTokensDefault)
 	if err != nil {
+		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskSummarize, 0, 0, false) //nolint:contextcheck // fire-and-forget
 		return nil, err
 	}
 
-	return p.parseProcessBatchResponse(responseText, messages)
+	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskSummarize, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+
+	return p.parseProcessBatchResponse(result.Text, messages)
 }
 
 // parseProcessBatchResponse parses the JSON response from batch processing.
@@ -291,13 +306,17 @@ func (p *cohereProvider) TranslateText(ctx context.Context, text, targetLanguage
 	}
 
 	prompt := fmt.Sprintf(translatePromptFmt, targetLanguage, text)
+	resolvedModel := p.resolveModel(model)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensShort)
+	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensShort)
 	if err != nil {
+		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTranslate, 0, 0, false) //nolint:contextcheck // fire-and-forget
 		return "", err
 	}
 
-	return strings.TrimSpace(responseText), nil
+	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTranslate, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+
+	return strings.TrimSpace(result.Text), nil
 }
 
 // CompleteText implements Provider interface.
@@ -306,12 +325,17 @@ func (p *cohereProvider) CompleteText(ctx context.Context, prompt, model string)
 		return "", fmt.Errorf(errRateLimiterSimple, err)
 	}
 
-	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
+	resolvedModel := p.resolveModel(model)
+
+	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
 	if err != nil {
+		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskComplete, 0, 0, false) //nolint:contextcheck // fire-and-forget
 		return "", err
 	}
 
-	return strings.TrimSpace(responseText), nil
+	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskComplete, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+
+	return strings.TrimSpace(result.Text), nil
 }
 
 // GenerateNarrative implements Provider interface.
@@ -325,13 +349,17 @@ func (p *cohereProvider) GenerateNarrative(ctx context.Context, items []domain.I
 	}
 
 	prompt := buildNarrativePrompt(items, nil, targetLanguage, tone, defaultNarrativePrompt)
+	resolvedModel := p.resolveModel(model)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
+	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
 	if err != nil {
+		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
 		return "", err
 	}
 
-	return strings.TrimSpace(responseText), nil
+	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+
+	return strings.TrimSpace(result.Text), nil
 }
 
 // GenerateNarrativeWithEvidence implements Provider interface.
@@ -345,13 +373,17 @@ func (p *cohereProvider) GenerateNarrativeWithEvidence(ctx context.Context, item
 	}
 
 	prompt := buildNarrativePrompt(items, evidence, targetLanguage, tone, defaultNarrativePrompt)
+	resolvedModel := p.resolveModel(model)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
+	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
 	if err != nil {
+		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
 		return "", err
 	}
 
-	return strings.TrimSpace(responseText), nil
+	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+
+	return strings.TrimSpace(result.Text), nil
 }
 
 // SummarizeCluster implements Provider interface.
@@ -365,13 +397,17 @@ func (p *cohereProvider) SummarizeCluster(ctx context.Context, items []domain.It
 	}
 
 	prompt := buildClusterSummaryPrompt(items, nil, targetLanguage, tone, defaultClusterSummaryPrompt)
+	resolvedModel := p.resolveModel(model)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensTiny)
+	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensTiny)
 	if err != nil {
+		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
 		return "", err
 	}
 
-	return strings.TrimSpace(responseText), nil
+	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+
+	return strings.TrimSpace(result.Text), nil
 }
 
 // SummarizeClusterWithEvidence implements Provider interface.
@@ -385,13 +421,17 @@ func (p *cohereProvider) SummarizeClusterWithEvidence(ctx context.Context, items
 	}
 
 	prompt := buildClusterSummaryPrompt(items, evidence, targetLanguage, tone, defaultClusterSummaryPrompt)
+	resolvedModel := p.resolveModel(model)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensTiny)
+	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensTiny)
 	if err != nil {
+		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
 		return "", err
 	}
 
-	return strings.TrimSpace(responseText), nil
+	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+
+	return strings.TrimSpace(result.Text), nil
 }
 
 // GenerateClusterTopic implements Provider interface.
@@ -405,29 +445,39 @@ func (p *cohereProvider) GenerateClusterTopic(ctx context.Context, items []domai
 	}
 
 	prompt := buildClusterTopicPrompt(items, targetLanguage, defaultClusterTopicPrompt)
+	resolvedModel := p.resolveModel(model)
 
-	responseText, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensNano)
+	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensNano)
 	if err != nil {
+		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTopic, 0, 0, false) //nolint:contextcheck // fire-and-forget
 		return "", err
 	}
 
-	return strings.TrimSpace(responseText), nil
+	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTopic, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+
+	return strings.TrimSpace(result.Text), nil
 }
 
 // RelevanceGate implements Provider interface.
+//
+//nolint:dupl // Provider implementations share similar structure
 func (p *cohereProvider) RelevanceGate(ctx context.Context, text, model, prompt string) (RelevanceGateResult, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
 		return RelevanceGateResult{}, fmt.Errorf(errRateLimiterSimple, err)
 	}
 
 	fullPrompt := fmt.Sprintf(relevanceGateFormat, prompt, text)
+	resolvedModel := p.resolveModel(model)
 
-	responseText, err := p.callCohereAPI(ctx, fullPrompt, model, cohereMaxTokensMicro)
+	apiResult, err := p.callCohereAPI(ctx, fullPrompt, model, cohereMaxTokensMicro)
 	if err != nil {
+		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskRelevanceGate, 0, 0, false) //nolint:contextcheck // fire-and-forget
 		return RelevanceGateResult{}, err
 	}
 
-	responseText = extractJSON(responseText)
+	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskRelevanceGate, apiResult.PromptTokens, apiResult.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+
+	responseText := extractJSON(apiResult.Text)
 
 	var result RelevanceGateResult
 	if unmarshalErr := json.Unmarshal([]byte(responseText), &result); unmarshalErr != nil {
@@ -454,13 +504,17 @@ func (p *cohereProvider) CompressSummariesForCover(ctx context.Context, summarie
 	}
 
 	prompt := buildCompressSummariesPrompt(summaries)
+	resolvedModel := p.resolveModel(model)
 
-	responseText, err := p.callCohereAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, model, cohereMaxTokensTiny)
+	result, err := p.callCohereAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, model, cohereMaxTokensTiny)
 	if err != nil {
+		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCompress, 0, 0, false) //nolint:contextcheck // fire-and-forget
 		return nil, err
 	}
 
-	lines := strings.Split(strings.TrimSpace(responseText), "\n")
+	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCompress, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+
+	lines := strings.Split(strings.TrimSpace(result.Text), "\n")
 
 	var compressed []string
 

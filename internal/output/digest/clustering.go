@@ -20,6 +20,9 @@ import (
 // URL normalization constants.
 const wwwPrefix = "www."
 
+// Topic similarity threshold for Jaccard index.
+const topicJaccardThreshold = 0.8
+
 func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, end time.Time, logger *zerolog.Logger) error {
 	if len(items) == 0 {
 		return nil
@@ -33,9 +36,10 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	}
 
 	cfg := s.getClusteringConfig(ctx, logger)
+	topicIndex, topicGroups := s.buildTopicGrouping(items)
 	clusterCtx := &clusterBuildContext{
-		topicIndex:  s.getTopicIndex(items),
-		topicGroups: s.getTopicGroups(items),
+		topicIndex:  topicIndex,
+		topicGroups: topicGroups,
 		embeddings:  s.getEmbeddings(ctx, items, logger),
 		evidenceMap: s.getEvidenceMap(ctx, items, cfg, logger),
 		assigned:    make(map[string]bool),
@@ -207,24 +211,38 @@ func (s *Scheduler) applyClusteringDefaults(cfg *clusteringConfig) {
 	}
 }
 
-func (s *Scheduler) getTopicIndex(items []db.Item) map[string]string {
+func (s *Scheduler) buildTopicGrouping(items []db.Item) (map[string]string, map[string][]db.Item) {
 	topicIndex := make(map[string]string)
+	topicGroups := make(map[string][]db.Item)
+	canonicalTopics := make([]string, 0)
+
 	for _, item := range items {
-		topicIndex[item.ID] = normalizeClusterTopic(item.Topic)
+		normalized := normalizeClusterTopic(item.Topic)
+
+		canonical := canonicalizeTopic(normalized, canonicalTopics)
+		if canonical != "" {
+			if canonical == normalized {
+				canonicalTopics = append(canonicalTopics, canonical)
+			}
+		}
+
+		topicIndex[item.ID] = canonical
+		topicGroups[canonical] = append(topicGroups[canonical], item)
 	}
 
-	return topicIndex
+	return topicIndex, topicGroups
 }
 
+// getTopicIndex returns a mapping of item ID to normalized topic.
+func (s *Scheduler) getTopicIndex(items []db.Item) map[string]string {
+	idx, _ := s.buildTopicGrouping(items)
+	return idx
+}
+
+// getTopicGroups returns items grouped by normalized topic.
 func (s *Scheduler) getTopicGroups(items []db.Item) map[string][]db.Item {
-	topicGroups := make(map[string][]db.Item)
-
-	for _, item := range items {
-		topic := normalizeClusterTopic(item.Topic)
-		topicGroups[topic] = append(topicGroups[topic], item)
-	}
-
-	return topicGroups
+	_, groups := s.buildTopicGrouping(items)
+	return groups
 }
 
 func (s *Scheduler) getEmbeddings(ctx context.Context, items []db.Item, logger *zerolog.Logger) map[string][]float32 {
@@ -550,12 +568,84 @@ func (s *Scheduler) calculateCoherence(items []db.Item, embeddings map[string][]
 }
 
 func normalizeClusterTopic(topic string) string {
-	normalized := strings.TrimSpace(cases.Title(language.English).String(strings.ToLower(topic)))
+	normalized := strings.TrimSpace(strings.ToLower(topic))
 	if normalized == "" {
 		return DefaultTopic
 	}
 
-	return normalized
+	if mapped, ok := topicSynonyms[normalized]; ok {
+		return mapped
+	}
+
+	return strings.TrimSpace(cases.Title(language.English).String(normalized))
+}
+
+var topicSynonyms = map[string]string{
+	"ukraine": "Ukraine",
+	"украина": "Ukraine",
+	"україна": "Ukraine",
+	"russia":  "Russia",
+	"россия":  "Russia",
+	"росія":   "Russia",
+	"cyprus":  "Cyprus",
+	"кипр":    "Cyprus",
+}
+
+func canonicalizeTopic(topic string, canon []string) string {
+	if topic == "" {
+		return ""
+	}
+
+	for _, existing := range canon {
+		if topicsSimilar(topic, existing) {
+			return existing
+		}
+	}
+
+	return topic
+}
+
+func topicsSimilar(a, b string) bool {
+	if a == b {
+		return true
+	}
+
+	aTokens := tokenizeTopic(a)
+
+	bTokens := tokenizeTopic(b)
+	if len(aTokens) == 0 || len(bTokens) == 0 {
+		return false
+	}
+
+	intersection := 0
+
+	for token := range aTokens {
+		if _, ok := bTokens[token]; ok {
+			intersection++
+		}
+	}
+
+	union := len(aTokens) + len(bTokens) - intersection
+	if union == 0 {
+		return false
+	}
+
+	jaccard := float64(intersection) / float64(union)
+
+	return jaccard >= topicJaccardThreshold
+}
+
+func tokenizeTopic(topic string) map[string]struct{} {
+	out := make(map[string]struct{})
+
+	for _, token := range strings.Fields(strings.ToLower(topic)) {
+		token = strings.Trim(token, ".,:;!()[]{}\"'")
+		if token != "" {
+			out[token] = struct{}{}
+		}
+	}
+
+	return out
 }
 
 func withinClusterWindow(a, b time.Time, window time.Duration) bool {

@@ -71,6 +71,10 @@ const (
 	MaxImportanceScore         = 1.0
 	UniqueInfoPenalty          = 0.2
 	NormalizationStddevMinimum = 0.01
+
+	// Deduplication window defaults
+	DefaultDedupWindowHours            = 36
+	DefaultDedupSameChannelWindowHours = 6
 )
 
 // Recovery constants for stuck message handling

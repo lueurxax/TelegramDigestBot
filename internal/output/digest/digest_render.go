@@ -29,18 +29,24 @@ type digestSettings struct {
 	digestLanguage              string
 	digestTone                  string
 	othersAsNarrative           bool
+	corroborationBoost          float32
+	singleSourcePenalty         float32
+	explainabilityLineEnabled   bool
 }
 
 const errInvalidScheduleTimezone = "invalid digest schedule timezone"
 
 func (s *Scheduler) getDigestSettings(ctx context.Context, logger *zerolog.Logger) digestSettings {
 	ds := digestSettings{
-		topicsEnabled:       true,
-		freshnessDecayHours: s.cfg.FreshnessDecayHours,
-		freshnessFloor:      s.cfg.FreshnessFloor,
-		topicDiversityCap:   s.cfg.TopicDiversityCap,
-		minTopicCount:       s.cfg.MinTopicCount,
-		editorDetailedItems: true,
+		topicsEnabled:             true,
+		freshnessDecayHours:       s.cfg.FreshnessDecayHours,
+		freshnessFloor:            s.cfg.FreshnessFloor,
+		topicDiversityCap:         s.cfg.TopicDiversityCap,
+		minTopicCount:             s.cfg.MinTopicCount,
+		editorDetailedItems:       true,
+		corroborationBoost:        s.cfg.CorroborationImportanceBoost,
+		singleSourcePenalty:       s.cfg.SingleSourcePenalty,
+		explainabilityLineEnabled: s.cfg.ExplainabilityLineEnabled,
 	}
 
 	s.loadDigestSettingsFromDB(ctx, logger, &ds)
@@ -76,19 +82,21 @@ type clusterGroup struct {
 
 // digestRenderContext holds all context needed for rendering a digest
 type digestRenderContext struct {
-	scheduler     *Scheduler
-	llmClient     llm.Client
-	settings      digestSettings
-	items         []db.Item
-	clusters      []db.ClusterWithItems
-	start         time.Time
-	end           time.Time
-	displayStart  time.Time
-	displayEnd    time.Time
-	seenSummaries map[string]bool
-	factChecks    map[string]db.FactCheckMatch
-	evidence      map[string][]db.ItemEvidenceWithSource
-	logger        *zerolog.Logger
+	scheduler                 *Scheduler
+	llmClient                 llm.Client
+	settings                  digestSettings
+	items                     []db.Item
+	clusters                  []db.ClusterWithItems
+	start                     time.Time
+	end                       time.Time
+	displayStart              time.Time
+	displayEnd                time.Time
+	seenSummaries             map[string]bool
+	factChecks                map[string]db.FactCheckMatch
+	evidence                  map[string][]db.ItemEvidenceWithSource
+	clusterSummaryCache       []db.ClusterSummaryCacheEntry
+	clusterSummaryCacheLoaded bool
+	logger                    *zerolog.Logger
 }
 
 func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSettings, items []db.Item, clusters []db.ClusterWithItems, start, end time.Time, factChecks map[string]db.FactCheckMatch, evidence map[string][]db.ItemEvidenceWithSource, logger *zerolog.Logger) *digestRenderContext {
@@ -377,20 +385,28 @@ func (rc *digestRenderContext) renderOthersAsNarrative(ctx context.Context, sb *
 		return false
 	}
 
-	// Generate narrative for "others" items with evidence context
-	// Pass empty model to let the LLM registry handle task-specific model selection
-	// via LLM_CLUSTER_MODEL env var or default task config
-	evidence := rc.convertEvidenceForLLM(allItems)
-	narrative, err := rc.llmClient.SummarizeClusterWithEvidence(ctx, allItems, evidence, rc.settings.digestLanguage, "", rc.settings.digestTone)
+	narrative, ok := rc.findCachedClusterSummary(ctx, allItems)
+	if !ok {
+		// Generate narrative for "others" items with evidence context
+		// Pass empty model to let the LLM registry handle task-specific model selection
+		// via LLM_CLUSTER_MODEL env var or default task config
+		evidence := rc.convertEvidenceForLLM(allItems)
+		generated, err := rc.llmClient.SummarizeClusterWithEvidence(ctx, allItems, evidence, rc.settings.digestLanguage, "", rc.settings.digestTone)
 
-	if err != nil || narrative == "" {
-		if err != nil {
-			rc.logger.Warn().Err(err).Msg("failed to generate others narrative, falling back to detailed list")
+		if err != nil || generated == "" {
+			if err != nil {
+				rc.logger.Warn().Err(err).Msg("failed to generate others narrative, falling back to detailed list")
+			}
+
+			rc.renderGroup(ctx, sb, group, emoji, title)
+
+			return true
 		}
 
-		rc.renderGroup(ctx, sb, group, emoji, title)
-
-		return true
+		narrative = htmlutils.SanitizeHTML(generated)
+		rc.storeClusterSummaryCache(ctx, allItems, narrative)
+	} else {
+		narrative = htmlutils.SanitizeHTML(narrative)
 	}
 
 	rc.renderNarrativeSection(sb, narrative, emoji, title, allItems)
@@ -434,6 +450,8 @@ func (rc *digestRenderContext) renderNarrativeSection(sb *strings.Builder, narra
 		sb.WriteString(line)
 	}
 
+	rc.appendExplainabilityLine(sb, allItems)
+
 	rc.appendEvidenceLine(sb, allItems)
 }
 
@@ -446,20 +464,27 @@ func (rc *digestRenderContext) renderMultiItemCluster(ctx context.Context, sb *s
 }
 
 func (rc *digestRenderContext) renderConsolidatedCluster(ctx context.Context, sb *strings.Builder, c db.ClusterWithItems) bool {
-	// Pass empty model to let the LLM registry handle task-specific model selection
-	// via LLM_CLUSTER_MODEL env var or default task config
-	evidence := rc.convertEvidenceForLLM(c.Items)
-	summary, err := rc.llmClient.SummarizeClusterWithEvidence(ctx, c.Items, evidence, rc.settings.digestLanguage, "", rc.settings.digestTone)
+	summary, ok := rc.findCachedClusterSummary(ctx, c.Items)
+	if !ok {
+		// Pass empty model to let the LLM registry handle task-specific model selection
+		// via LLM_CLUSTER_MODEL env var or default task config
+		evidence := rc.convertEvidenceForLLM(c.Items)
+		generated, err := rc.llmClient.SummarizeClusterWithEvidence(ctx, c.Items, evidence, rc.settings.digestLanguage, "", rc.settings.digestTone)
 
-	if err != nil || summary == "" {
-		if err != nil {
-			rc.logger.Warn().Err(err).Str("cluster", c.Topic).Msg("failed to summarize cluster, falling back to detailed list")
+		if err != nil || generated == "" {
+			if err != nil {
+				rc.logger.Warn().Err(err).Str("cluster", c.Topic).Msg("failed to summarize cluster, falling back to detailed list")
+			}
+
+			return rc.renderRepresentativeCluster(sb, c)
 		}
 
-		return rc.renderRepresentativeCluster(sb, c)
+		summary = htmlutils.SanitizeHTML(generated)
+		rc.storeClusterSummaryCache(ctx, c.Items, summary)
+	} else {
+		summary = htmlutils.SanitizeHTML(summary)
 	}
 
-	summary = htmlutils.SanitizeHTML(summary)
 	if rc.seenSummaries[summary] {
 		return false
 	}
@@ -501,6 +526,8 @@ func (rc *digestRenderContext) renderConsolidatedSummary(sb *strings.Builder, su
 	if line := rc.scheduler.buildCorroborationLine(c.Items, c.Items[0]); line != "" {
 		sb.WriteString(line)
 	}
+
+	rc.appendExplainabilityLine(sb, c.Items)
 
 	rc.appendEvidenceLine(sb, c.Items)
 
@@ -544,6 +571,8 @@ func (rc *digestRenderContext) renderRepresentativeCluster(sb *strings.Builder, 
 	if line := rc.scheduler.buildCorroborationLine(c.Items, representative); line != "" {
 		sb.WriteString(line)
 	}
+
+	rc.appendExplainabilityLine(sb, c.Items)
 
 	rc.appendEvidenceLine(sb, c.Items)
 
@@ -595,6 +624,36 @@ func (rc *digestRenderContext) appendEvidenceLine(sb *strings.Builder, items []d
 			fmt.Fprintf(sb, " <i>(%s)</i>", html.EscapeString(ev.Source.Domain))
 		}
 	}
+}
+
+func (rc *digestRenderContext) appendExplainabilityLine(sb *strings.Builder, items []db.Item) {
+	if !rc.settings.explainabilityLineEnabled || len(items) == 0 {
+		return
+	}
+
+	var (
+		maxRel float32
+		maxImp float32
+	)
+
+	channelSet := make(map[string]struct{})
+
+	for _, item := range items {
+		if item.RelevanceScore > maxRel {
+			maxRel = item.RelevanceScore
+		}
+
+		if item.ImportanceScore > maxImp {
+			maxImp = item.ImportanceScore
+		}
+
+		if item.SourceChannel != "" {
+			channelSet[item.SourceChannel] = struct{}{}
+		}
+	}
+
+	chCount := len(channelSet)
+	fmt.Fprintf(sb, "\n    ↳ <i>why: rel %.2f | imp %.2f | corr %dch | gate: pass</i>", maxRel, maxImp, chCount)
 }
 
 func (rc *digestRenderContext) evidenceDisplayMinAgreement() float32 {
@@ -815,6 +874,8 @@ func (rc *digestRenderContext) formatSummaryGroup(sb *strings.Builder, g summary
 			sb.WriteString(line)
 		}
 	}
+
+	rc.appendExplainabilityLine(sb, g.items)
 
 	// Append evidence bullets (Phase 2)
 	rc.appendEvidenceLine(sb, g.items)

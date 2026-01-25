@@ -453,6 +453,8 @@ func (p *openRouterProvider) GenerateClusterTopic(ctx context.Context, items []d
 }
 
 // RelevanceGate implements Provider interface.
+//
+//nolint:dupl // Provider implementations share similar structure
 func (p *openRouterProvider) RelevanceGate(ctx context.Context, text, model, prompt string) (RelevanceGateResult, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
 		return RelevanceGateResult{}, fmt.Errorf(errRateLimiterSimple, err)

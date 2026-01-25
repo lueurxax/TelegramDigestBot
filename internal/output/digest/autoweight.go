@@ -14,6 +14,15 @@ import (
 // neutralWeight is the default weight returned when there's insufficient data
 const neutralWeight = db.DefaultImportanceWeight
 
+const (
+	channelReliabilityWindowDays     = 60
+	channelReliabilityHalfLifeDays   = 30.0
+	channelReliabilityDeltaFactor    = 0.2
+	channelReliabilityHighIrrelevant = 0.35
+	channelReliabilityExtraPenalty   = 0.05
+	channelReliabilityNeutral        = 0.5
+)
+
 // AutoWeightConfig holds configuration for auto-weight calculation
 type AutoWeightConfig struct {
 	MinMessages       int     // Minimum messages before auto-weight applies
@@ -32,6 +41,57 @@ func DefaultAutoWeightConfig() AutoWeightConfig {
 		AutoMax:           AutoWeightDefaultMaxWeight,
 		RollingDays:       AutoWeightDefaultRollingDays,
 	}
+}
+
+func decayWeightWithHalfLife(now time.Time, createdAt time.Time, halfLifeDays float64) float64 {
+	ageDays := now.Sub(createdAt).Hours() / HoursPerDay
+	if ageDays < 0 {
+		ageDays = 0
+	}
+
+	return math.Exp(-ageDays * math.Ln2 / halfLifeDays)
+}
+
+func aggregateReliabilityStats(now time.Time, ratings []db.ItemRating) map[string]*ratingStats {
+	stats := make(map[string]*ratingStats)
+
+	for _, r := range ratings {
+		if r.ChannelID == "" {
+			continue
+		}
+
+		weight := decayWeightWithHalfLife(now, r.CreatedAt, channelReliabilityHalfLifeDays)
+		if weight <= 0 {
+			continue
+		}
+
+		st := stats[r.ChannelID]
+		if st == nil {
+			st = &ratingStats{}
+			stats[r.ChannelID] = st
+		}
+
+		applyRating(st, r.Rating, weight)
+	}
+
+	return stats
+}
+
+func calculateReliabilityDelta(st *ratingStats) (float32, float64, float64, bool) {
+	if st == nil || st.weightedTotal <= 0 {
+		return 0, 0, 0, false
+	}
+
+	goodRate := st.weightedGood / st.weightedTotal
+	irrelevantRate := st.weightedIrrelevant / st.weightedTotal
+	reliability := clampFloat64(channelReliabilityNeutral+(goodRate-irrelevantRate)*channelReliabilityNeutral, 0, 1)
+	delta := float32((reliability - channelReliabilityNeutral) * channelReliabilityDeltaFactor)
+
+	if irrelevantRate >= channelReliabilityHighIrrelevant {
+		delta -= channelReliabilityExtraPenalty
+	}
+
+	return delta, reliability, irrelevantRate, true
 }
 
 // CalculateAutoWeight computes a channel's weight based on historical stats
@@ -116,7 +176,16 @@ func (s *Scheduler) UpdateAutoWeights(ctx context.Context, logger *zerolog.Logge
 		return fmt.Errorf("failed to get channels for auto weight: %w", err)
 	}
 
-	since := time.Now().AddDate(0, 0, -cfg.RollingDays)
+	now := time.Now()
+	since := now.AddDate(0, 0, -cfg.RollingDays)
+	ratingsSince := now.AddDate(0, 0, -channelReliabilityWindowDays)
+
+	ratings, err := s.database.GetItemRatingsSince(ctx, ratingsSince)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to load ratings for reliability adjustments")
+	}
+
+	reliabilityStats := aggregateReliabilityStats(now, ratings)
 	updated := 0
 	skipped := 0
 
@@ -128,6 +197,19 @@ func (s *Scheduler) UpdateAutoWeights(ctx context.Context, logger *zerolog.Logge
 		}
 
 		newWeight := CalculateAutoWeight(stats, cfg, cfg.RollingDays)
+
+		if st := reliabilityStats[ch.ID]; st != nil && st.count >= s.cfg.RatingMinSampleChannel {
+			delta, reliability, irrelevantRate, ok := calculateReliabilityDelta(st)
+			if ok {
+				newWeight = float32(math.Max(float64(cfg.AutoMin), math.Min(float64(cfg.AutoMax), float64(newWeight+delta))))
+				logger.Debug().
+					Str(LogFieldChannelID, ch.ID).
+					Float64(LogFieldReliability, reliability).
+					Float64("irrelevant_rate", irrelevantRate).
+					Float32(LogFieldDelta, delta).
+					Msg("Applied reliability adjustment to auto-weight")
+			}
+		}
 
 		// Only update if weight changed significantly (> 0.05)
 		if math.Abs(float64(newWeight-ch.ImportanceWeight)) < 0.05 {

@@ -47,6 +47,7 @@ const (
 	// A multiplier of 2 assumes roughly 50% success rate.
 	resultProcessingMultiplier = 2
 	maxLogClaimLen             = 100
+	logFieldClaimText          = "claim_text"
 	budgetCheckInterval        = 5 * time.Minute
 	domainFilterReloadInterval = 5 * time.Minute
 	llmQuerySummaryLimit       = 400
@@ -1479,7 +1480,18 @@ func (w *Worker) saveClaimsWithDedup(ctx context.Context, sourceID string, claim
 	for _, claim := range claims {
 		embedding := w.generateClaimEmbedding(ctx, claim.Text)
 
-		// Check for similar existing claim if embedding was generated
+		// Skip claims without embeddings only when embedding client is configured
+		// (meaning the embedding generation failed). When no client is configured,
+		// we still save claims for basic functionality.
+		if w.embeddingClient != nil && len(embedding) == 0 {
+			w.logger.Debug().
+				Str(logFieldClaimText, truncateText(claim.Text, maxLogClaimLen)).
+				Msg("skipping claim without embedding")
+
+			continue
+		}
+
+		// Check for similar existing claim (only if we have an embedding)
 		if len(embedding) > 0 {
 			existing, err := w.db.FindSimilarClaim(ctx, sourceID, embedding, similarity)
 			if err != nil {
@@ -1487,7 +1499,7 @@ func (w *Worker) saveClaimsWithDedup(ctx context.Context, sourceID string, claim
 			} else if existing != nil {
 				w.logger.Debug().
 					Str("existing_id", existing.ID).
-					Str("claim_text", truncateText(claim.Text, maxLogClaimLen)).
+					Str(logFieldClaimText, truncateText(claim.Text, maxLogClaimLen)).
 					Msg("skipping duplicate claim")
 
 				continue
@@ -1498,7 +1510,11 @@ func (w *Worker) saveClaimsWithDedup(ctx context.Context, sourceID string, claim
 			EvidenceID:  sourceID,
 			ClaimText:   claim.Text,
 			EntitiesRaw: claim.EntitiesJSON(),
-			Embedding:   pgvector.NewVector(embedding),
+		}
+
+		// Only set embedding if we have one
+		if len(embedding) > 0 {
+			dbClaim.Embedding = pgvector.NewVector(embedding)
 		}
 
 		if _, err := w.db.SaveEvidenceClaim(ctx, dbClaim); err != nil {

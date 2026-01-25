@@ -2255,10 +2255,10 @@ func (q *Queries) SaveEmbedding(ctx context.Context, arg SaveEmbeddingParams) er
 }
 
 const saveItem = `-- name: SaveItem :one
-INSERT INTO items (raw_message_id, relevance_score, importance_score, topic, summary, language, status, retry_count, next_retry_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, 0, NULL)
+INSERT INTO items (raw_message_id, relevance_score, importance_score, topic, summary, language, language_source, status, retry_count, next_retry_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, NULL)
 ON CONFLICT (raw_message_id) DO UPDATE SET
-    relevance_score = $2, importance_score = $3, topic = $4, summary = $5, language = $6, status = $7,
+    relevance_score = $2, importance_score = $3, topic = $4, summary = $5, language = $6, language_source = $7, status = $8,
     retry_count = 0, next_retry_at = NULL, error_json = NULL
 RETURNING id
 `
@@ -2270,6 +2270,7 @@ type SaveItemParams struct {
 	Topic           pgtype.Text `json:"topic"`
 	Summary         pgtype.Text `json:"summary"`
 	Language        pgtype.Text `json:"language"`
+	LanguageSource  pgtype.Text `json:"language_source"`
 	Status          string      `json:"status"`
 }
 
@@ -2281,6 +2282,7 @@ func (q *Queries) SaveItem(ctx context.Context, arg SaveItemParams) (pgtype.UUID
 		arg.Topic,
 		arg.Summary,
 		arg.Language,
+		arg.LanguageSource,
 		arg.Status,
 	)
 	var id pgtype.UUID

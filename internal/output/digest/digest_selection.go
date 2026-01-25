@@ -7,8 +7,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 	"github.com/lueurxax/telegram-digest-bot/internal/process/dedup"
+	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 // applySmartSelection applies time-decay and diversity adjustments to items
@@ -108,7 +108,7 @@ func (s *Scheduler) checkEmptyWindow(ctx context.Context, items []db.Item, start
 		logger.Info().Time(LogFieldStart, start).Time(LogFieldEnd, end).
 			Int("total_items", totalItems).
 			Int("ready_items", readyItems).
-			Float32("threshold", importanceThreshold).
+			Float32(LogFieldThreshold, importanceThreshold).
 			Msg("No items reached importance threshold for digest window")
 
 		return &anomalyInfo{

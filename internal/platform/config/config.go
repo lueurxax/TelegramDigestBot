@@ -14,62 +14,74 @@ import (
 const hoursPerDay = 24
 
 type Config struct {
-	AppEnv                        string  `env:"APP_ENV" envDefault:"local"`
-	PostgresDSN                   string  `env:"POSTGRES_DSN,required"`
-	BotToken                      string  `env:"BOT_TOKEN,required"`
-	AdminIDs                      []int64 `env:"ADMIN_IDS" envSeparator:","`
-	TargetChatID                  int64   `env:"TARGET_CHAT_ID,required"`
-	TGAPIID                       int     `env:"TG_API_ID,required"`
-	TGAPIHash                     string  `env:"TG_API_HASH,required"`
-	TGPhone                       string  `env:"TG_PHONE"`
-	TG2FAPassword                 string  `env:"TG_2FA_PASSWORD"`
-	TGSessionPath                 string  `env:"TG_SESSION_PATH" envDefault:"./tg.session"`
-	LLMAPIKey                     string  `env:"LLM_API_KEY,required"`
-	LLMModel                      string  `env:"LLM_MODEL" envDefault:"gpt-4o-mini"`
-	DigestWindow                  string  `env:"DIGEST_WINDOW" envDefault:"60m"`
-	DigestTopN                    int     `env:"DIGEST_TOP_N" envDefault:"20"`
-	RelevanceThreshold            float32 `env:"RELEVANCE_THRESHOLD" envDefault:"0.5"`
-	ImportanceThreshold           float32 `env:"IMPORTANCE_THRESHOLD" envDefault:"0.3"`
-	SimilarityThreshold           float32 `env:"SIMILARITY_THRESHOLD" envDefault:"0.65"`
-	RateLimitRPS                  int     `env:"RATE_LIMIT_RPS" envDefault:"1"`
-	HealthPort                    int     `env:"HEALTH_PORT" envDefault:"8080"`
-	LeaderElectionEnabled         bool    `env:"LEADER_ELECTION_ENABLED" envDefault:"true"`
-	LeaderElectionLeaseName       string  `env:"LEADER_ELECTION_LEASE_NAME" envDefault:"digest-scheduler-lease"`
-	ReaderFetchLimit              int     `env:"READER_FETCH_LIMIT" envDefault:"20"`
-	WorkerBatchSize               int     `env:"WORKER_BATCH_SIZE" envDefault:"10"`
-	WorkerPollInterval            string  `env:"WORKER_POLL_INTERVAL" envDefault:"10s"`
-	SchedulerTickInterval         string  `env:"SCHEDULER_TICK_INTERVAL" envDefault:"10m"`
-	SchedulerCatchupWindow        string  `env:"SCHEDULER_CATCHUP_WINDOW" envDefault:"24h"`
-	RelevanceGateEnabled          bool    `env:"RELEVANCE_GATE_ENABLED" envDefault:"false"`
-	RelevanceGateMode             string  `env:"RELEVANCE_GATE_MODE" envDefault:"heuristic"`
-	RelevanceGateModel            string  `env:"RELEVANCE_GATE_MODEL"`
-	TopicDiversityCap             float32 `env:"TOPIC_DIVERSITY_CAP" envDefault:"0.30"`
-	FreshnessDecayHours           int     `env:"FRESHNESS_DECAY_HOURS" envDefault:"36"`
-	FreshnessFloor                float32 `env:"FRESHNESS_FLOOR" envDefault:"0.4"`
-	MinTopicCount                 int     `env:"MIN_TOPIC_COUNT" envDefault:"3"`
-	AutoThresholdTuningEnabled    bool    `env:"AUTO_THRESHOLD_TUNING_ENABLED" envDefault:"false"`
-	ThresholdTuningStep           float32 `env:"THRESHOLD_TUNING_STEP" envDefault:"0.05"`
-	ThresholdTuningMin            float32 `env:"THRESHOLD_TUNING_MIN" envDefault:"0.10"`
-	ThresholdTuningMax            float32 `env:"THRESHOLD_TUNING_MAX" envDefault:"0.90"`
-	ThresholdTuningNetPositive    float32 `env:"THRESHOLD_TUNING_NET_POSITIVE" envDefault:"0.20"`
-	ThresholdTuningNetNegative    float32 `env:"THRESHOLD_TUNING_NET_NEGATIVE" envDefault:"-0.20"`
-	ClusterSimilarityThreshold    float32 `env:"CLUSTER_SIMILARITY_THRESHOLD" envDefault:"0.75"`
-	ClusterCoherenceThreshold     float32 `env:"CLUSTER_COHERENCE_THRESHOLD" envDefault:"0.70"`
-	ClusterTimeWindowHours        int     `env:"CLUSTER_TIME_WINDOW_HOURS" envDefault:"36"`
-	CrossTopicClusteringEnabled   bool    `env:"CROSS_TOPIC_CLUSTERING_ENABLED" envDefault:"false"`
-	CrossTopicSimilarityThreshold float32 `env:"CROSS_TOPIC_SIMILARITY_THRESHOLD" envDefault:"0.90"`
-	EvidenceClusteringEnabled     bool    `env:"EVIDENCE_CLUSTERING_ENABLED" envDefault:"true"`
-	EvidenceClusteringBoost       float32 `env:"EVIDENCE_CLUSTERING_BOOST" envDefault:"0.15"`
-	EvidenceClusteringMinScore    float32 `env:"EVIDENCE_CLUSTERING_MIN_SCORE" envDefault:"0.5"`
-	RatingMinSampleChannel        int     `env:"RATING_MIN_SAMPLE_CHANNEL" envDefault:"15"`
-	RatingMinSampleGlobal         int     `env:"RATING_MIN_SAMPLE_GLOBAL" envDefault:"100"`
-	FactCheckGoogleEnabled        bool    `env:"FACTCHECK_GOOGLE_ENABLED" envDefault:"false"`
-	FactCheckGoogleAPIKey         string  `env:"FACTCHECK_GOOGLE_API_KEY"`
-	FactCheckGoogleMaxResults     int     `env:"FACTCHECK_GOOGLE_MAX_RESULTS" envDefault:"3"`
-	FactCheckCacheTTLHours        int     `env:"FACTCHECK_CACHE_TTL_HOURS" envDefault:"48"`
-	FactCheckGoogleRPM            int     `env:"FACTCHECK_GOOGLE_RPM" envDefault:"60"`
-	FactCheckMinClaimLength       int     `env:"FACTCHECK_MIN_CLAIM_LENGTH" envDefault:"40"`
-	FactCheckQueueMax             int     `env:"FACTCHECK_QUEUE_MAX" envDefault:"5000"`
+	AppEnv                        string        `env:"APP_ENV" envDefault:"local"`
+	PostgresDSN                   string        `env:"POSTGRES_DSN,required"`
+	BotToken                      string        `env:"BOT_TOKEN,required"`
+	AdminIDs                      []int64       `env:"ADMIN_IDS" envSeparator:","`
+	TargetChatID                  int64         `env:"TARGET_CHAT_ID,required"`
+	TGAPIID                       int           `env:"TG_API_ID,required"`
+	TGAPIHash                     string        `env:"TG_API_HASH,required"`
+	TGPhone                       string        `env:"TG_PHONE"`
+	TG2FAPassword                 string        `env:"TG_2FA_PASSWORD"`
+	TGSessionPath                 string        `env:"TG_SESSION_PATH" envDefault:"./tg.session"`
+	LLMAPIKey                     string        `env:"LLM_API_KEY,required"`
+	LLMModel                      string        `env:"LLM_MODEL" envDefault:"gpt-4o-mini"`
+	DigestWindow                  string        `env:"DIGEST_WINDOW" envDefault:"60m"`
+	DigestTopN                    int           `env:"DIGEST_TOP_N" envDefault:"20"`
+	RelevanceThreshold            float32       `env:"RELEVANCE_THRESHOLD" envDefault:"0.5"`
+	ImportanceThreshold           float32       `env:"IMPORTANCE_THRESHOLD" envDefault:"0.3"`
+	SimilarityThreshold           float32       `env:"SIMILARITY_THRESHOLD" envDefault:"0.65"`
+	RateLimitRPS                  int           `env:"RATE_LIMIT_RPS" envDefault:"1"`
+	HealthPort                    int           `env:"HEALTH_PORT" envDefault:"8080"`
+	LeaderElectionEnabled         bool          `env:"LEADER_ELECTION_ENABLED" envDefault:"true"`
+	LeaderElectionLeaseName       string        `env:"LEADER_ELECTION_LEASE_NAME" envDefault:"digest-scheduler-lease"`
+	ReaderFetchLimit              int           `env:"READER_FETCH_LIMIT" envDefault:"20"`
+	WorkerBatchSize               int           `env:"WORKER_BATCH_SIZE" envDefault:"10"`
+	WorkerPollInterval            string        `env:"WORKER_POLL_INTERVAL" envDefault:"10s"`
+	SchedulerTickInterval         string        `env:"SCHEDULER_TICK_INTERVAL" envDefault:"10m"`
+	SchedulerCatchupWindow        string        `env:"SCHEDULER_CATCHUP_WINDOW" envDefault:"24h"`
+	RelevanceGateEnabled          bool          `env:"RELEVANCE_GATE_ENABLED" envDefault:"false"`
+	RelevanceGateMode             string        `env:"RELEVANCE_GATE_MODE" envDefault:"heuristic"`
+	RelevanceGateModel            string        `env:"RELEVANCE_GATE_MODEL"`
+	TopicDiversityCap             float32       `env:"TOPIC_DIVERSITY_CAP" envDefault:"0.30"`
+	FreshnessDecayHours           int           `env:"FRESHNESS_DECAY_HOURS" envDefault:"36"`
+	FreshnessFloor                float32       `env:"FRESHNESS_FLOOR" envDefault:"0.4"`
+	MinTopicCount                 int           `env:"MIN_TOPIC_COUNT" envDefault:"3"`
+	TimeToDigestAlertThreshold    time.Duration `env:"TIME_TO_DIGEST_ALERT_THRESHOLD" envDefault:"0"`
+	AutoThresholdTuningEnabled    bool          `env:"AUTO_THRESHOLD_TUNING_ENABLED" envDefault:"false"`
+	ThresholdTuningStep           float32       `env:"THRESHOLD_TUNING_STEP" envDefault:"0.05"`
+	ThresholdTuningMin            float32       `env:"THRESHOLD_TUNING_MIN" envDefault:"0.10"`
+	ThresholdTuningMax            float32       `env:"THRESHOLD_TUNING_MAX" envDefault:"0.90"`
+	ThresholdTuningNetPositive    float32       `env:"THRESHOLD_TUNING_NET_POSITIVE" envDefault:"0.20"`
+	ThresholdTuningNetNegative    float32       `env:"THRESHOLD_TUNING_NET_NEGATIVE" envDefault:"-0.20"`
+	ClusterSimilarityThreshold    float32       `env:"CLUSTER_SIMILARITY_THRESHOLD" envDefault:"0.75"`
+	ClusterCoherenceThreshold     float32       `env:"CLUSTER_COHERENCE_THRESHOLD" envDefault:"0.70"`
+	ClusterTimeWindowHours        int           `env:"CLUSTER_TIME_WINDOW_HOURS" envDefault:"36"`
+	CrossTopicClusteringEnabled   bool          `env:"CROSS_TOPIC_CLUSTERING_ENABLED" envDefault:"false"`
+	CrossTopicSimilarityThreshold float32       `env:"CROSS_TOPIC_SIMILARITY_THRESHOLD" envDefault:"0.90"`
+	EvidenceClusteringEnabled     bool          `env:"EVIDENCE_CLUSTERING_ENABLED" envDefault:"true"`
+	EvidenceClusteringBoost       float32       `env:"EVIDENCE_CLUSTERING_BOOST" envDefault:"0.15"`
+	EvidenceClusteringMinScore    float32       `env:"EVIDENCE_CLUSTERING_MIN_SCORE" envDefault:"0.5"`
+	RatingMinSampleChannel        int           `env:"RATING_MIN_SAMPLE_CHANNEL" envDefault:"15"`
+	RatingMinSampleGlobal         int           `env:"RATING_MIN_SAMPLE_GLOBAL" envDefault:"100"`
+	FilterMinLengthRu             int           `env:"FILTER_MIN_LENGTH_RU" envDefault:"20"`
+	FilterMinLengthUk             int           `env:"FILTER_MIN_LENGTH_UK" envDefault:"20"`
+	FilterMinLengthEn             int           `env:"FILTER_MIN_LENGTH_EN" envDefault:"15"`
+	SummaryMaxChars               int           `env:"SUMMARY_MAX_CHARS" envDefault:"220"`
+	SummaryStripPhrases           string        `env:"SUMMARY_STRIP_PHRASES" envDefault:""`
+	DedupSameChannelWindowHours   int           `env:"DEDUP_SAME_CHANNEL_WINDOW_HOURS" envDefault:"6"`
+	CorroborationImportanceBoost  float32       `env:"CORROBORATION_IMPORTANCE_BOOST" envDefault:"0.08"`
+	SingleSourcePenalty           float32       `env:"SINGLE_SOURCE_PENALTY" envDefault:"0.05"`
+	ExplainabilityLineEnabled     bool          `env:"EXPLAINABILITY_LINE_ENABLED" envDefault:"false"`
+	DomainAllowlist               string        `env:"DOMAIN_ALLOWLIST" envDefault:""`
+	DomainDenylist                string        `env:"DOMAIN_DENYLIST" envDefault:""`
+	FactCheckGoogleEnabled        bool          `env:"FACTCHECK_GOOGLE_ENABLED" envDefault:"false"`
+	FactCheckGoogleAPIKey         string        `env:"FACTCHECK_GOOGLE_API_KEY"`
+	FactCheckGoogleMaxResults     int           `env:"FACTCHECK_GOOGLE_MAX_RESULTS" envDefault:"3"`
+	FactCheckCacheTTLHours        int           `env:"FACTCHECK_CACHE_TTL_HOURS" envDefault:"48"`
+	FactCheckGoogleRPM            int           `env:"FACTCHECK_GOOGLE_RPM" envDefault:"60"`
+	FactCheckMinClaimLength       int           `env:"FACTCHECK_MIN_CLAIM_LENGTH" envDefault:"40"`
+	FactCheckQueueMax             int           `env:"FACTCHECK_QUEUE_MAX" envDefault:"5000"`
 
 	// Link enrichment
 	LinkEnrichmentEnabled  bool          `env:"LINK_ENRICHMENT_ENABLED" envDefault:"false"`

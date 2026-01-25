@@ -1053,7 +1053,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_pending{namespace=\"digest\"})",
+              "expr": "max(crawler_queue_pending{namespace=\"digest\"})",
               "legendFormat": "Pending",
               "refId": "A"
             }
@@ -1086,7 +1086,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_processing{namespace=\"digest\"})",
+              "expr": "max(crawler_queue_processing{namespace=\"digest\"})",
               "legendFormat": "Processing",
               "refId": "A"
             }
@@ -1119,7 +1119,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_done{namespace=\"digest\"})",
+              "expr": "max(crawler_queue_done{namespace=\"digest\"})",
               "legendFormat": "Done",
               "refId": "A"
             }
@@ -1152,7 +1152,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_error{namespace=\"digest\"})",
+              "expr": "max(crawler_queue_error{namespace=\"digest\"})",
               "legendFormat": "Errors",
               "refId": "A"
             }
@@ -1200,19 +1200,19 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_pending{namespace=\"digest\"})",
+              "expr": "max(crawler_queue_pending{namespace=\"digest\"})",
               "legendFormat": "Pending",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_processing{namespace=\"digest\"})",
+              "expr": "max(crawler_queue_processing{namespace=\"digest\"})",
               "legendFormat": "Processing",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_error{namespace=\"digest\"})",
+              "expr": "max(crawler_queue_error{namespace=\"digest\"})",
               "legendFormat": "Errors",
               "refId": "C"
             }
@@ -1349,7 +1349,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_done{namespace=\"digest\"}) / (sum(crawler_queue_done{namespace=\"digest\"}) + sum(crawler_queue_error{namespace=\"digest\"}))",
+              "expr": "max(crawler_queue_done{namespace=\"digest\"}) / (max(crawler_queue_done{namespace=\"digest\"}) + max(crawler_queue_error{namespace=\"digest\"}))",
               "legendFormat": "Success Rate",
               "refId": "A"
             }
@@ -1380,25 +1380,25 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_pending{namespace=\"digest\"})",
+              "expr": "max(crawler_queue_pending{namespace=\"digest\"})",
               "legendFormat": "Pending",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_processing{namespace=\"digest\"})",
+              "expr": "max(crawler_queue_processing{namespace=\"digest\"})",
               "legendFormat": "Processing",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_done{namespace=\"digest\"})",
+              "expr": "max(crawler_queue_done{namespace=\"digest\"})",
               "legendFormat": "Done",
               "refId": "C"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(crawler_queue_error{namespace=\"digest\"})",
+              "expr": "max(crawler_queue_error{namespace=\"digest\"})",
               "legendFormat": "Error",
               "refId": "D"
             }

@@ -78,9 +78,9 @@ spec:
         - name: CRAWL_DEPTH
           value: "2"
         - name: CRAWL_RATE_LIMIT_RPS
-          value: "5"
+          value: "10"
         - name: CRAWL_BATCH_SIZE
-          value: "20"
+          value: "50"
         - name: CRAWL_CLAIM_TTL
           value: "5m"
         - name: CRAWL_USER_AGENT

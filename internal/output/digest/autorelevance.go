@@ -220,6 +220,6 @@ func (s *Scheduler) logAutoRelevanceUpdate(ch db.Channel, delta float32, st *rat
 		Float32("old_delta", ch.RelevanceThresholdDelta).
 		Float32("new_delta", delta).
 		Int(LogFieldRatingCount, st.count).
-		Float64("reliability", reliability).
+		Float64(LogFieldReliability, reliability).
 		Msg("Updated auto-relevance delta")
 }

@@ -1016,7 +1016,62 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 		return "", nil, nil, nil, err
 	}
 
+	items, clusters = s.applyCorroborationAdjustments(items, clusters, settings)
+
+	s.recordDigestQuality(items, end, importanceThreshold, logger)
+
 	return s.renderDigest(ctx, items, clusters, start, end, settings, logger)
+}
+
+func (s *Scheduler) recordDigestQuality(items []db.Item, windowEnd time.Time, importanceThreshold float32, logger *zerolog.Logger) {
+	if len(items) == 0 {
+		return
+	}
+
+	var (
+		totalImportance float32
+		totalLag        float64
+		lagCount        int
+	)
+
+	for _, item := range items {
+		totalImportance += item.ImportanceScore
+
+		if !item.TGDate.IsZero() {
+			lag := windowEnd.Sub(item.TGDate)
+			if lag < 0 {
+				lag = 0
+			}
+
+			seconds := lag.Seconds()
+			observability.DigestTimeToDigestSeconds.Observe(seconds)
+			totalLag += seconds
+			lagCount++
+		}
+	}
+
+	avgImportance := totalImportance / float32(len(items))
+	observability.DigestAverageImportance.Set(float64(avgImportance))
+	observability.DigestReadyItems.Set(float64(len(items)))
+
+	if s.cfg.TimeToDigestAlertThreshold > 0 && lagCount > 0 {
+		avgLag := totalLag / float64(lagCount)
+		if avgLag > s.cfg.TimeToDigestAlertThreshold.Seconds() {
+			logger.Warn().
+				Float64("avg_lag_seconds", avgLag).
+				Dur(LogFieldThreshold, s.cfg.TimeToDigestAlertThreshold).
+				Int(LogFieldItems, len(items)).
+				Msg("Digest lag exceeds alert threshold")
+		}
+	}
+
+	if len(items) <= 2 || avgImportance < importanceThreshold {
+		logger.Warn().
+			Int(LogFieldItems, len(items)).
+			Float32("avg_importance", avgImportance).
+			Float32(LogFieldThreshold, importanceThreshold).
+			Msg("Digest quality signal low for window")
+	}
 }
 
 // performClusteringIfEnabled runs clustering and fetches clusters if topics are enabled

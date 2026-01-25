@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/text/cases"
 
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
+	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 const (
@@ -13,10 +13,13 @@ const (
 	filterModeMixed     = "mixed"
 	filterModeDenylist  = "denylist"
 
-	ReasonMinLength = "filter_min_length"
-	ReasonAds       = "filter_ads"
-	ReasonDeny      = "filter_deny"
-	ReasonAllowMiss = "filter_allow_miss"
+	ReasonMinLength    = "filter_min_length"
+	ReasonEmojiOnly    = "filter_emoji_only"
+	ReasonBoilerplate  = "filter_boilerplate"
+	ReasonForwardShell = "filter_forward_shell"
+	ReasonAds          = "filter_ads"
+	ReasonDeny         = "filter_deny"
+	ReasonAllowMiss    = "filter_allow_miss"
 )
 
 type Filterer struct {
@@ -57,7 +60,11 @@ func (f *Filterer) IsFiltered(text string) bool {
 }
 
 func (f *Filterer) FilterReason(text string) (bool, string) {
-	if len(text) < f.minLength {
+	return f.FilterReasonWithMinLength(text, f.minLength)
+}
+
+func (f *Filterer) FilterReasonWithMinLength(text string, minLength int) (bool, string) {
+	if minLength > 0 && len(text) < minLength {
 		return true, ReasonMinLength
 	}
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
@@ -94,13 +95,13 @@ func (m *mockRepository) CheckStrictDuplicate(_ context.Context, _, _ string) (b
 	return m.strictDuplicateExists, m.strictDuplicateErr
 }
 
-func (m *mockRepository) FindSimilarItem(_ context.Context, _ []float32, _ float32) (string, error) {
+func (m *mockRepository) FindSimilarItem(_ context.Context, _ []float32, _ float32, _ time.Time) (string, error) {
 	return m.similarItemID, m.similarItemErr
 }
 
 func TestNewSemantic(t *testing.T) {
 	repo := &mockRepository{}
-	d := NewSemantic(repo, testSimilarityThreshold)
+	d := NewSemantic(repo, testSimilarityThreshold, 0)
 
 	if d == nil {
 		t.Fatal("NewSemantic() returned nil")
@@ -166,7 +167,7 @@ func TestSemanticDeduplicator_IsDuplicate(t *testing.T) {
 				similarItemID:  tt.similarItemID,
 				similarItemErr: tt.similarErr,
 			}
-			d := NewSemantic(repo, testSimilarityThreshold)
+			d := NewSemantic(repo, testSimilarityThreshold, 0)
 
 			isDup, dupID, err := d.IsDuplicate(context.Background(), db.RawMessage{}, tt.embedding)
 

@@ -461,6 +461,8 @@ func matchesSkipPattern(rawURL string) bool {
 		"/feed/", "/feed", "/rss", "xmlrpc.php",
 		"%7B%7B", "{{", "#",
 		"?replytocom=", "?share=", "?action=", "?utm_", "&utm_",
+		// Search and category pages (low content value)
+		"/search", "/search/", "?q=", "?s=", "/tag/", "/tags/", "/category/",
 	}
 
 	for _, pattern := range skipPatterns {

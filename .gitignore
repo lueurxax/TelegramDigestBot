@@ -28,3 +28,4 @@ deploy/k8s/secrets.yaml
 .claude/
 .output.txt
 /crawler
+.gocache/

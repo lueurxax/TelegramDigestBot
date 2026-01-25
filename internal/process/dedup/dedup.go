@@ -4,8 +4,14 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
+	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
+)
+
+const (
+	defaultDedupWindowDays = 7
+	hoursPerDay            = 24
 )
 
 type Deduplicator interface {
@@ -14,18 +20,20 @@ type Deduplicator interface {
 
 type Repository interface {
 	CheckStrictDuplicate(ctx context.Context, hash string, id string) (bool, error)
-	FindSimilarItem(ctx context.Context, embedding []float32, threshold float32) (string, error)
+	FindSimilarItem(ctx context.Context, embedding []float32, threshold float32, minCreatedAt time.Time) (string, error)
 }
 
 type semanticDeduplicator struct {
 	database  Repository
 	threshold float32
+	window    time.Duration
 }
 
-func NewSemantic(database Repository, threshold float32) Deduplicator {
+func NewSemantic(database Repository, threshold float32, window time.Duration) Deduplicator {
 	return &semanticDeduplicator{
 		database:  database,
 		threshold: threshold,
+		window:    window,
 	}
 }
 
@@ -34,7 +42,14 @@ func (d *semanticDeduplicator) IsDuplicate(ctx context.Context, _ db.RawMessage,
 		return false, "", nil
 	}
 
-	similarItemID, err := d.database.FindSimilarItem(ctx, embedding, d.threshold)
+	window := d.window
+	if window <= 0 {
+		window = defaultDedupWindowDays * hoursPerDay * time.Hour
+	}
+
+	minCreatedAt := time.Now().Add(-window)
+
+	similarItemID, err := d.database.FindSimilarItem(ctx, embedding, d.threshold, minCreatedAt)
 	if err != nil {
 		return false, "", fmt.Errorf("find similar item: %w", err)
 	}

@@ -84,9 +84,29 @@ Improve relevance, readability, and diversity of the digest without increasing L
   1) Recalculate importance after clustering before digest selection, or
   2) Store a secondary `importance_adjusted` used only for ranking.
 
+**Boost math:**
+- `importance_adjusted = importance + (channels_count - 1) * CORROBORATION_IMPORTANCE_BOOST`
+- Clamp to [0, 1]. Single-channel clusters get no boost.
+ - Apply `SINGLE_SOURCE_PENALTY` when `channels_count == 1` and the item is a repost.
+
 ### 7) Channel Reliability/Weight History
 - Apply reliability decay and stronger penalties for high irrelevant rates.
 - Promote channels with sustained high "good" ratings.
+
+**Formula (proposal):**
+- Reliability score per channel per week:
+  - `good_rate = good / max(total_ratings, 1)`
+  - `irrelevant_rate = irrelevant / max(total_ratings, 1)`
+  - `reliability = clamp(0.5 + (good_rate - irrelevant_rate) * 0.5, 0, 1)`
+- Decay older weeks with half-life 30 days:
+  - `weight = exp(-age_days * ln(2) / 30)`
+- Auto-weight adjustment:
+  - `weight_delta = (reliability - 0.5) * 0.2`
+  - clamp channel weight to configured min/max.
+
+**Thresholds:**
+- “High irrelevant rate” default: `irrelevant_rate >= 0.35` with ≥ 15 ratings.
+- If fewer ratings, do not adjust (avoid noise).
 
 ### 8) Summary Post-Processing (Heuristic)
 - Enforce single-sentence and length cap.
@@ -102,9 +122,24 @@ Improve relevance, readability, and diversity of the digest without increasing L
 - If summary is weak, pick the best lead sentence from original/preview text.
 - Prefer sentences with lightweight signals (numbers/dates, capitalized proper-noun patterns, @mentions, hashtags, acronyms).
 
+**Definition of weak summary:**
+- Empty, or length < 60 chars, or low information density (fewer than 6 tokens).
+
+**Scoring (example):**
+- +2: contains a number/date (regex: `\\b\\d{1,4}([:/.-]\\d{1,2})?\\b`)
+- +2: contains 2+ capitalized tokens in a row (regex: `\\b[A-ZА-Я][\\p{L}]+\\s+[A-ZА-Я][\\p{L}]+\\b`)
+- +1: contains @mention or #hashtag
+- +1: contains acronym (regex: `\\b[A-Z]{2,5}\\b`)
+- Pick top scoring sentence; tie-breaker = longest sentence under 200 chars.
+
 ### 10) Cluster Topic Cleanup
 - Canonicalize topic labels (case, punctuation, synonyms).
 - Deduplicate similar topics in a window.
+
+**Rules (proposal):**
+- Normalize to title case and trim punctuation.
+- Apply a small synonym map (e.g., Ukraine/Украина/Україна → Ukraine).
+- Deduplicate topics with cosine similarity ≥ 0.9 or Jaccard ≥ 0.8 on token sets.
 
 ### 11) Explainability Line
 - Optional metadata line: why included (scores, corroboration, thresholds).
@@ -117,6 +152,12 @@ Improve relevance, readability, and diversity of the digest without increasing L
 ### 12) Ratings-Driven Threshold Tuning (Weekly)
 - Adjust relevance/importance thresholds using rating history.
 
+**Formula (proposal):**
+- Compute net score: `net = (good - bad - irrelevant) / max(total, 1)`
+- If total < `RATING_MIN_SAMPLE_*`, skip update.
+- Adjustment: `threshold += clamp(net, -0.3, 0.3) * 0.05`
+- Clamp thresholds to `[0.1, 0.9]` to avoid runaway drift.
+
 ### 13) Time-to-Digest Tracking
 - Track time from first seen to digest inclusion.
 - Flag windows with quality drops (few items, low average importance).
@@ -126,6 +167,13 @@ Improve relevance, readability, and diversity of the digest without increasing L
 
 ### 15) Reuse Cluster Summaries Across Windows
 - If a cluster repeats with minimal change, reuse its previous summary.
+
+**Minimal change rule:**
+- Reuse if ≥ 80% of item IDs match previous cluster fingerprint.
+- Otherwise re-summarize and overwrite cache entry.
+
+**Staleness guard:**
+- Reuse only if cached summary < 7 days old.
 
 ## Pipeline Integration
 This proposal applies changes at specific points in the pipeline.
@@ -163,6 +211,7 @@ flowchart TD
 - `SUMMARY_MAX_CHARS`, `SUMMARY_STRIP_PHRASES`
 - `EXPLAINABILITY_LINE_ENABLED`
 - `TIME_TO_DIGEST_ALERT_THRESHOLD`
+- `RATING_MIN_SAMPLE_CHANNEL`, `RATING_MIN_SAMPLE_GLOBAL`
 
 ### Defaults + Validation
 - Provide safe defaults for all new settings to avoid config explosion.
@@ -189,6 +238,18 @@ Some changes require persistent state. Proposed schema additions:
 
 If storage changes are out of scope, these features should be deferred.
 
+**Storage details:**
+- `cluster_fingerprint`: SHA256 hash of sorted item IDs (string).
+- Indexes:
+  - `items(first_seen_at)` for time-to-digest queries.
+  - `channel_quality_history(channel_id, date)` for trends.
+  - `cluster_summary_cache(cluster_fingerprint)` for cache lookups.
+
+**Writers and concurrency:**
+- `channel_quality_history`: written by a weekly worker job (single leader).
+- `threshold_tuning_log`: written by the same job; use leader election to avoid concurrent updates.
+- `cluster_summary_cache`: written by digest scheduler; upsert on fingerprint.
+
 ## Dependencies Checklist
 - MTProto ingest persists `webpage` metadata (title/description/site).
 - Link preview extraction is stable for short/empty messages.
@@ -209,6 +270,7 @@ If storage changes are out of scope, these features should be deferred.
 - Invalidate when prompt version changes or TTL expires (default 30 days).
 - Cache storage: PostgreSQL tables proposed in “Data Storage Additions” (no new infra).
 - Cluster summary reuse only when cluster fingerprint (sorted item IDs) is unchanged.
+- Cluster cache TTL: 7 days (staleness guard).
 
 ## Rollout
 - Stage 1: Enable preview-based enrichment + dedup window (requires MTProto preview fields).
@@ -221,7 +283,10 @@ If storage changes are out of scope, these features should be deferred.
 ## Testing Strategy
 - **Shadow mode**: compute adjusted scores but do not affect ranking; log deltas.
 - **A/B via time windows**: alternate windows with feature on/off for 1 week.
-- **Regression suite**: replay a fixed sample of messages and compare selection stats.
+- **Regression suite**: replay 1,000 messages (or last 7 days) and compare selection stats.
+
+**Shadow logging fields:**
+- message_id, channel_id, base scores, adjusted scores, drop reason, dedup hit, cluster_id.
 
 ## Monitoring & Alerting
 - Metrics:
@@ -255,12 +320,17 @@ If storage changes are out of scope, these features should be deferred.
 - If preview data is malformed or missing: fall back to raw message text.
 
 ## Open Questions
-- Exact heuristics for lead sentence extraction?
 - Should domain quality signals affect relevance, importance, or both?
 - How much transparency to show in public digests?
 
 ## Example Heuristics
 **CTA/boilerplate regexes (illustrative):**
-- `^(subscribe|share this|donate|support us)\\b`
-- `^(подписывайтесь|поддержите|поделитесь)\\b`
-- `(?i)\\b(подписка|донат|спонсор)\\b` when in footer block only
+```text
+^(subscribe|share this|donate|support us)\b
+^(подписывайтесь|поддержите|поделитесь)\b
+(?i)\b(подписка|донат|спонсор)\b   # footer block only
+```
+
+**Footer block detection (heuristic):**
+- Last 2–3 lines of message, or a block separated by a blank line.
+- Block contains ≥2 CTA keywords or a URL list.

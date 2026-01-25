@@ -32,6 +32,22 @@ var (
 		Help: "The total number of digests posted",
 	}, []string{"status"})
 
+	DigestTimeToDigestSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "digest_time_to_digest_seconds",
+		Help:    "Time from message timestamp to digest inclusion",
+		Buckets: []float64{60, 300, 900, 1800, 3600, 7200, 14400, 28800, 43200, 86400},
+	})
+
+	DigestAverageImportance = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "digest_average_importance",
+		Help: "Average importance score for items in a digest window",
+	})
+
+	DigestReadyItems = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "digest_ready_items",
+		Help: "Number of items selected for a digest window",
+	})
+
 	DiscoveryPending = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "digest_discovery_pending",
 		Help: "Current number of pending channel discoveries",

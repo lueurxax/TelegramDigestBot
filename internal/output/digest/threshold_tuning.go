@@ -164,7 +164,7 @@ func (s *Scheduler) applyThresholdUpdates(ctx context.Context, delta, minVal, ma
 
 	logger.Info().
 		Float64(LogFieldNetScore, net).
-		Float32("delta", delta).
+		Float32(LogFieldDelta, delta).
 		Float32("relevance", relevance).
 		Float32("relevance_new", newRelevance).
 		Float32("importance", importance).

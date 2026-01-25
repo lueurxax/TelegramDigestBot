@@ -866,6 +866,10 @@ func writeEnrichmentDebugItemInfo(sb *strings.Builder, item *db.ItemDebugDetail)
 		fmt.Fprintf(sb, "Language: <code>%s</code>\n", html.EscapeString(item.Language))
 	}
 
+	if item.LanguageSource != "" {
+		fmt.Fprintf(sb, "Language Source: <code>%s</code>\n", html.EscapeString(item.LanguageSource))
+	}
+
 	name := formatChannelName(item.ChannelUsername, item.ChannelTitle)
 	link := FormatLink(item.ChannelUsername, item.ChannelPeerID, item.MessageID, fmtOpenMessage)
 	fmt.Fprintf(sb, "Channel: <b>%s</b> (%s)\n", html.EscapeString(name), link)

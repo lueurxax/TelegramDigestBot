@@ -14,7 +14,7 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/process/filters"
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
+	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 var errLLM = errors.New("llm error")
@@ -133,8 +133,20 @@ func (m *mockRepo) CheckStrictDuplicate(_ context.Context, _, _ string) (bool, e
 	return false, nil
 }
 
-func (m *mockRepo) FindSimilarItem(_ context.Context, _ []float32, _ float32) (string, error) {
+func (m *mockRepo) FindSimilarItem(_ context.Context, _ []float32, _ float32, _ time.Time) (string, error) {
 	return "", nil
+}
+
+func (m *mockRepo) FindSimilarItemForChannel(_ context.Context, _ []float32, _ string, _ float32, _ time.Time) (string, error) {
+	return "", nil
+}
+
+func (m *mockRepo) GetSummaryCache(_ context.Context, _, _ string) (*db.SummaryCacheEntry, error) {
+	return nil, db.ErrSummaryCacheNotFound
+}
+
+func (m *mockRepo) UpsertSummaryCache(_ context.Context, _ *db.SummaryCacheEntry) error {
+	return nil
 }
 
 func (m *mockRepo) LinkMessageToLink(_ context.Context, _, _ string, _ int) error {
@@ -598,7 +610,7 @@ func TestSelectTieredCandidates(t *testing.T) {
 			{ImportanceScore: 0.9},  // above threshold
 		}
 
-		indices, selected := selectTieredCandidates(candidates, results)
+		indices, selected := selectTieredCandidates(candidates, results, nil)
 
 		if len(indices) != 2 {
 			t.Fatalf("expected 2 selected, got %d", len(indices))
@@ -618,7 +630,7 @@ func TestSelectTieredCandidates(t *testing.T) {
 
 		results := []llm.BatchResult{{ImportanceScore: 0.5}}
 
-		indices, selected := selectTieredCandidates(candidates, results)
+		indices, selected := selectTieredCandidates(candidates, results, nil)
 
 		if len(indices) != 0 || len(selected) != 0 {
 			t.Errorf("expected empty results, got %d indices", len(indices))
@@ -832,7 +844,7 @@ func TestGroupIndicesByModel(t *testing.T) {
 
 			p := New(cfg, nil, nil, nil, nil, nil)
 
-			result := p.groupIndicesByModel(tt.candidates)
+			result := p.groupIndicesByModel(tt.candidates, nil)
 
 			if len(result) != len(tt.expectedGroups) {
 				t.Errorf("expected %d groups, got %d", len(tt.expectedGroups), len(result))
@@ -1014,6 +1026,8 @@ func TestCalculateImportance(t *testing.T) {
 
 	p := New(cfg, nil, nil, nil, nil, &logger)
 
+	s := &pipelineSettings{}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := llm.MessageInput{
@@ -1028,7 +1042,7 @@ func TestCalculateImportance(t *testing.T) {
 				Summary:         tt.summary,
 			}
 
-			got := p.calculateImportance(logger, c, res)
+			got := p.calculateImportance(logger, c, res, s)
 
 			if got < tt.expectedMin || got > tt.expectedMax {
 				t.Errorf("calculateImportance() = %v, want between %v and %v", got, tt.expectedMin, tt.expectedMax)
@@ -1553,7 +1567,7 @@ func TestSkipMessage(t *testing.T) {
 			message:               db.RawMessage{ID: "1", Text: "https://t.me/1"},
 			linkEnrichmentEnabled: false,
 			seenHashes:            make(map[string]string),
-			expectSkip:            true,
+			expectSkip:            false,
 		},
 	}
 
@@ -1570,7 +1584,7 @@ func TestSkipMessage(t *testing.T) {
 			s := &pipelineSettings{
 				skipForwards:          tt.skipForwards,
 				linkEnrichmentEnabled: tt.linkEnrichmentEnabled,
-				minLength:             20,
+				minLengthDefault:      20,
 			}
 
 			f := filters.New(nil, false, 20, nil, "mixed")

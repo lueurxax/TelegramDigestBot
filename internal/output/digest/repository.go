@@ -36,6 +36,9 @@ type Repository interface {
 	GetLinksForMessage(ctx context.Context, msgID string) ([]domain.ResolvedLink, error)
 	GetFactChecksForItems(ctx context.Context, itemIDs []string) (map[string]db.FactCheckMatch, error)
 	GetEvidenceForItems(ctx context.Context, itemIDs []string) (map[string][]db.ItemEvidenceWithSource, error)
+	GetClusterSummaryCache(ctx context.Context, digestLanguage string, since time.Time) ([]db.ClusterSummaryCacheEntry, error)
+	GetClusterSummaryCacheEntry(ctx context.Context, digestLanguage, fingerprint string) (*db.ClusterSummaryCacheEntry, error)
+	UpsertClusterSummaryCache(ctx context.Context, entry *db.ClusterSummaryCacheEntry) error
 
 	// Cluster operations
 	GetClustersForWindow(ctx context.Context, start, end time.Time) ([]db.ClusterWithItems, error)

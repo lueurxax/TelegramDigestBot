@@ -40,6 +40,7 @@ const (
 	httpHeaderContent = "Content-Type"
 	fieldResponse     = "response"
 	fieldAttempt      = "attempt"
+	markdownCodeFence = "```"
 
 	// LLM retry settings.
 	// With 45s timeout × 3 attempts + ~6s delays = ~141s max for LLM.
@@ -329,6 +330,9 @@ func (e *Extractor) createLLMContext(parent context.Context) (context.Context, c
 }
 
 func (e *Extractor) parseLLMClaims(res string) ([]ExtractedClaim, error) {
+	// Strip markdown code blocks if present (common LLM response format)
+	res = stripMarkdownCodeBlocks(res)
+
 	var (
 		lastErr         error
 		foundValidArray bool
@@ -849,4 +853,24 @@ func coalesce2(a, b time.Time) time.Time {
 	}
 
 	return b
+}
+
+// stripMarkdownCodeBlocks removes markdown code block wrappers from LLM responses.
+// Handles formats like: ```json\n[...]\n``` or ```\n[...]\n```
+func stripMarkdownCodeBlocks(s string) string {
+	// Remove opening code fence with optional language specifier
+	if idx := strings.Index(s, markdownCodeFence); idx != -1 {
+		// Find end of opening fence line
+		endOfLine := strings.Index(s[idx:], "\n")
+		if endOfLine != -1 {
+			s = s[idx+endOfLine+1:]
+		}
+	}
+
+	// Remove closing code fence
+	if idx := strings.LastIndex(s, markdownCodeFence); idx != -1 {
+		s = s[:idx]
+	}
+
+	return strings.TrimSpace(s)
 }

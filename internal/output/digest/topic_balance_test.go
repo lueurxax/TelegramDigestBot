@@ -279,7 +279,7 @@ func TestApplyTopicBalanceEdgeCases(t *testing.T) {
 	t.Run("invalid cap fraction uses simple selection", func(t *testing.T) {
 		items := []db.Item{{Topic: "A"}, {Topic: "B"}, {Topic: "C"}}
 
-		result := applyTopicBalance(items, 2, 0.0, 0)
+		result := applyTopicBalance(items, 2, testScoreZero, 0)
 
 		if len(result.Items) != 2 {
 			t.Errorf(testErrExpectedItemsCountGot, 2, len(result.Items))

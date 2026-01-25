@@ -873,11 +873,12 @@ func (db *DB) countEnrichmentByStatus(ctx context.Context, status string) (int, 
 }
 
 // GetClaimsForSource retrieves all claims for a given evidence source.
+// Only returns claims with valid (non-NULL) embeddings to ensure they can be used for matching.
 func (db *DB) GetClaimsForSource(ctx context.Context, sourceID string) ([]EvidenceClaim, error) {
 	rows, err := db.Pool.Query(ctx, `
 		SELECT id, evidence_id, claim_text, entities_json, embedding, created_at
 		FROM evidence_claims
-		WHERE evidence_id = $1
+		WHERE evidence_id = $1 AND embedding IS NOT NULL
 		ORDER BY created_at
 	`, toUUID(sourceID))
 	if err != nil {

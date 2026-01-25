@@ -245,6 +245,7 @@ type Item struct {
 	Topic           pgtype.Text        `json:"topic"`
 	Summary         pgtype.Text        `json:"summary"`
 	Language        pgtype.Text        `json:"language"`
+	LanguageSource  pgtype.Text        `json:"language_source"`
 	Status          string             `json:"status"`
 	ErrorJson       []byte             `json:"error_json"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`

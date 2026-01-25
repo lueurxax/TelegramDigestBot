@@ -31,6 +31,7 @@ type ItemDebugDetail struct {
 	Summary         string
 	Topic           string
 	Language        string
+	LanguageSource  string
 	Status          string
 	RelevanceScore  float32
 	ImportanceScore float32
@@ -125,6 +126,7 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 		       i.summary,
 		       i.topic,
 		       i.language,
+		       i.language_source,
 		       i.status,
 		       i.relevance_score,
 		       i.importance_score,
@@ -148,6 +150,7 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 		summary      pgtype.Text
 		topic        pgtype.Text
 		language     pgtype.Text
+		langSource   pgtype.Text
 		text         pgtype.Text
 		channelID    pgtype.UUID
 		user         pgtype.Text
@@ -163,6 +166,7 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 		&summary,
 		&topic,
 		&language,
+		&langSource,
 		&item.Status,
 		&item.RelevanceScore,
 		&item.ImportanceScore,
@@ -187,6 +191,7 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 	item.Summary = summary.String
 	item.Topic = topic.String
 	item.Language = language.String
+	item.LanguageSource = langSource.String
 	item.Text = text.String
 	item.ChannelID = fromUUID(channelID)
 	item.ChannelUsername = user.String

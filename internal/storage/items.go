@@ -39,6 +39,7 @@ func (db *DB) SaveItem(ctx context.Context, item *Item) error {
 		Topic:           toText(item.Topic),
 		Summary:         toText(item.Summary),
 		Language:        toText(item.Language),
+		LanguageSource:  toText(item.LanguageSource),
 		Status:          SanitizeUTF8(item.Status),
 	})
 	if err != nil {
@@ -61,11 +62,11 @@ func (db *DB) SaveItemError(ctx context.Context, rawMsgID string, errJSON []byte
 	return nil
 }
 
-func (db *DB) FindSimilarItem(ctx context.Context, embedding []float32, threshold float32) (string, error) {
+func (db *DB) FindSimilarItem(ctx context.Context, embedding []float32, threshold float32, minCreatedAt time.Time) (string, error) {
 	id, err := db.Queries.FindSimilarItem(ctx, sqlc.FindSimilarItemParams{
 		Embedding:    pgvector.NewVector(embedding),
 		Threshold:    float64(1.0 - threshold),
-		MinCreatedAt: toTimestamptz(time.Now().Add(-7 * 24 * time.Hour)),
+		MinCreatedAt: toTimestamptz(minCreatedAt),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -73,6 +74,31 @@ func (db *DB) FindSimilarItem(ctx context.Context, embedding []float32, threshol
 		}
 
 		return "", fmt.Errorf("find similar item: %w", err)
+	}
+
+	return fromUUID(id), nil
+}
+
+func (db *DB) FindSimilarItemForChannel(ctx context.Context, embedding []float32, channelID string, threshold float32, minCreatedAt time.Time) (string, error) {
+	var id pgtype.UUID
+
+	err := db.Pool.QueryRow(ctx, `
+		SELECT e.item_id
+		FROM embeddings e
+		JOIN items i ON i.id = e.item_id
+		JOIN raw_messages rm ON rm.id = i.raw_message_id
+		WHERE rm.channel_id = $1
+		  AND e.created_at > $2
+		  AND (e.embedding <=> $3::vector) < $4
+		ORDER BY e.embedding <=> $3::vector
+		LIMIT 1
+	`, toUUID(channelID), minCreatedAt, pgvector.NewVector(embedding), float64(1.0-threshold)).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+
+		return "", fmt.Errorf("find similar item for channel: %w", err)
 	}
 
 	return fromUUID(id), nil

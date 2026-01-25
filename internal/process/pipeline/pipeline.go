@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/embeddings"
-	"github.com/lueurxax/telegram-digest-bot/internal/core/links/linkextract"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
@@ -43,7 +43,10 @@ type Repository interface {
 	EnqueueEnrichment(ctx context.Context, itemID, summary string) error
 	CountPendingEnrichments(ctx context.Context) (int, error)
 	CheckStrictDuplicate(ctx context.Context, hash string, id string) (bool, error)
-	FindSimilarItem(ctx context.Context, embedding []float32, threshold float32) (string, error)
+	FindSimilarItem(ctx context.Context, embedding []float32, threshold float32, minCreatedAt time.Time) (string, error)
+	FindSimilarItemForChannel(ctx context.Context, embedding []float32, channelID string, threshold float32, minCreatedAt time.Time) (string, error)
+	GetSummaryCache(ctx context.Context, canonicalHash, digestLanguage string) (*db.SummaryCacheEntry, error)
+	UpsertSummaryCache(ctx context.Context, entry *db.SummaryCacheEntry) error
 	LinkMessageToLink(ctx context.Context, rawMsgID, linkCacheID string, position int) error
 }
 
@@ -67,11 +70,18 @@ type pipelineSettings struct {
 	batchSize               int
 	filterList              []db.Filter
 	adsFilterEnabled        bool
-	minLength               int
+	minLengthDefault        int
+	minLengthByLang         map[string]int
+	summaryMaxChars         int
+	summaryStripPhrases     []string
+	domainAllowlist         map[string]struct{}
+	domainDenylist          map[string]struct{}
 	adsKeywords             []string
 	skipForwards            bool
 	filtersMode             string
 	dedupMode               string
+	dedupWindow             time.Duration
+	dedupSameChannelWindow  time.Duration
 	topicsEnabled           bool
 	relevanceThreshold      float32
 	digestLanguage          string
@@ -98,6 +108,7 @@ const (
 	dropReasonForwarded           = "forwarded"
 	dropReasonRelevanceGate       = "relevance_gate"
 	dropReasonDedupSemanticBatch  = "dedup_semantic_batch"
+	dropReasonDedupSemanticSame   = "dedup_semantic_same_channel"
 	dropReasonDedupSemanticGlobal = "dedup_semantic_global"
 	dropReasonDedupStrictGlobal   = "dedup_strict_global"
 )
@@ -271,8 +282,19 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 		linkEmbeddingMaxMsgLen: p.cfg.LinkEmbeddingMaxMsgLen,
 		filtersMode:            FilterModeMixed,
 		dedupMode:              DedupModeSemantic,
+		dedupWindow:            time.Duration(p.cfg.ClusterTimeWindowHours) * time.Hour,
+		dedupSameChannelWindow: time.Duration(p.cfg.DedupSameChannelWindowHours) * time.Hour,
 		topicsEnabled:          true,
-		minLength:              DefaultMinLength,
+		minLengthDefault:       DefaultMinLength,
+		minLengthByLang: map[string]int{
+			"ru": p.cfg.FilterMinLengthRu,
+			"uk": p.cfg.FilterMinLengthUk,
+			"en": p.cfg.FilterMinLengthEn,
+		},
+		summaryMaxChars:     p.cfg.SummaryMaxChars,
+		summaryStripPhrases: parseSummaryStripPhrases(p.cfg.SummaryStripPhrases),
+		domainAllowlist:     parseDomainList(p.cfg.DomainAllowlist),
+		domainDenylist:      parseDomainList(p.cfg.DomainDenylist),
 	}
 
 	p.getSetting(ctx, "worker_batch_size", &s.batchSize, logger)
@@ -285,7 +307,7 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 	s.filterList = filterList
 
 	p.getSetting(ctx, "filters_ads", &s.adsFilterEnabled, logger)
-	p.getSetting(ctx, "filters_min_length", &s.minLength, logger)
+	p.getSetting(ctx, "filters_min_length", &s.minLengthDefault, logger)
 	p.getSetting(ctx, "filters_ads_keywords", &s.adsKeywords, logger)
 	p.getSetting(ctx, "filters_skip_forwards", &s.skipForwards, logger)
 	p.getSetting(ctx, "filters_mode", &s.filtersMode, logger)
@@ -320,6 +342,10 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 	p.getSetting(ctx, "max_links_per_message", &s.maxLinks, logger)
 	s.linkCacheTTL = p.getDurationSetting(ctx, "link_cache_ttl", p.cfg.LinkCacheTTL, logger)
 	s.tgLinkCacheTTL = p.getDurationSetting(ctx, "tg_link_cache_ttl", p.cfg.TelegramLinkCacheTTL, logger)
+
+	s.normalizeMinLengthSettings()
+	s.normalizeSummarySettings()
+	s.normalizeDedupWindows()
 
 	return s, nil
 }
@@ -392,11 +418,11 @@ func (p *Pipeline) recordRelevanceGateDecision(ctx context.Context, logger zerol
 }
 
 func (p *Pipeline) prepareCandidates(ctx context.Context, logger zerolog.Logger, messages []db.RawMessage, s *pipelineSettings) ([]llm.MessageInput, map[string][]float32, error) {
-	f := filters.New(s.filterList, s.adsFilterEnabled, s.minLength, s.adsKeywords, s.filtersMode)
+	f := filters.New(s.filterList, s.adsFilterEnabled, s.minLengthDefault, s.adsKeywords, s.filtersMode)
 
 	var deduplicator dedup.Deduplicator
 	if s.dedupMode == DedupModeSemantic {
-		deduplicator = dedup.NewSemantic(p.database, p.cfg.SimilarityThreshold)
+		deduplicator = dedup.NewSemantic(p.database, p.cfg.SimilarityThreshold, s.dedupWindow)
 	} else {
 		deduplicator = dedup.NewStrict(p.database)
 	}
@@ -433,9 +459,60 @@ func (p *Pipeline) prepareCandidates(ctx context.Context, logger zerolog.Logger,
 }
 
 func (p *Pipeline) skipMessageBasic(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, seenHashes map[string]string, f *filters.Filterer) bool {
-	if dupID, seen := seenHashes[m.CanonicalHash]; seen {
-		logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, dupID).Msg("skipping strict duplicate in batch")
-		p.recordDrop(ctx, logger, m.ID, dropReasonDuplicateBatch, dupID)
+	if p.skipBatchDuplicate(ctx, logger, m, seenHashes) {
+		return true
+	}
+
+	previewText := extractPreviewText(m.MediaJSON)
+	filterText, stripped := p.prepareFilterText(m.Text, previewText)
+
+	if p.skipEmptyContent(ctx, logger, m, s, filterText, previewText, stripped) {
+		return true
+	}
+
+	if p.skipByContentFilters(ctx, logger, m, filterText, previewText) {
+		return true
+	}
+
+	m.Text = filterText
+
+	return p.skipByLengthAndFilterer(ctx, logger, m, s, filterText, previewText, f)
+}
+
+func (p *Pipeline) skipBatchDuplicate(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, seenHashes map[string]string) bool {
+	dupID, seen := seenHashes[m.CanonicalHash]
+	if !seen {
+		return false
+	}
+
+	logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, dupID).Msg("skipping strict duplicate in batch")
+	p.recordDrop(ctx, logger, m.ID, dropReasonDuplicateBatch, dupID)
+	p.markProcessed(ctx, logger, m.ID)
+
+	return true
+}
+
+func (p *Pipeline) prepareFilterText(text, previewText string) (string, bool) {
+	filterText := combinePreviewText(text, previewText)
+	filterText, stripped := filters.StripFooterBoilerplate(filterText)
+
+	if previewText != "" && len(filterText) < domain.ShortMessageThreshold && !strings.Contains(filterText, previewText) {
+		filterText = strings.TrimSpace(filterText + "\n\n" + previewText)
+	}
+
+	return filterText, stripped
+}
+
+func (p *Pipeline) skipEmptyContent(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, filterText, _ string, stripped bool) bool {
+	if stripped && strings.TrimSpace(filterText) == "" {
+		p.recordDrop(ctx, logger, m.ID, filters.ReasonBoilerplate, "footer_only")
+		p.markProcessed(ctx, logger, m.ID)
+
+		return true
+	}
+
+	if m.IsForward && strings.TrimSpace(filterText) == "" {
+		p.recordDrop(ctx, logger, m.ID, filters.ReasonForwardShell, "")
 		p.markProcessed(ctx, logger, m.ID)
 
 		return true
@@ -449,15 +526,45 @@ func (p *Pipeline) skipMessageBasic(ctx context.Context, logger zerolog.Logger, 
 		return true
 	}
 
-	if filtered, reason := f.FilterReason(m.Text); filtered {
-		if reason == filters.ReasonMinLength && s.linkEnrichmentEnabled {
-			resolutionText := p.buildLinkResolutionText(m.Text, m.EntitiesJSON, m.MediaJSON)
-			if len(linkextract.ExtractLinks(resolutionText)) > 0 {
-				// Do not skip if the message contains links (including text_url entities).
-				return false
-			}
-		}
+	return false
+}
 
+func (p *Pipeline) skipByContentFilters(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, filterText, previewText string) bool {
+	if filters.IsEmojiOnly(filterText) && !hasLinkOrPreview(m, previewText) {
+		p.recordDrop(ctx, logger, m.ID, filters.ReasonEmojiOnly, "")
+		p.markProcessed(ctx, logger, m.ID)
+
+		return true
+	}
+
+	if filters.IsBoilerplateOnly(filterText) {
+		p.recordDrop(ctx, logger, m.ID, filters.ReasonBoilerplate, "cta_only")
+		p.markProcessed(ctx, logger, m.ID)
+
+		return true
+	}
+
+	return false
+}
+
+func (p *Pipeline) skipByLengthAndFilterer(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, filterText, previewText string, f *filters.Filterer) bool {
+	lang := detectLanguageForFilter(filterText, previewText)
+	minLength := s.minLengthForLanguage(lang)
+	hasLinks := hasLinkOrPreview(m, previewText)
+
+	if len(filterText) < minLength && !hasLinks {
+		p.recordDrop(ctx, logger, m.ID, filters.ReasonMinLength, "")
+		p.markProcessed(ctx, logger, m.ID)
+
+		return true
+	}
+
+	effectiveMinLength := minLength
+	if len(filterText) < minLength && hasLinks {
+		effectiveMinLength = 0
+	}
+
+	if filtered, reason := f.FilterReasonWithMinLength(m.Text, effectiveMinLength); filtered {
 		p.recordDrop(ctx, logger, m.ID, reason, "")
 		p.markProcessed(ctx, logger, m.ID)
 
@@ -492,6 +599,10 @@ func (p *Pipeline) handleDeduplication(ctx context.Context, logger zerolog.Logge
 	}
 
 	if p.checkBatchDuplicate(ctx, logger, &c.RawMessage, s, candidates, embeddings, emb) {
+		return nil, true
+	}
+
+	if p.checkSameChannelDuplicate(ctx, logger, &c.RawMessage, s, emb) {
 		return nil, true
 	}
 
@@ -556,6 +667,42 @@ func (p *Pipeline) checkBatchDuplicate(ctx context.Context, logger zerolog.Logge
 	return false
 }
 
+func (p *Pipeline) checkSameChannelDuplicate(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, emb []float32) bool {
+	if s.dedupMode != DedupModeSemantic || s.dedupSameChannelWindow <= 0 || len(emb) == 0 {
+		return false
+	}
+
+	if m.ChannelID == "" {
+		return false
+	}
+
+	minCreatedAt := time.Now().Add(-s.dedupSameChannelWindow)
+	if !m.TGDate.IsZero() {
+		minCreatedAt = m.TGDate.Add(-s.dedupSameChannelWindow)
+	}
+
+	threshold := p.cfg.SimilarityThreshold
+	if threshold < 0.85 {
+		threshold = 0.85
+	}
+
+	dupID, err := p.database.FindSimilarItemForChannel(ctx, emb, m.ChannelID, threshold, minCreatedAt)
+	if err != nil {
+		logger.Error().Str(LogFieldMsgID, m.ID).Err(err).Msg("failed to check same-channel duplicates")
+		return false
+	}
+
+	if dupID == "" {
+		return false
+	}
+
+	logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, dupID).Msg("skipping same-channel near-duplicate")
+	p.recordDrop(ctx, logger, m.ID, dropReasonDedupSemanticSame, dupID)
+	p.markProcessed(ctx, logger, m.ID)
+
+	return true
+}
+
 func (p *Pipeline) checkGlobalDuplicate(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, emb []float32, deduplicator dedup.Deduplicator) bool {
 	isDup, dupID, dErr := deduplicator.IsDuplicate(ctx, *m, emb)
 	if dErr != nil {
@@ -603,9 +750,39 @@ func (p *Pipeline) runLLMProcessing(ctx context.Context, logger zerolog.Logger, 
 	start := time.Now()
 
 	results := make([]llm.BatchResult, len(candidates))
+	cached := make([]bool, len(candidates))
+
+	for i, candidate := range candidates {
+		if candidate.CanonicalHash == "" {
+			continue
+		}
+
+		entry, err := p.database.GetSummaryCache(ctx, candidate.CanonicalHash, normalizeLanguage(s.digestLanguage))
+		if err != nil {
+			if !errors.Is(err, db.ErrSummaryCacheNotFound) {
+				logger.Warn().Err(err).Str(LogFieldMsgID, candidate.ID).Msg("failed to load summary cache")
+			}
+
+			continue
+		}
+
+		if strings.TrimSpace(entry.Summary) == "" {
+			continue
+		}
+
+		results[i] = llm.BatchResult{
+			Index:           i,
+			RelevanceScore:  entry.RelevanceScore,
+			ImportanceScore: entry.ImportanceScore,
+			Topic:           entry.Topic,
+			Summary:         entry.Summary,
+			Language:        entry.Language,
+		}
+		cached[i] = true
+	}
 
 	// Group indices by model for Vision Routing
-	modelGroups := p.groupIndicesByModel(candidates)
+	modelGroups := p.groupIndicesByModel(candidates, cached)
 
 	for model, indices := range modelGroups {
 		if err := p.processModelBatch(ctx, logger, candidates, results, model, indices, s); err != nil {
@@ -614,19 +791,23 @@ func (p *Pipeline) runLLMProcessing(ctx context.Context, logger zerolog.Logger, 
 	}
 
 	// 2.1 Tiered Importance Analysis
-	p.performTieredImportanceAnalysis(ctx, logger, candidates, results, s)
+	p.performTieredImportanceAnalysis(ctx, logger, candidates, results, cached, s)
 
 	logger.Info().Int(LogFieldCount, len(candidates)).Dur("duration", time.Since(start)).Msg("LLM processing finished")
 
 	return results, nil
 }
 
-func (p *Pipeline) groupIndicesByModel(candidates []llm.MessageInput) map[string][]int {
+func (p *Pipeline) groupIndicesByModel(candidates []llm.MessageInput, cached []bool) map[string][]int {
 	modelGroups := make(map[string][]int)
 
 	// Use empty string to let the LLM registry handle task-specific model selection
 	// via LLM_SUMMARIZE_MODEL env var or default task config
 	for i := range candidates {
+		if len(cached) > i && cached[i] {
+			continue
+		}
+
 		modelGroups[""] = append(modelGroups[""], i)
 	}
 
@@ -688,12 +869,12 @@ func (p *Pipeline) augmentTextForLLM(c llm.MessageInput, s *pipelineSettings) st
 	return c.Text
 }
 
-func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, s *pipelineSettings) {
+func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, cached []bool, s *pipelineSettings) {
 	if !s.tieredImportanceEnabled {
 		return
 	}
 
-	tieredIndices, tieredCandidates := selectTieredCandidates(candidates, results)
+	tieredIndices, tieredCandidates := selectTieredCandidates(candidates, results, cached)
 	if len(tieredCandidates) == 0 {
 		return
 	}
@@ -718,12 +899,16 @@ func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger z
 	applyTieredResults(results, tieredResults, tieredIndices)
 }
 
-func selectTieredCandidates(candidates []llm.MessageInput, results []llm.BatchResult) ([]int, []llm.MessageInput) {
+func selectTieredCandidates(candidates []llm.MessageInput, results []llm.BatchResult, cached []bool) ([]int, []llm.MessageInput) {
 	var tieredIndices []int
 
 	var tieredCandidates []llm.MessageInput
 
 	for i, res := range results {
+		if len(cached) > i && cached[i] {
+			continue
+		}
+
 		if res.ImportanceScore > TieredImportanceThreshold {
 			tieredIndices = append(tieredIndices, i)
 			tieredCandidates = append(tieredCandidates, candidates[i])
@@ -746,18 +931,35 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 	rejectedCount := 0
 
 	for i, res := range results {
+		res.Summary = postProcessSummary(res.Summary, s.summaryMaxChars, s.summaryStripPhrases)
+
+		if res.Summary == "" || isWeakSummary(res.Summary) {
+			lead := selectLeadSentence(candidates[i].Text)
+			if lead != "" && !isMostlySymbols(lead) {
+				res.Summary = postProcessSummary(lead, s.summaryMaxChars, s.summaryStripPhrases)
+			}
+		}
+
 		if res.Summary == "" {
 			p.handleEmptySummary(ctx, logger, candidates[i].ID, i)
 
 			continue
 		}
 
+		lang, langSource := resolveItemLanguage(candidates[i], res)
+		res.Language = lang
+
 		item := p.createItem(logger, candidates[i], res, s)
+		item.Language = lang
+		item.LanguageSource = langSource
+
 		if item.Status == StatusReady {
-			item.Summary = p.translateSummaryIfNeeded(ctx, logger, candidates[i].ID, item.Summary, item.Language, s)
+			detectedLang := detectSummaryLanguage(item.Summary, item.Language)
+			item.Summary = p.translateSummaryIfNeeded(ctx, logger, candidates[i].ID, item.Summary, detectedLang, s)
+			item.Summary = postProcessSummary(item.Summary, s.summaryMaxChars, s.summaryStripPhrases)
 		}
 
-		if p.saveAndMarkProcessed(ctx, logger, candidates[i], item, embeddings) {
+		if p.saveAndMarkProcessed(ctx, logger, candidates[i], item, embeddings, s.digestLanguage) {
 			if item.Status == StatusReady {
 				readyCount++
 			} else {
@@ -828,10 +1030,6 @@ func summaryNeedsTranslation(summary string, detectedLang string, targetLang str
 	return targetLang == "ru" && containsUkrainianLetters(summary)
 }
 
-func normalizeLanguage(lang string) string {
-	return strings.ToLower(strings.TrimSpace(lang))
-}
-
 func containsUkrainianLetters(text string) bool {
 	for _, r := range text {
 		switch r {
@@ -852,7 +1050,7 @@ func (p *Pipeline) handleEmptySummary(ctx context.Context, logger zerolog.Logger
 }
 
 func (p *Pipeline) createItem(logger zerolog.Logger, c llm.MessageInput, res llm.BatchResult, s *pipelineSettings) *db.Item {
-	importance := p.calculateImportance(logger, c, res)
+	importance := p.calculateImportance(logger, c, res, s)
 	status := p.determineStatus(c, res.RelevanceScore, s)
 
 	return &db.Item{
@@ -866,7 +1064,7 @@ func (p *Pipeline) createItem(logger zerolog.Logger, c llm.MessageInput, res llm
 	}
 }
 
-func (p *Pipeline) calculateImportance(logger zerolog.Logger, c llm.MessageInput, res llm.BatchResult) float32 {
+func (p *Pipeline) calculateImportance(logger zerolog.Logger, c llm.MessageInput, res llm.BatchResult, s *pipelineSettings) float32 {
 	channelWeight := c.ImportanceWeight
 	if channelWeight < MinChannelWeight {
 		channelWeight = MaxImportanceScore
@@ -887,6 +1085,8 @@ func (p *Pipeline) calculateImportance(logger zerolog.Logger, c llm.MessageInput
 
 		logger.Debug().Str(LogFieldMsgID, c.ID).Msg("Applied penalty for lack of unique info")
 	}
+
+	importance = applyDomainBias(importance, c, s)
 
 	return importance
 }
@@ -914,7 +1114,7 @@ func (p *Pipeline) determineStatus(c llm.MessageInput, relevanceScore float32, s
 	return StatusReady
 }
 
-func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, item *db.Item, embeddings map[string][]float32) bool {
+func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, item *db.Item, embeddings map[string][]float32, digestLanguage string) bool {
 	if err := p.database.SaveItem(ctx, item); err != nil {
 		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg("failed to save item")
 		observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
@@ -938,6 +1138,8 @@ func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logg
 	if err := p.database.MarkAsProcessed(ctx, c.ID); err != nil {
 		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg(LogMsgFailedToMarkProcessed)
 	}
+
+	p.upsertSummaryCache(ctx, logger, c.CanonicalHash, digestLanguage, item)
 
 	p.enqueueFactCheck(ctx, logger, item)
 	p.enqueueEnrichment(ctx, logger, item)
@@ -1003,6 +1205,26 @@ func (p *Pipeline) factCheckQueueHasCapacity(ctx context.Context, logger zerolog
 	}
 
 	return pending < p.cfg.FactCheckQueueMax
+}
+
+func (p *Pipeline) upsertSummaryCache(ctx context.Context, logger zerolog.Logger, canonicalHash, digestLanguage string, item *db.Item) {
+	if canonicalHash == "" || item == nil || strings.TrimSpace(item.Summary) == "" {
+		return
+	}
+
+	entry := &db.SummaryCacheEntry{
+		CanonicalHash:   canonicalHash,
+		DigestLanguage:  normalizeLanguage(digestLanguage),
+		Summary:         item.Summary,
+		Topic:           item.Topic,
+		Language:        item.Language,
+		RelevanceScore:  item.RelevanceScore,
+		ImportanceScore: item.ImportanceScore,
+	}
+
+	if err := p.database.UpsertSummaryCache(ctx, entry); err != nil {
+		logger.Warn().Err(err).Str(LogFieldMsgID, item.RawMessageID).Msg("failed to upsert summary cache")
+	}
 }
 
 func (p *Pipeline) enqueueEnrichment(ctx context.Context, logger zerolog.Logger, item *db.Item) {

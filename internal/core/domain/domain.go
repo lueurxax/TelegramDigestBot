@@ -36,6 +36,7 @@ type Item struct {
 	Topic              string
 	Summary            string
 	Language           string
+	LanguageSource     string
 	Status             string
 	ErrorJSON          []byte
 	CreatedAt          time.Time

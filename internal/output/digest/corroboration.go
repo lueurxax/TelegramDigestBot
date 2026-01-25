@@ -1,106 +1,110 @@
 package digest
 
 import (
-	"fmt"
-	"html"
-	"strings"
-
-	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
-const (
-	maxCorroborationChannels = 3
-	labelFalse               = "false"
-	labelTrue                = "true"
-)
-
-func (s *Scheduler) buildCorroborationLine(items []db.Item, representative db.Item) string {
-	if len(items) <= 1 {
-		observability.CorroborationCoverage.WithLabelValues(labelFalse).Inc()
-
-		return ""
+func (s *Scheduler) applyCorroborationAdjustments(items []db.Item, clusters []db.ClusterWithItems, settings digestSettings) ([]db.Item, []db.ClusterWithItems) {
+	if len(clusters) == 0 {
+		return items, clusters
 	}
 
-	repKey := channelKey(representative)
-	channels, relatedLink := s.collectCorroborationInfo(items, representative, repKey)
-
-	if len(channels) > 0 {
-		observability.CorroborationCoverage.WithLabelValues(labelTrue).Inc()
-
-		if len(channels) > maxCorroborationChannels {
-			channels = channels[:maxCorroborationChannels]
-		}
-
-		return fmt.Sprintf("\n    ↳ <i>Also reported by: %s</i>", strings.Join(channels, ", "))
+	if settings.corroborationBoost <= 0 && settings.singleSourcePenalty <= 0 {
+		return items, clusters
 	}
 
-	observability.CorroborationCoverage.WithLabelValues(labelFalse).Inc()
+	itemIndex := buildItemIndex(items)
 
-	if relatedLink != "" {
-		return fmt.Sprintf("\n    ↳ <i>Related: %s</i>", relatedLink)
+	for ci := range clusters {
+		s.adjustClusterScores(&clusters[ci], itemIndex, settings)
 	}
 
-	return ""
+	return items, clusters
 }
 
-func (s *Scheduler) collectCorroborationInfo(items []db.Item, representative db.Item, repKey string) ([]string, string) {
-	seen := make(map[string]bool)
-	channels := make([]string, 0, len(items))
+func buildItemIndex(items []db.Item) map[string]*db.Item {
+	index := make(map[string]*db.Item, len(items))
 
-	var relatedLink string
-
-	for _, item := range items {
-		key := channelKey(item)
-		if key == "" {
-			continue
-		}
-
-		if repKey != "" && key == repKey {
-			if item.SourceMsgID != representative.SourceMsgID && relatedLink == "" {
-				relatedLink = s.formatLink(item, "Related")
-			}
-
-			continue
-		}
-
-		label := channelLabel(item)
-		if label == "" || seen[label] {
-			continue
-		}
-
-		label = html.EscapeString(label)
-		seen[label] = true
-		channels = append(channels, label)
+	for i := range items {
+		index[items[i].ID] = &items[i]
 	}
 
-	return channels, relatedLink
+	return index
 }
 
-func channelKey(item db.Item) string {
-	if item.SourceChannel != "" {
-		return "u:" + strings.ToLower(item.SourceChannel)
+func (s *Scheduler) adjustClusterScores(cluster *db.ClusterWithItems, itemIndex map[string]*db.Item, settings digestSettings) {
+	channelCount := countUniqueChannels(cluster.Items)
+	if channelCount == 0 {
+		return
 	}
 
-	if item.SourceChannelID != 0 {
-		return fmt.Sprintf("id:%d", item.SourceChannelID)
-	}
+	boost, penalty := calculateBoostPenalty(channelCount, len(cluster.Items), settings)
 
-	if item.SourceChannelTitle != "" {
-		return "t:" + strings.ToLower(item.SourceChannelTitle)
+	for i := range cluster.Items {
+		applyScoreAdjustment(&cluster.Items[i], itemIndex, boost, penalty)
 	}
-
-	return ""
 }
 
-func channelLabel(item db.Item) string {
-	if item.SourceChannel != "" {
-		return "@" + item.SourceChannel
+func countUniqueChannels(items []db.Item) int {
+	channelSet := make(map[string]struct{})
+
+	for _, it := range items {
+		if it.SourceChannel != "" {
+			channelSet[it.SourceChannel] = struct{}{}
+		}
 	}
 
-	if item.SourceChannelTitle != "" {
-		return item.SourceChannelTitle
+	return len(channelSet)
+}
+
+func calculateBoostPenalty(channelCount, itemCount int, settings digestSettings) (boost, penalty float32) {
+	if channelCount > 1 && settings.corroborationBoost > 0 {
+		boost = float32(channelCount-1) * settings.corroborationBoost
 	}
 
+	if channelCount == 1 && itemCount > 1 && settings.singleSourcePenalty > 0 {
+		penalty = settings.singleSourcePenalty
+	}
+
+	return boost, penalty
+}
+
+func applyScoreAdjustment(clusterItem *db.Item, itemIndex map[string]*db.Item, boost, penalty float32) {
+	baseScore := clusterItem.ImportanceScore
+
+	if item, ok := itemIndex[clusterItem.ID]; ok {
+		baseScore = item.ImportanceScore
+		clusterItem.RelevanceScore = item.RelevanceScore
+
+		clusterItem.Topic = item.Topic
+		if clusterItem.Summary == "" {
+			clusterItem.Summary = item.Summary
+		}
+	}
+
+	newScore := clampScore(baseScore + boost - penalty)
+
+	if item, ok := itemIndex[clusterItem.ID]; ok {
+		item.ImportanceScore = newScore
+	}
+
+	clusterItem.ImportanceScore = newScore
+}
+
+func clampScore(score float32) float32 {
+	if score < 0 {
+		return 0
+	}
+
+	if score > 1 {
+		return 1
+	}
+
+	return score
+}
+
+// buildCorroborationLine returns an empty string (corroboration display disabled).
+// Reserved for future implementation of multi-source verification display.
+func (s *Scheduler) buildCorroborationLine(_ []db.Item, _ db.Item) string {
 	return ""
 }
