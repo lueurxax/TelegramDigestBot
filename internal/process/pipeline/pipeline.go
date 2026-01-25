@@ -463,7 +463,7 @@ func (p *Pipeline) skipMessageBasic(ctx context.Context, logger zerolog.Logger, 
 		return true
 	}
 
-	previewText := extractPreviewText(m.MediaJSON)
+	previewText := previewTextFromMessage(m)
 	filterText, stripped := p.prepareFilterText(m.Text, previewText)
 
 	if p.skipEmptyContent(ctx, logger, m, s, filterText, previewText, stripped) {

@@ -12,7 +12,11 @@ func resolveItemLanguage(c llm.MessageInput, res llm.BatchResult) (string, strin
 		return lang, "original"
 	}
 
-	preview := extractPreviewText(c.MediaJSON)
+	preview := strings.TrimSpace(c.PreviewText)
+	if preview == "" {
+		preview = extractPreviewText(c.MediaJSON)
+	}
+
 	if lang := links.DetectLanguage(preview); lang != "" {
 		return lang, "preview"
 	}

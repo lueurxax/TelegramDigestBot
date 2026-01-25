@@ -327,6 +327,7 @@ type RawMessage struct {
 	TgMessageID          int64              `json:"tg_message_id"`
 	TgDate               pgtype.Timestamptz `json:"tg_date"`
 	Text                 pgtype.Text        `json:"text"`
+	PreviewText          pgtype.Text        `json:"preview_text"`
 	EntitiesJson         []byte             `json:"entities_json"`
 	MediaJson            []byte             `json:"media_json"`
 	CanonicalHash        string             `json:"canonical_hash"`

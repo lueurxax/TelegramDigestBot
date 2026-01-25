@@ -1920,7 +1920,7 @@ claimed AS (
     WHERE rm.id = eligible.id
     RETURNING rm.id
 )
-SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.entities_json, rm.media_json, rm.media_data, rm.canonical_hash, rm.is_forward,
+SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.preview_text, rm.entities_json, rm.media_json, rm.media_data, rm.canonical_hash, rm.is_forward,
        c.title as channel_title, c.context as channel_context, c.description as channel_description,
        c.category as channel_category, c.tone as channel_tone, c.update_freq as channel_update_freq,
        c.relevance_threshold as channel_relevance_threshold, c.importance_threshold as channel_importance_threshold,
@@ -1939,6 +1939,7 @@ type GetUnprocessedMessagesRow struct {
 	TgMessageID                    int64              `json:"tg_message_id"`
 	TgDate                         pgtype.Timestamptz `json:"tg_date"`
 	Text                           pgtype.Text        `json:"text"`
+	PreviewText                    pgtype.Text        `json:"preview_text"`
 	EntitiesJson                   []byte             `json:"entities_json"`
 	MediaJson                      []byte             `json:"media_json"`
 	MediaData                      []byte             `json:"media_data"`
@@ -1974,6 +1975,7 @@ func (q *Queries) GetUnprocessedMessages(ctx context.Context, limit int32) ([]Ge
 			&i.TgMessageID,
 			&i.TgDate,
 			&i.Text,
+			&i.PreviewText,
 			&i.EntitiesJson,
 			&i.MediaJson,
 			&i.MediaData,
@@ -2452,9 +2454,12 @@ func (q *Queries) SaveRating(ctx context.Context, arg SaveRatingParams) error {
 }
 
 const saveRawMessage = `-- name: SaveRawMessage :exec
-INSERT INTO raw_messages (channel_id, tg_message_id, tg_date, text, entities_json, media_json, media_data, canonical_hash, is_forward)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-ON CONFLICT (channel_id, tg_message_id) DO UPDATE SET media_data = EXCLUDED.media_data WHERE raw_messages.media_data IS NULL
+INSERT INTO raw_messages (channel_id, tg_message_id, tg_date, text, entities_json, media_json, media_data, preview_text, canonical_hash, is_forward)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (channel_id, tg_message_id) DO UPDATE SET
+    media_data = COALESCE(raw_messages.media_data, EXCLUDED.media_data),
+    preview_text = COALESCE(raw_messages.preview_text, EXCLUDED.preview_text)
+WHERE raw_messages.media_data IS NULL OR raw_messages.preview_text IS NULL
 `
 
 type SaveRawMessageParams struct {
@@ -2462,6 +2467,7 @@ type SaveRawMessageParams struct {
 	TgMessageID   int64              `json:"tg_message_id"`
 	TgDate        pgtype.Timestamptz `json:"tg_date"`
 	Text          pgtype.Text        `json:"text"`
+	PreviewText   pgtype.Text        `json:"preview_text"`
 	EntitiesJson  []byte             `json:"entities_json"`
 	MediaJson     []byte             `json:"media_json"`
 	MediaData     []byte             `json:"media_data"`
@@ -2478,6 +2484,7 @@ func (q *Queries) SaveRawMessage(ctx context.Context, arg SaveRawMessageParams) 
 		arg.EntitiesJson,
 		arg.MediaJson,
 		arg.MediaData,
+		arg.PreviewText,
 		arg.CanonicalHash,
 		arg.IsForward,
 	)

@@ -236,7 +236,7 @@ func TestExtractLinks(t *testing.T) {
 			text: "Search: https://google.com/search?q=test&lang=en",
 			want: []Link{
 				{
-					URL:      "https://google.com/search?q=test&lang=en",
+					URL:      "https://google.com/search?lang=en&q=test",
 					Domain:   "google.com",
 					Type:     LinkTypeWeb,
 					Position: 8,
@@ -321,6 +321,48 @@ func TestExtractLinks(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := ExtractLinks(tt.text); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ExtractLinks() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeURL(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "remove tracking params",
+			raw:  "https://example.com/path?utm_source=twitter&foo=bar&gclid=123",
+			want: "https://example.com/path?foo=bar",
+		},
+		{
+			name: "remove default https port",
+			raw:  "https://example.com:443/path/",
+			want: "https://example.com/path",
+		},
+		{
+			name: "remove default http port",
+			raw:  "http://example.com:80/path?gclid=1&x=2",
+			want: "http://example.com/path?x=2",
+		},
+		{
+			name: "strip fragment",
+			raw:  "https://example.com/path#section",
+			want: "https://example.com/path",
+		},
+		{
+			name: "add scheme for bare domain",
+			raw:  "example.com/path?utm_medium=email",
+			want: "https://example.com/path",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeURL(tt.raw); got != tt.want {
+				t.Errorf("normalizeURL(%q) = %q, want %q", tt.raw, got, tt.want)
 			}
 		})
 	}

@@ -53,22 +53,27 @@ func ExtractLinks(text string) []Link {
 
 	for _, match := range matches {
 		rawURL := strings.TrimRight(text[match[0]:match[1]], ".,;:!?)")
+		normalized := normalizeURL(rawURL)
 
-		if seen[rawURL] {
+		if normalized == "" {
 			continue
 		}
 
-		seen[rawURL] = true
+		if seen[normalized] {
+			continue
+		}
 
-		domain := extractDomain(rawURL)
+		seen[normalized] = true
+
+		domain := extractDomain(normalized)
 		link := Link{
-			URL:      rawURL,
+			URL:      normalized,
 			Domain:   domain,
 			Position: match[0],
 		}
 
 		// Classify link type
-		if strings.Contains(rawURL, "t.me/") {
+		if strings.Contains(normalized, "t.me/") {
 			link.Type = LinkTypeTelegram
 			parseTelegramLink(&link)
 		} else if blockedDomains[domain] {

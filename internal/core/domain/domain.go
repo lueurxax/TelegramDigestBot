@@ -20,6 +20,7 @@ type RawMessage struct {
 	TGMessageID             int64
 	TGDate                  time.Time
 	Text                    string
+	PreviewText             string
 	EntitiesJSON            []byte
 	MediaJSON               []byte
 	MediaData               []byte

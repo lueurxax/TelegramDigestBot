@@ -1,11 +1,13 @@
 package enrichment
 
 import (
-	"crypto/md5" //nolint:gosec // MD5 is required for HTTP Digest Authentication (RFC 2617)
-	"crypto/rand"
+	"crypto/md5"  //nolint:gosec // MD5 is required for HTTP Digest Authentication (RFC 2617)
+	"crypto/rand" //nolint:gosec // crypto/rand is secure
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"strings"
@@ -160,18 +162,18 @@ func buildDigestAuthHeader(req *http.Request, username, password, challenge stri
 	cnonce := randomHex(cnonceLen)
 	nc := "00000001"
 
-	ha1 := md5Hex(fmt.Sprintf(fmtThreeStrings, username, realm, password))
-	if strings.EqualFold(algorithm, "MD5-sess") {
-		ha1 = md5Hex(fmt.Sprintf(fmtThreeStrings, ha1, nonce, cnonce))
+	ha1 := digestHash(fmt.Sprintf(fmtThreeStrings, username, realm, password), algorithm)
+	if strings.HasSuffix(strings.ToUpper(algorithm), "-SESS") {
+		ha1 = digestHash(fmt.Sprintf(fmtThreeStrings, ha1, nonce, cnonce), algorithm)
 	}
 
-	ha2 := md5Hex(fmt.Sprintf("%s:%s", req.Method, uri))
+	ha2 := digestHash(fmt.Sprintf("%s:%s", req.Method, uri), algorithm)
 
 	var response string
 	if qop != "" {
-		response = md5Hex(fmt.Sprintf("%s:%s:%s:%s:%s:%s", ha1, nonce, nc, cnonce, qop, ha2))
+		response = digestHash(fmt.Sprintf("%s:%s:%s:%s:%s:%s", ha1, nonce, nc, cnonce, qop, ha2), algorithm)
 	} else {
-		response = md5Hex(fmt.Sprintf(fmtThreeStrings, ha1, nonce, ha2))
+		response = digestHash(fmt.Sprintf(fmtThreeStrings, ha1, nonce, ha2), algorithm)
 	}
 
 	parts := []string{
@@ -300,8 +302,19 @@ func randomHex(n int) string {
 	return hex.EncodeToString(buf)
 }
 
-func md5Hex(s string) string {
-	h := md5.New() //nolint:gosec // MD5 is required for HTTP Digest Authentication (RFC 2617)
+// digestHash computes the hash for HTTP Digest Authentication.
+// Uses SHA-256 for RFC 7616 algorithms, falls back to MD5 for RFC 2617.
+func digestHash(s string, algorithm string) string {
+	var h hash.Hash
+
+	if strings.HasPrefix(strings.ToUpper(algorithm), "SHA-256") {
+		h = sha256.New()
+	} else {
+		// MD5 is required for HTTP Digest Authentication (RFC 2617)
+		//nolint:gosec // Protocol requirement, not used for password storage
+		h = md5.New()
+	}
+
 	h.Write([]byte(s))
 
 	return hex.EncodeToString(h.Sum(nil))

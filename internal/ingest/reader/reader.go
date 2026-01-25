@@ -980,12 +980,14 @@ func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessin
 	entitiesJSON, _ := json.Marshal(msg.Entities) //nolint:errchkjson // marshaling TG types for debug logging
 	mediaJSON, _ := json.Marshal(msg.Media)       //nolint:errchkjson // marshaling TG types for debug logging
 	_, isForward := msg.GetFwdFrom()
+	previewText := links.ExtractPreviewText(mediaJSON)
 
 	rawMsg := &db.RawMessage{
 		ChannelID:     hpc.ch.ID,
 		TGMessageID:   int64(msg.ID),
 		TGDate:        time.Unix(int64(msg.Date), 0),
 		Text:          msg.Message,
+		PreviewText:   previewText,
 		EntitiesJSON:  entitiesJSON,
 		MediaJSON:     mediaJSON,
 		CanonicalHash: r.canonicalize(msg.Message),

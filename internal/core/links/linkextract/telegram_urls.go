@@ -2,7 +2,14 @@ package linkextract
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
+)
+
+// Default port suffixes for URL normalization.
+const (
+	httpsDefaultPort = ":443"
+	httpDefaultPort  = ":80"
 )
 
 // ExtractURLsFromJSON parses Telegram entities/media JSON and returns any HTTP(S) URLs.
@@ -78,17 +85,81 @@ func normalizeURL(raw string) string {
 		return ""
 	}
 
-	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+	if strings.HasPrefix(raw, "//") {
+		raw = "https:" + raw
+	}
+
+	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+		if strings.Contains(raw, ".") {
+			raw = "https://" + raw
+		} else {
+			return ""
+		}
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
 		return raw
 	}
 
-	if strings.HasPrefix(raw, "//") {
-		return "https:" + raw
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = strings.ToLower(parsed.Host)
+	parsed.Host = stripDefaultPort(parsed.Scheme, parsed.Host)
+	parsed.Fragment = ""
+
+	if len(parsed.Path) > 1 && strings.HasSuffix(parsed.Path, "/") {
+		parsed.Path = strings.TrimSuffix(parsed.Path, "/")
 	}
 
-	if strings.Contains(raw, ".") {
-		return "https://" + raw
+	parsed.RawQuery = stripTrackingParams(parsed.Query()).Encode()
+
+	return parsed.String()
+}
+
+func stripDefaultPort(scheme, host string) string {
+	if scheme == "https" && strings.HasSuffix(host, httpsDefaultPort) {
+		return strings.TrimSuffix(host, httpsDefaultPort)
 	}
 
-	return ""
+	if scheme == "http" && strings.HasSuffix(host, httpDefaultPort) {
+		return strings.TrimSuffix(host, httpDefaultPort)
+	}
+
+	return host
+}
+
+func stripTrackingParams(values url.Values) url.Values {
+	if len(values) == 0 {
+		return values
+	}
+
+	cleaned := url.Values{}
+
+	for key, vals := range values {
+		if isTrackingParam(key) {
+			continue
+		}
+
+		cleaned[key] = vals
+	}
+
+	return cleaned
+}
+
+func isTrackingParam(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" {
+		return false
+	}
+
+	if strings.HasPrefix(key, "utm_") {
+		return true
+	}
+
+	switch key {
+	case "fbclid", "gclid", "dclid", "yclid", "gbraid", "wbraid", "mc_cid", "mc_eid", "igshid", "_ga", "_gl":
+		return true
+	default:
+		return false
+	}
 }

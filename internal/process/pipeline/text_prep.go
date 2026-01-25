@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"encoding/json"
 	"strings"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
@@ -10,53 +9,21 @@ import (
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
-// Telegram API field names (PascalCase as per gotd/td serialization)
-const (
-	fieldWebpage     = "Webpage"
-	fieldTitle       = "Title"
-	fieldDescription = "Description"
-	fieldSiteName    = "SiteName"
-)
-
 func extractPreviewText(mediaJSON []byte) string {
-	if len(mediaJSON) == 0 {
+	return links.ExtractPreviewText(mediaJSON)
+}
+
+func previewTextFromMessage(msg *db.RawMessage) string {
+	if msg == nil {
 		return ""
 	}
 
-	webpage := parseWebpageFromMedia(mediaJSON)
-	if webpage == nil {
-		return ""
+	preview := strings.TrimSpace(msg.PreviewText)
+	if preview != "" {
+		return preview
 	}
 
-	parts := collectWebpageTextParts(webpage)
-
-	return strings.TrimSpace(strings.Join(parts, ". "))
-}
-
-func parseWebpageFromMedia(mediaJSON []byte) map[string]interface{} {
-	var payload map[string]interface{}
-	if err := json.Unmarshal(mediaJSON, &payload); err != nil {
-		return nil
-	}
-
-	webpage, ok := payload[fieldWebpage].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-
-	return webpage
-}
-
-func collectWebpageTextParts(webpage map[string]interface{}) []string {
-	var parts []string
-
-	for _, field := range []string{fieldTitle, fieldDescription, fieldSiteName} {
-		if val, ok := webpage[field].(string); ok && val != "" {
-			parts = append(parts, val)
-		}
-	}
-
-	return parts
+	return extractPreviewText(msg.MediaJSON)
 }
 
 func combinePreviewText(text, preview string) string {
@@ -94,6 +61,10 @@ func detectLanguageForFilter(text, preview string) string {
 
 func hasLinkOrPreview(msg *db.RawMessage, previewText string) bool {
 	if strings.TrimSpace(previewText) != "" {
+		return true
+	}
+
+	if msg != nil && strings.TrimSpace(msg.PreviewText) != "" {
 		return true
 	}
 
