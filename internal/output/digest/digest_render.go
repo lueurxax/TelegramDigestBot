@@ -641,9 +641,10 @@ func filterEvidenceForDisplay(evidence []db.ItemEvidenceWithSource, minAgreement
 			continue
 		}
 
-		key := ev.Source.URL
+		// Normalize URL to deduplicate www vs non-www variants
+		key := normalizeURLForDedup(ev.Source.URL)
 		if key == "" {
-			key = ev.Source.Domain + "|" + ev.Source.Title
+			key = normalizeDomain(ev.Source.Domain) + "|" + ev.Source.Title
 		}
 
 		if key != "" {

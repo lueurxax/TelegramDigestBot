@@ -3,6 +3,7 @@ package digest
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +16,9 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/process/dedup"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
+
+// URL normalization constants.
+const wwwPrefix = "www."
 
 func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, end time.Time, logger *zerolog.Logger) error {
 	if len(items) == 0 {
@@ -372,14 +376,15 @@ func calculateEvidenceBoost(itemAID, itemBID string, evidenceMap map[string][]db
 	return boost
 }
 
-// buildEvidenceURLMap creates a map of URLs to agreement scores for evidence
-// that meets the minimum agreement threshold.
+// buildEvidenceURLMap creates a map of normalized URLs to agreement scores for evidence
+// that meets the minimum agreement threshold. URLs are normalized to treat www vs non-www as same.
 func buildEvidenceURLMap(evidence []db.ItemEvidenceWithSource, minAgreement float32) map[string]float32 {
 	urlMap := make(map[string]float32)
 
 	for _, ev := range evidence {
 		if ev.AgreementScore >= minAgreement {
-			urlMap[ev.Source.URL] = ev.AgreementScore
+			normalizedURL := normalizeURLForDedup(ev.Source.URL)
+			urlMap[normalizedURL] = ev.AgreementScore
 		}
 	}
 
@@ -387,7 +392,7 @@ func buildEvidenceURLMap(evidence []db.ItemEvidenceWithSource, minAgreement floa
 }
 
 // findMaxSharedAgreement finds the maximum agreement score among shared evidence
-// sources between two items.
+// sources between two items. URLs are normalized to treat www vs non-www as same.
 func findMaxSharedAgreement(evidenceB []db.ItemEvidenceWithSource, evidenceAURLs map[string]float32, minAgreement float32) float32 {
 	var maxAgreement float32
 
@@ -396,7 +401,8 @@ func findMaxSharedAgreement(evidenceB []db.ItemEvidenceWithSource, evidenceAURLs
 			continue
 		}
 
-		if scoreA, ok := evidenceAURLs[ev.Source.URL]; ok {
+		normalizedURL := normalizeURLForDedup(ev.Source.URL)
+		if scoreA, ok := evidenceAURLs[normalizedURL]; ok {
 			minScore := minFloat32(scoreA, ev.AgreementScore)
 			if minScore > maxAgreement {
 				maxAgreement = minScore
@@ -405,6 +411,34 @@ func findMaxSharedAgreement(evidenceB []db.ItemEvidenceWithSource, evidenceAURLs
 	}
 
 	return maxAgreement
+}
+
+// normalizeURLForDedup normalizes a URL for deduplication purposes.
+// Removes www. prefix from the host to treat www.example.com and example.com as the same.
+func normalizeURLForDedup(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+
+	// Quick check for www. - if not present, return as-is
+	if !strings.Contains(rawURL, wwwPrefix) {
+		return rawURL
+	}
+
+	// Parse and normalize
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+
+	parsed.Host = normalizeDomain(parsed.Host)
+
+	return parsed.String()
+}
+
+// normalizeDomain removes www. prefix from domain for deduplication.
+func normalizeDomain(domain string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(domain, wwwPrefix), "WWW.")
 }
 
 func minFloat32(a, b float32) float32 {
