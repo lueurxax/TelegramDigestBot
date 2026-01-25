@@ -21,21 +21,19 @@ When enabled, messages containing images are automatically routed to a vision-ca
 
 1. Pipeline groups messages by model requirements
 2. Messages with `MediaData` are flagged as needing vision
-3. If `smart_llm_model` is set and vision routing is enabled, image messages use that model
-4. Text-only messages continue using the standard `llm_model`
+3. Image messages use the primary model configured by `LLM_MODEL`
+4. Text-only messages continue using the same model
 
 ### Configuration
 
 ```
 /ai vision on
-/ai smartmodel gpt-4o
 ```
 
 | Setting | Description |
 |---------|-------------|
 | `vision_routing_enabled` | Enable/disable vision routing |
-| `smart_llm_model` | Vision-capable model for image analysis |
-| `llm_model` | Standard model for text-only messages |
+| `LLM_MODEL` | Primary model for text and vision messages |
 
 ### Benefits
 

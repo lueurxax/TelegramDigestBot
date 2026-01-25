@@ -138,6 +138,20 @@ func New(ctx context.Context, cfg *config.Config, store PromptStore, logger *zer
 	registry := NewRegistry(logger)
 	circuitCfg := buildCircuitConfig(cfg)
 	registerProviders(ctx, registry, cfg, store, logger, circuitCfg)
+	applyModelOverrides(registry, cfg)
 
 	return registry
+}
+
+// applyModelOverrides applies per-task model overrides from config.
+func applyModelOverrides(registry *Registry, cfg *config.Config) {
+	// Apply model overrides for each task type
+	registry.SetTaskModelOverride(TaskTypeSummarize, cfg.LLMSummarizeModel)
+	registry.SetTaskModelOverride(TaskTypeClusterSummary, cfg.LLMClusterModel)
+	registry.SetTaskModelOverride(TaskTypeClusterTopic, cfg.LLMClusterModel)
+	registry.SetTaskModelOverride(TaskTypeNarrative, cfg.LLMNarrativeModel)
+	registry.SetTaskModelOverride(TaskTypeTranslate, cfg.LLMTranslateModel)
+	registry.SetTaskModelOverride(TaskTypeComplete, cfg.LLMCompleteModel)
+	registry.SetTaskModelOverride(TaskTypeRelevanceGate, cfg.LLMRelevanceGateModel)
+	registry.SetTaskModelOverride(TaskTypeCompress, cfg.LLMCompressModel)
 }

@@ -2001,9 +2001,6 @@ func TestCommandConstants(t *testing.T) {
 		"importance":       CmdImportance,
 		"language":         CmdLanguage,
 		"tone":             CmdTone,
-		"model":            CmdModel,
-		"smart_model":      CmdSmartModel,
-		"smartmodel":       CmdSmartModelAlt,
 		"editor":           CmdEditor,
 		"tiered":           CmdTiered,
 		"vision":           CmdVision,
@@ -2703,8 +2700,6 @@ func TestHelpAIMessage(t *testing.T) {
 
 	wantParts := []string{
 		"AI",
-		"/ai model",
-		"/ai smart_model",
 		"/ai tone",
 		"/ai prompt",
 		"/ai editor",

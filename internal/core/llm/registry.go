@@ -27,6 +27,7 @@ type Registry struct {
 	order           []ProviderName // Priority order (highest first)
 	circuitBreakers map[ProviderName]*embeddings.CircuitBreaker
 	taskConfig      map[TaskType]TaskProviderChain
+	modelOverrides  map[TaskType]string // Per-task model overrides from config
 	budgetTracker   *BudgetTracker
 	logger          *zerolog.Logger
 }
@@ -41,6 +42,7 @@ func NewRegistry(logger *zerolog.Logger) *Registry {
 		order:           make([]ProviderName, 0),
 		circuitBreakers: make(map[ProviderName]*embeddings.CircuitBreaker),
 		taskConfig:      DefaultTaskConfig(),
+		modelOverrides:  make(map[TaskType]string),
 		budgetTracker:   bt,
 		logger:          logger,
 	}
@@ -71,6 +73,32 @@ func (r *Registry) ProviderCount() int {
 	defer r.mu.RUnlock()
 
 	return len(r.providers)
+}
+
+// SetTaskModelOverride sets a model override for a specific task type.
+// When set, this model will be used instead of the default for that task.
+func (r *Registry) SetTaskModelOverride(taskType TaskType, model string) {
+	if model == "" {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.modelOverrides[taskType] = model
+
+	r.logger.Debug().
+		Str(logKeyTask, string(taskType)).
+		Str(logKeyModel, model).
+		Msg("set task model override")
+}
+
+// getTaskModelOverride returns the model override for a task, if set.
+func (r *Registry) getTaskModelOverride(taskType TaskType) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.modelOverrides[taskType]
 }
 
 // ProcessBatch implements Client interface with task-aware fallback.
@@ -244,12 +272,18 @@ func executeWithTaskFallback[T any](r *Registry, taskType TaskType, modelOverrid
 		return zero, ErrNoProvidersAvailable
 	}
 
+	// Check for config-level model override if no explicit override provided
+	effectiveModelOverride := modelOverride
+	if effectiveModelOverride == "" {
+		effectiveModelOverride = r.getTaskModelOverride(taskType)
+	}
+
 	var lastErr error
 
 	isFirstProvider := true
 
 	for _, pm := range providerModels {
-		result, success, err := tryProviderExec(r, pm, modelOverride, taskType, fn)
+		result, success, err := tryProviderExec(r, pm, effectiveModelOverride, taskType, fn)
 		if err != nil {
 			lastErr = err
 			isFirstProvider = false

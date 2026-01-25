@@ -71,7 +71,6 @@ func (b *Bot) registerSettingCommands(r *commandRegistry) {
 	r.handlers[CmdDedup] = b.handleDedup
 	r.handlers[CmdLanguage] = b.handleLanguage
 	r.handlers[CmdTone] = b.handleTone
-	r.handlers[CmdModel] = b.handleModel
 	r.handlers[CmdErrors] = b.handleErrors
 	r.handlers[CmdRetry] = b.handleRetry
 
@@ -86,8 +85,6 @@ func (b *Bot) registerSettingCommands(r *commandRegistry) {
 	// Commands with aliases
 	r.handlers[CmdMinLength] = b.handleMinLength
 	r.handlers[CmdMinLengthAlt] = b.handleMinLength
-	r.handlers[CmdSmartModel] = b.handleSmartModel
-	r.handlers[CmdSmartModelAlt] = b.handleSmartModel
 	r.handlers["ads_keywords"] = b.handleAdsKeywords
 	r.handlers["adskeywords"] = b.handleAdsKeywords
 }

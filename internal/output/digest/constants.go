@@ -68,7 +68,6 @@ const (
 // Database setting key constants
 const (
 	SettingDigestLanguage      = "digest_language"
-	SettingSmartLLMModel       = "smart_llm_model"
 	SettingTargetChatID        = "target_chat_id"
 	SettingImportanceThreshold = "importance_threshold"
 	SettingRelevanceThreshold  = "relevance_threshold"
@@ -77,7 +76,6 @@ const (
 // Log message constants
 const (
 	MsgCouldNotGetDigestLanguage = "could not get digest_language from DB"
-	MsgCouldNotGetSmartLLMModel  = "could not get smart_llm_model from DB"
 	MsgFailedToProcessDigest     = "failed to process digest"
 	msgFailedToProcessWindow     = "failed to process window"
 )

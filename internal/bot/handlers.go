@@ -425,10 +425,6 @@ func (b *Bot) handleAINamespace(ctx context.Context, msg *tgbotapi.Message) {
 	if len(args) == 0 {
 		b.reply(msg, `🤖 <b>AI Settings</b>
 
-<b>Models:</b>
-• <code>/ai model gpt-4o</code> - Set primary LLM
-• <code>/ai smartmodel gpt-4o</code> - Set routing model
-
 <b>Features (on/off):</b>
 • <code>/ai editor on</code> - Editor-in-chief
 • <code>/ai tiered on</code> - Tiered importance
@@ -455,13 +451,10 @@ func (b *Bot) handleAINamespace(ctx context.Context, msg *tgbotapi.Message) {
 
 func (b *Bot) routeAISubcommand(ctx context.Context, msg *tgbotapi.Message, subcommand string) bool {
 	handlers := map[string]func(){
-		"model":       func() { b.handleModel(ctx, msg) },
-		"smart_model": func() { b.handleSmartModel(ctx, msg) },
-		"smartmodel":  func() { b.handleSmartModel(ctx, msg) },
-		"prompt":      func() { b.handlePrompt(ctx, msg) },
-		CmdTone:       func() { b.handleTone(ctx, msg) },
-		"topics":      func() { b.handleTopics(ctx, msg) },
-		"dedup":       func() { b.handleDedup(ctx, msg) },
+		"prompt": func() { b.handlePrompt(ctx, msg) },
+		CmdTone:  func() { b.handleTone(ctx, msg) },
+		"topics": func() { b.handleTopics(ctx, msg) },
+		"dedup":  func() { b.handleDedup(ctx, msg) },
 	}
 
 	if handler, ok := handlers[subcommand]; ok {
@@ -1188,24 +1181,6 @@ func (b *Bot) removeAdsKeyword(msg *tgbotapi.Message, args []string, keywords []
 	}
 
 	return newKeywords, true
-}
-
-func (b *Bot) handleModel(ctx context.Context, msg *tgbotapi.Message) {
-	args := msg.CommandArguments()
-
-	if args == "" {
-		b.reply(msg, "Usage: <code>/model &lt;name&gt;</code> (e.g. <code>gpt-4o</code>, <code>gpt-4o-mini</code>)")
-
-		return
-	}
-
-	if err := b.database.SaveSettingWithHistory(ctx, "llm_model", args, msg.From.ID); err != nil {
-		b.reply(msg, fmt.Sprintf("❌ Error saving LLM model: %s", html.EscapeString(err.Error())))
-
-		return
-	}
-
-	b.reply(msg, fmt.Sprintf("✅ LLM model updated to <code>%s</code>. It will be used for the next processing batches.", html.EscapeString(args)))
 }
 
 func (b *Bot) handleListChannels(ctx context.Context, msg *tgbotapi.Message) {
@@ -2907,24 +2882,6 @@ func (b *Bot) handleTone(ctx context.Context, msg *tgbotapi.Message) {
 	b.reply(msg, fmt.Sprintf("✅ Digest tone set to <code>%s</code>.", html.EscapeString(args)))
 }
 
-func (b *Bot) handleSmartModel(ctx context.Context, msg *tgbotapi.Message) {
-	args := msg.CommandArguments()
-
-	if args == "" {
-		b.reply(msg, "Usage: <code>/smartmodel &lt;name&gt;</code> (e.g. <code>gpt-4o</code>)")
-
-		return
-	}
-
-	if err := b.database.SaveSettingWithHistory(ctx, "smart_llm_model", args, msg.From.ID); err != nil {
-		b.reply(msg, fmt.Sprintf("❌ Error saving smart LLM model: %s", html.EscapeString(err.Error())))
-
-		return
-	}
-
-	b.reply(msg, fmt.Sprintf("✅ Smart LLM model updated to <code>%s</code>.", html.EscapeString(args)))
-}
-
 func (b *Bot) handleDedup(ctx context.Context, msg *tgbotapi.Message) {
 	args := msg.CommandArguments()
 
@@ -2975,8 +2932,6 @@ func (b *Bot) handleSettings(ctx context.Context, msg *tgbotapi.Message) {
 		{SettingDigestWindow, "Digest Window", b.cfg.DigestWindow},
 		{SettingRelevanceThreshold, "Relevance Threshold", b.cfg.RelevanceThreshold},
 		{SettingImportanceThreshold, "Importance Threshold", b.cfg.ImportanceThreshold},
-		{"llm_model", "Primary LLM Model", b.cfg.LLMModel},
-		{"smart_llm_model", "Smart LLM Model", "not set"},
 		{"digest_language", "Digest Language", "default (en)"},
 		{"digest_tone", "Digest Tone", "professional"},
 		{"dedup_mode", "Deduplication Mode", "semantic"},
@@ -3187,8 +3142,6 @@ func helpConfigMessage() string {
 
 func helpAIMessage() string {
 	return "🧠 <b>AI &amp; Features</b>\n" +
-		"• <code>/ai model &lt;name&gt;</code>\n" +
-		"• <code>/ai smart_model &lt;name&gt;</code>\n" +
 		"• <code>/ai tone &lt;professional|casual|brief&gt;</code>\n" +
 		"• <code>/ai prompt</code>\n" +
 		"• <code>/ai editor &lt;on|off&gt;</code>\n" +

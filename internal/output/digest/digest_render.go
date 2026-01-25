@@ -24,7 +24,6 @@ type digestSettings struct {
 	topicDiversityCap           float32
 	minTopicCount               int
 	editorEnabled               bool
-	smartLLMModel               string
 	consolidatedClustersEnabled bool
 	editorDetailedItems         bool
 	digestLanguage              string
@@ -62,7 +61,6 @@ func (s *Scheduler) loadDigestSettingsFromDB(ctx context.Context, logger *zerolo
 	loadSetting("topic_diversity_cap", &ds.topicDiversityCap, "could not get topic_diversity_cap from DB")
 	loadSetting("min_topic_count", &ds.minTopicCount, "could not get min_topic_count from DB")
 	loadSetting("editor_enabled", &ds.editorEnabled, "could not get editor_enabled from DB")
-	loadSetting(SettingSmartLLMModel, &ds.smartLLMModel, MsgCouldNotGetSmartLLMModel)
 	loadSetting("consolidated_clusters_enabled", &ds.consolidatedClustersEnabled, "could not get consolidated_clusters_enabled from DB")
 	loadSetting("editor_detailed_items", &ds.editorDetailedItems, "could not get editor_detailed_items from DB")
 	loadSetting(SettingDigestLanguage, &ds.digestLanguage, MsgCouldNotGetDigestLanguage)
@@ -252,13 +250,14 @@ func (rc *digestRenderContext) convertEvidenceForLLM(items []db.Item) llm.ItemEv
 }
 
 func (rc *digestRenderContext) generateNarrative(ctx context.Context, sb *strings.Builder) bool {
-	if !rc.settings.editorEnabled || rc.settings.smartLLMModel == "" {
+	model := rc.scheduler.cfg.LLMModel
+	if !rc.settings.editorEnabled || model == "" {
 		return false
 	}
 
 	evidence := rc.convertEvidenceForLLM(rc.items)
 
-	narrative, err := rc.llmClient.GenerateNarrativeWithEvidence(ctx, rc.items, evidence, rc.settings.digestLanguage, rc.settings.smartLLMModel, rc.settings.digestTone)
+	narrative, err := rc.llmClient.GenerateNarrativeWithEvidence(ctx, rc.items, evidence, rc.settings.digestLanguage, model, rc.settings.digestTone)
 	if err != nil {
 		rc.logger.Warn().Err(err).Msg("Editor-in-Chief narrative generation failed")
 		return false
@@ -404,12 +403,7 @@ func (rc *digestRenderContext) renderOthersAsNarrative(ctx context.Context, sb *
 }
 
 func (rc *digestRenderContext) getNarrativeModel() string {
-	model := rc.settings.smartLLMModel
-	if model == "" {
-		model = rc.scheduler.cfg.LLMModel
-	}
-
-	return model
+	return rc.scheduler.cfg.LLMModel
 }
 
 func collectAllItems(group clusterGroup) []db.Item {

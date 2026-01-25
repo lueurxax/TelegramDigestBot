@@ -118,7 +118,7 @@ func (s *Scheduler) persistCluster(ctx context.Context, clusterItemsList []db.It
 		Float32("rep_importance", clusterItemsList[0].ImportanceScore).
 		Msg("Cluster representative selected")
 
-	clusterTopic := s.generateClusterTopic(ctx, clusterItemsList, topic, cfg.digestLanguage, cfg.smartLLMModel)
+	clusterTopic := s.generateClusterTopic(ctx, clusterItemsList, topic, cfg.digestLanguage)
 
 	clusterID, err := s.database.CreateCluster(ctx, start, end, clusterTopic)
 	if err != nil {
@@ -141,7 +141,6 @@ type clusteringConfig struct {
 	coherenceThreshold   float32
 	clusterWindow        time.Duration
 	digestLanguage       string
-	smartLLMModel        string
 	evidenceEnabled      bool
 	evidenceBoost        float32
 	evidenceMinAgreement float32
@@ -192,7 +191,6 @@ func (s *Scheduler) loadClusteringConfigFromDB(ctx context.Context, logger *zero
 	}
 
 	loadSetting(SettingDigestLanguage, &cfg.digestLanguage, MsgCouldNotGetDigestLanguage)
-	loadSetting(SettingSmartLLMModel, &cfg.smartLLMModel, MsgCouldNotGetSmartLLMModel)
 }
 
 func (s *Scheduler) applyClusteringDefaults(cfg *clusteringConfig) {
@@ -459,15 +457,16 @@ func (s *Scheduler) sortClusterItems(clusterItemsList []db.Item) {
 	})
 }
 
-func (s *Scheduler) generateClusterTopic(ctx context.Context, clusterItemsList []db.Item, defaultTopic, digestLanguage, smartLLMModel string) string {
-	if smartLLMModel == "" || len(clusterItemsList) <= 1 {
+func (s *Scheduler) generateClusterTopic(ctx context.Context, clusterItemsList []db.Item, defaultTopic, digestLanguage string) string {
+	model := s.cfg.LLMModel
+	if model == "" || len(clusterItemsList) <= 1 {
 		return defaultTopic
 	}
 
 	// Augment vague summaries with link context for better topic generation
 	augmentedItems := s.augmentClusterItemsForTopic(ctx, clusterItemsList)
 
-	if betterTopic, err := s.llmClient.GenerateClusterTopic(ctx, augmentedItems, digestLanguage, smartLLMModel); err == nil && betterTopic != "" {
+	if betterTopic, err := s.llmClient.GenerateClusterTopic(ctx, augmentedItems, digestLanguage, model); err == nil && betterTopic != "" {
 		return betterTopic
 	}
 

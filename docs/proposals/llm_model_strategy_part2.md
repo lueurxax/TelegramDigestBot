@@ -162,12 +162,14 @@ Assuming 10,000 messages/day, 30 digests/month:
 # Additional to Part 1
 OPENROUTER_API_KEY=sk-or-...
 
-# Per-task model overrides (optional)
+# Per-task model overrides (all implemented)
 LLM_TRANSLATE_MODEL=meta-llama/llama-3.1-8b-instruct
 LLM_COMPLETE_MODEL=meta-llama/llama-3.1-8b-instruct
 LLM_RELEVANCE_GATE_MODEL=meta-llama/llama-3.1-8b-instruct
 LLM_COMPRESS_MODEL=gpt-4o-mini
 ```
+
+**Status:** Fully implemented. All per-task model configuration options are available.
 
 ---
 

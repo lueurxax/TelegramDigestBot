@@ -71,11 +71,7 @@ func (p *Pipeline) evaluateRelevanceGate(ctx context.Context, logger zerolog.Log
 func (p *Pipeline) evaluateGateLLM(ctx context.Context, logger zerolog.Logger, text string, s *pipelineSettings) (gateDecision, bool) {
 	model := strings.TrimSpace(s.relevanceGateModel)
 	if model == "" {
-		if s.smartLLMModel != "" {
-			model = s.smartLLMModel
-		} else {
-			model = s.llmModel
-		}
+		model = strings.TrimSpace(p.cfg.LLMModel)
 	}
 
 	if model == "" {

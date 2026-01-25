@@ -75,8 +75,6 @@ type pipelineSettings struct {
 	topicsEnabled           bool
 	relevanceThreshold      float32
 	digestLanguage          string
-	llmModel                string
-	smartLLMModel           string
 	visionRoutingEnabled    bool
 	tieredImportanceEnabled bool
 	digestTone              string
@@ -295,8 +293,6 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 	p.getSetting(ctx, "topics_enabled", &s.topicsEnabled, logger)
 	p.getSetting(ctx, "relevance_threshold", &s.relevanceThreshold, logger)
 	p.getSetting(ctx, "digest_language", &s.digestLanguage, logger)
-	p.getSetting(ctx, "llm_model", &s.llmModel, logger)
-	p.getSetting(ctx, "smart_llm_model", &s.smartLLMModel, logger)
 	p.getSetting(ctx, "vision_routing_enabled", &s.visionRoutingEnabled, logger)
 	p.getSetting(ctx, "tiered_importance_enabled", &s.tieredImportanceEnabled, logger)
 	p.getSetting(ctx, "digest_tone", &s.digestTone, logger)
@@ -607,34 +603,29 @@ func (p *Pipeline) runLLMProcessing(ctx context.Context, logger zerolog.Logger, 
 	start := time.Now()
 
 	results := make([]llm.BatchResult, len(candidates))
-	modelUsed := make([]string, len(candidates))
 
 	// Group indices by model for Vision Routing
-	modelGroups := p.groupIndicesByModel(candidates, s)
+	modelGroups := p.groupIndicesByModel(candidates)
 
 	for model, indices := range modelGroups {
-		if err := p.processModelBatch(ctx, logger, candidates, results, modelUsed, model, indices, s); err != nil {
+		if err := p.processModelBatch(ctx, logger, candidates, results, model, indices, s); err != nil {
 			return nil, err
 		}
 	}
 
 	// 2.1 Tiered Importance Analysis
-	p.performTieredImportanceAnalysis(ctx, logger, candidates, results, modelUsed, s)
+	p.performTieredImportanceAnalysis(ctx, logger, candidates, results, s)
 
 	logger.Info().Int(LogFieldCount, len(candidates)).Dur("duration", time.Since(start)).Msg("LLM processing finished")
 
 	return results, nil
 }
 
-func (p *Pipeline) groupIndicesByModel(candidates []llm.MessageInput, s *pipelineSettings) map[string][]int {
+func (p *Pipeline) groupIndicesByModel(candidates []llm.MessageInput) map[string][]int {
 	modelGroups := make(map[string][]int)
 
-	for i, c := range candidates {
-		model := s.llmModel
-
-		if s.visionRoutingEnabled && len(c.MediaData) > 0 && s.smartLLMModel != "" {
-			model = s.smartLLMModel
-		}
+	for i := range candidates {
+		model := p.cfg.LLMModel
 
 		modelGroups[model] = append(modelGroups[model], i)
 	}
@@ -642,7 +633,7 @@ func (p *Pipeline) groupIndicesByModel(candidates []llm.MessageInput, s *pipelin
 	return modelGroups
 }
 
-func (p *Pipeline) processModelBatch(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, modelUsed []string, model string, indices []int, s *pipelineSettings) error {
+func (p *Pipeline) processModelBatch(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, model string, indices []int, s *pipelineSettings) error {
 	groupCandidates := make([]llm.MessageInput, len(indices))
 	for j, idx := range indices {
 		candidate := candidates[idx]
@@ -679,7 +670,6 @@ func (p *Pipeline) processModelBatch(ctx context.Context, logger zerolog.Logger,
 	for j, idx := range indices {
 		if j < len(groupResults) {
 			results[idx] = groupResults[j]
-			modelUsed[idx] = model
 		}
 	}
 
@@ -698,21 +688,26 @@ func (p *Pipeline) augmentTextForLLM(c llm.MessageInput, s *pipelineSettings) st
 	return c.Text
 }
 
-func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, modelUsed []string, s *pipelineSettings) {
-	if !s.tieredImportanceEnabled || s.smartLLMModel == "" {
+func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, s *pipelineSettings) {
+	if !s.tieredImportanceEnabled {
 		return
 	}
 
-	tieredIndices, tieredCandidates := selectTieredCandidates(candidates, results, modelUsed, s.smartLLMModel)
+	tieredModel := p.cfg.LLMModel
+	if tieredModel == "" {
+		return
+	}
+
+	tieredIndices, tieredCandidates := selectTieredCandidates(candidates, results)
 	if len(tieredCandidates) == 0 {
 		return
 	}
 
-	logger.Info().Int(LogFieldCount, len(tieredCandidates)).Msg("Performing tiered importance analysis with smart model")
+	logger.Info().Int(LogFieldCount, len(tieredCandidates)).Msg("Performing tiered importance analysis")
 
 	llmStart := time.Now()
 
-	tieredResults, err := p.llmClient.ProcessBatch(ctx, tieredCandidates, s.digestLanguage, s.smartLLMModel, s.digestTone)
+	tieredResults, err := p.llmClient.ProcessBatch(ctx, tieredCandidates, s.digestLanguage, tieredModel, s.digestTone)
 	if err != nil {
 		logger.Warn().Err(err).Msg("Tiered importance analysis failed, keeping original results")
 
@@ -723,17 +718,17 @@ func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger z
 		return
 	}
 
-	observability.LLMRequestDuration.WithLabelValues(s.smartLLMModel).Observe(time.Since(llmStart).Seconds())
+	observability.LLMRequestDuration.WithLabelValues(tieredModel).Observe(time.Since(llmStart).Seconds())
 	applyTieredResults(results, tieredResults, tieredIndices)
 }
 
-func selectTieredCandidates(candidates []llm.MessageInput, results []llm.BatchResult, modelUsed []string, smartModel string) ([]int, []llm.MessageInput) {
+func selectTieredCandidates(candidates []llm.MessageInput, results []llm.BatchResult) ([]int, []llm.MessageInput) {
 	var tieredIndices []int
 
 	var tieredCandidates []llm.MessageInput
 
 	for i, res := range results {
-		if res.ImportanceScore > TieredImportanceThreshold && modelUsed[i] != smartModel {
+		if res.ImportanceScore > TieredImportanceThreshold {
 			tieredIndices = append(tieredIndices, i)
 			tieredCandidates = append(tieredCandidates, candidates[i])
 		}
@@ -809,7 +804,12 @@ func (p *Pipeline) translateSummaryIfNeeded(ctx context.Context, logger zerolog.
 		return summary
 	}
 
-	translated, err := p.llmClient.TranslateText(ctx, summary, targetLang, s.llmModel)
+	model := strings.TrimSpace(p.cfg.TranslationModel)
+	if model == "" {
+		model = p.cfg.LLMModel
+	}
+
+	translated, err := p.llmClient.TranslateText(ctx, summary, targetLang, model)
 	if err != nil {
 		logger.Warn().Err(err).Str(LogFieldMsgID, msgID).Msg("failed to translate summary")
 		return summary

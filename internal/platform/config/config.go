@@ -175,9 +175,13 @@ type Config struct {
 	LLMCircuitTimeout   time.Duration `env:"LLM_CIRCUIT_TIMEOUT" envDefault:"1m"`
 
 	// Per-task LLM model configuration
-	LLMSummarizeModel string `env:"LLM_SUMMARIZE_MODEL" envDefault:""`
-	LLMClusterModel   string `env:"LLM_CLUSTER_MODEL" envDefault:""`
-	LLMNarrativeModel string `env:"LLM_NARRATIVE_MODEL" envDefault:""`
+	LLMSummarizeModel     string `env:"LLM_SUMMARIZE_MODEL" envDefault:""`
+	LLMClusterModel       string `env:"LLM_CLUSTER_MODEL" envDefault:""`
+	LLMNarrativeModel     string `env:"LLM_NARRATIVE_MODEL" envDefault:""`
+	LLMTranslateModel     string `env:"LLM_TRANSLATE_MODEL" envDefault:""`
+	LLMCompleteModel      string `env:"LLM_COMPLETE_MODEL" envDefault:""`
+	LLMRelevanceGateModel string `env:"LLM_RELEVANCE_GATE_MODEL" envDefault:""`
+	LLMCompressModel      string `env:"LLM_COMPRESS_MODEL" envDefault:""`
 
 	// Crawler settings (for cmd/crawler)
 	CrawlDepth        int           `env:"CRAWL_DEPTH" envDefault:"2"`

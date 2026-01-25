@@ -704,7 +704,6 @@ func TestClusteringConfigStruct(t *testing.T) {
 		coherenceThreshold:  ClusterDefaultCoherenceThreshold,
 		clusterWindow:       2 * time.Hour,
 		digestLanguage:      "en",
-		smartLLMModel:       "gpt-4",
 	}
 
 	if cfg.similarityThreshold != testSimilarityThresholdDefault {

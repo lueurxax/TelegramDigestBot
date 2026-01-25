@@ -20,8 +20,6 @@ import (
 var errLLM = errors.New("llm error")
 
 const (
-	testTieredModel = "gpt-4o"
-
 	tech = "Tech"
 
 	image = "image"
@@ -587,7 +585,7 @@ func TestSummaryNeedsTranslation(t *testing.T) {
 }
 
 func TestSelectTieredCandidates(t *testing.T) {
-	t.Run("selects high importance non-smart candidates", func(t *testing.T) {
+	t.Run("selects high importance candidates above threshold", func(t *testing.T) {
 		candidates := []llm.MessageInput{
 			{RawMessage: db.RawMessage{ID: "1"}},
 			{RawMessage: db.RawMessage{ID: "2"}},
@@ -595,25 +593,23 @@ func TestSelectTieredCandidates(t *testing.T) {
 		}
 
 		results := []llm.BatchResult{
-			{ImportanceScore: 0.5},  // below threshold
+			{ImportanceScore: 0.5},  // below threshold (0.8)
 			{ImportanceScore: 0.85}, // above threshold
-			{ImportanceScore: 0.9},  // above threshold, already smart model
+			{ImportanceScore: 0.9},  // above threshold
 		}
 
-		modelUsed := []string{"gpt-4o-mini", "gpt-4o-mini", testTieredModel}
+		indices, selected := selectTieredCandidates(candidates, results)
 
-		indices, selected := selectTieredCandidates(candidates, results, modelUsed, testTieredModel)
-
-		if len(indices) != 1 {
-			t.Fatalf("expected 1 selected, got %d", len(indices))
+		if len(indices) != 2 {
+			t.Fatalf("expected 2 selected, got %d", len(indices))
 		}
 
-		if indices[0] != 1 {
-			t.Errorf("expected index 1, got %d", indices[0])
+		if indices[0] != 1 || indices[1] != 2 {
+			t.Errorf("expected indices [1, 2], got %v", indices)
 		}
 
-		if len(selected) != 1 || selected[0].ID != "2" {
-			t.Errorf("expected candidate ID '2', got %v", selected)
+		if len(selected) != 2 || selected[0].ID != "2" || selected[1].ID != "3" {
+			t.Errorf("expected candidate IDs ['2', '3'], got %v", selected)
 		}
 	})
 
@@ -622,9 +618,7 @@ func TestSelectTieredCandidates(t *testing.T) {
 
 		results := []llm.BatchResult{{ImportanceScore: 0.5}}
 
-		modelUsed := []string{"gpt-4o-mini"}
-
-		indices, selected := selectTieredCandidates(candidates, results, modelUsed, testTieredModel)
+		indices, selected := selectTieredCandidates(candidates, results)
 
 		if len(indices) != 0 || len(selected) != 0 {
 			t.Errorf("expected empty results, got %d indices", len(indices))
@@ -797,12 +791,10 @@ func TestHasAlphaNum(t *testing.T) {
 
 func TestGroupIndicesByModel(t *testing.T) {
 	tests := []struct {
-		name                 string
-		candidates           []llm.MessageInput
-		llmModel             string
-		smartLLMModel        string
-		visionRoutingEnabled bool
-		expectedGroups       map[string][]int
+		name           string
+		candidates     []llm.MessageInput
+		llmModel       string
+		expectedGroups map[string][]int
 	}{
 		{
 			name: "all same model without vision routing",
@@ -811,61 +803,36 @@ func TestGroupIndicesByModel(t *testing.T) {
 				{RawMessage: db.RawMessage{ID: "2"}},
 				{RawMessage: db.RawMessage{ID: "3"}},
 			},
-			llmModel:             "gpt-4o-mini",
-			smartLLMModel:        "gpt-4o",
-			visionRoutingEnabled: false,
-			expectedGroups:       map[string][]int{"gpt-4o-mini": {0, 1, 2}},
+			llmModel:       "gpt-4o-mini",
+			expectedGroups: map[string][]int{"gpt-4o-mini": {0, 1, 2}},
 		},
 		{
-			name: "vision routing enabled with media",
+			name: "media does not change model",
 			candidates: []llm.MessageInput{
 				{RawMessage: db.RawMessage{ID: "1"}},
 				{RawMessage: db.RawMessage{ID: "2", MediaData: []byte(image)}},
 				{RawMessage: db.RawMessage{ID: "3"}},
 			},
-			llmModel:             "gpt-4o-mini",
-			smartLLMModel:        "gpt-4o",
-			visionRoutingEnabled: true,
-			expectedGroups: map[string][]int{
-				"gpt-4o-mini": {0, 2},
-				"gpt-4o":      {1},
-			},
-		},
-		{
-			name: "vision routing enabled but no smart model",
-			candidates: []llm.MessageInput{
-				{RawMessage: db.RawMessage{ID: "1", MediaData: []byte(image)}},
-			},
-			llmModel:             "gpt-4o-mini",
-			smartLLMModel:        "",
-			visionRoutingEnabled: true,
-			expectedGroups:       map[string][]int{"gpt-4o-mini": {0}},
+			llmModel:       "gpt-4o-mini",
+			expectedGroups: map[string][]int{"gpt-4o-mini": {0, 1, 2}},
 		},
 		{
 			name: "empty model uses default",
 			candidates: []llm.MessageInput{
 				{RawMessage: db.RawMessage{ID: "1"}},
 			},
-			llmModel:             "",
-			smartLLMModel:        "",
-			visionRoutingEnabled: false,
-			expectedGroups:       map[string][]int{"": {0}},
+			llmModel:       "",
+			expectedGroups: map[string][]int{"": {0}},
 		},
 	}
 
-	cfg := &config.Config{}
-
-	p := New(cfg, nil, nil, nil, nil, nil)
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &pipelineSettings{
-				llmModel:             tt.llmModel,
-				smartLLMModel:        tt.smartLLMModel,
-				visionRoutingEnabled: tt.visionRoutingEnabled,
-			}
+			cfg := &config.Config{LLMModel: tt.llmModel}
 
-			result := p.groupIndicesByModel(tt.candidates, s)
+			p := New(cfg, nil, nil, nil, nil, nil)
+
+			result := p.groupIndicesByModel(tt.candidates)
 
 			if len(result) != len(tt.expectedGroups) {
 				t.Errorf("expected %d groups, got %d", len(tt.expectedGroups), len(result))
@@ -1250,8 +1217,7 @@ func TestEvaluateGateLLM(t *testing.T) {
 	tests := []struct {
 		name                 string
 		relevanceGateModel   string
-		smartLLMModel        string
-		llmModel             string
+		cfgModel             string
 		mockRelevanceGateErr error
 		mockDecision         string
 		mockConfidence       float32
@@ -1261,38 +1227,25 @@ func TestEvaluateGateLLM(t *testing.T) {
 		{
 			name:               "uses relevance gate model when set",
 			relevanceGateModel: "gpt-4",
-			smartLLMModel:      "gpt-4o",
-			llmModel:           "gpt-4o-mini",
+			cfgModel:           "gpt-4o-mini",
 			mockDecision:       DecisionRelevant,
 			mockConfidence:     0.8,
 			expectOK:           true,
 			expectedModel:      "gpt-4",
 		},
 		{
-			name:               "falls back to smart model",
+			name:               "falls back to config model",
 			relevanceGateModel: "",
-			smartLLMModel:      "gpt-4o",
-			llmModel:           "gpt-4o-mini",
+			cfgModel:           "gpt-4o",
 			mockDecision:       DecisionRelevant,
 			mockConfidence:     0.9,
 			expectOK:           true,
 			expectedModel:      "gpt-4o",
 		},
 		{
-			name:               "falls back to llm model",
-			relevanceGateModel: "",
-			smartLLMModel:      "",
-			llmModel:           "gpt-4o-mini",
-			mockDecision:       DecisionRelevant,
-			mockConfidence:     0.7,
-			expectOK:           true,
-			expectedModel:      "gpt-4o-mini",
-		},
-		{
 			name:               "returns false when no model available",
 			relevanceGateModel: "",
-			smartLLMModel:      "",
-			llmModel:           "",
+			cfgModel:           "",
 			expectOK:           false,
 		},
 		{
@@ -1319,7 +1272,7 @@ func TestEvaluateGateLLM(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{}
+			cfg := &config.Config{LLMModel: tt.cfgModel}
 
 			repo := &mockRepo{settings: make(map[string]interface{})}
 
@@ -1335,8 +1288,6 @@ func TestEvaluateGateLLM(t *testing.T) {
 
 			s := &pipelineSettings{
 				relevanceGateModel: tt.relevanceGateModel,
-				smartLLMModel:      tt.smartLLMModel,
-				llmModel:           tt.llmModel,
 			}
 
 			decision, ok := p.evaluateGateLLM(context.Background(), logger, "test text", s)
