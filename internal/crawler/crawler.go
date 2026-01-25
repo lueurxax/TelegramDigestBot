@@ -23,7 +23,9 @@ const (
 	fieldCount          = "count"
 	fieldSitemap        = "sitemap"
 	fieldURL            = "url"
+	fieldRetries        = "retries"
 	maxErrorMsgLen      = 500
+	maxCrawlRetries     = 3 // Max retries before permanent error status
 )
 
 // Crawler is a web crawler that uses Solr as a work queue.
@@ -187,7 +189,7 @@ func (c *Crawler) processURL(ctx context.Context, doc *solr.Document) {
 	result, err := c.extractor.Extract(ctx, doc.URL)
 	if err != nil {
 		c.logger.Warn().Err(err).Str(fieldURL, doc.URL).Msg("Extraction failed")
-		c.markError(ctx, doc.ID, err.Error())
+		c.handleExtractionError(ctx, doc, err)
 		IncrementExtractionErrors()
 
 		return
@@ -206,13 +208,17 @@ func (c *Crawler) processURL(ctx context.Context, doc *solr.Document) {
 }
 
 // discoverURLs enqueues discovered URLs.
+// Order per proposal: RSS/Sitemap first (more structured), then link crawling (fallback).
 func (c *Crawler) discoverURLs(ctx context.Context, sourceURL string, links []string, depth int) {
-	c.enqueueLinks(ctx, links, depth)
-
-	// Also try RSS/Sitemap discovery
+	// 1. Try RSS/Atom feeds first (most structured, efficient discovery)
 	feeds, sitemaps := c.discovery.DiscoverFeeds(ctx, sourceURL)
 	c.processFeedURLs(ctx, feeds, depth)
+
+	// 2. Then try sitemaps (structured but may include non-article URLs)
 	c.processSitemapURLs(ctx, sitemaps, depth)
+
+	// 3. Finally fall back to link crawling (least structured, may include noise)
+	c.enqueueLinks(ctx, links, depth)
 }
 
 // enqueueLinks enqueues a list of links.
@@ -306,7 +312,50 @@ func (c *Crawler) updateWithContent(ctx context.Context, docID string, result *E
 	return nil
 }
 
-// markError marks a document as having an error.
+// handleExtractionError handles extraction failures with retry logic.
+// If retries < maxCrawlRetries, increments retry count and resets to pending.
+// After maxCrawlRetries, marks the document with permanent error status.
+func (c *Crawler) handleExtractionError(ctx context.Context, doc *solr.Document, extractionErr error) {
+	errMsg := extractionErr.Error()
+	if len(errMsg) > maxErrorMsgLen {
+		errMsg = errMsg[:maxErrorMsgLen]
+	}
+
+	newRetries := doc.CrawlRetries + 1
+
+	if newRetries >= maxCrawlRetries {
+		// Max retries reached - mark as permanent error
+		c.logger.Warn().
+			Str(fieldURL, doc.URL).
+			Int(fieldRetries, newRetries).
+			Str("error", errMsg).
+			Msg("Max retries reached, marking as error")
+		c.markError(ctx, doc.ID, errMsg)
+
+		return
+	}
+
+	// Still have retries left - increment and reset to pending
+	c.logger.Info().
+		Str(fieldURL, doc.URL).
+		Int(fieldRetries, newRetries).
+		Int("max_retries", maxCrawlRetries).
+		Msg("Extraction failed, will retry later")
+
+	fields := map[string]interface{}{
+		"crawl_status":     solr.CrawlStatusPending,
+		"crawl_retries":    newRetries,
+		"crawl_error":      errMsg,
+		"crawl_claimed_at": nil, // Clear claim fields for cleaner diagnostics
+		"crawl_claimed_by": nil,
+	}
+
+	if err := c.client.AtomicUpdate(ctx, doc.ID, fields); err != nil {
+		c.logger.Warn().Err(err).Str(fieldDocID, doc.ID).Msg("Failed to update retry count")
+	}
+}
+
+// markError marks a document as having a permanent error.
 func (c *Crawler) markError(ctx context.Context, docID, errMsg string) {
 	if len(errMsg) > maxErrorMsgLen {
 		errMsg = errMsg[:maxErrorMsgLen]

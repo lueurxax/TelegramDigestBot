@@ -21,12 +21,14 @@ const (
 	updatePath          = "/update"
 	getPath             = "/get"
 	contentTypeJSON     = "application/json"
+	contentTypeForm     = "application/x-www-form-urlencoded"
 	headerContentType   = "Content-Type"
 	httpStatusConflict  = 409
 	maxResponseBodySize = 10 * 1024 * 1024 // 10MB
 	errBodyReadLimit    = 1024
 	errStatusBodyFmt    = "%w: status %d, body: %s"
 	errStatusFmt        = "%w: status %d"
+	maxURILength        = 4096 // Use POST for queries longer than this
 )
 
 // Client provides methods to interact with a SolrCloud collection.
@@ -95,6 +97,7 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 // Search executes a search query and returns matching documents.
+// Uses GET for short queries, POST for long queries to avoid URI length limits.
 func (c *Client) Search(ctx context.Context, query string, opts ...SearchOption) (*SearchResponse, error) {
 	if !c.enabled {
 		return nil, ErrClientDisabled
@@ -109,9 +112,19 @@ func (c *Client) Search(ctx context.Context, query string, opts ...SearchOption)
 		opt(params)
 	}
 
+	var req *http.Request
+
+	var err error
+
 	searchURL := c.buildSearchURL(params)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
+	// Use POST for long queries to avoid URI length limits (HTTP 414)
+	if len(searchURL) > maxURILength {
+		req, err = c.buildSearchPOSTRequest(ctx, params)
+	} else {
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, searchURL, nil)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("create search request: %w", err)
 	}
@@ -142,6 +155,24 @@ func (c *Client) Search(ctx context.Context, query string, opts ...SearchOption)
 	}
 
 	return &result, nil
+}
+
+// buildSearchPOSTRequest creates a POST request for Solr search.
+// Used when query parameters exceed URI length limits.
+func (c *Client) buildSearchPOSTRequest(ctx context.Context, params *searchParams) (*http.Request, error) {
+	postURL := c.baseURL + selectPath
+
+	// Build form data
+	formData := c.buildSearchParams(params)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, postURL, strings.NewReader(formData.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("create POST request: %w", err)
+	}
+
+	req.Header.Set(headerContentType, contentTypeForm)
+
+	return req, nil
 }
 
 // Get retrieves a document by its ID.
@@ -491,8 +522,8 @@ func WithEdismax(queryFields string) SearchOption {
 	}
 }
 
-// buildSearchURL constructs the search URL with query parameters.
-func (c *Client) buildSearchURL(params *searchParams) string {
+// buildSearchParams constructs the URL values for a search query.
+func (c *Client) buildSearchParams(params *searchParams) url.Values {
 	q := url.Values{}
 	q.Set("q", params.q)
 	q.Set("rows", strconv.Itoa(params.rows))
@@ -522,5 +553,10 @@ func (c *Client) buildSearchURL(params *searchParams) string {
 		q.Set("qf", params.qf)
 	}
 
-	return c.baseURL + selectPath + "?" + q.Encode()
+	return q
+}
+
+// buildSearchURL constructs the search URL with query parameters.
+func (c *Client) buildSearchURL(params *searchParams) string {
+	return c.baseURL + selectPath + "?" + c.buildSearchParams(params).Encode()
 }

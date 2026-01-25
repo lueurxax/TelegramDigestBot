@@ -164,7 +164,7 @@ func (d *Discovery) FetchFeed(ctx context.Context, feedURL string) ([]string, er
 
 	feed, err := d.feedParser.Parse(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("parse feed: %w", err)
+		return nil, fmt.Errorf(errFmtParseFeed, err)
 	}
 
 	var urls []string

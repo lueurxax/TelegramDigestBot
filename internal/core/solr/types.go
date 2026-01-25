@@ -67,6 +67,7 @@ type Document struct {
 	CrawlClaimedAt time.Time `json:"crawl_claimed_at,omitempty"`
 	CrawlClaimedBy string    `json:"crawl_claimed_by,omitempty"`
 	CrawlDepth     int       `json:"crawl_depth,omitempty"`
+	CrawlRetries   int       `json:"crawl_retries,omitempty"`
 	CrawlError     string    `json:"crawl_error,omitempty"`
 
 	// Language-specific dynamic fields (populated during indexing)

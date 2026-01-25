@@ -44,7 +44,7 @@ func (c *Crawler) claimURLs(ctx context.Context, count int) ([]*solr.Document, e
 		solr.WithFilterQuery(filterSourceWeb),
 		solr.WithRows(count*claimMultiplier),     // Fetch more to account for claim failures
 		solr.WithSort("crawl_depth asc, id asc"), // Breadth-first crawling
-		solr.WithFields("id,url,domain,crawl_depth,crawl_status,_version_"),
+		solr.WithFields("id,url,domain,crawl_depth,crawl_status,crawl_retries,_version_"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("search pending URLs: %w", err)

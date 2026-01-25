@@ -150,6 +150,7 @@ data:
       <field name="crawl_claimed_at" type="pdate" indexed="true" stored="true"/>
       <field name="crawl_claimed_by" type="string" indexed="true" stored="true"/>
       <field name="crawl_depth" type="pint" indexed="true" stored="true" default="0"/>
+      <field name="crawl_retries" type="pint" indexed="true" stored="true" default="0"/>
       <field name="crawl_error" type="string" indexed="true" stored="true"/>
 
       <!-- Text fields with general analyzer (stored for display) -->

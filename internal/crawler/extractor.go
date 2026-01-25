@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"codeberg.org/readeck/go-readability/v2"
+	"github.com/mmcdole/gofeed"
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links"
@@ -22,14 +23,31 @@ const (
 	maxContentLength   = 10 * 1024 * 1024 // 10MB
 	maxExtractedLength = 100000           // 100KB of text
 	maxExcerptLength   = 500
+	minContentLength   = 100 // Minimum content length to accept
 	hrefPrefixLen      = 6   // len(`href="`)
 	contentAttrLen     = 9   // len(`content="`)
 	metaLookbackWindow = 200 // bytes to search backwards for content attr
 	extractorHeaderCT  = "Content-Type"
 
+	// OpenGraph and meta tag property names.
+	ogTitle            = "og:title"
+	ogDescription      = "og:description"
+	ogLocale           = "og:locale"
+	articlePublishedAt = "article:published_time"
+
+	// Content type constants for RSS/Atom detection.
+	ctApplicationRSS  = "application/rss"
+	ctApplicationAtom = "application/atom"
+	ctApplicationXML  = "application/xml"
+	ctTextXML         = "text/xml"
+
 	// Log/error message constants.
-	msgNoContentExtracted = "no content extracted from page"
-	logKeyDomain          = "domain"
+	msgContentTooShort = "content too short"
+	logKeyDomain       = "domain"
+	logKeyURL          = "url"
+
+	// Error format strings.
+	errFmtParseFeed = "parse feed: %w"
 )
 
 // Extractor errors.
@@ -37,7 +55,7 @@ var (
 	errTooManyRedirects       = errors.New("too many redirects")
 	errHTTPError              = errors.New("HTTP error")
 	errUnsupportedContentType = errors.New("unsupported content type")
-	errNoContentExtracted     = errors.New(msgNoContentExtracted)
+	errContentTooShort        = errors.New(msgContentTooShort)
 )
 
 // ExtractionResult holds the extracted content from a web page.
@@ -55,6 +73,7 @@ type ExtractionResult struct {
 // Extractor extracts content from web pages.
 type Extractor struct {
 	httpClient *http.Client
+	feedParser *gofeed.Parser
 	userAgent  string
 	logger     *zerolog.Logger
 }
@@ -72,12 +91,14 @@ func NewExtractor(userAgent string, logger *zerolog.Logger) *Extractor {
 				return nil
 			},
 		},
-		userAgent: userAgent,
-		logger:    logger,
+		feedParser: gofeed.NewParser(),
+		userAgent:  userAgent,
+		logger:     logger,
 	}
 }
 
 // Extract fetches and extracts content from a URL.
+// Fallback chain: JSON-LD → RSS/Atom → OG → Readability → raw text.
 func (e *Extractor) Extract(ctx context.Context, rawURL string) (*ExtractionResult, error) {
 	// Parse URL to get domain
 	parsed, err := url.Parse(rawURL)
@@ -86,35 +107,79 @@ func (e *Extractor) Extract(ctx context.Context, rawURL string) (*ExtractionResu
 	}
 
 	// Fetch the page
-	body, err := e.fetchPage(ctx, rawURL)
+	body, contentType, err := e.fetchPage(ctx, rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	// Use go-readability to extract article content
-	article, err := readability.FromReader(strings.NewReader(string(body)), parsed)
-	if err != nil {
-		return nil, fmt.Errorf("readability extraction: %w", err)
+	var result *ExtractionResult
+
+	// Check if this is an RSS/Atom feed - use feed extraction
+	if isFeedContentType(contentType) {
+		e.logger.Debug().
+			Str(logKeyURL, rawURL).
+			Str("content_type", contentType).
+			Msg("Detected RSS/Atom feed, using feed extraction")
+
+		result, err = e.buildFeedResult(parsed, body)
+		if err != nil {
+			e.logger.Debug().Err(err).
+				Str(logKeyURL, rawURL).
+				Msg("Feed extraction failed, falling back to raw text")
+
+			result = e.buildRawTextResult(parsed, body)
+		}
+	} else {
+		// HTML content - use Readability extraction
+		article, readErr := readability.FromReader(strings.NewReader(string(body)), parsed)
+		if readErr != nil {
+			return nil, fmt.Errorf("readability extraction: %w", readErr)
+		}
+
+		// Use readability if it extracted content, otherwise fall back to raw text
+		if article.Node != nil {
+			result = e.buildResult(article, parsed, body)
+		} else {
+			// Fallback: extract raw text from HTML
+			e.logger.Debug().
+				Str(logKeyURL, rawURL).
+				Str(logKeyDomain, parsed.Host).
+				Msg("Readability failed, falling back to raw text extraction")
+
+			result = e.buildRawTextResult(parsed, body)
+		}
 	}
 
-	// Skip if readability couldn't extract any content
-	if article.Node == nil {
+	// Validate minimum content length (proposal: reject < 100 chars)
+	if len(result.Content) < minContentLength {
 		e.logger.Warn().
-			Str("url", rawURL).
+			Str(logKeyURL, rawURL).
 			Str(logKeyDomain, parsed.Host).
-			Msg(msgNoContentExtracted)
+			Int("content_len", len(result.Content)).
+			Int("min_required", minContentLength).
+			Msg(msgContentTooShort)
 
-		return nil, errNoContentExtracted
+		return nil, fmt.Errorf("%w: %d chars (min %d)", errContentTooShort, len(result.Content), minContentLength)
 	}
 
-	return e.buildResult(article, parsed, body), nil
+	return result, nil
 }
 
-// fetchPage fetches a web page and returns its body.
-func (e *Extractor) fetchPage(ctx context.Context, rawURL string) ([]byte, error) {
+// isFeedContentType checks if the content type indicates an RSS/Atom feed.
+func isFeedContentType(contentType string) bool {
+	ct := strings.ToLower(contentType)
+
+	return strings.Contains(ct, ctApplicationRSS) ||
+		strings.Contains(ct, ctApplicationAtom) ||
+		strings.Contains(ct, ctApplicationXML) ||
+		strings.Contains(ct, ctTextXML)
+}
+
+// fetchPage fetches a web page and returns its body and content type.
+func (e *Extractor) fetchPage(ctx context.Context, rawURL string) ([]byte, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, "", fmt.Errorf("create request: %w", err)
 	}
 
 	req.Header.Set("User-Agent", e.userAgent)
@@ -123,27 +188,41 @@ func (e *Extractor) fetchPage(ctx context.Context, rawURL string) ([]byte, error
 
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch: %w", err)
+		return nil, "", fmt.Errorf("fetch: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: %d", errHTTPError, resp.StatusCode)
+		return nil, "", fmt.Errorf("%w: %d", errHTTPError, resp.StatusCode)
 	}
 
-	// Check content type
+	// Get content type
 	contentType := resp.Header.Get(extractorHeaderCT)
-	if !strings.Contains(contentType, "text/html") && !strings.Contains(contentType, "application/xhtml") {
-		return nil, fmt.Errorf("%w: %s", errUnsupportedContentType, contentType)
+
+	// Accept HTML, XHTML, and XML (for RSS/Atom feeds)
+	if !isAcceptableContentType(contentType) {
+		return nil, "", fmt.Errorf("%w: %s", errUnsupportedContentType, contentType)
 	}
 
 	// Read body with size limit
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxContentLength))
 	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
+		return nil, "", fmt.Errorf("read body: %w", err)
 	}
 
-	return body, nil
+	return body, contentType, nil
+}
+
+// isAcceptableContentType checks if we can process this content type.
+func isAcceptableContentType(contentType string) bool {
+	ct := strings.ToLower(contentType)
+
+	return strings.Contains(ct, "text/html") ||
+		strings.Contains(ct, "application/xhtml") ||
+		strings.Contains(ct, ctApplicationRSS) ||
+		strings.Contains(ct, ctApplicationAtom) ||
+		strings.Contains(ct, ctApplicationXML) ||
+		strings.Contains(ct, ctTextXML)
 }
 
 // buildResult builds an ExtractionResult from a readability article.
@@ -156,26 +235,26 @@ func (e *Extractor) buildResult(article readability.Article, parsed *url.URL, bo
 	jsonLD := extractJSONLD(htmlContent)
 
 	// Extract OG meta tags for better metadata (fallback)
-	ogTitle := extractMetaContent(htmlContent, "og:title")
-	ogDescription := extractMetaContent(htmlContent, "og:description")
-	ogLocale := extractMetaContent(htmlContent, "og:locale")
-	articlePublished := extractMetaContent(htmlContent, "article:published_time")
+	ogTitleVal := extractMetaContent(htmlContent, ogTitle)
+	ogDescVal := extractMetaContent(htmlContent, ogDescription)
+	ogLocaleVal := extractMetaContent(htmlContent, ogLocale)
+	articlePubVal := extractMetaContent(htmlContent, articlePublishedAt)
 
 	// Extract text content using v2 API
 	textContent := extractArticleText(article)
 
 	// Build result with fallback chain: JSON-LD -> OG -> Readability
 	result := &ExtractionResult{
-		Title:       coalesce(jsonLD.Headline, ogTitle, article.Title()),
+		Title:       coalesce(jsonLD.Headline, ogTitleVal, article.Title()),
 		Content:     truncateContent(textContent, maxExtractedLength),
-		Description: truncateContent(coalesce(jsonLD.Description, ogDescription, article.Excerpt()), maxExcerptLength),
+		Description: truncateContent(coalesce(jsonLD.Description, ogDescVal, article.Excerpt()), maxExcerptLength),
 		Author:      coalesce(jsonLD.Author, article.Byline()),
 		Domain:      parsed.Host,
 		Links:       extractLinks(htmlContent, parsed),
 	}
 
-	result.PublishedAt = parsePublishedDate(jsonLD.DatePublished, articlePublished, getArticlePublishedTime(article))
-	result.Language = detectLanguage(jsonLD.Language, ogLocale, article.Title(), textContent)
+	result.PublishedAt = parsePublishedDate(jsonLD.DatePublished, articlePubVal, getArticlePublishedTime(article))
+	result.Language = detectLanguage(jsonLD.Language, ogLocaleVal, article.Title(), textContent)
 
 	return result
 }
@@ -507,4 +586,210 @@ func resolveLink(href string, base *url.URL) string {
 	}
 
 	return resolved.String()
+}
+
+// buildRawTextResult extracts content from HTML when Readability fails.
+// This is the last fallback in the extraction chain.
+func (e *Extractor) buildRawTextResult(parsed *url.URL, body []byte) *ExtractionResult {
+	htmlContent := string(body)
+
+	// Extract JSON-LD and OG data (same as buildResult)
+	jsonLD := extractJSONLD(htmlContent)
+	ogTitleVal := extractMetaContent(htmlContent, ogTitle)
+	ogDescVal := extractMetaContent(htmlContent, ogDescription)
+	ogLocaleVal := extractMetaContent(htmlContent, ogLocale)
+	articlePubVal := extractMetaContent(htmlContent, articlePublishedAt)
+
+	// Extract title from HTML <title> tag if not in JSON-LD or OG
+	htmlTitle := extractHTMLTitle(htmlContent)
+
+	// Extract raw text by stripping HTML tags
+	rawText := extractRawText(htmlContent)
+
+	result := &ExtractionResult{
+		Title:       coalesce(jsonLD.Headline, ogTitleVal, htmlTitle),
+		Content:     truncateContent(rawText, maxExtractedLength),
+		Description: truncateContent(coalesce(jsonLD.Description, ogDescVal), maxExcerptLength),
+		Author:      jsonLD.Author,
+		Domain:      parsed.Host,
+		Links:       extractLinks(htmlContent, parsed),
+	}
+
+	result.PublishedAt = parsePublishedDate(jsonLD.DatePublished, articlePubVal, nil)
+	result.Language = detectLanguage(jsonLD.Language, ogLocaleVal, result.Title, rawText)
+
+	return result
+}
+
+// buildFeedResult extracts content from an RSS/Atom feed.
+// If the feed has items, extracts the first item's content.
+// Otherwise, uses the feed's title and description.
+func (e *Extractor) buildFeedResult(parsed *url.URL, body []byte) (*ExtractionResult, error) {
+	feed, err := e.feedParser.ParseString(string(body))
+	if err != nil {
+		return nil, fmt.Errorf(errFmtParseFeed, err)
+	}
+
+	result := &ExtractionResult{
+		Domain: parsed.Host,
+	}
+
+	// If feed has items, use the first item for content
+	if len(feed.Items) > 0 {
+		item := feed.Items[0]
+		result.Title = item.Title
+		result.Description = truncateContent(item.Description, maxExcerptLength)
+
+		// Use item content if available, otherwise description
+		content := item.Content
+		if content == "" {
+			content = item.Description
+		}
+
+		// Strip HTML from content
+		result.Content = truncateContent(extractRawText(content), maxExtractedLength)
+
+		// Extract author
+		if len(item.Authors) > 0 {
+			result.Author = item.Authors[0].Name
+		}
+
+		// Extract published date
+		if item.PublishedParsed != nil {
+			result.PublishedAt = *item.PublishedParsed
+		} else if item.UpdatedParsed != nil {
+			result.PublishedAt = *item.UpdatedParsed
+		}
+
+		// Extract links from item
+		result.Links = []string{item.Link}
+	} else {
+		// No items - use feed metadata
+		result.Title = feed.Title
+		result.Description = truncateContent(feed.Description, maxExcerptLength)
+		result.Content = truncateContent(extractRawText(feed.Description), maxExtractedLength)
+
+		if len(feed.Authors) > 0 {
+			result.Author = feed.Authors[0].Name
+		}
+
+		if feed.PublishedParsed != nil {
+			result.PublishedAt = *feed.PublishedParsed
+		} else if feed.UpdatedParsed != nil {
+			result.PublishedAt = *feed.UpdatedParsed
+		}
+	}
+
+	// Detect language from content
+	result.Language = links.DetectLanguage(result.Title + " " + result.Content)
+
+	return result, nil
+}
+
+// extractHTMLTitle extracts the content of the <title> tag.
+func extractHTMLTitle(html string) string {
+	const (
+		titleStart = "<title>"
+		titleEnd   = "</title>"
+	)
+
+	startIdx := strings.Index(strings.ToLower(html), titleStart)
+	if startIdx == -1 {
+		return ""
+	}
+
+	startIdx += len(titleStart)
+	endIdx := strings.Index(strings.ToLower(html[startIdx:]), titleEnd)
+
+	if endIdx == -1 {
+		return ""
+	}
+
+	return strings.TrimSpace(html[startIdx : startIdx+endIdx])
+}
+
+// extractRawText removes HTML tags and extracts visible text content.
+// Removes script, style, and other non-visible elements first.
+func extractRawText(html string) string {
+	// Remove script and style blocks
+	html = removeTagBlock(html, "script")
+	html = removeTagBlock(html, "style")
+	html = removeTagBlock(html, "noscript")
+	html = removeTagBlock(html, "nav")
+	html = removeTagBlock(html, "header")
+	html = removeTagBlock(html, "footer")
+	html = removeTagBlock(html, "aside")
+
+	// Remove all remaining HTML tags
+	var result strings.Builder
+
+	inTag := false
+
+	for _, r := range html {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+
+			result.WriteRune(' ') // Replace tag with space
+		case !inTag:
+			result.WriteRune(r)
+		}
+	}
+
+	// Normalize whitespace
+	return normalizeWhitespace(result.String())
+}
+
+// removeTagBlock removes all content between <tag> and </tag> including nested tags.
+func removeTagBlock(html, tag string) string {
+	startTag := "<" + tag
+	endTag := "</" + tag + ">"
+
+	result := html
+
+	for {
+		startIdx := strings.Index(strings.ToLower(result), startTag)
+		if startIdx == -1 {
+			break
+		}
+
+		// Find matching end tag
+		endIdx := strings.Index(strings.ToLower(result[startIdx:]), endTag)
+		if endIdx == -1 {
+			// No closing tag, remove to end of string
+			result = result[:startIdx]
+
+			break
+		}
+
+		result = result[:startIdx] + result[startIdx+endIdx+len(endTag):]
+	}
+
+	return result
+}
+
+// normalizeWhitespace collapses multiple whitespace characters into single spaces.
+func normalizeWhitespace(s string) string {
+	var result strings.Builder
+
+	prevWasSpace := true // Start true to trim leading whitespace
+
+	for _, r := range s {
+		isSpace := r == ' ' || r == '\t' || r == '\n' || r == '\r'
+		if isSpace {
+			if !prevWasSpace {
+				result.WriteRune(' ')
+			}
+
+			prevWasSpace = true
+		} else {
+			result.WriteRune(r)
+
+			prevWasSpace = false
+		}
+	}
+
+	return strings.TrimSpace(result.String())
 }

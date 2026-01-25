@@ -129,12 +129,14 @@ data:
       <field name="language" type="string" indexed="true" stored="true" default="unknown"/>
       <field name="published_at" type="pdate" indexed="true" stored="true"/>
       <field name="crawled_at" type="pdate" indexed="true" stored="true"/>
+      <field name="indexed_at" type="pdate" indexed="true" stored="true"/>
 
       <!-- Crawl queue fields (unified: URL queue + indexed content) -->
       <field name="crawl_status" type="string" indexed="true" stored="true" default="pending"/>
       <field name="crawl_claimed_at" type="pdate" indexed="true" stored="true"/>
       <field name="crawl_claimed_by" type="string" indexed="true" stored="true"/>
       <field name="crawl_depth" type="pint" indexed="true" stored="true" default="0"/>
+      <field name="crawl_retries" type="pint" indexed="true" stored="true" default="0"/>
       <field name="crawl_error" type="string" indexed="true" stored="true"/>
 
       <!-- Text fields with general analyzer (stored for display) -->
@@ -621,10 +623,10 @@ spec:
             - |
               SOLR_URL="http://solr:8983/solr/news"
 
-              # Delete pending URLs older than 7 days
+              # Delete pending URLs older than 7 days (use indexed_at since pending URLs haven't been crawled yet)
               curl -X POST "$SOLR_URL/update?commit=true" \
                 -H "Content-Type: application/json" \
-                -d '{"delete":{"query":"crawl_status:pending AND crawled_at:[* TO NOW-7DAYS]"}}'
+                -d '{"delete":{"query":"crawl_status:pending AND indexed_at:[* TO NOW-7DAYS]"}}'
 
               # Delete error URLs older than 30 days
               curl -X POST "$SOLR_URL/update?commit=true" \
@@ -1848,9 +1850,13 @@ data:
 **Risk**: Crawler may index navigation, ads, boilerplate instead of article text.
 
 **Mitigations**:
-1. **Readability algorithm** - use go-readability or similar for main content extraction
-2. **Fallback chain**: JSON-LD → RSS/Atom → OpenGraph → Readability → raw text
-3. **Field validation** - reject documents with < 100 chars content
+1. **Readability algorithm** - use go-readability (Mozilla Readability) for main content extraction
+2. **Fallback chain** (implemented):
+   - **JSON-LD**: Extract structured article data (headline, description, author, datePublished)
+   - **OpenGraph**: Extract og:title, og:description, og:locale, article:published_time
+   - **Readability**: Primary content extraction using Mozilla algorithm
+   - **Raw text**: Last resort - strip HTML tags, remove script/style/nav/header/footer blocks
+3. **Field validation** - reject documents with < 100 chars content (enforced in extractor)
 4. **Quality sampling** - periodic manual review of indexed content
 
 ### Index Maintenance
@@ -1858,10 +1864,11 @@ data:
 **Risk**: Pending/error URLs accumulate; stale content lingers.
 
 **Mitigations**:
-1. **Cleanup CronJob** - purge URLs in `pending` status > 7 days
-2. **Error retry limit** - max 3 retries, then permanent `error` status
+1. **Cleanup CronJob** - purge URLs in `pending` status > 7 days (uses `indexed_at` since pending URLs haven't been crawled)
+2. **Error retry limit** - max 3 retries (tracked in `crawl_retries` field), then permanent `error` status; failed URLs are reset to `pending` with incremented retry count until max reached
 3. **Content TTL** - delete documents with `crawled_at` > 90 days (configurable)
 4. **Dedup monitoring** - alert if duplicate URLs detected (canonicalization failure)
+5. **Content validation** - reject pages with < 100 chars content (likely error pages or empty stubs)
 
 ### Operational Monitoring
 
