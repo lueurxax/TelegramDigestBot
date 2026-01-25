@@ -7,9 +7,9 @@ data:
   APP_ENV: "prod"
   # Digest settings
   DIGEST_WINDOW: "60m"
-  DIGEST_TOP_N: "20"
+  DIGEST_TOP_N: "50"
   RELEVANCE_THRESHOLD: "0.5"
-  IMPORTANCE_THRESHOLD: "0.3"
+  IMPORTANCE_THRESHOLD: "0.5"
   SIMILARITY_THRESHOLD: "0.5"
   AUTO_THRESHOLD_TUNING_ENABLED: "true"
   # Health & monitoring

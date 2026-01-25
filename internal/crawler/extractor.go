@@ -20,6 +20,7 @@ import (
 
 const (
 	extractionTimeout  = 30 * time.Second
+	feedFetchTimeout   = 10 * time.Second
 	maxContentLength   = 10 * 1024 * 1024 // 10MB
 	maxExtractedLength = 100000           // 100KB of text
 	maxExcerptLength   = 500
@@ -48,6 +49,7 @@ const (
 
 	// Error format strings.
 	errFmtParseFeed = "parse feed: %w"
+	errFmtFetchFeed = "fetch feed: %w"
 )
 
 // Extractor errors.
@@ -56,6 +58,7 @@ var (
 	errHTTPError              = errors.New("HTTP error")
 	errUnsupportedContentType = errors.New("unsupported content type")
 	errContentTooShort        = errors.New(msgContentTooShort)
+	errFeedFetchFailed        = errors.New("feed fetch failed")
 )
 
 // ExtractionResult holds the extracted content from a web page.
@@ -138,7 +141,7 @@ func (e *Extractor) Extract(ctx context.Context, rawURL string) (*ExtractionResu
 
 		// Use readability if it extracted content, otherwise fall back to raw text
 		if article.Node != nil {
-			result = e.buildResult(article, parsed, body)
+			result = e.buildResult(ctx, article, parsed, body)
 		} else {
 			// Fallback: extract raw text from HTML
 			e.logger.Debug().
@@ -182,7 +185,7 @@ func (e *Extractor) fetchPage(ctx context.Context, rawURL string) ([]byte, strin
 		return nil, "", fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", e.userAgent)
+	req.Header.Set(headerUserAgent, e.userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
 
@@ -226,15 +229,18 @@ func isAcceptableContentType(contentType string) bool {
 }
 
 // buildResult builds an ExtractionResult from a readability article.
-// Uses fallback chain: JSON-LD -> OG meta tags -> Readability for better metadata extraction.
+// Uses fallback chain: JSON-LD -> RSS/Atom -> OG meta tags -> Readability for better metadata extraction.
 // Note: article.Node must not be nil - caller should check before calling.
-func (e *Extractor) buildResult(article readability.Article, parsed *url.URL, body []byte) *ExtractionResult {
+func (e *Extractor) buildResult(ctx context.Context, article readability.Article, parsed *url.URL, body []byte) *ExtractionResult {
 	htmlContent := string(body)
 
 	// Extract JSON-LD structured data (most reliable source)
 	jsonLD := extractJSONLD(htmlContent)
 
-	// Extract OG meta tags for better metadata (fallback)
+	// Try RSS/Atom feed metadata as second fallback (per proposal)
+	feedMeta := e.extractFeedMetadataForPage(ctx, htmlContent, parsed)
+
+	// Extract OG meta tags for better metadata (third fallback)
 	ogTitleVal := extractMetaContent(htmlContent, ogTitle)
 	ogDescVal := extractMetaContent(htmlContent, ogDescription)
 	ogLocaleVal := extractMetaContent(htmlContent, ogLocale)
@@ -243,20 +249,212 @@ func (e *Extractor) buildResult(article readability.Article, parsed *url.URL, bo
 	// Extract text content using v2 API
 	textContent := extractArticleText(article)
 
-	// Build result with fallback chain: JSON-LD -> OG -> Readability
+	// Build result with fallback chain: JSON-LD -> RSS/Atom -> OG -> Readability
 	result := &ExtractionResult{
-		Title:       coalesce(jsonLD.Headline, ogTitleVal, article.Title()),
+		Title:       coalesce(jsonLD.Headline, feedMeta.Title, ogTitleVal, article.Title()),
 		Content:     truncateContent(textContent, maxExtractedLength),
-		Description: truncateContent(coalesce(jsonLD.Description, ogDescVal, article.Excerpt()), maxExcerptLength),
-		Author:      coalesce(jsonLD.Author, article.Byline()),
+		Description: truncateContent(coalesce(jsonLD.Description, feedMeta.Description, ogDescVal, article.Excerpt()), maxExcerptLength),
+		Author:      coalesce(jsonLD.Author, feedMeta.Author, article.Byline()),
 		Domain:      parsed.Host,
 		Links:       extractLinks(htmlContent, parsed),
 	}
 
-	result.PublishedAt = parsePublishedDate(jsonLD.DatePublished, articlePubVal, getArticlePublishedTime(article))
+	result.PublishedAt = parsePublishedDate(jsonLD.DatePublished, feedMeta.Published, articlePubVal, getArticlePublishedTime(article))
 	result.Language = detectLanguage(jsonLD.Language, ogLocaleVal, article.Title(), textContent)
 
 	return result
+}
+
+// feedMetadata holds metadata extracted from RSS/Atom feed for a page.
+type feedMetadata struct {
+	Title       string
+	Description string
+	Author      string
+	Published   string
+}
+
+// extractFeedMetadataForPage tries to find RSS/Atom feed links in HTML and extract metadata for the current page.
+// Returns empty feedMetadata if no feed found or page not in feed.
+func (e *Extractor) extractFeedMetadataForPage(ctx context.Context, htmlContent string, pageURL *url.URL) feedMetadata {
+	// Extract feed links from HTML <link> elements
+	feedLinks := extractFeedLinks(htmlContent, pageURL)
+	if len(feedLinks) == 0 {
+		return feedMetadata{}
+	}
+
+	// Try each feed until we find one with the page
+	pageURLStr := pageURL.String()
+	pageURLNoWWW := strings.Replace(pageURLStr, "://www.", "://", 1)
+
+	for _, feedLink := range feedLinks {
+		meta := e.fetchFeedMetadataForURL(ctx, feedLink, pageURLStr, pageURLNoWWW)
+		if meta.Title != "" || meta.Description != "" {
+			return meta
+		}
+	}
+
+	return feedMetadata{}
+}
+
+// extractFeedLinks extracts RSS/Atom feed URLs from HTML <link> elements.
+func extractFeedLinks(htmlContent string, baseURL *url.URL) []string {
+	var feeds []string
+
+	// Match <link rel="alternate" type="application/rss+xml" href="...">
+	// and <link rel="alternate" type="application/atom+xml" href="...">
+	linkPattern := `<link[^>]+rel=["']alternate["'][^>]+type=["'](application/rss\+xml|application/atom\+xml)["'][^>]+href=["']([^"']+)["']`
+	linkPatternAlt := `<link[^>]+href=["']([^"']+)["'][^>]+type=["'](application/rss\+xml|application/atom\+xml)["']`
+
+	// Simple regex-free extraction for performance
+	lowerHTML := strings.ToLower(htmlContent)
+	links := extractLinkElements(lowerHTML, htmlContent)
+
+	for _, link := range links {
+		if (strings.Contains(link.linkType, "rss") || strings.Contains(link.linkType, "atom")) &&
+			strings.Contains(link.rel, "alternate") {
+			href := resolveLink(link.href, baseURL)
+			if href != "" {
+				feeds = append(feeds, href)
+			}
+		}
+	}
+
+	// Also check for common patterns if regex approach needed
+	_ = linkPattern
+	_ = linkPatternAlt
+
+	return feeds
+}
+
+// linkElement represents a parsed <link> element.
+type linkElement struct {
+	rel      string
+	linkType string
+	href     string
+}
+
+// extractLinkElements extracts <link> elements from HTML.
+func extractLinkElements(lowerHTML, originalHTML string) []linkElement {
+	var elements []linkElement
+
+	idx := 0
+
+	for {
+		start := strings.Index(lowerHTML[idx:], "<link")
+		if start == -1 {
+			break
+		}
+
+		start += idx
+		end := strings.Index(lowerHTML[start:], ">")
+
+		if end == -1 {
+			break
+		}
+
+		end += start
+		tagContent := originalHTML[start : end+1]
+		lowerTag := lowerHTML[start : end+1]
+
+		elem := linkElement{
+			rel:      extractAttr(lowerTag, tagContent, "rel"),
+			linkType: extractAttr(lowerTag, tagContent, "type"),
+			href:     extractAttr(lowerTag, tagContent, "href"),
+		}
+
+		if elem.href != "" {
+			elements = append(elements, elem)
+		}
+
+		idx = end + 1
+	}
+
+	return elements
+}
+
+// extractAttr extracts an attribute value from a tag.
+func extractAttr(lowerTag, originalTag, attrName string) string {
+	// Find attribute in lowercase tag
+	patterns := []string{attrName + `="`, attrName + `='`}
+
+	for _, pattern := range patterns {
+		idx := strings.Index(lowerTag, pattern)
+		if idx == -1 {
+			continue
+		}
+
+		start := idx + len(pattern)
+		quote := pattern[len(pattern)-1]
+		end := strings.IndexByte(originalTag[start:], quote)
+
+		if end == -1 {
+			continue
+		}
+
+		return originalTag[start : start+end]
+	}
+
+	return ""
+}
+
+// fetchFeedMetadataForURL fetches a feed and extracts metadata for a specific page URL.
+func (e *Extractor) fetchFeedMetadataForURL(ctx context.Context, feedURL, pageURL, pageURLNoWWW string) feedMetadata {
+	feed, err := e.fetchFeed(ctx, feedURL)
+	if err != nil {
+		return feedMetadata{}
+	}
+
+	// Find item matching the page URL
+	for _, item := range feed.Items {
+		if item.Link == pageURL || item.Link == pageURLNoWWW ||
+			strings.TrimSuffix(item.Link, "/") == strings.TrimSuffix(pageURL, "/") {
+			meta := feedMetadata{
+				Title:       item.Title,
+				Description: item.Description,
+			}
+
+			if len(item.Authors) > 0 {
+				meta.Author = item.Authors[0].Name
+			}
+
+			if item.PublishedParsed != nil {
+				meta.Published = item.PublishedParsed.Format(time.RFC3339)
+			} else if item.UpdatedParsed != nil {
+				meta.Published = item.UpdatedParsed.Format(time.RFC3339)
+			}
+
+			return meta
+		}
+	}
+
+	return feedMetadata{}
+}
+
+// fetchFeed fetches and parses an RSS/Atom feed.
+func (e *Extractor) fetchFeed(ctx context.Context, feedURL string) (*gofeed.Feed, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create feed request: %w", err)
+	}
+
+	req.Header.Set(headerUserAgent, e.userAgent)
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf(errFmtFetchFeed, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: status %d", errFeedFetchFailed, resp.StatusCode)
+	}
+
+	feed, err := e.feedParser.Parse(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf(errFmtParseFeed, err)
+	}
+
+	return feed, nil
 }
 
 // extractArticleText extracts text content from a readability Article using v2 API.
@@ -279,10 +477,16 @@ func getArticlePublishedTime(article readability.Article) *time.Time {
 	return &t
 }
 
-// parsePublishedDate extracts published date using fallback chain: JSON-LD -> meta tag -> readability.
-func parsePublishedDate(jsonLDDate, metaDate string, readabilityTime *time.Time) time.Time {
+// / parsePublishedDate extracts published date using fallback chain: JSON-LD -> RSS/Atom -> meta tag -> readability.
+func parsePublishedDate(jsonLDDate, feedDate, metaDate string, readabilityTime *time.Time) time.Time {
 	if jsonLDDate != "" {
 		if t, err := time.Parse(time.RFC3339, jsonLDDate); err == nil {
+			return t
+		}
+	}
+
+	if feedDate != "" {
+		if t, err := time.Parse(time.RFC3339, feedDate); err == nil {
 			return t
 		}
 	}
@@ -615,7 +819,7 @@ func (e *Extractor) buildRawTextResult(parsed *url.URL, body []byte) *Extraction
 		Links:       extractLinks(htmlContent, parsed),
 	}
 
-	result.PublishedAt = parsePublishedDate(jsonLD.DatePublished, articlePubVal, nil)
+	result.PublishedAt = parsePublishedDate(jsonLD.DatePublished, "", articlePubVal, nil)
 	result.Language = detectLanguage(jsonLD.Language, ogLocaleVal, result.Title, rawText)
 
 	return result

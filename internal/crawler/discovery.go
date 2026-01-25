@@ -26,6 +26,10 @@ const (
 	wrapReadBody      = "read body: %w"
 	wrapHTTPStatusFmt = "%w: status %d"
 	httpErrorMsg      = "HTTP error"
+
+	// Feed type keywords.
+	feedTypeRSS  = "rss"
+	feedTypeAtom = "atom"
 )
 
 // Discovery errors.
@@ -120,8 +124,8 @@ func (d *Discovery) isFeed(ctx context.Context, feedURL string) bool {
 	contentType := resp.Header.Get(headerContentType)
 
 	return strings.Contains(contentType, "xml") ||
-		strings.Contains(contentType, "rss") ||
-		strings.Contains(contentType, "atom")
+		strings.Contains(contentType, feedTypeRSS) ||
+		strings.Contains(contentType, feedTypeAtom)
 }
 
 // isSitemap checks if a URL is a valid sitemap.
@@ -154,7 +158,7 @@ func (d *Discovery) FetchFeed(ctx context.Context, feedURL string) ([]string, er
 
 	resp, err := d.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch feed: %w", err)
+		return nil, fmt.Errorf(errFmtFetchFeed, err)
 	}
 	defer resp.Body.Close()
 

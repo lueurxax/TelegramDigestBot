@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -218,13 +220,26 @@ func (c *Crawler) discoverURLs(ctx context.Context, sourceURL string, links []st
 	c.processSitemapURLs(ctx, sitemaps, depth)
 
 	// 3. Finally fall back to link crawling (least structured, may include noise)
-	c.enqueueLinks(ctx, links, depth)
+	// Only follow same-domain links per proposal to prevent crawler drift
+	c.enqueueLinks(ctx, sourceURL, links, depth)
 }
 
-// enqueueLinks enqueues a list of links.
-func (c *Crawler) enqueueLinks(ctx context.Context, links []string, depth int) {
+// enqueueLinks enqueues a list of links, filtering to same-domain only.
+// Per proposal: "only follow same-domain links" to prevent off-site drift.
+func (c *Crawler) enqueueLinks(ctx context.Context, sourceURL string, links []string, depth int) {
+	sourceDomain := extractDomain(sourceURL)
+	if sourceDomain == "" {
+		return
+	}
+
 	for _, link := range links {
 		if !isValidCrawlURL(link) {
+			continue
+		}
+
+		// Only follow same-domain links to prevent crawler drift
+		linkDomain := extractDomain(link)
+		if !isSameDomain(sourceDomain, linkDomain) {
 			continue
 		}
 
@@ -233,6 +248,29 @@ func (c *Crawler) enqueueLinks(ctx context.Context, links []string, depth int) {
 			c.logger.Debug().Err(err).Str(fieldURL, link).Msg("Failed to enqueue discovered URL")
 		}
 	}
+}
+
+// extractDomain extracts the domain from a URL, normalizing www prefix.
+func extractDomain(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+
+	return normalizeDomain(parsed.Host)
+}
+
+// normalizeDomain removes www. prefix for consistent comparison.
+func normalizeDomain(domain string) string {
+	domain = strings.ToLower(domain)
+	domain = strings.TrimPrefix(domain, "www.")
+
+	return domain
+}
+
+// isSameDomain checks if two domains are the same (ignoring www prefix).
+func isSameDomain(domain1, domain2 string) bool {
+	return domain1 != "" && domain2 != "" && domain1 == domain2
 }
 
 // processFeedURLs fetches and enqueues entries from feed URLs.
