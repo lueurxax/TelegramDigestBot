@@ -170,7 +170,7 @@ func (r *Resolver) dispatchLinkResolution(ctx context.Context, link *linkextract
 
 func (r *Resolver) handleResolutionError(ctx context.Context, link linkextract.Link, err error) {
 	if errors.Is(err, ErrClientNotInitialized) {
-		r.logger.Debug().Str(logKeyURL, link.URL).Msg("skipping telegram link resolution: client not initialized")
+		r.logger.Trace().Str(logKeyURL, link.URL).Msg("skipping telegram link resolution: client not initialized")
 		return
 	}
 

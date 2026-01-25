@@ -32,7 +32,7 @@ data:
     - name: wikipedia
       disabled: false
     - name: arxiv
-      disabled: false
+      disabled: true  # Disabled due to aggressive rate limiting (3600s suspension)
     - name: crossref
       disabled: false
     - name: ahmia

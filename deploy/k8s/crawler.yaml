@@ -57,7 +57,7 @@ metadata:
   name: news-crawler
   namespace: digest
 spec:
-  replicas: 2
+  replicas: 4
   selector:
     matchLabels:
       app: news-crawler
@@ -78,9 +78,9 @@ spec:
         - name: CRAWL_DEPTH
           value: "2"
         - name: CRAWL_RATE_LIMIT_RPS
-          value: "2"
+          value: "5"
         - name: CRAWL_BATCH_SIZE
-          value: "10"
+          value: "20"
         - name: CRAWL_CLAIM_TTL
           value: "5m"
         - name: CRAWL_USER_AGENT
