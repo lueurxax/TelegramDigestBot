@@ -158,4 +158,39 @@ var (
 		Name: "digest_llm_requests_total",
 		Help: "Total number of LLM requests",
 	}, []string{"provider", "model", "task", "status"})
+
+	// LLM fallback and circuit breaker metrics
+	LLMFallbacks = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_llm_fallbacks_total",
+		Help: "Total number of LLM fallback events",
+	}, []string{"from_provider", "to_provider", "task"})
+
+	LLMCircuitBreakerOpens = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_llm_circuit_breaker_opens_total",
+		Help: "Total number of times LLM circuit breaker opened",
+	}, []string{"provider"})
+
+	LLMCircuitBreakerState = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "digest_llm_circuit_breaker_state",
+		Help: "Current state of LLM circuit breaker (0=closed, 1=open)",
+	}, []string{"provider"})
+
+	// LLM latency by provider and task
+	LLMRequestLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "digest_llm_request_latency_seconds",
+		Help:    "Latency of LLM requests by provider and task",
+		Buckets: []float64{0.5, 1, 2, 5, 10, 20, 30, 60, 120},
+	}, []string{"provider", "model", "task"})
+
+	// LLM estimated costs (in millicents to avoid floating point issues)
+	LLMEstimatedCost = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_llm_estimated_cost_millicents_total",
+		Help: "Estimated LLM cost in millicents (0.001 cents)",
+	}, []string{"provider", "model", "task"})
+
+	// LLM provider availability
+	LLMProviderAvailable = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "digest_llm_provider_available",
+		Help: "Whether LLM provider is currently available (0=no, 1=yes)",
+	}, []string{"provider"})
 )

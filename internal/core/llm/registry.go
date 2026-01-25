@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -60,6 +61,14 @@ func (r *Registry) Register(p Provider, cfg embeddings.CircuitBreakerConfig) {
 
 	// Sort by priority (descending)
 	r.sortProvidersByPriority()
+
+	// Track provider availability metric
+	available := MetricValueUnavailable
+	if p.IsAvailable() {
+		available = MetricValueAvailable
+	}
+
+	observability.LLMProviderAvailable.WithLabelValues(string(name)).Set(available)
 
 	r.logger.Info().
 		Str(logKeyProvider, string(name)).
@@ -280,12 +289,19 @@ func executeWithTaskFallback[T any](r *Registry, taskType TaskType, modelOverrid
 
 	var lastErr error
 
+	var previousProvider ProviderName
+
 	isFirstProvider := true
 
 	for _, pm := range providerModels {
 		result, success, err := tryProviderExec(r, pm, effectiveModelOverride, taskType, fn)
 		if err != nil {
 			lastErr = err
+
+			if isFirstProvider {
+				previousProvider = pm.Provider
+			}
+
 			isFirstProvider = false
 
 			continue
@@ -295,9 +311,17 @@ func executeWithTaskFallback[T any](r *Registry, taskType TaskType, modelOverrid
 			continue
 		}
 
-		if !isFirstProvider {
+		if !isFirstProvider && previousProvider != "" {
+			// Record fallback event
+			observability.LLMFallbacks.WithLabelValues(
+				string(previousProvider),
+				string(pm.Provider),
+				string(taskType),
+			).Inc()
+
 			r.logger.Info().
 				Str(logKeyProvider, string(pm.Provider)).
+				Str("from_provider", string(previousProvider)).
 				Str(logKeyTask, string(taskType)).
 				Msg("used fallback LLM provider")
 		}
@@ -327,6 +351,9 @@ func tryProviderExec[T any](r *Registry, pm ProviderModel, modelOverride string,
 	cb := r.getCircuitBreaker(pm.Provider)
 
 	if !cb.CanAttempt() {
+		// Track circuit breaker state as open
+		observability.LLMCircuitBreakerState.WithLabelValues(string(pm.Provider)).Set(MetricValueCBOpen)
+
 		r.logger.Debug().
 			Str(logKeyProvider, string(pm.Provider)).
 			Str(logKeyTask, string(taskType)).
@@ -340,21 +367,46 @@ func tryProviderExec[T any](r *Registry, pm ProviderModel, modelOverride string,
 		model = modelOverride
 	}
 
+	// Track latency
+	start := time.Now()
+
 	result, err := fn(p, model)
+
+	duration := time.Since(start)
+
+	// Record latency metric
+	observability.LLMRequestLatency.WithLabelValues(
+		string(pm.Provider),
+		model,
+		string(taskType),
+	).Observe(duration.Seconds())
+
 	if err != nil {
+		wasOpen := !cb.CanAttempt()
 		cb.RecordFailure(embeddings.ProviderName(pm.Provider))
+		isNowOpen := !cb.CanAttempt()
+
+		// Track if circuit breaker just opened
+		if !wasOpen && isNowOpen {
+			observability.LLMCircuitBreakerOpens.WithLabelValues(string(pm.Provider)).Inc()
+			observability.LLMCircuitBreakerState.WithLabelValues(string(pm.Provider)).Set(MetricValueCBOpen)
+		}
 
 		r.logger.Warn().
 			Err(err).
 			Str(logKeyProvider, string(pm.Provider)).
 			Str(logKeyModel, model).
 			Str(logKeyTask, string(taskType)).
+			Float64("duration_seconds", duration.Seconds()).
 			Msg("LLM provider failed, trying fallback")
 
 		return zero, false, err
 	}
 
 	cb.RecordSuccess()
+
+	// Circuit breaker recovered - mark as closed
+	observability.LLMCircuitBreakerState.WithLabelValues(string(pm.Provider)).Set(MetricValueCBClosed)
 
 	return result, true, nil
 }

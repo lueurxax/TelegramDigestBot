@@ -1486,3 +1486,1026 @@ data:
       "version": 1,
       "weekStart": ""
     }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: digest-llm-dashboard
+  namespace: monitoring-system
+  labels:
+    grafana_dashboard: "1"
+data:
+  digest-llm.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 1,
+          "panels": [],
+          "title": "LLM Overview",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+          "id": 2,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_requests_total{namespace=\"digest\"}[24h]))",
+              "legendFormat": "Requests",
+              "refId": "A"
+            }
+          ],
+          "title": "LLM Requests (24h)",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 1},
+          "id": 3,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_tokens_prompt_total{namespace=\"digest\"}[24h])) + sum(increase(digest_llm_tokens_completion_total{namespace=\"digest\"}[24h]))",
+              "legendFormat": "Tokens",
+              "refId": "A"
+            }
+          ],
+          "title": "Total Tokens (24h)",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 5}, {"color": "red", "value": 20}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 1},
+          "id": 4,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_fallbacks_total{namespace=\"digest\"}[24h]))",
+              "legendFormat": "Fallbacks",
+              "refId": "A"
+            }
+          ],
+          "title": "Fallback Events (24h)",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [{"options": {"0": {"color": "green", "index": 0, "text": "OK"}, "1": {"color": "red", "index": 1, "text": "OPEN"}}, "type": "value"}],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 1},
+          "id": 5,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "max(digest_llm_circuit_breaker_state{namespace=\"digest\"}) by (provider)",
+              "legendFormat": "{{provider}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Circuit Breaker Status",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+          "id": 6,
+          "options": {
+            "legend": {"calcs": ["mean", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(rate(digest_llm_requests_total{namespace=\"digest\"}[5m])) by (provider) * 60",
+              "legendFormat": "{{provider}}",
+              "refId": "A"
+            }
+          ],
+          "title": "LLM Requests per Minute by Provider",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+          "id": 7,
+          "options": {
+            "legend": {"calcs": ["mean", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(rate(digest_llm_requests_total{namespace=\"digest\"}[5m])) by (task) * 60",
+              "legendFormat": "{{task}}",
+              "refId": "A"
+            }
+          ],
+          "title": "LLM Requests per Minute by Task",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 13},
+          "id": 8,
+          "panels": [],
+          "title": "Token Usage",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "normal"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+          "id": 9,
+          "options": {
+            "legend": {"calcs": ["mean", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(rate(digest_llm_tokens_prompt_total{namespace=\"digest\"}[5m])) by (provider) * 60",
+              "legendFormat": "{{provider}} (prompt)",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(rate(digest_llm_tokens_completion_total{namespace=\"digest\"}[5m])) by (provider) * 60",
+              "legendFormat": "{{provider}} (completion)",
+              "refId": "B"
+            }
+          ],
+          "title": "Token Usage per Minute by Provider",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+          "id": 10,
+          "options": {
+            "legend": {"calcs": ["mean", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(rate(digest_llm_tokens_prompt_total{namespace=\"digest\"}[5m])) by (task) * 60 + sum(rate(digest_llm_tokens_completion_total{namespace=\"digest\"}[5m])) by (task) * 60",
+              "legendFormat": "{{task}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Token Usage per Minute by Task",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"hideFrom": {"legend": false, "tooltip": false, "viz": false}},
+              "mappings": [],
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 22},
+          "id": 11,
+          "options": {
+            "legend": {"displayMode": "table", "placement": "right", "showLegend": true},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "tooltip": {"mode": "single", "sort": "none"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_tokens_prompt_total{namespace=\"digest\"}[1h])) by (provider) + sum(increase(digest_llm_tokens_completion_total{namespace=\"digest\"}[1h])) by (provider)",
+              "legendFormat": "{{provider}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Token Distribution by Provider (1h)",
+          "type": "piechart"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"hideFrom": {"legend": false, "tooltip": false, "viz": false}},
+              "mappings": [],
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 22},
+          "id": 12,
+          "options": {
+            "legend": {"displayMode": "table", "placement": "right", "showLegend": true},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "tooltip": {"mode": "single", "sort": "none"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_tokens_prompt_total{namespace=\"digest\"}[1h])) by (task) + sum(increase(digest_llm_tokens_completion_total{namespace=\"digest\"}[1h])) by (task)",
+              "legendFormat": "{{task}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Token Distribution by Task (1h)",
+          "type": "piechart"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"hideFrom": {"legend": false, "tooltip": false, "viz": false}},
+              "mappings": [],
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 22},
+          "id": 13,
+          "options": {
+            "legend": {"displayMode": "table", "placement": "right", "showLegend": true},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "tooltip": {"mode": "single", "sort": "none"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_tokens_prompt_total{namespace=\"digest\"}[1h]))",
+              "legendFormat": "Prompt",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_tokens_completion_total{namespace=\"digest\"}[1h]))",
+              "legendFormat": "Completion",
+              "refId": "B"
+            }
+          ],
+          "title": "Prompt vs Completion Tokens (1h)",
+          "type": "piechart"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 30},
+          "id": 14,
+          "panels": [],
+          "title": "Latency & Performance",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 31},
+          "id": 15,
+          "options": {
+            "legend": {"calcs": ["mean", "max", "p99"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.50, sum(rate(digest_llm_request_latency_seconds_bucket{namespace=\"digest\"}[5m])) by (le, provider))",
+              "legendFormat": "{{provider}} p50",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.95, sum(rate(digest_llm_request_latency_seconds_bucket{namespace=\"digest\"}[5m])) by (le, provider))",
+              "legendFormat": "{{provider}} p95",
+              "refId": "B"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.99, sum(rate(digest_llm_request_latency_seconds_bucket{namespace=\"digest\"}[5m])) by (le, provider))",
+              "legendFormat": "{{provider}} p99",
+              "refId": "C"
+            }
+          ],
+          "title": "Request Latency by Provider",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 31},
+          "id": 16,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.50, sum(rate(digest_llm_request_latency_seconds_bucket{namespace=\"digest\"}[5m])) by (le, task))",
+              "legendFormat": "{{task}} p50",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.95, sum(rate(digest_llm_request_latency_seconds_bucket{namespace=\"digest\"}[5m])) by (le, task))",
+              "legendFormat": "{{task}} p95",
+              "refId": "B"
+            }
+          ],
+          "title": "Request Latency by Task",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 39},
+          "id": 17,
+          "panels": [],
+          "title": "Reliability & Fallbacks",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+          "id": 18,
+          "options": {
+            "legend": {"calcs": ["mean", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(rate(digest_llm_fallbacks_total{namespace=\"digest\"}[5m])) by (from_provider, to_provider) * 60",
+              "legendFormat": "{{from_provider}} → {{to_provider}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Fallback Events per Minute",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40},
+          "id": 19,
+          "options": {
+            "legend": {"calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_circuit_breaker_opens_total{namespace=\"digest\"}[1h])) by (provider)",
+              "legendFormat": "{{provider}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Circuit Breaker Opens (1h)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [{"options": {"0": {"color": "green", "index": 1, "text": "Available"}, "1": {"color": "red", "index": 0, "text": "Unavailable"}}, "type": "value"}],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.5}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 48},
+          "id": 20,
+          "options": {
+            "colorMode": "background",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "horizontal",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "digest_llm_provider_available{namespace=\"digest\"}",
+              "legendFormat": "{{provider}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Provider Availability",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.9}, {"color": "red", "value": 0.8}]},
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 48},
+          "id": 21,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(rate(digest_llm_requests_total{namespace=\"digest\", status=\"success\"}[1h])) / sum(rate(digest_llm_requests_total{namespace=\"digest\"}[1h]))",
+              "legendFormat": "Success Rate",
+              "refId": "A"
+            }
+          ],
+          "title": "Overall Success Rate (1h)",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"hideFrom": {"legend": false, "tooltip": false, "viz": false}},
+              "mappings": [],
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 48},
+          "id": 22,
+          "options": {
+            "legend": {"displayMode": "table", "placement": "right", "showLegend": true},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "tooltip": {"mode": "single", "sort": "none"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_requests_total{namespace=\"digest\"}[1h])) by (status)",
+              "legendFormat": "{{status}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Request Status Distribution (1h)",
+          "type": "piechart"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 56},
+          "id": 23,
+          "panels": [],
+          "title": "Cost Estimation",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "currencyUSD",
+              "decimals": 4
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 57},
+          "id": 24,
+          "options": {
+            "legend": {"calcs": ["mean", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(rate(digest_llm_estimated_cost_millicents_total{namespace=\"digest\"}[5m])) by (provider) * 60 / 100000",
+              "legendFormat": "{{provider}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Estimated Cost per Minute by Provider",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "currencyUSD",
+              "decimals": 4
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 57},
+          "id": 25,
+          "options": {
+            "legend": {"calcs": ["mean", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(rate(digest_llm_estimated_cost_millicents_total{namespace=\"digest\"}[5m])) by (task) * 60 / 100000",
+              "legendFormat": "{{task}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Estimated Cost per Minute by Task",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "thresholds"},
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]},
+              "unit": "currencyUSD",
+              "decimals": 2
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 65},
+          "id": 26,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_estimated_cost_millicents_total{namespace=\"digest\"}[24h])) / 100000",
+              "legendFormat": "Cost",
+              "refId": "A"
+            }
+          ],
+          "title": "Estimated Cost (24h)",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"hideFrom": {"legend": false, "tooltip": false, "viz": false}},
+              "mappings": [],
+              "unit": "currencyUSD",
+              "decimals": 4
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 65},
+          "id": 27,
+          "options": {
+            "legend": {"displayMode": "table", "placement": "right", "showLegend": true},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "tooltip": {"mode": "single", "sort": "none"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_estimated_cost_millicents_total{namespace=\"digest\"}[1h])) by (provider) / 100000",
+              "legendFormat": "{{provider}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Cost Distribution by Provider (1h)",
+          "type": "piechart"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {"hideFrom": {"legend": false, "tooltip": false, "viz": false}},
+              "mappings": [],
+              "unit": "currencyUSD",
+              "decimals": 4
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 65},
+          "id": 28,
+          "options": {
+            "legend": {"displayMode": "table", "placement": "right", "showLegend": true},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "tooltip": {"mode": "single", "sort": "none"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(increase(digest_llm_estimated_cost_millicents_total{namespace=\"digest\"}[1h])) by (task) / 100000",
+              "legendFormat": "{{task}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Cost Distribution by Task (1h)",
+          "type": "piechart"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": ["digest", "llm"],
+      "templating": {
+        "list": [
+          {
+            "current": {"selected": false, "text": "VictoriaMetrics", "value": "VictoriaMetrics"},
+            "hide": 0,
+            "includeAll": false,
+            "label": "Data Source",
+            "multi": false,
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "queryValue": "",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "type": "datasource"
+          }
+        ]
+      },
+      "time": {"from": "now-6h", "to": "now"},
+      "timepicker": {},
+      "timezone": "",
+      "title": "Digest LLM",
+      "uid": "digest-llm",
+      "version": 1,
+      "weekStart": ""
+    }

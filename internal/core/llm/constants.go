@@ -126,3 +126,11 @@ const (
 	StatusSuccess = "success"
 	StatusError   = "error"
 )
+
+// Metric gauge values.
+const (
+	MetricValueAvailable   = 1.0
+	MetricValueUnavailable = 0.0
+	MetricValueCBOpen      = 1.0 // Circuit breaker is open (blocking requests)
+	MetricValueCBClosed    = 0.0 // Circuit breaker is closed (allowing requests)
+)
