@@ -472,7 +472,8 @@ func matchesSkipPattern(rawURL string) bool {
 	return false
 }
 
-// hasSkipSuffix checks if URL ends with a non-content file extension.
+// hasSkipSuffix checks if URL path ends with a non-content file extension.
+// Handles URLs with query parameters (e.g., /style.css?v=123).
 func hasSkipSuffix(rawURL string) bool {
 	skipSuffixes := []string{
 		// Media
@@ -488,8 +489,18 @@ func hasSkipSuffix(rawURL string) bool {
 		".doc", ".docx", ".ppt", ".pptx", ".odt", ".ods", ".odp",
 	}
 
+	// Extract path without query string and fragment
+	path := rawURL
+	if idx := strings.Index(rawURL, "?"); idx != -1 {
+		path = rawURL[:idx]
+	}
+
+	if idx := strings.Index(path, "#"); idx != -1 {
+		path = path[:idx]
+	}
+
 	for _, suffix := range skipSuffixes {
-		if len(rawURL) > len(suffix) && rawURL[len(rawURL)-len(suffix):] == suffix {
+		if len(path) > len(suffix) && path[len(path)-len(suffix):] == suffix {
 			return true
 		}
 	}
