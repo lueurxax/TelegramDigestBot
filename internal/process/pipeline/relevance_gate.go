@@ -69,12 +69,17 @@ func (p *Pipeline) evaluateRelevanceGate(ctx context.Context, logger zerolog.Log
 	return heuristic
 }
 
-func (p *Pipeline) evaluateGateLLM(ctx context.Context, logger zerolog.Logger, text string, _ *pipelineSettings) (gateDecision, bool) {
+func (p *Pipeline) evaluateGateLLM(ctx context.Context, logger zerolog.Logger, text string, s *pipelineSettings) (gateDecision, bool) {
 	prompt, version := p.loadGatePrompt(ctx, logger)
 
-	// Pass empty model to let the LLM registry handle task-specific model selection
+	model := s.relevanceGateModel
+	if model == "" {
+		model = p.cfg.LLMModel
+	}
+
+	// Pass model to llmClient, if empty it will let the LLM registry handle task-specific model selection
 	// via LLM_RELEVANCE_GATE_MODEL env var or default task config
-	result, err := p.llmClient.RelevanceGate(ctx, text, "", prompt)
+	result, err := p.llmClient.RelevanceGate(ctx, text, s.relevanceGateModel, prompt)
 	if err != nil {
 		logger.Warn().Err(err).Str(LogFieldTask, dropReasonRelevanceGate).Msg("relevance gate LLM call failed")
 		return gateDecision{}, false
@@ -97,7 +102,7 @@ func (p *Pipeline) evaluateGateLLM(ctx context.Context, logger zerolog.Logger, t
 		decision:   decision,
 		confidence: confidence,
 		reason:     strings.TrimSpace(result.Reason),
-		model:      gateModelLLM, // Use constant for LLM-based gate
+		model:      model,
 		version:    version,
 	}, true
 }

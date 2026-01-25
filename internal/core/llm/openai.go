@@ -55,6 +55,7 @@ const (
 	translatePromptTemplate       = "Translate the following text to %s. Preserve HTML tags and return only the translated text."
 	coverPromptNarrativeMaxLength = 200
 	compressSummariesTemperature  = 0.3
+	imageModelGPTImage            = "gpt-image-1.5"
 
 	// Format strings for LLM prompts
 	narrativeItemFormat       = "[%d] Topic: %s - %s\n"
@@ -663,11 +664,13 @@ func (c *openaiClient) GenerateNarrative(ctx context.Context, items []domain.Ite
 	})
 	if err != nil {
 		c.recordFailure()
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
 
 	return resp.Choices[0].Message.Content, nil
 }
@@ -716,11 +719,13 @@ func (c *openaiClient) GenerateNarrativeWithEvidence(ctx context.Context, items 
 	})
 	if err != nil {
 		c.recordFailure()
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
 
 	return resp.Choices[0].Message.Content, nil
 }
@@ -772,11 +777,13 @@ func (c *openaiClient) SummarizeCluster(ctx context.Context, items []domain.Item
 	})
 	if err != nil {
 		c.recordFailure()
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
@@ -844,11 +851,13 @@ func (c *openaiClient) executeClusterSummary(ctx context.Context, model, prompt 
 	})
 	if err != nil {
 		c.recordFailure()
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
@@ -896,11 +905,13 @@ func (c *openaiClient) GenerateClusterTopic(ctx context.Context, items []domain.
 	})
 	if err != nil {
 		c.recordFailure()
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskTopic, 0, 0, false) //nolint:contextcheck // fire-and-forget
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskTopic, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
@@ -932,11 +943,13 @@ func (c *openaiClient) RelevanceGate(ctx context.Context, text string, model str
 	})
 	if err != nil {
 		c.recordFailure()
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskRelevanceGate, 0, 0, false) //nolint:contextcheck // fire-and-forget
 
 		return RelevanceGateResult{}, fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskRelevanceGate, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
 
 	content := resp.Choices[0].Message.Content
 
@@ -1048,11 +1061,13 @@ func (c *openaiClient) CompressSummariesForCover(ctx context.Context, summaries 
 	})
 	if err != nil {
 		c.recordFailure()
+		RecordTokenUsage(string(ProviderOpenAI), modelToUse, TaskCompress, 0, 0, false) //nolint:contextcheck // fire-and-forget
 
 		return nil, fmt.Errorf("failed to compress summaries: %w", err)
 	}
 
 	c.recordSuccess()
+	RecordTokenUsage(string(ProviderOpenAI), modelToUse, TaskCompress, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
 
 	if len(resp.Choices) == 0 {
 		return nil, ErrEmptyLLMResponse
@@ -1089,7 +1104,7 @@ func (c *openaiClient) GenerateDigestCover(ctx context.Context, topics []string,
 	c.logger.Debug().Str("prompt", prompt).Msg("Generating digest cover image")
 
 	resp, err := c.client.CreateImage(ctx, openai.ImageRequest{
-		Model:   "gpt-image-1.5",
+		Model:   imageModelGPTImage,
 		Prompt:  prompt,
 		Size:    openai.CreateImageSize1024x1024,
 		Quality: openai.CreateImageQualityMedium,
@@ -1097,11 +1112,14 @@ func (c *openaiClient) GenerateDigestCover(ctx context.Context, topics []string,
 	})
 	if err != nil {
 		c.recordFailure()
+		RecordTokenUsage(string(ProviderOpenAI), imageModelGPTImage, TaskImageGen, 0, 0, false) //nolint:contextcheck // fire-and-forget
 
 		return nil, fmt.Errorf("failed to generate cover image: %w", err)
 	}
 
 	c.recordSuccess()
+	// Image generation doesn't have traditional token counts, record 0 for success tracking
+	RecordTokenUsage(string(ProviderOpenAI), imageModelGPTImage, TaskImageGen, 0, 0, true) //nolint:contextcheck // fire-and-forget
 
 	if len(resp.Data) == 0 {
 		return nil, ErrEmptyDALLEResponse

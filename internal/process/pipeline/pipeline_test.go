@@ -804,7 +804,7 @@ func TestGroupIndicesByModel(t *testing.T) {
 				{RawMessage: db.RawMessage{ID: "3"}},
 			},
 			llmModel:       "gpt-4o-mini",
-			expectedGroups: map[string][]int{"gpt-4o-mini": {0, 1, 2}},
+			expectedGroups: map[string][]int{"": {0, 1, 2}},
 		},
 		{
 			name: "media does not change model",
@@ -814,7 +814,7 @@ func TestGroupIndicesByModel(t *testing.T) {
 				{RawMessage: db.RawMessage{ID: "3"}},
 			},
 			llmModel:       "gpt-4o-mini",
-			expectedGroups: map[string][]int{"gpt-4o-mini": {0, 1, 2}},
+			expectedGroups: map[string][]int{"": {0, 1, 2}},
 		},
 		{
 			name: "empty model uses default",

@@ -98,6 +98,29 @@ func (p *anthropicProvider) resolveModel(model string) string {
 	return ModelClaudeHaiku
 }
 
+// completeWithMetrics is a helper that executes an API call and records metrics.
+// It handles the common pattern of calling the Anthropic API with metrics tracking.
+func (p *anthropicProvider) completeWithMetrics(ctx context.Context, prompt, model, task string, maxTokens int64, errMsg string) (string, error) {
+	resolvedModel := anthropic.Model(p.resolveModel(model))
+
+	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
+		Model:     resolvedModel,
+		MaxTokens: maxTokens,
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
+		},
+	})
+	if err != nil {
+		RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), task, 0, 0, false) //nolint:contextcheck // fire-and-forget
+
+		return "", fmt.Errorf("%s: %w", errMsg, err)
+	}
+
+	RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), task, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true) //nolint:contextcheck // fire-and-forget
+
+	return strings.TrimSpace(extractTextFromResponse(resp)), nil
+}
+
 // ProcessBatch implements Provider interface.
 func (p *anthropicProvider) ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage, model, tone string) ([]BatchResult, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
@@ -134,8 +157,12 @@ func (p *anthropicProvider) ProcessBatch(ctx context.Context, messages []Message
 		},
 	})
 	if err != nil {
+		RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskSummarize, 0, 0, false) //nolint:contextcheck // fire-and-forget
+
 		return nil, fmt.Errorf("anthropic chat completion: %w", err)
 	}
+
+	RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskSummarize, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true) //nolint:contextcheck // fire-and-forget
 
 	if len(resp.Content) == 0 {
 		return nil, ErrEmptyLLMResponse
@@ -198,8 +225,12 @@ func (p *anthropicProvider) TranslateText(ctx context.Context, text, targetLangu
 		},
 	})
 	if err != nil {
+		RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskTranslate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+
 		return "", fmt.Errorf("anthropic translation: %w", err)
 	}
+
+	RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskTranslate, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true) //nolint:contextcheck // fire-and-forget
 
 	return strings.TrimSpace(extractTextFromResponse(resp)), nil
 }
@@ -210,20 +241,7 @@ func (p *anthropicProvider) CompleteText(ctx context.Context, prompt, model stri
 		return "", fmt.Errorf(errRateLimiterSimple, err)
 	}
 
-	resolvedModel := anthropic.Model(p.resolveModel(model))
-
-	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     resolvedModel,
-		MaxTokens: anthropicMaxTokensDefault,
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("anthropic completion: %w", err)
-	}
-
-	return strings.TrimSpace(extractTextFromResponse(resp)), nil
+	return p.completeWithMetrics(ctx, prompt, model, TaskComplete, anthropicMaxTokensDefault, "anthropic completion")
 }
 
 // GenerateNarrative implements Provider interface.
@@ -237,20 +255,8 @@ func (p *anthropicProvider) GenerateNarrative(ctx context.Context, items []domai
 	}
 
 	prompt := buildNarrativePrompt(items, nil, targetLanguage, tone, defaultNarrativePrompt)
-	resolvedModel := anthropic.Model(p.resolveModel(model))
 
-	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     resolvedModel,
-		MaxTokens: anthropicMaxTokensDefault,
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("anthropic narrative: %w", err)
-	}
-
-	return strings.TrimSpace(extractTextFromResponse(resp)), nil
+	return p.completeWithMetrics(ctx, prompt, model, TaskNarrative, anthropicMaxTokensDefault, "anthropic narrative")
 }
 
 // GenerateNarrativeWithEvidence implements Provider interface.
@@ -264,20 +270,8 @@ func (p *anthropicProvider) GenerateNarrativeWithEvidence(ctx context.Context, i
 	}
 
 	prompt := buildNarrativePrompt(items, evidence, targetLanguage, tone, defaultNarrativePrompt)
-	resolvedModel := anthropic.Model(p.resolveModel(model))
 
-	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     resolvedModel,
-		MaxTokens: anthropicMaxTokensDefault,
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("anthropic narrative with evidence: %w", err)
-	}
-
-	return strings.TrimSpace(extractTextFromResponse(resp)), nil
+	return p.completeWithMetrics(ctx, prompt, model, TaskNarrative, anthropicMaxTokensDefault, "anthropic narrative with evidence")
 }
 
 // SummarizeCluster implements Provider interface.
@@ -291,20 +285,8 @@ func (p *anthropicProvider) SummarizeCluster(ctx context.Context, items []domain
 	}
 
 	prompt := buildClusterSummaryPrompt(items, nil, targetLanguage, tone, defaultClusterSummaryPrompt)
-	resolvedModel := anthropic.Model(p.resolveModel(model))
 
-	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     resolvedModel,
-		MaxTokens: anthropicMaxTokensTiny,
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("anthropic cluster summary: %w", err)
-	}
-
-	return strings.TrimSpace(extractTextFromResponse(resp)), nil
+	return p.completeWithMetrics(ctx, prompt, model, TaskCluster, anthropicMaxTokensTiny, "anthropic cluster summary")
 }
 
 // SummarizeClusterWithEvidence implements Provider interface.
@@ -318,20 +300,8 @@ func (p *anthropicProvider) SummarizeClusterWithEvidence(ctx context.Context, it
 	}
 
 	prompt := buildClusterSummaryPrompt(items, evidence, targetLanguage, tone, defaultClusterSummaryPrompt)
-	resolvedModel := anthropic.Model(p.resolveModel(model))
 
-	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     resolvedModel,
-		MaxTokens: anthropicMaxTokensTiny,
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("anthropic cluster summary with evidence: %w", err)
-	}
-
-	return strings.TrimSpace(extractTextFromResponse(resp)), nil
+	return p.completeWithMetrics(ctx, prompt, model, TaskCluster, anthropicMaxTokensTiny, "anthropic cluster summary with evidence")
 }
 
 // GenerateClusterTopic implements Provider interface.
@@ -345,20 +315,8 @@ func (p *anthropicProvider) GenerateClusterTopic(ctx context.Context, items []do
 	}
 
 	prompt := buildClusterTopicPrompt(items, targetLanguage, defaultClusterTopicPrompt)
-	resolvedModel := anthropic.Model(p.resolveModel(model))
 
-	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     resolvedModel,
-		MaxTokens: anthropicMaxTokensNano,
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("anthropic cluster topic: %w", err)
-	}
-
-	return strings.TrimSpace(extractTextFromResponse(resp)), nil
+	return p.completeWithMetrics(ctx, prompt, model, TaskTopic, anthropicMaxTokensNano, "anthropic cluster topic")
 }
 
 // RelevanceGate implements Provider interface.
@@ -378,8 +336,12 @@ func (p *anthropicProvider) RelevanceGate(ctx context.Context, text, model, prom
 		},
 	})
 	if err != nil {
+		RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskRelevanceGate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+
 		return RelevanceGateResult{}, fmt.Errorf("anthropic relevance gate: %w", err)
 	}
+
+	RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskRelevanceGate, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true) //nolint:contextcheck // fire-and-forget
 
 	responseText := extractJSON(extractTextFromResponse(resp))
 
@@ -420,8 +382,12 @@ func (p *anthropicProvider) CompressSummariesForCover(ctx context.Context, summa
 		},
 	})
 	if err != nil {
+		RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskCompress, 0, 0, false) //nolint:contextcheck // fire-and-forget
+
 		return nil, fmt.Errorf("anthropic compress summaries: %w", err)
 	}
+
+	RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskCompress, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true) //nolint:contextcheck // fire-and-forget
 
 	responseText := extractTextFromResponse(resp)
 	lines := strings.Split(strings.TrimSpace(responseText), "\n")
