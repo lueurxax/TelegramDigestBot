@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 )
@@ -53,6 +54,9 @@ func (r *Registry) Register(p Provider, cfg CircuitBreakerConfig) {
 	// Sort by priority (descending)
 	r.sortProvidersByPriority()
 
+	// Track provider availability metric
+	SetEmbeddingProviderAvailable(string(name), p.IsAvailable())
+
 	r.logger.Info().
 		Str(logKeyProvider, string(name)).
 		Int("priority", p.Priority()).
@@ -65,6 +69,12 @@ func (r *Registry) Register(p Provider, cfg CircuitBreakerConfig) {
 func (r *Registry) GetEmbedding(ctx context.Context, text string) ([]float32, error) {
 	r.mu.RLock()
 	providers := r.getActiveProviders()
+
+	primaryProvider := ""
+	if len(r.order) > 0 {
+		primaryProvider = string(r.order[0])
+	}
+
 	r.mu.RUnlock()
 
 	if len(providers) == 0 {
@@ -73,37 +83,53 @@ func (r *Registry) GetEmbedding(ctx context.Context, text string) ([]float32, er
 
 	var lastErr error
 
+	estimatedTokens := estimateTokens(text)
+
 	for _, p := range providers {
 		cb := r.getCircuitBreaker(p.Name())
+		providerName := string(p.Name())
+		model := r.getModelForProvider(p.Name())
 
 		if !cb.CanAttempt() {
 			r.logger.Debug().
-				Str(logKeyProvider, string(p.Name())).
+				Str(logKeyProvider, providerName).
 				Msg("skipping provider - circuit breaker open")
+			SetEmbeddingProviderAvailable(providerName, false)
 
 			continue
 		}
 
+		start := time.Now()
 		result, err := p.GetEmbedding(ctx, text)
+		duration := time.Since(start)
+
+		RecordEmbeddingLatency(providerName, model, duration)
+
 		if err != nil {
 			cb.RecordFailure(p.Name())
+			RecordEmbeddingRequest(providerName, model, false)
 
 			lastErr = err
 
 			r.logger.Warn().
 				Err(err).
-				Str(logKeyProvider, string(p.Name())).
+				Str(logKeyProvider, providerName).
 				Msg("embedding provider failed, trying fallback")
 
 			continue
 		}
 
 		cb.RecordSuccess()
+		RecordEmbeddingRequest(providerName, model, true)
+		RecordEmbeddingTokens(providerName, model, estimatedTokens)
+		SetEmbeddingProviderAvailable(providerName, true)
 
-		// Log if we used a fallback provider
-		if len(providers) > 1 && p.Name() != r.order[0] {
+		// Log and record if we used a fallback provider
+		if primaryProvider != "" && providerName != primaryProvider {
+			RecordEmbeddingFallback(primaryProvider, providerName)
 			r.logger.Info().
-				Str(logKeyProvider, string(p.Name())).
+				Str(logKeyProvider, providerName).
+				Str("from_provider", primaryProvider).
 				Msg("used fallback embedding provider")
 		}
 
@@ -122,6 +148,12 @@ func (r *Registry) GetEmbedding(ctx context.Context, text string) ([]float32, er
 func (r *Registry) GetEmbeddingWithMetadata(ctx context.Context, text string) (EmbeddingResult, error) {
 	r.mu.RLock()
 	providers := r.getActiveProviders()
+
+	primaryProvider := ""
+	if len(r.order) > 0 {
+		primaryProvider = string(r.order[0])
+	}
+
 	r.mu.RUnlock()
 
 	if len(providers) == 0 {
@@ -130,16 +162,27 @@ func (r *Registry) GetEmbeddingWithMetadata(ctx context.Context, text string) (E
 
 	var lastErr error
 
+	estimatedTokens := estimateTokens(text)
+
 	for _, p := range providers {
 		cb := r.getCircuitBreaker(p.Name())
+		providerName := string(p.Name())
+		model := r.getModelForProvider(p.Name())
 
 		if !cb.CanAttempt() {
+			SetEmbeddingProviderAvailable(providerName, false)
 			continue
 		}
 
+		start := time.Now()
 		result, err := p.GetEmbedding(ctx, text)
+		duration := time.Since(start)
+
+		RecordEmbeddingLatency(providerName, model, duration)
+
 		if err != nil {
 			cb.RecordFailure(p.Name())
+			RecordEmbeddingRequest(providerName, model, false)
 
 			lastErr = err
 
@@ -147,6 +190,14 @@ func (r *Registry) GetEmbeddingWithMetadata(ctx context.Context, text string) (E
 		}
 
 		cb.RecordSuccess()
+		RecordEmbeddingRequest(providerName, model, true)
+		RecordEmbeddingTokens(providerName, model, estimatedTokens)
+		SetEmbeddingProviderAvailable(providerName, true)
+
+		// Record fallback if not using primary provider
+		if primaryProvider != "" && providerName != primaryProvider {
+			RecordEmbeddingFallback(primaryProvider, providerName)
+		}
 
 		// Pad to target dimension
 		result.Vector = PadToTargetDimensions(result.Vector, r.targetDimension)
@@ -211,4 +262,18 @@ func (r *Registry) getCircuitBreaker(name ProviderName) *CircuitBreaker {
 	defer r.mu.RUnlock()
 
 	return r.circuitBreakers[name]
+}
+
+// getModelForProvider returns the model name used by a provider for metrics.
+func (r *Registry) getModelForProvider(name ProviderName) string {
+	switch name {
+	case ProviderOpenAI:
+		return ModelTextEmbedding3Large
+	case ProviderCohere:
+		return ModelEmbedMultilingualV3
+	case ProviderGoogle:
+		return ModelGeminiEmbedding001
+	default:
+		return "unknown"
+	}
 }

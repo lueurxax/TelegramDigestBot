@@ -193,4 +193,36 @@ var (
 		Name: "digest_llm_provider_available",
 		Help: "Whether LLM provider is currently available (0=no, 1=yes)",
 	}, []string{"provider"})
+
+	// Embedding metrics
+	EmbeddingRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_embedding_requests_total",
+		Help: "Total number of embedding requests",
+	}, []string{"provider", "model", "status"})
+
+	EmbeddingTokens = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_embedding_tokens_total",
+		Help: "Total number of tokens processed for embeddings",
+	}, []string{"provider", "model"})
+
+	EmbeddingLatency = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "digest_embedding_latency_seconds",
+		Help:    "Latency of embedding requests by provider",
+		Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5, 10},
+	}, []string{"provider", "model"})
+
+	EmbeddingEstimatedCost = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_embedding_estimated_cost_millicents_total",
+		Help: "Estimated embedding cost in millicents (0.001 cents)",
+	}, []string{"provider", "model"})
+
+	EmbeddingProviderAvailable = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "digest_embedding_provider_available",
+		Help: "Whether embedding provider is currently available (0=no, 1=yes)",
+	}, []string{"provider"})
+
+	EmbeddingFallbacks = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_embedding_fallbacks_total",
+		Help: "Total number of embedding fallback events",
+	}, []string{"from_provider", "to_provider"})
 )
