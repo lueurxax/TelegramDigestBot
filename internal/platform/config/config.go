@@ -169,6 +169,7 @@ type Config struct {
 	// LLM provider settings (multi-provider fallback)
 	AnthropicAPIKey     string        `env:"ANTHROPIC_API_KEY" envDefault:""`
 	GoogleAPIKey        string        `env:"GOOGLE_API_KEY" envDefault:""`
+	GoogleAPIKeyPaid    string        `env:"GOOGLE_API_KEY_PAID" envDefault:""`
 	OpenRouterAPIKey    string        `env:"OPENROUTER_API_KEY" envDefault:""`
 	LLMCircuitThreshold int           `env:"LLM_CIRCUIT_THRESHOLD" envDefault:"5"`
 	LLMCircuitTimeout   time.Duration `env:"LLM_CIRCUIT_TIMEOUT" envDefault:"1m"`

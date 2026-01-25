@@ -73,18 +73,18 @@ spec:
         - name: ZOO_4LW_COMMANDS_WHITELIST
           value: "stat,ruok,conf,srvr"
         command:
-        - sh
-        - -c
-        - |
-          # Extract pod ordinal from hostname
-          HOST=$(hostname -s)
-          ORDINAL=${HOST##*-}
-          MY_ID=$((ORDINAL + 1))
-          echo $MY_ID > /data/myid
-          exec /docker-entrypoint.sh zkServer.sh start-foreground
+          - sh
+          - -c
+          - |
+            # Extract pod ordinal from hostname
+            HOST=$(hostname -s)
+            ORDINAL=${HOST##*-}
+            MY_ID=$((ORDINAL + 1))
+            echo $MY_ID > /data/myid
+            exec /docker-entrypoint.sh zkServer.sh start-foreground
         volumeMounts:
-        - name: data
-          mountPath: /data
+          - name: data
+            mountPath: /data
         resources:
           requests:
             memory: "256Mi"
@@ -95,9 +95,9 @@ spec:
         livenessProbe:
           exec:
             command:
-            - sh
-            - -c
-            - 'echo ruok | nc localhost 2181 | grep imok'
+              - sh
+              - -c
+              - 'echo ruok | nc localhost 2181 | grep imok'
           initialDelaySeconds: 30
           periodSeconds: 15
           timeoutSeconds: 5
@@ -105,9 +105,9 @@ spec:
         readinessProbe:
           exec:
             command:
-            - sh
-            - -c
-            - 'echo stat | nc localhost 2181 | grep Mode'
+              - sh
+              - -c
+              - 'echo stat | nc localhost 2181 | grep Mode'
           initialDelaySeconds: 10
           periodSeconds: 15
           timeoutSeconds: 5

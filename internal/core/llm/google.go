@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/google/generative-ai-go/genai"
@@ -60,19 +61,43 @@ func sanitizeUTF8(s string) string {
 }
 
 // googleProvider implements the Provider interface for Google Gemini.
+// It supports automatic switching from free tier to paid tier on rate limit errors.
 type googleProvider struct {
 	cfg         *config.Config
-	client      *genai.Client
+	clientFree  *genai.Client
+	clientPaid  *genai.Client
 	logger      *zerolog.Logger
 	rateLimiter *rate.Limiter
 	promptStore PromptStore
+
+	mu         sync.RWMutex
+	usePaidKey bool
 }
 
 // NewGoogleProvider creates a new Google Gemini LLM provider.
+// It supports automatic switching from free tier (GOOGLE_API_KEY) to paid tier (GOOGLE_API_KEY_PAID).
 func NewGoogleProvider(ctx context.Context, cfg *config.Config, store PromptStore, logger *zerolog.Logger) (*googleProvider, error) {
-	client, err := genai.NewClient(ctx, option.WithAPIKey(cfg.GoogleAPIKey))
+	// Create free tier client (required)
+	clientFree, err := genai.NewClient(ctx, option.WithAPIKey(cfg.GoogleAPIKey))
 	if err != nil {
-		return nil, fmt.Errorf("creating google genai client: %w", err)
+		return nil, fmt.Errorf("creating google genai client (free): %w", err)
+	}
+
+	// Create paid tier client (optional)
+	var clientPaid *genai.Client
+
+	if cfg.GoogleAPIKeyPaid != "" {
+		clientPaid, err = genai.NewClient(ctx, option.WithAPIKey(cfg.GoogleAPIKeyPaid))
+		if err != nil {
+			// Close free client before returning error
+			_ = clientFree.Close()
+
+			return nil, fmt.Errorf("creating google genai client (paid): %w", err)
+		}
+
+		logger.Info().Msg("Google LLM provider initialized with free and paid tier keys")
+	} else {
+		logger.Info().Msg("Google LLM provider initialized with free tier key only")
 	}
 
 	rateLimit := cfg.RateLimitRPS
@@ -82,22 +107,111 @@ func NewGoogleProvider(ctx context.Context, cfg *config.Config, store PromptStor
 
 	return &googleProvider{
 		cfg:         cfg,
-		client:      client,
+		clientFree:  clientFree,
+		clientPaid:  clientPaid,
 		logger:      logger,
 		rateLimiter: rate.NewLimiter(rate.Limit(float64(rateLimit)), googleRateLimiterBurst),
 		promptStore: store,
+		usePaidKey:  false,
 	}, nil
 }
 
-// Close closes the Google client.
+// Close closes the Google clients.
 func (p *googleProvider) Close() error {
-	if p.client != nil {
-		if err := p.client.Close(); err != nil {
-			return fmt.Errorf("closing google genai client: %w", err)
+	var errs []error
+
+	if p.clientFree != nil {
+		if err := p.clientFree.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("closing google genai client (free): %w", err))
 		}
 	}
 
+	if p.clientPaid != nil {
+		if err := p.clientPaid.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("closing google genai client (paid): %w", err))
+		}
+	}
+
+	if len(errs) > 0 {
+		return errs[0]
+	}
+
 	return nil
+}
+
+// getClient returns the appropriate client based on current tier.
+func (p *googleProvider) getClient() *genai.Client {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if p.usePaidKey && p.clientPaid != nil {
+		return p.clientPaid
+	}
+
+	return p.clientFree
+}
+
+// switchToPaid switches to the paid tier if available.
+func (p *googleProvider) switchToPaid() bool {
+	if p.clientPaid == nil {
+		return false
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.usePaidKey {
+		p.usePaidKey = true
+		p.logger.Warn().Msg("Google LLM: switching to paid tier due to rate limit")
+
+		return true
+	}
+
+	return false
+}
+
+// isRateLimitError checks if the error is a rate limit error.
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+
+	return strings.Contains(errStr, "429") ||
+		strings.Contains(errStr, "RESOURCE_EXHAUSTED") ||
+		strings.Contains(errStr, "quota") ||
+		strings.Contains(errStr, "rate limit")
+}
+
+// generateContent wraps genModel.GenerateContent with automatic retry on rate limit.
+// If the free tier is rate limited, it switches to paid tier and retries.
+func (p *googleProvider) generateContent(ctx context.Context, model string, parts ...genai.Part) (*genai.GenerateContentResponse, error) {
+	client := p.getClient()
+	genModel := client.GenerativeModel(p.resolveModel(model))
+
+	resp, err := genModel.GenerateContent(ctx, parts...)
+	if err != nil && isRateLimitError(err) {
+		// Try switching to paid tier
+		if p.switchToPaid() {
+			// Retry with paid client
+			client = p.getClient()
+			genModel = client.GenerativeModel(p.resolveModel(model))
+
+			retryResp, retryErr := genModel.GenerateContent(ctx, parts...)
+			if retryErr != nil {
+				return nil, fmt.Errorf(errGoogleGenAICompletion, retryErr)
+			}
+
+			return retryResp, nil
+		}
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf(errGoogleGenAICompletion, err)
+	}
+
+	return resp, nil
 }
 
 // Name returns the provider identifier.
@@ -158,10 +272,7 @@ func (p *googleProvider) ProcessBatch(ctx context.Context, messages []MessageInp
 		content.WriteString("\n\n")
 	}
 
-	resolvedModel := p.resolveModel(model)
-	genModel := p.client.GenerativeModel(resolvedModel)
-
-	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(content.String())))
+	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(content.String())))
 	if err != nil {
 		return nil, fmt.Errorf(errGoogleGenAICompletion, err)
 	}
@@ -216,10 +327,8 @@ func (p *googleProvider) TranslateText(ctx context.Context, text, targetLanguage
 	}
 
 	prompt := fmt.Sprintf(translatePromptFmt, targetLanguage, text)
-	resolvedModel := p.resolveModel(model)
-	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
+	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai translation: %w", err)
 	}
@@ -233,10 +342,7 @@ func (p *googleProvider) CompleteText(ctx context.Context, prompt, model string)
 		return "", fmt.Errorf(errRateLimiterSimple, err)
 	}
 
-	resolvedModel := p.resolveModel(model)
-	genModel := p.client.GenerativeModel(resolvedModel)
-
-	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
+	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai completion: %w", err)
 	}
@@ -255,10 +361,8 @@ func (p *googleProvider) GenerateNarrative(ctx context.Context, items []domain.I
 	}
 
 	prompt := buildNarrativePrompt(items, nil, targetLanguage, tone, defaultNarrativePrompt)
-	resolvedModel := p.resolveModel(model)
-	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
+	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai narrative: %w", err)
 	}
@@ -277,10 +381,8 @@ func (p *googleProvider) GenerateNarrativeWithEvidence(ctx context.Context, item
 	}
 
 	prompt := buildNarrativePrompt(items, evidence, targetLanguage, tone, defaultNarrativePrompt)
-	resolvedModel := p.resolveModel(model)
-	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
+	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai narrative with evidence: %w", err)
 	}
@@ -299,10 +401,8 @@ func (p *googleProvider) SummarizeCluster(ctx context.Context, items []domain.It
 	}
 
 	prompt := buildClusterSummaryPrompt(items, nil, targetLanguage, tone, defaultClusterSummaryPrompt)
-	resolvedModel := p.resolveModel(model)
-	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
+	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai cluster summary: %w", err)
 	}
@@ -321,10 +421,8 @@ func (p *googleProvider) SummarizeClusterWithEvidence(ctx context.Context, items
 	}
 
 	prompt := buildClusterSummaryPrompt(items, evidence, targetLanguage, tone, defaultClusterSummaryPrompt)
-	resolvedModel := p.resolveModel(model)
-	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
+	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai cluster summary with evidence: %w", err)
 	}
@@ -343,10 +441,8 @@ func (p *googleProvider) GenerateClusterTopic(ctx context.Context, items []domai
 	}
 
 	prompt := buildClusterTopicPrompt(items, targetLanguage, defaultClusterTopicPrompt)
-	resolvedModel := p.resolveModel(model)
-	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(prompt)))
+	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
 		return "", fmt.Errorf("google genai cluster topic: %w", err)
 	}
@@ -361,10 +457,8 @@ func (p *googleProvider) RelevanceGate(ctx context.Context, text, model, prompt 
 	}
 
 	fullPrompt := fmt.Sprintf(relevanceGateFormat, prompt, text)
-	resolvedModel := p.resolveModel(model)
-	genModel := p.client.GenerativeModel(resolvedModel)
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(fullPrompt)))
+	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(fullPrompt)))
 	if err != nil {
 		return RelevanceGateResult{}, fmt.Errorf("google genai relevance gate: %w", err)
 	}
@@ -397,9 +491,8 @@ func (p *googleProvider) CompressSummariesForCover(ctx context.Context, summarie
 	}
 
 	prompt := buildCompressSummariesPrompt(summaries)
-	genModel := p.client.GenerativeModel(p.resolveModel(model))
 
-	resp, err := genModel.GenerateContent(ctx, genai.Text(sanitizeUTF8(compressSummariesSystemPrompt+"\n\n"+prompt)))
+	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(compressSummariesSystemPrompt+"\n\n"+prompt)))
 	if err != nil {
 		return nil, fmt.Errorf("google genai compress summaries: %w", err)
 	}

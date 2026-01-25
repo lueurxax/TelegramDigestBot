@@ -32,11 +32,12 @@ type TaskProviderChain struct {
 // Each task has its own provider/model fallback chain.
 func DefaultTaskConfig() map[TaskType]TaskProviderChain {
 	return map[TaskType]TaskProviderChain{
-		// Summarize: Google → OpenAI
+		// Summarize: Google → OpenAI → OpenRouter
 		TaskTypeSummarize: {
 			Default: ProviderModel{Provider: ProviderGoogle, Model: "gemini-2.0-flash-lite"},
 			Fallbacks: []ProviderModel{
 				{Provider: ProviderOpenAI, Model: "gpt-5-nano"},
+				{Provider: ProviderOpenRouter, Model: "openai/gpt-oss-120b"},
 			},
 		},
 
