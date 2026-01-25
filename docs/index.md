@@ -19,6 +19,12 @@ This directory contains all documentation for the Telegram Digest Bot project.
 | [Channel Discovery](features/discovery.md) | Automatic channel discovery, keyword filters, admin review |
 | [Channel Importance](features/channel-importance-weight.md) | Per-channel importance weighting |
 
+### AI/LLM Configuration
+
+| Document | Description |
+|----------|-------------|
+| [LLM Configuration](features/llm-configuration.md) | Multi-provider LLM system, model selection, cost tracking, budget controls |
+
 ### Digest Output
 
 | Document | Description |
@@ -45,12 +51,13 @@ This directory contains all documentation for the Telegram Digest Bot project.
 
 These documents describe features under consideration or in development.
 
-| Document | Status | Description |
-|----------|--------|-------------|
-| [Source Enrichment](proposals/source-enrichment-fact-checking.md) | Implemented | Original design for Phase 1 and Phase 2 enrichment |
-| [Language Routing](proposals/enrichment-language-routing.md) | Implemented | Language-aware search query routing |
-| [Search Infrastructure](proposals/search-infrastructure-redesign.md) | Ready | YaCy replacement with SolrCloud (single-step deployment) |
-| [Research & Visualization](proposals/research-interactivity-visualization.md) | Proposal | Interactive research UI and analytics |
+| Document | Description |
+|----------|-------------|
+| [LLM Budget Guardrails](proposals/llm-budget-guardrails.md) | Per-model budgets and rate limits |
+| [Research & Visualization](proposals/research-interactivity-visualization.md) | Interactive research UI and analytics |
+| [Digest Item Expansion](proposals/digest-item-expansion.md) | Expandable digest items with full content |
+| [Digest Quality Low Cost](proposals/digest-quality-low-cost.md) | Quality improvements at lower LLM cost |
+| [Telegram Link Seeding](proposals/telegram-link-seeding.md) | Seeding evidence from Telegram links |
 
 ## Other
 
