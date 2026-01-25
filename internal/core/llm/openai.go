@@ -196,13 +196,13 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskSummarize, 0, 0, false)
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskSummarize, 0, 0, false) //nolint:contextcheck // fire-and-forget
 
 		return nil, fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskSummarize, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskSummarize, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
 
 	content := resp.Choices[0].Message.Content
 	c.logger.Debug().Str("content", content).Msg("LLM response")
@@ -242,13 +242,13 @@ func (c *openaiClient) TranslateText(ctx context.Context, text string, targetLan
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskTranslate, 0, 0, false)
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskTranslate, 0, 0, false) //nolint:contextcheck // fire-and-forget
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskTranslate, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskTranslate, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
@@ -279,13 +279,13 @@ func (c *openaiClient) CompleteText(ctx context.Context, prompt string, model st
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskComplete, 0, 0, false)
+		RecordTokenUsage(string(ProviderOpenAI), model, TaskComplete, 0, 0, false) //nolint:contextcheck // fire-and-forget
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskComplete, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
+	RecordTokenUsage(string(ProviderOpenAI), model, TaskComplete, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }

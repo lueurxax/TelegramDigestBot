@@ -90,10 +90,12 @@ Embeddings are the highest-volume API calls:
 For quality-first with multilingual fallback:
 
 ```yaml
-EMBEDDING_PROVIDER_ORDER: "openai,cohere"
-EMBEDDING_DEFAULT_MODEL: "text-embedding-3-large"
-EMBEDDING_FALLBACK_MODEL: "embed-multilingual-v3.0"
+EMBEDDING_PROVIDER_ORDER: "openai,cohere,google"
+OPENAI_EMBEDDING_MODEL: "text-embedding-3-large"
+COHERE_EMBEDDING_MODEL: "embed-multilingual-v3.0"
 ```
+
+**Status:** Implemented. Provider order can be customized via `EMBEDDING_PROVIDER_ORDER` env var.
 
 **Rationale:**
 - `text-embedding-3-large` provides highest quality embeddings (3072 dimensions)

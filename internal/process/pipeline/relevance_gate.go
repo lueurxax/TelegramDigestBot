@@ -15,6 +15,7 @@ const (
 	gateModeHybrid    = "hybrid"
 
 	gateModelHeuristic   = "heuristic"
+	gateModelLLM         = "llm"
 	gateVersionHeuristic = "v1"
 
 	gatePromptActiveKey     = "prompt:relevance_gate:active"
@@ -68,28 +69,20 @@ func (p *Pipeline) evaluateRelevanceGate(ctx context.Context, logger zerolog.Log
 	return heuristic
 }
 
-func (p *Pipeline) evaluateGateLLM(ctx context.Context, logger zerolog.Logger, text string, s *pipelineSettings) (gateDecision, bool) {
-	model := strings.TrimSpace(s.relevanceGateModel)
-	if model == "" {
-		model = strings.TrimSpace(p.cfg.LLMModel)
-	}
-
-	if model == "" {
-		logger.Debug().Msg("relevance gate model is empty; falling back to heuristic")
-		return gateDecision{}, false
-	}
-
+func (p *Pipeline) evaluateGateLLM(ctx context.Context, logger zerolog.Logger, text string, _ *pipelineSettings) (gateDecision, bool) {
 	prompt, version := p.loadGatePrompt(ctx, logger)
 
-	result, err := p.llmClient.RelevanceGate(ctx, text, model, prompt)
+	// Pass empty model to let the LLM registry handle task-specific model selection
+	// via LLM_RELEVANCE_GATE_MODEL env var or default task config
+	result, err := p.llmClient.RelevanceGate(ctx, text, "", prompt)
 	if err != nil {
-		logger.Warn().Err(err).Str(LogFieldModel, model).Msg("relevance gate LLM call failed")
+		logger.Warn().Err(err).Str(LogFieldTask, dropReasonRelevanceGate).Msg("relevance gate LLM call failed")
 		return gateDecision{}, false
 	}
 
 	decision := strings.ToLower(strings.TrimSpace(result.Decision))
 	if decision != DecisionRelevant && decision != DecisionIrrelevant {
-		logger.Warn().Str(LogFieldModel, model).Str("decision", result.Decision).Msg("invalid relevance gate decision")
+		logger.Warn().Str(LogFieldTask, dropReasonRelevanceGate).Str("decision", result.Decision).Msg("invalid relevance gate decision")
 		return gateDecision{}, false
 	}
 
@@ -104,7 +97,7 @@ func (p *Pipeline) evaluateGateLLM(ctx context.Context, logger zerolog.Logger, t
 		decision:   decision,
 		confidence: confidence,
 		reason:     strings.TrimSpace(result.Reason),
-		model:      model,
+		model:      gateModelLLM, // Use constant for LLM-based gate
 		version:    version,
 	}, true
 }

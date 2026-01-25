@@ -250,14 +250,15 @@ func (rc *digestRenderContext) convertEvidenceForLLM(items []db.Item) llm.ItemEv
 }
 
 func (rc *digestRenderContext) generateNarrative(ctx context.Context, sb *strings.Builder) bool {
-	model := rc.scheduler.cfg.LLMModel
-	if !rc.settings.editorEnabled || model == "" {
+	if !rc.settings.editorEnabled {
 		return false
 	}
 
 	evidence := rc.convertEvidenceForLLM(rc.items)
 
-	narrative, err := rc.llmClient.GenerateNarrativeWithEvidence(ctx, rc.items, evidence, rc.settings.digestLanguage, model, rc.settings.digestTone)
+	// Pass empty model to let the LLM registry handle task-specific model selection
+	// via LLM_NARRATIVE_MODEL env var or default task config
+	narrative, err := rc.llmClient.GenerateNarrativeWithEvidence(ctx, rc.items, evidence, rc.settings.digestLanguage, "", rc.settings.digestTone)
 	if err != nil {
 		rc.logger.Warn().Err(err).Msg("Editor-in-Chief narrative generation failed")
 		return false
@@ -376,16 +377,11 @@ func (rc *digestRenderContext) renderOthersAsNarrative(ctx context.Context, sb *
 		return false
 	}
 
-	model := rc.getNarrativeModel()
-	if model == "" {
-		rc.renderGroup(ctx, sb, group, emoji, title)
-
-		return true
-	}
-
 	// Generate narrative for "others" items with evidence context
+	// Pass empty model to let the LLM registry handle task-specific model selection
+	// via LLM_CLUSTER_MODEL env var or default task config
 	evidence := rc.convertEvidenceForLLM(allItems)
-	narrative, err := rc.llmClient.SummarizeClusterWithEvidence(ctx, allItems, evidence, rc.settings.digestLanguage, model, rc.settings.digestTone)
+	narrative, err := rc.llmClient.SummarizeClusterWithEvidence(ctx, allItems, evidence, rc.settings.digestLanguage, "", rc.settings.digestTone)
 
 	if err != nil || narrative == "" {
 		if err != nil {
@@ -400,10 +396,6 @@ func (rc *digestRenderContext) renderOthersAsNarrative(ctx context.Context, sb *
 	rc.renderNarrativeSection(sb, narrative, emoji, title, allItems)
 
 	return true
-}
-
-func (rc *digestRenderContext) getNarrativeModel() string {
-	return rc.scheduler.cfg.LLMModel
 }
 
 func collectAllItems(group clusterGroup) []db.Item {
@@ -454,10 +446,10 @@ func (rc *digestRenderContext) renderMultiItemCluster(ctx context.Context, sb *s
 }
 
 func (rc *digestRenderContext) renderConsolidatedCluster(ctx context.Context, sb *strings.Builder, c db.ClusterWithItems) bool {
-	model := rc.getNarrativeModel()
-
+	// Pass empty model to let the LLM registry handle task-specific model selection
+	// via LLM_CLUSTER_MODEL env var or default task config
 	evidence := rc.convertEvidenceForLLM(c.Items)
-	summary, err := rc.llmClient.SummarizeClusterWithEvidence(ctx, c.Items, evidence, rc.settings.digestLanguage, model, rc.settings.digestTone)
+	summary, err := rc.llmClient.SummarizeClusterWithEvidence(ctx, c.Items, evidence, rc.settings.digestLanguage, "", rc.settings.digestTone)
 
 	if err != nil || summary == "" {
 		if err != nil {

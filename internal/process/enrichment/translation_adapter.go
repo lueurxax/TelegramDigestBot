@@ -10,18 +10,20 @@ import (
 
 type translationAdapter struct {
 	llmClient llm.Client
-	model     string
 }
 
-func NewTranslationAdapter(llmClient llm.Client, model string) TranslationClient {
+// NewTranslationAdapter creates a new translation adapter.
+// The model parameter is deprecated and ignored - the LLM registry handles task-specific model selection.
+func NewTranslationAdapter(llmClient llm.Client, _ string) TranslationClient {
 	return &translationAdapter{
 		llmClient: llmClient,
-		model:     model,
 	}
 }
 
 func (a *translationAdapter) Translate(ctx context.Context, text string, targetLanguage string) (string, error) {
-	res, err := a.llmClient.TranslateText(ctx, text, targetLanguage, a.model)
+	// Pass empty model to let the LLM registry handle task-specific model selection
+	// via LLM_TRANSLATE_MODEL env var or default task config
+	res, err := a.llmClient.TranslateText(ctx, text, targetLanguage, "")
 	if err != nil {
 		return "", fmt.Errorf(fmtErrTranslateTo, targetLanguage, err)
 	}

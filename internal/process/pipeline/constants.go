@@ -41,6 +41,7 @@ const (
 	LogFieldDuplicateID   = "duplicate_id"
 	LogFieldCount         = "count"
 	LogFieldModel         = "model"
+	LogFieldTask          = "task"
 	LogFieldItemID        = "item_id"
 	LogFieldLinkID        = "link_id"
 	LogFieldHours         = "hours"

@@ -110,6 +110,66 @@ func (r *Registry) getTaskModelOverride(taskType TaskType) string {
 	return r.modelOverrides[taskType]
 }
 
+// SettingsReader is an interface for reading settings from a database.
+type SettingsReader interface {
+	GetSetting(ctx context.Context, key string, target interface{}) error
+}
+
+// UsageStore is an interface for storing LLM usage data.
+type UsageStore interface {
+	IncrementLLMUsage(ctx context.Context, provider, model, task string, promptTokens, completionTokens int, cost float64) error
+}
+
+// DBSettingToTaskType maps database setting keys to TaskType.
+var DBSettingToTaskType = map[string]TaskType{
+	"llm_override_summarize": TaskTypeSummarize,
+	"llm_override_cluster":   TaskTypeClusterSummary,
+	"llm_override_narrative": TaskTypeNarrative,
+	"llm_override_topic":     TaskTypeClusterTopic,
+}
+
+// LoadOverridesFromDB loads model overrides from database settings.
+// This allows runtime configuration via bot commands like /llm set.
+func (r *Registry) LoadOverridesFromDB(ctx context.Context, reader SettingsReader) {
+	for settingKey, taskType := range DBSettingToTaskType {
+		var model string
+		if err := reader.GetSetting(ctx, settingKey, &model); err == nil && model != "" {
+			r.SetTaskModelOverride(taskType, model)
+
+			r.logger.Info().
+				Str(logKeyTask, string(taskType)).
+				Str(logKeyModel, model).
+				Msg("loaded task model override from DB")
+		}
+	}
+}
+
+// RefreshOverride reloads a single override from the database.
+// Called when a bot command updates a setting.
+func (r *Registry) RefreshOverride(ctx context.Context, reader SettingsReader, settingKey string) {
+	taskType, ok := DBSettingToTaskType[settingKey]
+	if !ok {
+		return
+	}
+
+	var model string
+	if err := reader.GetSetting(ctx, settingKey, &model); err != nil {
+		r.logger.Warn().Err(err).Str("setting", settingKey).Msg("failed to load override from DB")
+		return
+	}
+
+	// Empty model means reset to default (delete override)
+	if model == "" {
+		r.mu.Lock()
+		delete(r.modelOverrides, taskType)
+		r.mu.Unlock()
+
+		r.logger.Info().Str(logKeyTask, string(taskType)).Msg("cleared task model override")
+	} else {
+		r.SetTaskModelOverride(taskType, model)
+	}
+}
+
 // ProcessBatch implements Client interface with task-aware fallback.
 func (r *Registry) ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage, model, tone string) ([]BatchResult, error) {
 	return executeWithTaskFallback(r, TaskTypeSummarize, model, func(p Provider, m string) ([]BatchResult, error) {
@@ -464,9 +524,19 @@ func (r *Registry) GetProviderStatuses() []ProviderStatus {
 //nolint:gochecknoglobals
 var globalBudgetTracker *BudgetTracker
 
+// globalUsageStore holds a reference to the usage store for persisting token usage.
+//
+//nolint:gochecknoglobals
+var globalUsageStore UsageStore
+
 // SetGlobalBudgetTracker sets the global budget tracker reference.
 func SetGlobalBudgetTracker(bt *BudgetTracker) {
 	globalBudgetTracker = bt
+}
+
+// SetGlobalUsageStore sets the global usage store reference.
+func SetGlobalUsageStore(store UsageStore) {
+	globalUsageStore = store
 }
 
 // RecordTokenUsage records token usage metrics for an LLM request.
@@ -492,6 +562,27 @@ func RecordTokenUsage(provider, model, task string, promptTokens, completionToke
 		if totalTokens > 0 {
 			globalBudgetTracker.RecordTokens(totalTokens)
 		}
+	}
+
+	// Persist to database if store is configured and request succeeded
+	if globalUsageStore != nil && success {
+		// Estimate cost (rough approximation - actual costs vary by model)
+		cost := estimateCost(provider, model, promptTokens, completionTokens)
+
+		// Use background context since this is fire-and-forget.
+		// The context is intentionally not passed from callers because:
+		// 1. RecordTokenUsage is called synchronously and should not block on DB writes
+		// 2. Usage storage is best-effort and shouldn't fail the LLM request if it fails
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), usageStorageTimeout)
+			defer cancel()
+
+			if err := globalUsageStore.IncrementLLMUsage(ctx, provider, model, task, promptTokens, completionTokens, cost); err != nil {
+				// Log error but don't fail the request
+				// This is intentionally a no-op since we don't want to impact request latency
+				_ = err
+			}
+		}()
 	}
 }
 

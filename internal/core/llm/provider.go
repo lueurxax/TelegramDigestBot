@@ -28,9 +28,6 @@ const (
 	PriorityMock           = 0   // Mock provider for testing
 )
 
-// Log key constants.
-const logKeyProvider = "provider"
-
 // Provider defines the interface for LLM providers.
 // All providers must implement the core LLM methods.
 type Provider interface {

@@ -58,6 +58,8 @@ type Client interface {
 	GetBudgetStatus() (dailyTokens, dailyLimit int64, percentage float64)
 	SetBudgetAlertCallback(callback func(alert BudgetAlert))
 	RecordTokensForBudget(tokens int)
+	// Runtime override methods
+	RefreshOverride(ctx context.Context, reader SettingsReader, settingKey string)
 }
 
 type RelevanceGateResult struct {
@@ -138,7 +140,14 @@ func New(ctx context.Context, cfg *config.Config, store PromptStore, logger *zer
 	registry := NewRegistry(logger)
 	circuitCfg := buildCircuitConfig(cfg)
 	registerProviders(ctx, registry, cfg, store, logger, circuitCfg)
+
+	// Apply env-based model overrides first
 	applyModelOverrides(registry, cfg)
+
+	// Then load DB overrides (runtime config takes precedence)
+	if store != nil {
+		registry.LoadOverridesFromDB(ctx, store)
+	}
 
 	return registry
 }

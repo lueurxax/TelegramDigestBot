@@ -458,15 +458,16 @@ func (s *Scheduler) sortClusterItems(clusterItemsList []db.Item) {
 }
 
 func (s *Scheduler) generateClusterTopic(ctx context.Context, clusterItemsList []db.Item, defaultTopic, digestLanguage string) string {
-	model := s.cfg.LLMModel
-	if model == "" || len(clusterItemsList) <= 1 {
+	if len(clusterItemsList) <= 1 {
 		return defaultTopic
 	}
 
 	// Augment vague summaries with link context for better topic generation
 	augmentedItems := s.augmentClusterItemsForTopic(ctx, clusterItemsList)
 
-	if betterTopic, err := s.llmClient.GenerateClusterTopic(ctx, augmentedItems, digestLanguage, model); err == nil && betterTopic != "" {
+	// Pass empty model to let the LLM registry handle task-specific model selection
+	// via LLM_CLUSTER_MODEL env var or default task config
+	if betterTopic, err := s.llmClient.GenerateClusterTopic(ctx, augmentedItems, digestLanguage, ""); err == nil && betterTopic != "" {
 		return betterTopic
 	}
 

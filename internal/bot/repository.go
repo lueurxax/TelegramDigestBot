@@ -101,6 +101,10 @@ type Repository interface {
 	GetDiscoveryStats(ctx context.Context) (*db.DiscoveryStats, error)
 	GetDiscoveryFilterStats(ctx context.Context, minSeen int, minEngagement float32) (*db.DiscoveryFilterStats, error)
 	IsChannelTracked(ctx context.Context, username string, peerID int64, inviteLink string) (bool, error)
+
+	// LLM usage operations
+	GetDailyLLMUsage(ctx context.Context) (*db.LLMUsageSummary, error)
+	GetMonthlyLLMUsage(ctx context.Context) (*db.LLMUsageSummary, error)
 }
 
 // Compile-time assertion that *db.DB implements Repository.

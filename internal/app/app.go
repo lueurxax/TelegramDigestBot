@@ -357,6 +357,9 @@ func (a *App) RunDigest(ctx context.Context, once bool) error {
 
 // newLLMClient creates a new LLM client with multi-provider fallback.
 func (a *App) newLLMClient(ctx context.Context) llm.Client {
+	// Set the global usage store for token usage persistence
+	llm.SetGlobalUsageStore(a.database)
+
 	return llm.New(ctx, a.cfg, a.database, a.logger)
 }
 
@@ -374,6 +377,7 @@ func (a *App) newEmbeddingClient(ctx context.Context) embeddings.Client {
 		CohereRateLimit:  1,
 		GoogleAPIKey:     a.cfg.GoogleAPIKey,
 		GoogleRateLimit:  a.cfg.RateLimitRPS,
+		ProviderOrder:    a.cfg.EmbeddingProviderOrder,
 		CircuitBreakerConfig: embeddings.CircuitBreakerConfig{
 			Threshold:  a.cfg.EmbeddingCircuitThreshold,
 			ResetAfter: a.cfg.EmbeddingCircuitTimeout,

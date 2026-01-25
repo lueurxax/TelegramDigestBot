@@ -108,6 +108,16 @@ const (
 	defaultCircuitTimeout   = time.Minute
 )
 
+// Usage storage timeout
+const (
+	usageStorageTimeout = 5 * time.Second
+)
+
+// Log field keys
+const (
+	logKeyProvider = "provider"
+)
+
 // LLM task names for metrics tracking.
 const (
 	TaskSummarize     = "summarize"

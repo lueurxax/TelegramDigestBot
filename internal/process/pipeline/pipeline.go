@@ -624,10 +624,10 @@ func (p *Pipeline) runLLMProcessing(ctx context.Context, logger zerolog.Logger, 
 func (p *Pipeline) groupIndicesByModel(candidates []llm.MessageInput) map[string][]int {
 	modelGroups := make(map[string][]int)
 
+	// Use empty string to let the LLM registry handle task-specific model selection
+	// via LLM_SUMMARIZE_MODEL env var or default task config
 	for i := range candidates {
-		model := p.cfg.LLMModel
-
-		modelGroups[model] = append(modelGroups[model], i)
+		modelGroups[""] = append(modelGroups[""], i)
 	}
 
 	return modelGroups
@@ -693,11 +693,6 @@ func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger z
 		return
 	}
 
-	tieredModel := p.cfg.LLMModel
-	if tieredModel == "" {
-		return
-	}
-
 	tieredIndices, tieredCandidates := selectTieredCandidates(candidates, results)
 	if len(tieredCandidates) == 0 {
 		return
@@ -707,7 +702,8 @@ func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger z
 
 	llmStart := time.Now()
 
-	tieredResults, err := p.llmClient.ProcessBatch(ctx, tieredCandidates, s.digestLanguage, tieredModel, s.digestTone)
+	// Pass empty model to let the LLM registry handle task-specific model selection
+	tieredResults, err := p.llmClient.ProcessBatch(ctx, tieredCandidates, s.digestLanguage, "", s.digestTone)
 	if err != nil {
 		logger.Warn().Err(err).Msg("Tiered importance analysis failed, keeping original results")
 
@@ -718,7 +714,7 @@ func (p *Pipeline) performTieredImportanceAnalysis(ctx context.Context, logger z
 		return
 	}
 
-	observability.LLMRequestDuration.WithLabelValues(tieredModel).Observe(time.Since(llmStart).Seconds())
+	observability.LLMRequestDuration.WithLabelValues("summarize").Observe(time.Since(llmStart).Seconds())
 	applyTieredResults(results, tieredResults, tieredIndices)
 }
 
@@ -804,12 +800,9 @@ func (p *Pipeline) translateSummaryIfNeeded(ctx context.Context, logger zerolog.
 		return summary
 	}
 
-	model := strings.TrimSpace(p.cfg.TranslationModel)
-	if model == "" {
-		model = p.cfg.LLMModel
-	}
-
-	translated, err := p.llmClient.TranslateText(ctx, summary, targetLang, model)
+	// Pass empty model to let the LLM registry handle task-specific model selection
+	// via LLM_TRANSLATE_MODEL env var or default task config
+	translated, err := p.llmClient.TranslateText(ctx, summary, targetLang, "")
 	if err != nil {
 		logger.Warn().Err(err).Str(LogFieldMsgID, msgID).Msg("failed to translate summary")
 		return summary

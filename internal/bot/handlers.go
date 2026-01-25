@@ -4363,7 +4363,7 @@ func (b *Bot) handleLLMNamespace(ctx context.Context, msg *tgbotapi.Message) {
 	case subCmdReset:
 		b.handleLLMReset(ctx, msg, args[1:])
 	case "costs":
-		b.handleLLMCosts(msg)
+		b.handleLLMCosts(ctx, msg)
 	case "budget":
 		b.handleLLMBudget(ctx, msg, args[1:])
 	case subCmdHelp:
@@ -4491,6 +4491,9 @@ func (b *Bot) handleLLMSet(ctx context.Context, msg *tgbotapi.Message, args []st
 		return
 	}
 
+	// Refresh the override in the LLM registry so it takes effect immediately
+	b.llmClient.RefreshOverride(ctx, b.database, settingKey)
+
 	b.reply(msg, fmt.Sprintf("✅ Set <b>%s</b> model to <code>%s</code>", task, html.EscapeString(model)))
 }
 
@@ -4509,6 +4512,9 @@ func (b *Bot) handleLLMReset(ctx context.Context, msg *tgbotapi.Message, args []
 			if err := b.database.DeleteSettingWithHistory(ctx, settingKey, msg.From.ID); err != nil {
 				b.logger.Warn().Err(err).Str("task", taskName).Msg("failed to reset LLM override")
 			}
+
+			// Refresh the override in the LLM registry
+			b.llmClient.RefreshOverride(ctx, b.database, settingKey)
 		}
 
 		b.reply(msg, "✅ Reset all LLM model overrides to defaults")
@@ -4529,32 +4535,84 @@ func (b *Bot) handleLLMReset(ctx context.Context, msg *tgbotapi.Message, args []
 		return
 	}
 
+	// Refresh the override in the LLM registry so it takes effect immediately
+	b.llmClient.RefreshOverride(ctx, b.database, settingKey)
+
 	b.reply(msg, fmt.Sprintf("✅ Reset <b>%s</b> model to default", task))
 }
 
-// handleLLMCosts displays token usage tracking info.
-func (b *Bot) handleLLMCosts(msg *tgbotapi.Message) {
-	response := `💰 <b>LLM Cost Tracking</b>
+// handleLLMCosts displays token usage and cost tracking.
+func (b *Bot) handleLLMCosts(ctx context.Context, msg *tgbotapi.Message) {
+	var sb strings.Builder
 
-Token usage is tracked via Prometheus metrics:
-• <code>digest_llm_tokens_prompt_total</code>
-• <code>digest_llm_tokens_completion_total</code>
-• <code>digest_llm_requests_total</code>
+	sb.WriteString("💰 <b>LLM Cost Tracking</b>\n\n")
 
-<b>Labels:</b> provider, model, task, status
+	// Fetch daily usage
+	dailyUsage, err := b.database.GetDailyLLMUsage(ctx)
+	if err != nil {
+		b.logger.Warn().Err(err).Msg("failed to fetch daily LLM usage")
+	}
 
-<b>View in Grafana:</b>
-Check the "Digest Bot Overview" dashboard for:
-• Token usage by provider/model
-• Request counts and error rates
-• Cost estimation panels
+	// Fetch monthly usage
+	monthlyUsage, err := b.database.GetMonthlyLLMUsage(ctx)
+	if err != nil {
+		b.logger.Warn().Err(err).Msg("failed to fetch monthly LLM usage")
+	}
 
-<b>Estimated Pricing (per 1M tokens):</b>
-• Google gemini-2.0-flash-lite: $0.10 in / $0.40 out
-• Anthropic claude-haiku-4.5: $1.00 in / $5.00 out
-• OpenAI gpt-5-nano: $0.05 in / $0.40 out`
+	// Display daily usage
+	sb.WriteString("<b>Today's Usage:</b>\n")
 
-	b.reply(msg, response)
+	if dailyUsage != nil && dailyUsage.TotalRequests > 0 {
+		b.writeLLMUsageSummary(&sb, dailyUsage)
+	} else {
+		sb.WriteString("No usage recorded today.\n")
+	}
+
+	sb.WriteString("\n<b>This Month:</b>\n")
+
+	if monthlyUsage != nil && monthlyUsage.TotalRequests > 0 {
+		b.writeLLMUsageSummary(&sb, monthlyUsage)
+	} else {
+		sb.WriteString("No usage recorded this month.\n")
+	}
+
+	// Add Prometheus/Grafana info
+	sb.WriteString("\n<b>Real-time Metrics:</b>\n")
+	sb.WriteString("View detailed metrics in Grafana dashboard.\n")
+	sb.WriteString("Prometheus metrics: <code>digest_llm_*</code>")
+
+	b.reply(msg, sb.String())
+}
+
+// writeLLMUsageSummary writes LLM usage summary to the builder.
+func (b *Bot) writeLLMUsageSummary(sb *strings.Builder, usage *db.LLMUsageSummary) {
+	const tokensPerK = 1000
+
+	totalTokens := usage.TotalPromptTokens + usage.TotalCompletionTokens
+
+	fmt.Fprintf(sb, "• Requests: <code>%d</code>\n", usage.TotalRequests)
+	fmt.Fprintf(sb, "• Tokens: <code>%dk</code> (prompt: %dk, completion: %dk)\n",
+		totalTokens/tokensPerK, usage.TotalPromptTokens/tokensPerK, usage.TotalCompletionTokens/tokensPerK)
+
+	if usage.TotalCostUSD > 0 {
+		fmt.Fprintf(sb, "• Est. Cost: <code>$%.4f</code>\n", usage.TotalCostUSD)
+	}
+
+	// Show by provider if multiple
+	if len(usage.ByProvider) > 1 {
+		sb.WriteString("\n<b>By Provider:</b>\n")
+
+		for _, p := range usage.ByProvider {
+			provTokens := p.PromptTokens + p.CompletionTokens
+			fmt.Fprintf(sb, "  %s: %dk tokens, %d reqs", p.Provider, provTokens/tokensPerK, p.RequestCount)
+
+			if p.CostUSD > 0 {
+				fmt.Fprintf(sb, ", $%.4f", p.CostUSD)
+			}
+
+			sb.WriteString("\n")
+		}
+	}
 }
 
 // handleLLMBudget handles the /llm budget command.

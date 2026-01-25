@@ -163,6 +163,7 @@ type Config struct {
 	OpenAIEmbeddingModel      string        `env:"OPENAI_EMBEDDING_MODEL" envDefault:"text-embedding-3-large"`
 	OpenAIEmbeddingDimensions int           `env:"OPENAI_EMBEDDING_DIMENSIONS" envDefault:"1536"`
 	CohereEmbeddingModel      string        `env:"COHERE_EMBEDDING_MODEL" envDefault:"embed-multilingual-v3.0"`
+	EmbeddingProviderOrder    string        `env:"EMBEDDING_PROVIDER_ORDER" envDefault:"openai,cohere,google"`
 	EmbeddingCircuitThreshold int           `env:"EMBEDDING_CIRCUIT_THRESHOLD" envDefault:"5"`
 	EmbeddingCircuitTimeout   time.Duration `env:"EMBEDDING_CIRCUIT_TIMEOUT" envDefault:"1m"`
 

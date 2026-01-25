@@ -2,6 +2,7 @@ package embeddings
 
 import (
 	"context"
+	"strings"
 
 	"github.com/rs/zerolog"
 )
@@ -35,6 +36,9 @@ type Config struct {
 	GoogleModel     string
 	GoogleRateLimit int
 
+	// Provider order (comma-separated: "openai,cohere,google")
+	ProviderOrder string
+
 	// Circuit breaker settings
 	CircuitBreakerConfig CircuitBreakerConfig
 
@@ -50,38 +54,18 @@ func NewClient(ctx context.Context, cfg Config, logger *zerolog.Logger) Client {
 
 	registry := NewRegistry(cfg.TargetDimensions, logger)
 
-	// Register OpenAI as primary provider
-	if cfg.OpenAIAPIKey != "" && cfg.OpenAIAPIKey != mockAPIKey {
-		openaiProvider := NewOpenAIProvider(OpenAIConfig{
-			APIKey:     cfg.OpenAIAPIKey,
-			Model:      cfg.OpenAIModel,
-			Dimensions: cfg.OpenAIDimensions,
-			RateLimit:  cfg.OpenAIRateLimit,
-		})
-		registry.Register(openaiProvider, cfg.CircuitBreakerConfig)
-	}
+	// Parse provider order (default: openai,cohere,google)
+	providerOrder := parseProviderOrder(cfg.ProviderOrder)
 
-	// Register Cohere as first fallback provider
-	if cfg.CohereAPIKey != "" {
-		cohereProvider := NewCohereProvider(CohereConfig{
-			APIKey:    cfg.CohereAPIKey,
-			Model:     cfg.CohereModel,
-			RateLimit: cfg.CohereRateLimit,
-		})
-		registry.Register(cohereProvider, cfg.CircuitBreakerConfig)
-	}
-
-	// Register Google as second fallback provider
-	if cfg.GoogleAPIKey != "" {
-		googleProvider, err := NewGoogleProvider(ctx, GoogleConfig{
-			APIKey:    cfg.GoogleAPIKey,
-			Model:     cfg.GoogleModel,
-			RateLimit: cfg.GoogleRateLimit,
-		})
-		if err != nil {
-			logger.Error().Err(err).Msg("failed to create Google embedding provider")
-		} else if googleProvider.IsAvailable() {
-			registry.Register(googleProvider, cfg.CircuitBreakerConfig)
+	// Register providers in the specified order
+	for _, provider := range providerOrder {
+		switch provider {
+		case "openai":
+			registerOpenAI(registry, cfg)
+		case "cohere":
+			registerCohere(registry, cfg)
+		case "google":
+			registerGoogle(ctx, registry, cfg, logger)
 		}
 	}
 
@@ -94,4 +78,60 @@ func NewClient(ctx context.Context, cfg Config, logger *zerolog.Logger) Client {
 	}
 
 	return registry
+}
+
+// parseProviderOrder parses the provider order string into a list.
+func parseProviderOrder(order string) []string {
+	if order == "" {
+		return []string{"openai", "cohere", "google"}
+	}
+
+	var providers []string
+
+	for _, p := range strings.Split(order, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			providers = append(providers, strings.ToLower(p))
+		}
+	}
+
+	return providers
+}
+
+func registerOpenAI(registry *Registry, cfg Config) {
+	if cfg.OpenAIAPIKey != "" && cfg.OpenAIAPIKey != mockAPIKey {
+		openaiProvider := NewOpenAIProvider(OpenAIConfig{
+			APIKey:     cfg.OpenAIAPIKey,
+			Model:      cfg.OpenAIModel,
+			Dimensions: cfg.OpenAIDimensions,
+			RateLimit:  cfg.OpenAIRateLimit,
+		})
+		registry.Register(openaiProvider, cfg.CircuitBreakerConfig)
+	}
+}
+
+func registerCohere(registry *Registry, cfg Config) {
+	if cfg.CohereAPIKey != "" {
+		cohereProvider := NewCohereProvider(CohereConfig{
+			APIKey:    cfg.CohereAPIKey,
+			Model:     cfg.CohereModel,
+			RateLimit: cfg.CohereRateLimit,
+		})
+		registry.Register(cohereProvider, cfg.CircuitBreakerConfig)
+	}
+}
+
+func registerGoogle(ctx context.Context, registry *Registry, cfg Config, logger *zerolog.Logger) {
+	if cfg.GoogleAPIKey != "" {
+		googleProvider, err := NewGoogleProvider(ctx, GoogleConfig{
+			APIKey:    cfg.GoogleAPIKey,
+			Model:     cfg.GoogleModel,
+			RateLimit: cfg.GoogleRateLimit,
+		})
+		if err != nil {
+			logger.Error().Err(err).Msg("failed to create Google embedding provider")
+		} else if googleProvider.IsAvailable() {
+			registry.Register(googleProvider, cfg.CircuitBreakerConfig)
+		}
+	}
 }

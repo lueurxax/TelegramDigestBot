@@ -62,7 +62,6 @@ const defaultLLMTimeout = 45 * time.Second
 type Extractor struct {
 	httpClient *http.Client
 	llmClient  llm.Client
-	llmModel   string
 	llmTimeout time.Duration
 	logger     *zerolog.Logger
 }
@@ -82,9 +81,9 @@ func NewExtractor(logger *zerolog.Logger) *Extractor {
 }
 
 // SetLLMClient enables optional LLM claim extraction.
-func (e *Extractor) SetLLMClient(client llm.Client, model string) {
+// The model parameter is deprecated and ignored - the LLM registry handles task-specific model selection.
+func (e *Extractor) SetLLMClient(client llm.Client, _ string) {
 	e.llmClient = client
-	e.llmModel = model
 }
 
 // SetLLMTimeout sets the timeout for LLM extraction calls.
@@ -257,7 +256,9 @@ func (e *Extractor) tryLLMExtraction(ctx context.Context, prompt string) ([]Extr
 	llmCtx, cancel := e.createLLMContext(ctx)
 	defer cancel()
 
-	res, err := e.llmClient.CompleteText(llmCtx, prompt, e.llmModel)
+	// Pass empty model to let the LLM registry handle task-specific model selection
+	// via LLM_COMPLETE_MODEL env var or default task config
+	res, err := e.llmClient.CompleteText(llmCtx, prompt, "")
 	if err != nil {
 		return nil, fmt.Errorf("llm completion: %w", err)
 	}

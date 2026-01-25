@@ -21,8 +21,15 @@ This proposal targets a single primary researcher user, so the UX can be minimal
 - Replacing the Telegram bot for daily digest consumption.
 
 ## Experience Surfaces
-### 1) Lightweight Web UI (recommended)
-Single-page dashboard with a small set of views:
+### 1) Hybrid (Grafana + Web UI)
+Use Grafana for analytics and trends, and a minimal web UI for deep drill-down and item-level research.
+
+**Why hybrid**
+- Grafana is ideal for time-series dashboards and aggregate metrics.
+- A web UI is better for interactive exploration (clusters, items, evidence).
+
+### 2) Lightweight Web UI (deep drill-down)
+Single-page dashboard with a small set of views (implemented with Go templates first):
 - Search
 - Cluster inspector
 - Channel overlap graph
@@ -30,7 +37,7 @@ Single-page dashboard with a small set of views:
 - Source quality dashboards
 - Evidence explorer
 
-### 2) Extended Bot Commands (optional)
+### 3) Extended Bot Commands (optional)
 Fast access for quick queries and mobile use:
 - `/research search "<query>" [from:2026-01-01] [to:2026-01-31] [channel:@name] [lang:ru] [topic:"Local News"]`
 - `/research cluster <cluster_id>`
@@ -74,16 +81,88 @@ Per item:
 - agreement scores and matched claims
 - contradiction flags where available
 
+### Claim Ledger (new)
+Track recurring claims across clusters:
+- first seen timestamp + originating channel
+- reappears in later clusters
+- contradicted by (if evidence flags conflict)
+
+### Origin vs Amplifier (new)
+Per channel:
+- % of clusters first-seen in this channel (origin rate)
+- % of clusters where channel appears after first mention (amplifier rate)
+- top origin topics vs amplification topics
+
+### Cross-Language Coverage (new)
+Show how stories move across languages:
+- RU-origin corroborated in EN/EL (and time lag)
+- per-topic cross-language coverage rate
+
+### Topic Drift (new)
+Detect and flag topic label drift:
+- same cluster evolving topic labels across windows
+- “drifted clusters” list for review
+
+### Channel Bias Lens (new)
+Compare topic distributions across channels:
+- agenda similarity matrix
+- “over/under indexed” topics per channel
+
+### Weekly Diff (new)
+“What changed since last week”:
+- top rising/falling topics
+- channels with biggest volume or quality shifts
+
 ## Data and Query Strategy
 - Reuse existing tables for items, clusters, channel stats, evidence, and ratings.
 - Add lightweight aggregation queries (time buckets, cluster counts, overlap edges).
-- Cache heavy computations (channel overlap, topic timelines) daily or on-demand.
+- Cache heavy computations (channel overlap, topic timelines, drift, origin/amplifier stats) daily or on-demand.
 - Index the most common filters (time, channel, topic, language).
 
 ## Architecture
-- Add a read-only “research API” in the existing app or a small sidecar service.
+- Add a read-only “research API” in the existing app.
 - Web UI consumes API endpoints; bot commands reuse the same query layer.
 - Keep scope minimal: no writes except audit logs.
+
+### Hybrid Implementation Plan
+**Phase 1 (now):**
+- Go template web UI served by the existing app (no separate frontend build).
+- Auth: bot-based admin session (reuse admin ID list).
+- Core views: Search, Cluster, Item/Evidence.
+- Grafana dashboards for aggregates and trends.
+
+**Phase 2 (later):**
+- Replace UI with Vite app using the same API endpoints.
+- Add graph visualization, saved searches, and exports.
+
+### Grafana Dashboards (MVP)
+- Topic trends (weekly buckets, top N topics).
+- Channel quality (inclusion rate, noise rate, average relevance/importance).
+- Evidence match rate (matches per day, per topic).
+- Channel overlap (edge list table + optional node graph).
+- Originator vs amplifier panel per channel.
+- Cross-language corroboration rate over time.
+- Evidence match rate by topic and by source domain.
+- Time-to-digest distribution (p50/p90).
+
+### Web UI Views (MVP)
+- **Search**: query, time range, channel, language, topic.
+- **Cluster**: items, timeline, corroboration list, evidence sources.
+- **Item**: raw message, summary, scores, evidence matches.
+- **Settings**: edit thresholds, language, schedule, and research filters (web UI is easier than bot).
+
+### Transparency (new)
+- Per item: why included / suppressed (thresholds, relevance gate decision, dedup reason).
+- Per channel: weight history and auto-weight change reasoning.
+
+### Storage + Performance (new)
+- Materialized views for topic timelines, channel overlap edges, cluster stats.
+- Cached aggregates refreshed hourly + on-demand rebuild endpoint.
+- Retention policy section (items, evidence, translations) with default TTLs.
+
+### Auth Model
+- Bot-authenticated admin only: web UI requires a valid admin session (Telegram user ID).
+- No public access; no multi-user permissions.
 
 ## Success Criteria
 - Research queries under 2s for typical filters.
