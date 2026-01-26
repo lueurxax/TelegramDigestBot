@@ -12,6 +12,10 @@ data:
   IMPORTANCE_THRESHOLD: "0.5"
   SIMILARITY_THRESHOLD: "0.5"
   AUTO_THRESHOLD_TUNING_ENABLED: "true"
+  SUMMARY_MAX_CHARS: "220"
+  SUMMARY_STRIP_PHRASES_RU: "сводка:,итог:,итоги:,дайджест:,summary:,summary,дайджест"
+  SUMMARY_STRIP_PHRASES_UK: "зведення:,підсумок:,підсумки:,дайджест:,summary:,summary,дайджест"
+  SUMMARY_STRIP_PHRASES_EN: "summary:,summary,digest:,digest"
   # Health & monitoring
   HEALTH_PORT: "8080"
   # Leader election

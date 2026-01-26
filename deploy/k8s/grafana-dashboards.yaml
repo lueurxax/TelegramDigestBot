@@ -2576,7 +2576,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "((sum(rate(digest_drops_total[1h])) or vector(0)) + (sum(rate(digest_pipeline_processed_total{status=\"rejected\"}[1h])) or vector(0)) + (sum(rate(digest_item_ratings_total{rating=~\"bad|irrelevant\"}[1h])) or vector(0))) / clamp_min((sum(rate(digest_messages_ingested_total[1h])) or vector(0)), 1)",
+              "expr": "digest_low_signal_rate",
               "legendFormat": "low-signal",
               "refId": "A"
             }

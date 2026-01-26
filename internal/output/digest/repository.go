@@ -59,6 +59,9 @@ type Repository interface {
 	UpdateChannelAutoWeight(ctx context.Context, channelID string, weight float32) error
 	UpdateChannelRelevanceDelta(ctx context.Context, channelID string, delta float32, enabled bool) error
 	CollectAndSaveChannelStats(ctx context.Context, start, end time.Time) error
+	GetScoreDebugStats(ctx context.Context, since time.Time) (db.ScoreDebugStats, error)
+	GetItemStatusStats(ctx context.Context, since time.Time) (db.ItemStatusStats, error)
+	GetItemRatingSummary(ctx context.Context, since time.Time) ([]db.RatingSummary, error)
 }
 
 // Compile-time assertion that *db.DB implements Repository.

@@ -1018,7 +1018,7 @@ func (s *Scheduler) BuildDigest(ctx context.Context, start, end time.Time, impor
 
 	items, clusters = s.applyCorroborationAdjustments(items, clusters, settings)
 
-	s.recordDigestQuality(items, end, importanceThreshold, logger)
+	s.recordDigestQuality(ctx, items, end, importanceThreshold, logger)
 
 	return s.renderDigest(ctx, items, clusters, start, end, settings, logger)
 }
@@ -1030,7 +1030,7 @@ type digestTotals struct {
 	lagCount   int
 }
 
-func (s *Scheduler) recordDigestQuality(items []db.Item, windowEnd time.Time, importanceThreshold float32, logger *zerolog.Logger) {
+func (s *Scheduler) recordDigestQuality(ctx context.Context, items []db.Item, windowEnd time.Time, importanceThreshold float32, logger *zerolog.Logger) {
 	if len(items) == 0 {
 		return
 	}
@@ -1042,9 +1042,46 @@ func (s *Scheduler) recordDigestQuality(items []db.Item, windowEnd time.Time, im
 	observability.DigestAverageImportance.Set(float64(avgImportance))
 	observability.DigestAverageRelevance.Set(float64(avgRelevance))
 	observability.DigestReadyItems.Set(float64(len(items)))
+	observability.LowSignalRate.Set(float64(s.estimateLowSignalRate(ctx, windowEnd)))
 
 	s.checkLagAlert(totals, len(items), logger)
 	s.checkQualitySignal(len(items), avgImportance, importanceThreshold, logger)
+}
+
+func (s *Scheduler) estimateLowSignalRate(ctx context.Context, windowEnd time.Time) float32 {
+	since := windowEnd.Add(-1 * time.Hour)
+
+	debugStats, err := s.database.GetScoreDebugStats(ctx, since)
+	if err != nil {
+		return 0
+	}
+
+	rawTotal := debugStats.RawTotal
+	if rawTotal <= 0 {
+		return 0
+	}
+
+	droppedBeforeItem := debugStats.RawProcessed - debugStats.ItemsTotal
+	if droppedBeforeItem < 0 {
+		droppedBeforeItem = 0
+	}
+
+	statusStats, err := s.database.GetItemStatusStats(ctx, since)
+	if err != nil {
+		return 0
+	}
+
+	ratingStats, err := s.database.GetItemRatingSummary(ctx, since)
+	if err != nil {
+		return 0
+	}
+
+	lowSignal := droppedBeforeItem + statusStats.Rejected
+	for _, r := range ratingStats {
+		lowSignal += r.BadCount + r.IrrelevantCount
+	}
+
+	return float32(lowSignal) / float32(rawTotal)
 }
 
 func (s *Scheduler) calculateDigestTotals(items []db.Item, windowEnd time.Time) digestTotals {

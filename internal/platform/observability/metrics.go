@@ -63,6 +63,11 @@ var (
 		Help: "Total number of item ratings by rating value",
 	}, []string{"rating"})
 
+	LowSignalRate = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "digest_low_signal_rate",
+		Help: "Estimated low-signal rate in recent windows",
+	})
+
 	DiscoveryPending = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "digest_discovery_pending",
 		Help: "Current number of pending channel discoveries",
