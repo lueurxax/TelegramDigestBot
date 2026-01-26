@@ -5,11 +5,11 @@
 > Add a short link per digest item that opens an expanded view with evidence, context, and optional Q&A.
 
 ## Summary
-Provide a read-only expansion page for each digest item. The expansion uses existing evidence, link previews, and cluster context to avoid extra LLM cost. For Q&A, default to a deep link into ChatGPT (user subscription). Server-side Q&A is optional and strictly budgeted.
+Provide a read-only expansion page for each digest item. The expansion uses existing evidence, link previews, and cluster context to avoid extra LLM cost. Q&A is handled via a deep link into ChatGPT (user subscription) only.
 
 ## Goals
 - Provide deeper context without increasing baseline LLM usage.
-- Enable user-driven Q&A for specific items.
+- Enable user-driven Q&A for specific items via ChatGPT.
 - Keep access restricted to bot admins.
 
 ## Non-Goals
@@ -27,7 +27,7 @@ Provide a read-only expansion page for each digest item. The expansion uses exis
 - Evidence list with agreement scores and matched claims.
 - Corroborating channels and cluster context.
 - Button: `Open in ChatGPT` (pre-filled prompt).
-- Optional: `Ask here` if server-side Q&A is enabled.
+- Button: `Open in ChatGPT` (pre-filled prompt).
 
 ## Design
 
@@ -51,11 +51,6 @@ Provide a read-only expansion page for each digest item. The expansion uses exis
 - Build prompt from summary + top evidence lines + original link(s).
 - Open ChatGPT with the prompt (user subscription).
 
-### Optional Server-Side Q&A
-- Enabled via `EXPANDED_QA_ENABLED=true`.
-- Rate-limited and budgeted; uses existing LLM task chain.
-- If budget exceeded, return a friendly error and suggest ChatGPT.
-
 ## Configuration
 ```bash
 EXPANDED_VIEW_ENABLED=true
@@ -63,20 +58,19 @@ EXPANDED_VIEW_BASE_URL=https://digest.local
 EXPANDED_VIEW_SIGNING_SECRET=changeme
 EXPANDED_VIEW_TTL_HOURS=72
 EXPANDED_VIEW_REQUIRE_ADMIN=true
-EXPANDED_QA_ENABLED=false
-EXPANDED_QA_RPM=30
 ```
 
 ## Observability
 - Counters: `expanded_view_hits_total`, `expanded_view_denied_total`, `expanded_view_errors_total`.
-- Q&A metrics: `expanded_qa_requests_total`, `expanded_qa_errors_total`, `expanded_qa_latency_seconds`.
 - Log token validation failures and missing item IDs.
 
 ## Success Criteria
 - Users can open expanded context in 1 click.
 - No increase in baseline LLM cost.
-- Q&A cost only incurred on explicit requests.
+- Q&A cost handled by the user's ChatGPT subscription.
 
-## Open Questions
-- Should expanded views be indexed or always private?
-- Should prompts include raw message text or summary+evidence only?
+## Decisions
+| Question | Answer |
+| --- | --- |
+| Should expanded views be indexed or always private? | Indexed. |
+| Should prompts include raw message text or summary+evidence only? | Maximum context: raw text, links, corroboration text, original links, and all duplicate messages in one prompt. |

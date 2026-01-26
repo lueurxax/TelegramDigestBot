@@ -3,7 +3,9 @@ package embeddings
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +17,7 @@ var (
 	ErrNoProvidersAvailable = errors.New("no embedding providers available")
 	ErrProviderNotFound     = errors.New("embedding provider not found")
 	ErrAllProvidersFailed   = errors.New("all embedding providers failed")
+	ErrEmptyInput           = errors.New("cannot generate embedding for empty text")
 )
 
 // Log key constants.
@@ -67,73 +70,27 @@ func (r *Registry) Register(p Provider, cfg CircuitBreakerConfig) {
 // GetEmbedding attempts to get an embedding using available providers with fallback.
 // Returns a vector padded/truncated to the target dimension.
 func (r *Registry) GetEmbedding(ctx context.Context, text string) ([]float32, error) {
-	r.mu.RLock()
-	providers := r.getActiveProviders()
-
-	primaryProvider := ""
-	if len(r.order) > 0 {
-		primaryProvider = string(r.order[0])
+	if strings.TrimSpace(text) == "" {
+		return nil, ErrEmptyInput
 	}
 
-	r.mu.RUnlock()
-
+	providers, primaryProvider := r.getProvidersAndPrimary()
 	if len(providers) == 0 {
 		return nil, ErrNoProvidersAvailable
 	}
 
-	var lastErr error
-
 	estimatedTokens := estimateTokens(text)
 
+	var lastErr error
+
 	for _, p := range providers {
-		cb := r.getCircuitBreaker(p.Name())
-		providerName := string(p.Name())
-		model := r.getModelForProvider(p.Name())
-
-		if !cb.CanAttempt() {
-			r.logger.Debug().
-				Str(logKeyProvider, providerName).
-				Msg("skipping provider - circuit breaker open")
-			SetEmbeddingProviderAvailable(providerName, false)
-
-			continue
-		}
-
-		start := time.Now()
-		result, err := p.GetEmbedding(ctx, text)
-		duration := time.Since(start)
-
-		RecordEmbeddingLatency(providerName, model, duration)
-
+		result, err := r.tryProvider(ctx, p, text, primaryProvider, estimatedTokens)
 		if err != nil {
-			cb.RecordFailure(p.Name())
-			RecordEmbeddingRequest(providerName, model, false)
-
 			lastErr = err
 
-			r.logger.Warn().
-				Err(err).
-				Str(logKeyProvider, providerName).
-				Msg("embedding provider failed, trying fallback")
-
 			continue
 		}
 
-		cb.RecordSuccess()
-		RecordEmbeddingRequest(providerName, model, true)
-		RecordEmbeddingTokens(providerName, model, estimatedTokens)
-		SetEmbeddingProviderAvailable(providerName, true)
-
-		// Log and record if we used a fallback provider
-		if primaryProvider != "" && providerName != primaryProvider {
-			RecordEmbeddingFallback(primaryProvider, providerName)
-			r.logger.Info().
-				Str(logKeyProvider, providerName).
-				Str("from_provider", primaryProvider).
-				Msg("used fallback embedding provider")
-		}
-
-		// Pad or truncate to target dimension
 		return PadToTargetDimensions(result.Vector, r.targetDimension), nil
 	}
 
@@ -144,8 +101,76 @@ func (r *Registry) GetEmbedding(ctx context.Context, text string) ([]float32, er
 	return nil, ErrNoProvidersAvailable
 }
 
+// getProvidersAndPrimary returns active providers and the primary provider name.
+func (r *Registry) getProvidersAndPrimary() ([]Provider, string) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	providers := r.getActiveProviders()
+	primaryProvider := ""
+
+	if len(r.order) > 0 {
+		primaryProvider = string(r.order[0])
+	}
+
+	return providers, primaryProvider
+}
+
+// tryProvider attempts to get an embedding from a single provider.
+func (r *Registry) tryProvider(ctx context.Context, p Provider, text, primaryProvider string, estimatedTokens int) (EmbeddingResult, error) {
+	cb := r.getCircuitBreaker(p.Name())
+	providerName := string(p.Name())
+	model := r.getModelForProvider(p.Name())
+
+	if !cb.CanAttempt() {
+		r.logger.Debug().Str(logKeyProvider, providerName).Msg("skipping provider - circuit breaker open")
+		SetEmbeddingProviderAvailable(providerName, false)
+
+		return EmbeddingResult{}, ErrCircuitBreakerOpen
+	}
+
+	start := time.Now()
+	result, err := p.GetEmbedding(ctx, text)
+	duration := time.Since(start)
+
+	RecordEmbeddingLatency(providerName, model, duration)
+
+	if err != nil {
+		cb.RecordFailure(p.Name())
+		RecordEmbeddingRequest(providerName, model, false)
+		r.logger.Warn().Err(err).Str(logKeyProvider, providerName).Msg("embedding provider failed, trying fallback")
+
+		return EmbeddingResult{}, fmt.Errorf("provider %s: %w", providerName, err)
+	}
+
+	r.recordSuccess(cb, providerName, model, primaryProvider, estimatedTokens)
+
+	return result, nil
+}
+
+// recordSuccess records metrics for a successful embedding request.
+func (r *Registry) recordSuccess(cb *CircuitBreaker, providerName, model, primaryProvider string, estimatedTokens int) {
+	cb.RecordSuccess()
+	RecordEmbeddingRequest(providerName, model, true)
+	RecordEmbeddingTokens(providerName, model, estimatedTokens)
+	SetEmbeddingProviderAvailable(providerName, true)
+
+	if primaryProvider != "" && providerName != primaryProvider {
+		RecordEmbeddingFallback(primaryProvider, providerName)
+		r.logger.Info().
+			Str(logKeyProvider, providerName).
+			Str("from_provider", primaryProvider).
+			Msg("used fallback embedding provider")
+	}
+}
+
 // GetEmbeddingWithMetadata returns the full embedding result including metadata.
 func (r *Registry) GetEmbeddingWithMetadata(ctx context.Context, text string) (EmbeddingResult, error) {
+	// Validate input - empty text causes API errors on all providers
+	if strings.TrimSpace(text) == "" {
+		return EmbeddingResult{}, ErrEmptyInput
+	}
+
 	r.mu.RLock()
 	providers := r.getActiveProviders()
 

@@ -4,6 +4,8 @@ import (
 	"testing"
 )
 
+const filterURLErrFormat = "filterURL(%q) = %q, want %q"
+
 func TestFilterURL(t *testing.T) {
 	seeder := &Seeder{
 		extensionDenylist: map[string]struct{}{
@@ -98,7 +100,7 @@ func TestFilterURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := seeder.filterURL(tt.url)
 			if got != tt.wantReason {
-				t.Errorf("filterURL(%q) = %q, want %q", tt.url, got, tt.wantReason)
+				t.Errorf(filterURLErrFormat, tt.url, got, tt.wantReason)
 			}
 		})
 	}
@@ -140,7 +142,7 @@ func TestFilterURLWithAllowlist(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := seeder.filterURL(tt.url)
 			if got != tt.wantReason {
-				t.Errorf("filterURL(%q) = %q, want %q", tt.url, got, tt.wantReason)
+				t.Errorf(filterURLErrFormat, tt.url, got, tt.wantReason)
 			}
 		})
 	}

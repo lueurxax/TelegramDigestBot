@@ -43,7 +43,7 @@ func DefaultTaskConfig() map[TaskType]TaskProviderChain {
 
 		// Cluster Summary: Cohere → OpenAI → Google
 		TaskTypeClusterSummary: {
-			Default: ProviderModel{Provider: ProviderCohere, Model: "command-r"},
+			Default: ProviderModel{Provider: ProviderCohere, Model: ModelCommandR},
 			Fallbacks: []ProviderModel{
 				{Provider: ProviderOpenAI, Model: "gpt-5"},
 				{Provider: ProviderGoogle, Model: "gemini-2.0-flash-lite"},

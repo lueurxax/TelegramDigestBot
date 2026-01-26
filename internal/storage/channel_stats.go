@@ -57,8 +57,8 @@ func (db *DB) UpsertChannelStats(ctx context.Context, stats *ChannelStatsEntry) 
 		MessagesReceived: pgtype.Int4{Int32: safeIntToInt32(stats.MessagesReceived), Valid: true},
 		ItemsCreated:     pgtype.Int4{Int32: safeIntToInt32(stats.ItemsCreated), Valid: true},
 		ItemsDigested:    pgtype.Int4{Int32: safeIntToInt32(stats.ItemsDigested), Valid: true},
-		AvgImportance:    pgtype.Float8{Float64: stats.AvgImportance, Valid: stats.AvgImportance > 0},
-		AvgRelevance:     pgtype.Float8{Float64: stats.AvgRelevance, Valid: stats.AvgRelevance > 0},
+		AvgImportance:    pgtype.Float8{Float64: stats.AvgImportance, Valid: true},
+		AvgRelevance:     pgtype.Float8{Float64: stats.AvgRelevance, Valid: true},
 	}); err != nil {
 		return fmt.Errorf("upsert channel stats: %w", err)
 	}
@@ -73,8 +73,8 @@ func (db *DB) UpsertChannelQualityHistory(ctx context.Context, entry *ChannelQua
 		PeriodEnd:     pgtype.Date{Time: entry.PeriodEnd, Valid: true},
 		InclusionRate: pgtype.Float8{Float64: entry.InclusionRate, Valid: true},
 		NoiseRate:     pgtype.Float8{Float64: entry.NoiseRate, Valid: true},
-		AvgImportance: pgtype.Float8{Float64: entry.AvgImportance, Valid: entry.AvgImportance > 0},
-		AvgRelevance:  pgtype.Float8{Float64: entry.AvgRelevance, Valid: entry.AvgRelevance > 0},
+		AvgImportance: pgtype.Float8{Float64: entry.AvgImportance, Valid: true},
+		AvgRelevance:  pgtype.Float8{Float64: entry.AvgRelevance, Valid: true},
 	}); err != nil {
 		return fmt.Errorf("upsert channel quality history: %w", err)
 	}

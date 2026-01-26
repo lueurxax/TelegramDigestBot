@@ -22,9 +22,9 @@ import (
 const (
 	CohereAPIEndpoint = "https://api.cohere.ai/v2/chat"
 
-	// Model constants.
-	ModelCommandR     = "command-r"
-	ModelCommandRPlus = "command-r-plus"
+	// Model constants (use dated versions as base models were deprecated Sept 2025).
+	ModelCommandR     = "command-r-08-2024"
+	ModelCommandRPlus = "command-r-plus-08-2024"
 
 	// Default model for Cohere LLM.
 	defaultCohereModel = ModelCommandR
