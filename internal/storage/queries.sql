@@ -67,7 +67,8 @@ SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.preview_t
        c.relevance_threshold as channel_relevance_threshold, c.importance_threshold as channel_importance_threshold,
        c.importance_weight as channel_importance_weight,
        c.auto_relevance_enabled as channel_auto_relevance_enabled,
-       c.relevance_threshold_delta as channel_relevance_threshold_delta
+       c.relevance_threshold_delta as channel_relevance_threshold_delta,
+       c.tg_peer_id as channel_tg_peer_id
 FROM raw_messages rm
 JOIN channels c ON rm.channel_id = c.id
 WHERE rm.id IN (SELECT id FROM claimed)

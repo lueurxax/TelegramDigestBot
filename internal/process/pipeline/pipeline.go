@@ -68,7 +68,7 @@ type LinkSeeder interface {
 // LinkSeedInput contains information for link seeding.
 // This type is compatible with linkseeder.SeedInput.
 type LinkSeedInput struct {
-	ChannelID string
+	PeerID    int64
 	MessageID int64
 	URLs      []string
 }

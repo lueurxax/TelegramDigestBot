@@ -71,10 +71,10 @@ func (db *DB) UpsertChannelQualityHistory(ctx context.Context, entry *ChannelQua
 		ChannelID:     toUUID(entry.ChannelID),
 		PeriodStart:   pgtype.Date{Time: entry.PeriodStart, Valid: true},
 		PeriodEnd:     pgtype.Date{Time: entry.PeriodEnd, Valid: true},
-		InclusionRate: pgtype.Float8{Float64: entry.InclusionRate, Valid: true},
-		NoiseRate:     pgtype.Float8{Float64: entry.NoiseRate, Valid: true},
-		AvgImportance: pgtype.Float8{Float64: entry.AvgImportance, Valid: true},
-		AvgRelevance:  pgtype.Float8{Float64: entry.AvgRelevance, Valid: true},
+		InclusionRate: entry.InclusionRate,
+		NoiseRate:     entry.NoiseRate,
+		AvgImportance: entry.AvgImportance,
+		AvgRelevance:  entry.AvgRelevance,
 	}); err != nil {
 		return fmt.Errorf("upsert channel quality history: %w", err)
 	}

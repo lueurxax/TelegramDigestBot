@@ -31,9 +31,9 @@ const (
 
 // Log field names.
 const (
-	logFieldURL       = "url"
-	logFieldChannelID = "channel_id"
-	logFieldMsgID     = "msg_id"
+	logFieldURL    = "url"
+	logFieldPeerID = "peer_id"
+	logFieldMsgID  = "msg_id"
 )
 
 // Telegram-internal domains to filter out.
@@ -137,8 +137,8 @@ func buildDomainSet(domains []string) map[string]struct{} {
 
 // SeedInput contains information about a Telegram message for link seeding.
 type SeedInput struct {
-	ChannelID string // UUID of the channel
-	MessageID int64  // Telegram message ID
+	PeerID    int64 // Telegram peer ID of the channel
+	MessageID int64 // Telegram message ID
 	URLs      []string
 }
 
@@ -168,7 +168,7 @@ func (s *Seeder) SeedLinks(ctx context.Context, input SeedInput) SeedResult {
 		return result
 	}
 
-	seedRef := fmt.Sprintf("tg://channel/%s/msg/%d", input.ChannelID, input.MessageID)
+	seedRef := fmt.Sprintf("tg://peer/%d/msg/%d", input.PeerID, input.MessageID)
 	s.processURLs(ctx, input, seedRef, &result)
 
 	return result
@@ -248,6 +248,8 @@ func (s *Seeder) processURL(ctx context.Context, rawURL, seedRef string, input S
 		observability.LinkSeedSkipped.WithLabelValues(skipReason).Inc()
 		s.logger.Debug().
 			Str(logFieldURL, rawURL).
+			Int64(logFieldPeerID, input.PeerID).
+			Int64(logFieldMsgID, input.MessageID).
 			Str("reason", skipReason).
 			Msg("Link skipped")
 
@@ -262,7 +264,7 @@ func (s *Seeder) processURL(ctx context.Context, rawURL, seedRef string, input S
 	observability.LinkSeedEnqueued.Inc()
 	s.logger.Debug().
 		Str(logFieldURL, rawURL).
-		Str(logFieldChannelID, input.ChannelID).
+		Int64(logFieldPeerID, input.PeerID).
 		Int64(logFieldMsgID, input.MessageID).
 		Msg("URL enqueued for crawling")
 
@@ -283,7 +285,7 @@ func (s *Seeder) handleEnqueueError(err error, rawURL string, input SeedInput, r
 	s.logger.Warn().
 		Err(err).
 		Str(logFieldURL, rawURL).
-		Str(logFieldChannelID, input.ChannelID).
+		Int64(logFieldPeerID, input.PeerID).
 		Int64(logFieldMsgID, input.MessageID).
 		Msg("Failed to enqueue URL")
 

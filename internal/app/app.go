@@ -420,7 +420,7 @@ type linkSeederAdapter struct {
 // SeedLinks implements pipeline.LinkSeeder.
 func (a *linkSeederAdapter) SeedLinks(ctx context.Context, input pipeline.LinkSeedInput) pipeline.LinkSeedResult {
 	result := a.seeder.SeedLinks(ctx, linkseeder.SeedInput{
-		ChannelID: input.ChannelID,
+		PeerID:    input.PeerID,
 		MessageID: input.MessageID,
 		URLs:      input.URLs,
 	})

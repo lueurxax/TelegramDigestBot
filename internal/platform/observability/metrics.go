@@ -264,27 +264,27 @@ var (
 
 	// Link seeding metrics (Telegram → crawler queue)
 	LinkSeedExtracted = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "digest_link_seed_extracted_total",
+		Name: "link_seed_extracted_total",
 		Help: "Total number of links extracted from Telegram messages",
 	})
 
 	LinkSeedEnqueued = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "digest_link_seed_enqueued_total",
+		Name: "link_seed_enqueued_total",
 		Help: "Total number of links successfully enqueued for crawling",
 	})
 
 	LinkSeedSkipped = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "digest_link_seed_skipped_total",
+		Name: "link_seed_skipped_total",
 		Help: "Total number of links skipped during seeding",
 	}, []string{"reason"})
 
 	LinkSeedErrors = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "digest_link_seed_errors_total",
+		Name: "link_seed_errors_total",
 		Help: "Total number of errors during link seeding",
 	})
 
 	CrawlerQueuePending = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "digest_crawler_queue_pending",
+		Name: "crawler_queue_pending",
 		Help: "Current number of pending URLs in the crawler queue",
 	})
 )

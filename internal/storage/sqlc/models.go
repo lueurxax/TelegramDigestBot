@@ -49,6 +49,19 @@ type Channel struct {
 	RelevanceThresholdDelta pgtype.Float4      `json:"relevance_threshold_delta"`
 }
 
+type ChannelQualityHistory struct {
+	ID            pgtype.UUID        `json:"id"`
+	ChannelID     pgtype.UUID        `json:"channel_id"`
+	PeriodStart   pgtype.Date        `json:"period_start"`
+	PeriodEnd     pgtype.Date        `json:"period_end"`
+	InclusionRate float64            `json:"inclusion_rate"`
+	NoiseRate     float64            `json:"noise_rate"`
+	AvgImportance float64            `json:"avg_importance"`
+	AvgRelevance  float64            `json:"avg_relevance"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ChannelRatingStat struct {
 	ChannelID          pgtype.UUID        `json:"channel_id"`
 	PeriodStart        pgtype.Date        `json:"period_start"`
@@ -87,6 +100,15 @@ type Cluster struct {
 type ClusterItem struct {
 	ClusterID pgtype.UUID `json:"cluster_id"`
 	ItemID    pgtype.UUID `json:"item_id"`
+}
+
+type ClusterSummaryCache struct {
+	DigestLanguage     string             `json:"digest_language"`
+	ClusterFingerprint string             `json:"cluster_fingerprint"`
+	ItemIds            []byte             `json:"item_ids"`
+	Summary            string             `json:"summary"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Digest struct {
@@ -245,17 +267,17 @@ type Item struct {
 	Topic           pgtype.Text        `json:"topic"`
 	Summary         pgtype.Text        `json:"summary"`
 	Language        pgtype.Text        `json:"language"`
-	LanguageSource  pgtype.Text        `json:"language_source"`
 	Status          string             `json:"status"`
 	ErrorJson       []byte             `json:"error_json"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	FirstSeenAt     pgtype.Timestamptz `json:"first_seen_at"`
 	DigestedAt      pgtype.Timestamptz `json:"digested_at"`
 	RetryCount      int32              `json:"retry_count"`
 	NextRetryAt     pgtype.Timestamptz `json:"next_retry_at"`
 	FactCheckScore  pgtype.Float4      `json:"fact_check_score"`
 	FactCheckTier   pgtype.Text        `json:"fact_check_tier"`
 	FactCheckNotes  pgtype.Text        `json:"fact_check_notes"`
+	LanguageSource  pgtype.Text        `json:"language_source"`
+	FirstSeenAt     pgtype.Timestamptz `json:"first_seen_at"`
 }
 
 type ItemEvidence struct {
@@ -316,6 +338,20 @@ type LinkCache struct {
 	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
 }
 
+type LlmUsage struct {
+	ID               pgtype.UUID        `json:"id"`
+	Date             pgtype.Date        `json:"date"`
+	Provider         string             `json:"provider"`
+	Model            string             `json:"model"`
+	Task             string             `json:"task"`
+	PromptTokens     int32              `json:"prompt_tokens"`
+	CompletionTokens int32              `json:"completion_tokens"`
+	RequestCount     int32              `json:"request_count"`
+	CostUsd          pgtype.Numeric     `json:"cost_usd"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type MessageLink struct {
 	RawMessageID pgtype.UUID `json:"raw_message_id"`
 	LinkCacheID  pgtype.UUID `json:"link_cache_id"`
@@ -328,7 +364,6 @@ type RawMessage struct {
 	TgMessageID          int64              `json:"tg_message_id"`
 	TgDate               pgtype.Timestamptz `json:"tg_date"`
 	Text                 pgtype.Text        `json:"text"`
-	PreviewText          pgtype.Text        `json:"preview_text"`
 	EntitiesJson         []byte             `json:"entities_json"`
 	MediaJson            []byte             `json:"media_json"`
 	CanonicalHash        string             `json:"canonical_hash"`
@@ -338,6 +373,7 @@ type RawMessage struct {
 	MediaData            []byte             `json:"media_data"`
 	DiscoveriesExtracted pgtype.Bool        `json:"discoveries_extracted"`
 	ProcessingStartedAt  pgtype.Timestamptz `json:"processing_started_at"`
+	PreviewText          pgtype.Text        `json:"preview_text"`
 }
 
 type RawMessageDropLog struct {
@@ -373,6 +409,28 @@ type SettingHistory struct {
 	NewValue  pgtype.Text        `json:"new_value"`
 	ChangedBy int64              `json:"changed_by"`
 	ChangedAt pgtype.Timestamptz `json:"changed_at"`
+}
+
+type SummaryCache struct {
+	CanonicalHash   string             `json:"canonical_hash"`
+	DigestLanguage  string             `json:"digest_language"`
+	Summary         string             `json:"summary"`
+	Topic           pgtype.Text        `json:"topic"`
+	Language        pgtype.Text        `json:"language"`
+	RelevanceScore  float32            `json:"relevance_score"`
+	ImportanceScore float32            `json:"importance_score"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ThresholdTuningLog struct {
+	ID                  pgtype.UUID        `json:"id"`
+	TunedAt             pgtype.Timestamptz `json:"tuned_at"`
+	NetScore            float64            `json:"net_score"`
+	Delta               float32            `json:"delta"`
+	RelevanceThreshold  float32            `json:"relevance_threshold"`
+	ImportanceThreshold float32            `json:"importance_threshold"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
 type TranslationCache struct {

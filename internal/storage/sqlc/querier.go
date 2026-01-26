@@ -118,8 +118,8 @@ type Querier interface {
 	// Rejects the target row AND any related rows that share peer_id or invite_link
 	// This prevents the same channel from reappearing via different discovery paths
 	UpdateDiscoveryStatusByUsername(ctx context.Context, arg UpdateDiscoveryStatusByUsernameParams) error
-	// Channel stats queries
 	UpsertChannelQualityHistory(ctx context.Context, arg UpsertChannelQualityHistoryParams) error
+	// Channel stats queries
 	UpsertChannelStats(ctx context.Context, arg UpsertChannelStatsParams) error
 	UpsertDiscoveredChannelByInvite(ctx context.Context, arg UpsertDiscoveredChannelByInviteParams) error
 	UpsertDiscoveredChannelByPeerID(ctx context.Context, arg UpsertDiscoveredChannelByPeerIDParams) error

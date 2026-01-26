@@ -56,14 +56,14 @@ func (p *Pipeline) seedLinksForCrawler(ctx context.Context, logger zerolog.Logge
 		return
 	}
 
-	// Extract URLs from entities and media
-	urls := linkextract.ExtractURLsFromJSON(m.EntitiesJSON, m.MediaJSON)
+	// Extract URLs from entities, media JSON, and raw text
+	urls := linkextract.ExtractAllURLs(m.Text, m.EntitiesJSON, m.MediaJSON)
 	if len(urls) == 0 {
 		return
 	}
 
 	result := p.linkSeeder.SeedLinks(ctx, LinkSeedInput{
-		ChannelID: m.ChannelID,
+		PeerID:    m.TGPeerID,
 		MessageID: m.TGMessageID,
 		URLs:      urls,
 	})

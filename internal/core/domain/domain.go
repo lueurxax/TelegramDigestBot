@@ -17,6 +17,7 @@ type RawMessage struct {
 	ImportanceWeight        float32
 	AutoRelevanceEnabled    bool
 	RelevanceThresholdDelta float32
+	TGPeerID                int64
 	TGMessageID             int64
 	TGDate                  time.Time
 	Text                    string

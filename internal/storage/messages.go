@@ -60,6 +60,7 @@ func (db *DB) GetUnprocessedMessages(ctx context.Context, limit int) ([]RawMessa
 			ImportanceWeight:        weight,
 			AutoRelevanceEnabled:    m.ChannelAutoRelevanceEnabled.Bool,
 			RelevanceThresholdDelta: m.ChannelRelevanceThresholdDelta.Float32,
+			TGPeerID:                m.ChannelTgPeerID,
 			TGMessageID:             m.TgMessageID,
 			TGDate:                  m.TgDate.Time,
 			Text:                    m.Text.String,
