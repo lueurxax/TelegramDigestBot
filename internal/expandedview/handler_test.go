@@ -131,48 +131,55 @@ func TestHandler_ServeHTTP_NonAdminToken(t *testing.T) {
 	}
 }
 
-func TestHandler_ServeHTTP_SystemToken(t *testing.T) {
-	// Test that system tokens (UserID = 0) bypass the admin check
-	// by comparing behavior with a non-admin token
+func TestHandler_ServeHTTP_SystemTokenDeniedByDefault(t *testing.T) {
+	// Test that system tokens (UserID = 0) are denied when AllowSystemTokens is false (default)
 	cfg := newTestConfig()
-	cfg.AdminIDs = []int64{999999} // Different from test user
+	cfg.AdminIDs = []int64{999999}            // Different from test user
+	cfg.ExpandedViewAllowSystemTokens = false // Default - system tokens not allowed
 
 	handler, tokenService := newTestHandler(t, cfg)
 
-	// Generate non-admin token - should get 401 Unauthorized
-	nonAdminToken := requireGenerate(t, tokenService, testItemID, 123456)
-
-	req1 := httptest.NewRequest(http.MethodGet, "/"+nonAdminToken, nil)
-	rec1 := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec1, req1)
-
-	if rec1.Code != http.StatusUnauthorized {
-		t.Errorf("non-admin token: status = %d, want %d", rec1.Code, http.StatusUnauthorized)
-	}
-
-	// Generate system token (UserID = 0) - should NOT get 401
+	// Generate system token (UserID = 0) - should get 401 when AllowSystemTokens is false
 	systemToken := requireGenerate(t, tokenService, testItemID, 0)
 
-	req2 := httptest.NewRequest(http.MethodGet, "/"+systemToken, nil)
-	rec2 := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/"+systemToken, nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("system token with AllowSystemTokens=false: got status %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestHandler_ServeHTTP_SystemTokenAllowedWhenConfigured(t *testing.T) {
+	// Test that system tokens (UserID = 0) bypass admin check when AllowSystemTokens is true
+	cfg := newTestConfig()
+	cfg.AdminIDs = []int64{999999}           // Different from test user
+	cfg.ExpandedViewAllowSystemTokens = true // Explicitly allow system tokens
+
+	handler, tokenService := newTestHandler(t, cfg)
+
+	// Generate system token (UserID = 0) - should NOT get 401 when AllowSystemTokens is true
+	systemToken := requireGenerate(t, tokenService, testItemID, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "/"+systemToken, nil)
+	rec := httptest.NewRecorder()
 
 	// This will panic because database is nil, but we can check that the
 	// panic happens in the database layer, not the auth layer
 	defer func() {
 		if r := recover(); r != nil {
 			// Expected - database is nil. The important thing is we got past the auth check.
-			// If we had been rejected at the auth layer, we would have gotten a 401 response
-			// without a panic.
 			t.Log("recovered from expected panic due to nil database")
 		}
 	}()
 
-	handler.ServeHTTP(rec2, req2)
+	handler.ServeHTTP(rec, req)
 
 	// If we reach here without panic, check that we didn't get 401
-	if rec2.Code == http.StatusUnauthorized {
-		t.Error("system token should bypass admin check, but got 401")
+	if rec.Code == http.StatusUnauthorized {
+		t.Error("system token with AllowSystemTokens=true should bypass admin check, but got 401")
 	}
 }
 

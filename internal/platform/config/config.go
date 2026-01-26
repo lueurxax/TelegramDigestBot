@@ -214,12 +214,13 @@ type Config struct {
 	LinkSeedExtDenylist        string `env:"LINK_SEED_EXT_DENYLIST" envDefault:".zip,.exe,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.rar,.7z,.tar,.gz"`
 
 	// Expanded view settings (on-demand item detail pages)
-	ExpandedViewEnabled       bool   `env:"EXPANDED_VIEW_ENABLED" envDefault:"false"`
-	ExpandedViewBaseURL       string `env:"EXPANDED_VIEW_BASE_URL" envDefault:""`
-	ExpandedViewSigningSecret string `env:"EXPANDED_VIEW_SIGNING_SECRET" envDefault:""`
-	ExpandedViewTTLHours      int    `env:"EXPANDED_VIEW_TTL_HOURS" envDefault:"72"`
-	ExpandedViewRequireAdmin  bool   `env:"EXPANDED_VIEW_REQUIRE_ADMIN" envDefault:"true"`
-	ExpandedPromptMaxChars    int    `env:"EXPANDED_PROMPT_MAX_CHARS" envDefault:"12000"`
+	ExpandedViewEnabled           bool   `env:"EXPANDED_VIEW_ENABLED" envDefault:"false"`
+	ExpandedViewBaseURL           string `env:"EXPANDED_VIEW_BASE_URL" envDefault:""`
+	ExpandedViewSigningSecret     string `env:"EXPANDED_VIEW_SIGNING_SECRET" envDefault:""`
+	ExpandedViewTTLHours          int    `env:"EXPANDED_VIEW_TTL_HOURS" envDefault:"72"`
+	ExpandedViewRequireAdmin      bool   `env:"EXPANDED_VIEW_REQUIRE_ADMIN" envDefault:"true"`
+	ExpandedViewAllowSystemTokens bool   `env:"EXPANDED_VIEW_ALLOW_SYSTEM_TOKENS" envDefault:"false"`
+	ExpandedPromptMaxChars        int    `env:"EXPANDED_PROMPT_MAX_CHARS" envDefault:"12000"`
 }
 
 func Load() (*Config, error) {

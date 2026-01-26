@@ -28,6 +28,9 @@ const logFieldItemID = "item_id"
 // HTTP header constants.
 const headerContentType = "Content-Type"
 
+// Error page title constants.
+const errorTitleUnauthorized = "Unauthorized"
+
 // Handler serves expanded item views.
 type Handler struct {
 	cfg          *config.Config
@@ -102,14 +105,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check admin status if required
-	// UserID = 0 indicates a system-generated token (e.g., from digests) - allow for any viewer
-	if h.cfg.ExpandedViewRequireAdmin && payload.UserID != 0 && !h.isAdmin(payload.UserID) {
-		h.renderError(w, http.StatusUnauthorized, "Unauthorized", "You don't have permission to view this page.")
-		HitsTotal.WithLabelValues(StatusDenied).Inc()
-		DeniedTotal.WithLabelValues(ReasonNotAdmin).Inc()
-		h.logger.Warn().Int64("user_id", payload.UserID).Msg("Non-admin attempted expanded view access")
+	if h.cfg.ExpandedViewRequireAdmin {
+		isSystemToken := payload.UserID == 0
 
-		return
+		// System tokens (userID=0) require explicit AllowSystemTokens config
+		if isSystemToken && !h.cfg.ExpandedViewAllowSystemTokens {
+			h.renderError(w, http.StatusUnauthorized, errorTitleUnauthorized, "System tokens are not allowed when admin-only mode is enabled.")
+			HitsTotal.WithLabelValues(StatusDenied).Inc()
+			DeniedTotal.WithLabelValues(ReasonNotAdmin).Inc()
+			h.logger.Warn().Msg("System token denied: AllowSystemTokens is disabled")
+
+			return
+		}
+
+		// Non-system tokens require admin status
+		if !isSystemToken && !h.isAdmin(payload.UserID) {
+			h.renderError(w, http.StatusUnauthorized, errorTitleUnauthorized, "You don't have permission to view this page.")
+			HitsTotal.WithLabelValues(StatusDenied).Inc()
+			DeniedTotal.WithLabelValues(ReasonNotAdmin).Inc()
+			h.logger.Warn().Int64("user_id", payload.UserID).Msg("Non-admin attempted expanded view access")
+
+			return
+		}
 	}
 
 	// Fetch data and render
