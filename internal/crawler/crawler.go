@@ -324,7 +324,7 @@ func (c *Crawler) updateWithContent(ctx context.Context, docID string, result *E
 		fields["published_at"] = result.PublishedAt.UTC().Format(time.RFC3339)
 	}
 
-	// Add language-specific fields
+	// Add language-specific fields (only for languages supported in Solr schema)
 	switch result.Language {
 	case "en":
 		fields["title_en"] = result.Title
@@ -335,12 +335,6 @@ func (c *Crawler) updateWithContent(ctx context.Context, docID string, result *E
 	case "el":
 		fields["title_el"] = result.Title
 		fields["content_el"] = result.Content
-	case "de":
-		fields["title_de"] = result.Title
-		fields["content_de"] = result.Content
-	case "fr":
-		fields["title_fr"] = result.Title
-		fields["content_fr"] = result.Content
 	}
 
 	if err := c.client.AtomicUpdate(ctx, docID, fields); err != nil {

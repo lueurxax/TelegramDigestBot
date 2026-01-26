@@ -2576,7 +2576,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "(sum(rate(digest_drops_total{namespace=\"digest\"}[1h])) + sum(rate(digest_pipeline_processed_total{namespace=\"digest\",status=\"rejected\"}[1h])) + sum(rate(digest_item_ratings_total{namespace=\"digest\",rating=~\"bad|irrelevant\"}[1h]))) / sum(rate(digest_messages_ingested_total{namespace=\"digest\"}[1h]))",
+              "expr": "((sum(rate(digest_drops_total[1h])) or vector(0)) + (sum(rate(digest_pipeline_processed_total{status=\"rejected\"}[1h])) or vector(0)) + (sum(rate(digest_item_ratings_total{rating=~\"bad|irrelevant\"}[1h])) or vector(0))) / clamp_min((sum(rate(digest_messages_ingested_total[1h])) or vector(0)), 1)",
               "legendFormat": "low-signal",
               "refId": "A"
             }
@@ -2624,7 +2624,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(rate(digest_drops_total{namespace=\"digest\",reason=~\"dedup_.*|duplicate_batch\"}[1h])) / sum(rate(digest_messages_ingested_total{namespace=\"digest\"}[1h]))",
+              "expr": "(sum(rate(digest_drops_total{reason=~\"dedup_.*|duplicate_batch\"}[1h])) or vector(0)) / clamp_min((sum(rate(digest_messages_ingested_total[1h])) or vector(0)), 1)",
               "legendFormat": "duplicate",
               "refId": "A"
             }
@@ -2672,13 +2672,13 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "digest_average_importance{namespace=\"digest\"}",
+              "expr": "avg(digest_average_importance{namespace=\"digest\"})",
               "legendFormat": "importance",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "digest_average_relevance{namespace=\"digest\"}",
+              "expr": "avg(digest_average_relevance{namespace=\"digest\"})",
               "legendFormat": "relevance",
               "refId": "B"
             }
@@ -2780,7 +2780,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "sum(rate(digest_drops_total{namespace=\"digest\",reason=~\"dedup_.*|duplicate_batch\"}[1h])) by (reason)",
+              "expr": "sum(rate(digest_drops_total{reason=~\"dedup_.*|duplicate_batch\"}[1h])) by (reason)",
               "legendFormat": "{{reason}}",
               "refId": "A"
             }

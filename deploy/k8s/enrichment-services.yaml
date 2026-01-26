@@ -22,11 +22,11 @@ data:
       - json
     engines:
     - name: duckduckgo
-      disabled: true
-    - name: bing
-      disabled: true
-    - name: brave
       disabled: false
+    - name: bing
+      disabled: false
+    - name: brave
+      disabled: true  # Disabled due to aggressive rate limiting (3600s suspension)
     - name: qwant
       disabled: false
     - name: wikipedia

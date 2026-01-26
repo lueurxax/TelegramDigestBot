@@ -44,6 +44,7 @@ This directory contains all documentation for the Telegram Digest Bot project.
 
 | Document | Description |
 |----------|-------------|
+| [Pipeline Optimization](features/pipeline-optimization.md) | Heuristic filters, caching, summary post-processing |
 | [Annotations](features/annotations.md) | Item labeling for quality evaluation and threshold tuning |
 | [Evaluation Harness](eval/README.md) | Offline quality evaluation with labeled datasets |
 
@@ -56,7 +57,6 @@ These documents describe features under consideration or in development.
 | [LLM Budget Guardrails](proposals/llm-budget-guardrails.md) | Per-model budgets and rate limits |
 | [Research & Visualization](proposals/research-interactivity-visualization.md) | Interactive research UI and analytics |
 | [Digest Item Expansion](proposals/digest-item-expansion.md) | Expandable digest items with full content |
-| [Digest Quality Low Cost](proposals/digest-quality-low-cost.md) | Quality improvements at lower LLM cost |
 | [Telegram Link Seeding](proposals/telegram-link-seeding.md) | Seeding evidence from Telegram links |
 
 ## Other

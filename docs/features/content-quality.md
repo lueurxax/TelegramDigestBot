@@ -366,6 +366,7 @@ Track these metrics to measure quality improvements:
 
 ## See Also
 
+- [Pipeline Optimization](pipeline-optimization.md) - Pre-LLM filters, summary caching, post-processing
 - [Annotations](annotations.md) - Item labeling for threshold tuning
 - [Channel Importance](channel-importance-weight.md) - Per-channel importance weighting
 - [Source Enrichment](source-enrichment.md) - Evidence-enhanced clustering
