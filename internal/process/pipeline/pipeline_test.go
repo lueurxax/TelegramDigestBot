@@ -228,7 +228,7 @@ func TestPipeline_processNextBatch(t *testing.T) {
 
 	logger := zerolog.Nop()
 
-	p := New(cfg, repo, llmClient, embeddingClient, nil, &logger)
+	p := New(cfg, repo, llmClient, embeddingClient, nil, nil, &logger)
 
 	err := p.processNextBatch(context.Background(), "test-corr-id") //nolint:goconst // test literal
 	if err != nil {
@@ -327,7 +327,7 @@ func TestPipeline_ImportanceWeightApplication(t *testing.T) {
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, llmClient, embeddingClient, nil, &logger)
+			p := New(cfg, repo, llmClient, embeddingClient, nil, nil, &logger)
 
 			err := p.processNextBatch(context.Background(), "test-corr-id")
 			if err != nil {
@@ -425,7 +425,7 @@ func TestHasUniqueInfo(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	p := New(cfg, nil, nil, nil, nil, nil)
+	p := New(cfg, nil, nil, nil, nil, nil, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -842,7 +842,7 @@ func TestGroupIndicesByModel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{LLMModel: tt.llmModel}
 
-			p := New(cfg, nil, nil, nil, nil, nil)
+			p := New(cfg, nil, nil, nil, nil, nil, nil)
 
 			result := p.groupIndicesByModel(tt.candidates, nil)
 
@@ -936,7 +936,7 @@ func TestDetermineStatus(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	p := New(cfg, nil, nil, nil, nil, nil)
+	p := New(cfg, nil, nil, nil, nil, nil, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1024,7 +1024,7 @@ func TestCalculateImportance(t *testing.T) {
 
 	logger := zerolog.Nop()
 
-	p := New(cfg, nil, nil, nil, nil, &logger)
+	p := New(cfg, nil, nil, nil, nil, nil, &logger)
 
 	s := &pipelineSettings{}
 
@@ -1137,7 +1137,7 @@ func TestNormalizeResults(t *testing.T) {
 
 	cfg := &config.Config{}
 
-	p := New(cfg, nil, nil, nil, nil, nil)
+	p := New(cfg, nil, nil, nil, nil, nil, nil)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1211,7 +1211,7 @@ func TestEvaluateRelevanceGate(t *testing.T) {
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, llmClient, nil, nil, &logger)
+			p := New(cfg, repo, llmClient, nil, nil, nil, &logger)
 
 			s := &pipelineSettings{
 				relevanceGateEnabled: tt.gateEnabled,
@@ -1298,7 +1298,7 @@ func TestEvaluateGateLLM(t *testing.T) {
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, llmClient, nil, nil, &logger)
+			p := New(cfg, repo, llmClient, nil, nil, nil, &logger)
 
 			s := &pipelineSettings{
 				relevanceGateModel: tt.relevanceGateModel,
@@ -1382,7 +1382,7 @@ func TestLoadGatePrompt(t *testing.T) {
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, nil, nil, nil, &logger)
+			p := New(cfg, repo, nil, nil, nil, nil, &logger)
 
 			prompt, version := p.loadGatePrompt(context.Background(), logger)
 
@@ -1422,7 +1422,7 @@ func TestCreateItem(t *testing.T) {
 
 	logger := zerolog.Nop()
 
-	p := New(cfg, nil, nil, nil, nil, &logger)
+	p := New(cfg, nil, nil, nil, nil, nil, &logger)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1509,7 +1509,7 @@ func TestGetDurationSetting(t *testing.T) {
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, nil, nil, nil, &logger)
+			p := New(cfg, repo, nil, nil, nil, nil, &logger)
 
 			result := p.getDurationSetting(context.Background(), "test_duration", tt.defaultVal, logger)
 
@@ -1579,7 +1579,7 @@ func TestSkipMessage(t *testing.T) {
 
 			logger := zerolog.Nop()
 
-			p := New(cfg, repo, nil, nil, nil, &logger)
+			p := New(cfg, repo, nil, nil, nil, nil, &logger)
 
 			s := &pipelineSettings{
 				skipForwards:          tt.skipForwards,

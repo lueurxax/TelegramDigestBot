@@ -152,6 +152,8 @@ data:
       <field name="crawl_depth" type="pint" indexed="true" stored="true" default="0"/>
       <field name="crawl_retries" type="pint" indexed="true" stored="true" default="0"/>
       <field name="crawl_error" type="string" indexed="true" stored="true"/>
+      <field name="crawl_seed_source" type="string" indexed="true" stored="true"/>
+      <field name="crawl_seed_ref" type="string" indexed="true" stored="true"/>
 
       <!-- Text fields with general analyzer (stored for display) -->
       <field name="title" type="text_general" indexed="true" stored="true"/>

@@ -14,6 +14,13 @@ const (
 	portHTTPS = ":443"
 )
 
+// trackingParams are common tracking parameters to strip during URL canonicalization.
+var trackingParams = []string{
+	"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+	"fbclid", "gclid", "yclid", "mc_eid", "mc_cid",
+	"ref", "source", "share",
+}
+
 // WebDocID generates a document ID for a web page URL.
 // The ID is a full SHA-256 hash of the canonicalized URL.
 func WebDocID(rawURL string) string {
@@ -76,9 +83,14 @@ func canonicalizeURL(rawURL string) string {
 		parsed.Path = strings.TrimSuffix(parsed.Path, "/")
 	}
 
-	// Sort query parameters
+	// Remove tracking parameters and sort remaining
 	if parsed.RawQuery != "" {
 		query := parsed.Query()
+
+		for _, param := range trackingParams {
+			query.Del(param)
+		}
+
 		parsed.RawQuery = query.Encode()
 	}
 

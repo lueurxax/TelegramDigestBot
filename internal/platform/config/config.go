@@ -206,6 +206,11 @@ type Config struct {
 	CrawlClaimTTL     time.Duration `env:"CRAWL_CLAIM_TTL" envDefault:"5m"`
 	CrawlUserAgent    string        `env:"CRAWL_USER_AGENT" envDefault:"TelegramDigestBot/1.0"`
 	CrawlSeedsFile    string        `env:"CRAWL_SEEDS_FILE" envDefault:"/config/seeds.txt"`
+
+	// Telegram link seeding (seeds external links from Telegram posts into crawler queue)
+	TelegramLinkSeedingEnabled bool   `env:"TELEGRAM_LINK_SEEDING_ENABLED" envDefault:"false"`
+	CrawlerQueueMaxPending     int    `env:"CRAWLER_QUEUE_MAX_PENDING" envDefault:"10000"`
+	LinkSeedExtDenylist        string `env:"LINK_SEED_EXT_DENYLIST" envDefault:".zip,.exe,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.rar,.7z,.tar,.gz"`
 }
 
 func Load() (*Config, error) {

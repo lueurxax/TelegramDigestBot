@@ -2576,7 +2576,7 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "digest_low_signal_rate",
+              "expr": "avg(digest_low_signal_rate)",
               "legendFormat": "low-signal",
               "refId": "A"
             }

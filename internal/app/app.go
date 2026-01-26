@@ -12,12 +12,14 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/core/embeddings"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
+	"github.com/lueurxax/telegram-digest-bot/internal/core/solr"
 	"github.com/lueurxax/telegram-digest-bot/internal/ingest/reader"
 	"github.com/lueurxax/telegram-digest-bot/internal/output/digest"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	"github.com/lueurxax/telegram-digest-bot/internal/process/enrichment"
 	"github.com/lueurxax/telegram-digest-bot/internal/process/factcheck"
+	"github.com/lueurxax/telegram-digest-bot/internal/process/linkseeder"
 	"github.com/lueurxax/telegram-digest-bot/internal/process/pipeline"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
@@ -106,8 +108,9 @@ func (a *App) RunWorker(ctx context.Context) error {
 	llmClient := a.newLLMClient(ctx)
 	embeddingClient := a.newEmbeddingClient(ctx)
 	resolver := a.newLinkResolver()
+	seeder := a.newLinkSeeder()
 
-	p := pipeline.New(a.cfg, a.database, llmClient, embeddingClient, resolver, a.logger)
+	p := pipeline.New(a.cfg, a.database, llmClient, embeddingClient, resolver, seeder, a.logger)
 	go a.runDiscoveryReconciliation(ctx)
 	go a.runFactCheckWorker(ctx)
 	go a.runEnrichmentWorker(ctx, embeddingClient)
@@ -389,4 +392,43 @@ func (a *App) newEmbeddingClient(ctx context.Context) embeddings.Client {
 // newLinkResolver creates a new link resolver.
 func (a *App) newLinkResolver() *links.Resolver {
 	return links.New(a.cfg, a.database, db.NewChannelRepoAdapter(a.database), nil, a.logger)
+}
+
+// newLinkSeeder creates a new link seeder for seeding external links into crawler queue.
+func (a *App) newLinkSeeder() pipeline.LinkSeeder {
+	if !a.cfg.TelegramLinkSeedingEnabled || !a.cfg.SolrEnabled {
+		return nil
+	}
+
+	solrClient := solr.New(solr.Config{
+		Enabled:    a.cfg.SolrEnabled,
+		BaseURL:    a.cfg.SolrBaseURL,
+		Timeout:    a.cfg.SolrTimeout,
+		MaxResults: a.cfg.SolrMaxResults,
+	})
+
+	seeder := linkseeder.NewFromConfig(a.cfg, solrClient, a.logger)
+
+	return &linkSeederAdapter{seeder: seeder}
+}
+
+// linkSeederAdapter adapts *linkseeder.Seeder to pipeline.LinkSeeder interface.
+type linkSeederAdapter struct {
+	seeder *linkseeder.Seeder
+}
+
+// SeedLinks implements pipeline.LinkSeeder.
+func (a *linkSeederAdapter) SeedLinks(ctx context.Context, input pipeline.LinkSeedInput) pipeline.LinkSeedResult {
+	result := a.seeder.SeedLinks(ctx, linkseeder.SeedInput{
+		ChannelID: input.ChannelID,
+		MessageID: input.MessageID,
+		URLs:      input.URLs,
+	})
+
+	return pipeline.LinkSeedResult{
+		Extracted: result.Extracted,
+		Enqueued:  result.Enqueued,
+		Skipped:   result.Skipped,
+		Errors:    result.Errors,
+	}
 }

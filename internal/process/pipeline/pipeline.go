@@ -59,12 +59,36 @@ type LinkResolver interface {
 	ResolveLinks(ctx context.Context, text string, maxLinks int, webTTL, tgTTL time.Duration) ([]domain.ResolvedLink, error)
 }
 
+// LinkSeeder seeds external links from messages into the crawler queue.
+// Implemented by *linkseeder.Seeder.
+type LinkSeeder interface {
+	SeedLinks(ctx context.Context, input LinkSeedInput) LinkSeedResult
+}
+
+// LinkSeedInput contains information for link seeding.
+// This type is compatible with linkseeder.SeedInput.
+type LinkSeedInput struct {
+	ChannelID string
+	MessageID int64
+	URLs      []string
+}
+
+// LinkSeedResult contains the results of a seeding operation.
+// This type is compatible with linkseeder.SeedResult.
+type LinkSeedResult struct {
+	Extracted int
+	Enqueued  int
+	Skipped   map[string]int
+	Errors    int
+}
+
 type Pipeline struct {
 	cfg             *config.Config
 	database        Repository
 	llmClient       llm.Client
 	embeddingClient embeddings.Client
 	linkResolver    LinkResolver
+	linkSeeder      LinkSeeder
 	logger          *zerolog.Logger
 }
 
@@ -121,13 +145,14 @@ const (
 	hoursPerDay            = 24
 )
 
-func New(cfg *config.Config, database Repository, llmClient llm.Client, embeddingClient embeddings.Client, linkResolver LinkResolver, logger *zerolog.Logger) *Pipeline {
+func New(cfg *config.Config, database Repository, llmClient llm.Client, embeddingClient embeddings.Client, linkResolver LinkResolver, linkSeeder LinkSeeder, logger *zerolog.Logger) *Pipeline {
 	return &Pipeline{
 		cfg:             cfg,
 		database:        database,
 		llmClient:       llmClient,
 		embeddingClient: embeddingClient,
 		linkResolver:    linkResolver,
+		linkSeeder:      linkSeeder,
 		logger:          logger,
 	}
 }
@@ -754,6 +779,9 @@ func (p *Pipeline) enrichMessage(ctx context.Context, logger zerolog.Logger, m d
 	if eErr != nil {
 		logger.Warn().Err(eErr).Str(LogFieldMsgID, m.ID).Msg("link enrichment failed")
 	}
+
+	// Seed external links into crawler queue (non-blocking, opportunistic)
+	p.seedLinksForCrawler(ctx, logger, m)
 
 	return llm.MessageInput{
 		RawMessage:    m,
