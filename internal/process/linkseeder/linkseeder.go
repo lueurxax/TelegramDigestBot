@@ -399,16 +399,17 @@ func (s *Seeder) enqueueURL(ctx context.Context, rawURL, seedRef string) error {
 		return errDuplicate
 	}
 
-	parsed, err := url.Parse(rawURL)
+	// Parse canonical URL for normalized domain (lowercase, no port)
+	parsed, err := url.Parse(canonicalURL)
 	if err != nil {
-		return fmt.Errorf("parse url: %w", err)
+		return fmt.Errorf("parse canonical url: %w", err)
 	}
 
 	doc := solr.NewIndexDocument(docID).
 		SetField("source", solr.SourceWeb).
 		SetField(logFieldURL, rawURL).
 		SetField("url_canonical", canonicalURL).
-		SetField("domain", parsed.Host).
+		SetField("domain", parsed.Hostname()).
 		SetField("crawl_status", solr.CrawlStatusPending).
 		SetField("crawl_depth", 0).
 		SetField("crawl_seed_source", SeedSourceTelegram).

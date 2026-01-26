@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+const extractURLsFromJSONErrFormat = "ExtractURLsFromJSON() = %v, want %v"
+
 func TestExtractLinks(t *testing.T) {
 	tests := []struct {
 		name string
@@ -472,7 +474,62 @@ func TestExtractURLsFromJSON(t *testing.T) {
 	}
 
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("ExtractURLsFromJSON() = %v, want %v", got, want)
+		t.Errorf(extractURLsFromJSONErrFormat, got, want)
+	}
+}
+
+func TestExtractURLsFromJSON_WebpagePreview(t *testing.T) {
+	// Test that Telegram Webpage preview URLs are correctly extracted from mediaJSON
+	tests := []struct {
+		name      string
+		mediaJSON []byte
+		want      []string
+	}{
+		{
+			name: "webpage with URL and DisplayURL",
+			mediaJSON: []byte(`{
+				"Webpage": {
+					"URL": "https://example.com/article",
+					"DisplayURL": "example.com/article",
+					"Title": "Test Article"
+				}
+			}`),
+			want: []string{"https://example.com/article"},
+		},
+		{
+			name: "webpage with only URL",
+			mediaJSON: []byte(`{
+				"Webpage": {
+					"URL": "https://news.site/story/123"
+				}
+			}`),
+			want: []string{"https://news.site/story/123"},
+		},
+		{
+			name: "nested media structure",
+			mediaJSON: []byte(`{
+				"MessageMediaWebPage": {
+					"Webpage": {
+						"URL": "https://deep.nested.com/page"
+					}
+				}
+			}`),
+			want: []string{"https://deep.nested.com/page"},
+		},
+		{
+			name: "no webpage",
+			mediaJSON: []byte(`{"Photo": {"ID": 123}}`),
+			want:      []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractURLsFromJSON(nil, tt.mediaJSON)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf(extractURLsFromJSONErrFormat, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -598,6 +655,128 @@ func TestParseTelegramLink(t *testing.T) {
 
 			if link.MessageID != tt.wantMessageID {
 				t.Errorf("MessageID = %d, want %d", link.MessageID, tt.wantMessageID)
+			}
+		})
+	}
+}
+
+func TestExtractURLsFromText(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want []string
+	}{
+		{
+			name: "single URL",
+			text: "Check https://example.com/page for more info",
+			want: []string{"https://example.com/page"},
+		},
+		{
+			name: "multiple URLs",
+			text: "See https://google.com and https://github.com/repo",
+			want: []string{"https://google.com", "https://github.com/repo"},
+		},
+		{
+			name: "includes telegram URLs",
+			text: "Post at https://t.me/channel/123",
+			want: []string{"https://t.me/channel/123"},
+		},
+		{
+			name: "excludes blocked domains",
+			text: "Tweet https://twitter.com/user/123 and web https://example.com",
+			want: []string{"https://example.com"},
+		},
+		{
+			name: "empty text",
+			text: "",
+			want: []string{},
+		},
+		{
+			name: "no URLs",
+			text: "Just plain text without any links",
+			want: []string{},
+		},
+		{
+			name: "deduplicates URLs",
+			text: "Link https://example.com and again https://example.com",
+			want: []string{"https://example.com"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractURLsFromText(tt.text)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ExtractURLsFromText() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractAllURLs(t *testing.T) {
+	tests := []struct {
+		name         string
+		text         string
+		entitiesJSON []byte
+		mediaJSON    []byte
+		want         []string
+	}{
+		{
+			name:         "combines JSON and text URLs",
+			text:         "Also check https://text-url.com for details",
+			entitiesJSON: []byte(`[{"URL":"https://entity-url.com/page"}]`),
+			mediaJSON:    nil,
+			want:         []string{"https://entity-url.com/page", "https://text-url.com"},
+		},
+		{
+			name:         "deduplicates across sources",
+			text:         "Link https://example.com in text",
+			entitiesJSON: []byte(`[{"URL":"https://example.com"}]`),
+			mediaJSON:    nil,
+			want:         []string{"https://example.com"},
+		},
+		{
+			name:         "JSON takes priority order",
+			text:         "Text has https://second.com",
+			entitiesJSON: []byte(`[{"URL":"https://first.com"}]`),
+			mediaJSON:    []byte(`{"Webpage":{"URL":"https://media.com"}}`),
+			want:         []string{"https://first.com", "https://media.com", "https://second.com"},
+		},
+		{
+			name:         "text only when no JSON",
+			text:         "Only text https://example.com here",
+			entitiesJSON: nil,
+			mediaJSON:    nil,
+			want:         []string{"https://example.com"},
+		},
+		{
+			name:         "JSON only when no text URLs",
+			text:         "Plain text without URLs",
+			entitiesJSON: []byte(`[{"URL":"https://entity.com"}]`),
+			mediaJSON:    nil,
+			want:         []string{"https://entity.com"},
+		},
+		{
+			name:         "empty everything",
+			text:         "",
+			entitiesJSON: nil,
+			mediaJSON:    nil,
+			want:         []string{},
+		},
+		{
+			name:         "handles malformed JSON gracefully",
+			text:         "Fallback https://text.com",
+			entitiesJSON: []byte(`{invalid json`),
+			mediaJSON:    nil,
+			want:         []string{"https://text.com"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractAllURLs(tt.text, tt.entitiesJSON, tt.mediaJSON)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ExtractAllURLs() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -351,3 +351,61 @@ func TestParseCommaSeparated(t *testing.T) {
 		})
 	}
 }
+
+func TestSeedLinksDisabled(t *testing.T) {
+	seeder := &Seeder{
+		enabled: false,
+	}
+
+	input := SeedInput{
+		PeerID:    12345,
+		MessageID: 100,
+		URLs:      []string{"https://example.com/page1", "https://example.com/page2"},
+	}
+
+	result := seeder.SeedLinks(t.Context(), input)
+
+	if result.Skipped[SkipReasonDisabled] != 2 {
+		t.Errorf("expected 2 URLs skipped with reason 'disabled', got %d", result.Skipped[SkipReasonDisabled])
+	}
+
+	if result.Enqueued != 0 {
+		t.Errorf("expected 0 URLs enqueued when disabled, got %d", result.Enqueued)
+	}
+}
+
+func TestSeedInputFields(t *testing.T) {
+	// Test that SeedInput has correct field types for traceability
+	input := SeedInput{
+		PeerID:    1234567890,
+		MessageID: 42,
+		URLs:      []string{"https://example.com"},
+	}
+
+	if input.PeerID != 1234567890 {
+		t.Errorf("PeerID = %d, want 1234567890", input.PeerID)
+	}
+
+	if input.MessageID != 42 {
+		t.Errorf("MessageID = %d, want 42", input.MessageID)
+	}
+}
+
+func TestSeedResultInit(t *testing.T) {
+	// Test that SeedResult initializes correctly with skip tracking
+	result := SeedResult{
+		Skipped: make(map[string]int),
+	}
+
+	result.Skipped[SkipReasonDisabled] = 5
+	result.Skipped[SkipReasonDeniedDomain] = 3
+
+	totalSkipped := 0
+	for _, count := range result.Skipped {
+		totalSkipped += count
+	}
+
+	if totalSkipped != 8 {
+		t.Errorf("expected 8 total skipped, got %d", totalSkipped)
+	}
+}

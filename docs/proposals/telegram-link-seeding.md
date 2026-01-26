@@ -35,7 +35,7 @@ Seed external links from Telegram messages into the crawler queue. This improves
 - Normalize trailing slash and sort query params for stable hashing.
 - Produce:
   - `url_canonical` (normalized URL)
-  - `url_hash` (hash of canonical, used for dedupe; if doc ID already hashes canonical, this field can be omitted and doc ID used instead)
+  - Doc ID is derived from hash of `url_canonical` via `solr.WebDocID()`, used for idempotent dedupe
 
 ### Filtering & Scope Control
 - Drop non-http(s) schemes.
@@ -49,10 +49,11 @@ Each seeded URL is inserted into the crawler queue with:
 - `crawl_depth=0`
 - `crawl_seed_source=telegram`
 - `crawl_seed_ref=tg://peer/<peer_id>/msg/<msg_id>`
-- `url_canonical`, `url_hash`
+- `url_canonical`
+- `domain` (normalized hostname for analytics/filtering)
 
 Idempotency:
-- If `url_hash` already exists (any status), skip enqueue.
+- Doc ID is hash of `url_canonical`; if doc already exists (any status), skip enqueue.
 - If queue is unavailable, log and continue (no inline retries).
 
 ### Backpressure
@@ -65,9 +66,8 @@ Idempotency:
 <field name="crawl_seed_source" type="string" indexed="true" stored="true"/>
 <field name="crawl_seed_ref" type="string" indexed="true" stored="true"/>
 <field name="url_canonical" type="string" indexed="true" stored="true"/>
-<field name="url_hash" type="string" indexed="true" stored="true"/>
 ```
-Note: If the queue doc ID already hashes `url_canonical`, `url_hash` can be dropped and the doc ID used for dedupe.
+Note: Doc ID is hash of `url_canonical` (via `solr.WebDocID()`), so no separate `url_hash` field is needed.
 
 ## Configuration
 - `TELEGRAM_LINK_SEEDING_ENABLED` (default: false)
@@ -87,7 +87,7 @@ Note: If the queue doc ID already hashes `url_canonical`, `url_hash` can be drop
 - Logs include URL, channel, msg_id, and skip reason.
 
 ## Testing Strategy
-- Unit tests: URL normalization, Telegram-domain filtering, dedupe by hash.
+- Unit tests: URL normalization, Telegram-domain filtering, dedupe by doc ID.
 - Integration: seed a known link and verify queue insertion in Solr.
 
 ## Rollout
