@@ -1,23 +1,37 @@
 package expandedview
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
+
+const (
+	testItemID = "550e8400-e29b-41d4-a716-446655440000"
+	testSecret = "secret"
+)
+
+func requireGenerate(t *testing.T, svc *TokenService, itemID string, userID int64) string {
+	t.Helper()
+
+	token, err := svc.Generate(itemID, userID)
+	if err != nil {
+		t.Fatalf("failed to generate token: %v", err)
+	}
+
+	return token
+}
 
 func TestTokenService_GenerateAndVerify(t *testing.T) {
 	secret := "test-secret-key-12345"
 	ttlHours := 24
 	svc := NewTokenService(secret, ttlHours)
 
-	itemID := "550e8400-e29b-41d4-a716-446655440000"
+	itemID := testItemID
 	userID := int64(12345678)
 
 	// Generate token
-	token, err := svc.Generate(itemID, userID)
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
+	token := requireGenerate(t, svc, itemID, userID)
 
 	if token == "" {
 		t.Fatal("Generate() returned empty token")
@@ -26,7 +40,7 @@ func TestTokenService_GenerateAndVerify(t *testing.T) {
 	// Verify token
 	payload, err := svc.Verify(token)
 	if err != nil {
-		t.Fatalf("Verify() error = %v", err)
+		t.Fatalf("failed to verify token: %v", err)
 	}
 
 	if payload.ItemID != itemID {
@@ -43,16 +57,16 @@ func TestTokenService_GenerateAndVerify(t *testing.T) {
 }
 
 func TestTokenService_Generate_InvalidItemID(t *testing.T) {
-	svc := NewTokenService("secret", 24)
+	svc := NewTokenService(testSecret, 24)
 
 	_, err := svc.Generate("not-a-uuid", 12345)
-	if err != ErrInvalidItemID {
-		t.Errorf("Generate() error = %v, want %v", err, ErrInvalidItemID)
+	if !errors.Is(err, ErrInvalidItemID) {
+		t.Errorf("expected ErrInvalidItemID, got: %v", err)
 	}
 }
 
 func TestTokenService_Verify_InvalidToken(t *testing.T) {
-	svc := NewTokenService("secret", 24)
+	svc := NewTokenService(testSecret, 24)
 
 	tests := []struct {
 		name  string
@@ -67,8 +81,8 @@ func TestTokenService_Verify_InvalidToken(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := svc.Verify(tt.token)
-			if err != ErrInvalidToken {
-				t.Errorf("Verify() error = %v, want %v", err, ErrInvalidToken)
+			if !errors.Is(err, ErrInvalidToken) {
+				t.Errorf("expected ErrInvalidToken, got: %v", err)
 			}
 		})
 	}
@@ -77,20 +91,15 @@ func TestTokenService_Verify_InvalidToken(t *testing.T) {
 func TestTokenService_Verify_ExpiredToken(t *testing.T) {
 	// Create service with 0 TTL (immediate expiry)
 	svc := &TokenService{
-		secret: []byte("secret"),
+		secret: []byte(testSecret),
 		ttl:    -time.Hour, // Already expired
 	}
 
-	itemID := "550e8400-e29b-41d4-a716-446655440000"
-	token, err := svc.Generate(itemID, 12345)
+	token := requireGenerate(t, svc, testItemID, 12345)
 
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
-
-	_, err = svc.Verify(token)
-	if err != ErrTokenExpired {
-		t.Errorf("Verify() error = %v, want %v", err, ErrTokenExpired)
+	_, err := svc.Verify(token)
+	if !errors.Is(err, ErrTokenExpired) {
+		t.Errorf("expected ErrTokenExpired, got: %v", err)
 	}
 }
 
@@ -98,16 +107,11 @@ func TestTokenService_DifferentSecrets(t *testing.T) {
 	svc1 := NewTokenService("secret1", 24)
 	svc2 := NewTokenService("secret2", 24)
 
-	itemID := "550e8400-e29b-41d4-a716-446655440000"
-	token, err := svc1.Generate(itemID, 12345)
-
-	if err != nil {
-		t.Fatalf("Generate() error = %v", err)
-	}
+	token := requireGenerate(t, svc1, testItemID, 12345)
 
 	// Token from svc1 should not verify with svc2
-	_, err = svc2.Verify(token)
-	if err != ErrInvalidToken {
-		t.Errorf("Verify() with different secret: error = %v, want %v", err, ErrInvalidToken)
+	_, err := svc2.Verify(token)
+	if !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("expected ErrInvalidToken for different secret, got: %v", err)
 	}
 }

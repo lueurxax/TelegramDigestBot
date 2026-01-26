@@ -99,7 +99,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check admin status if required
-	if h.cfg.ExpandedViewRequireAdmin && !h.isAdmin(payload.UserID) {
+	// UserID = 0 indicates a system-generated token (e.g., from digests) - allow for any viewer
+	if h.cfg.ExpandedViewRequireAdmin && payload.UserID != 0 && !h.isAdmin(payload.UserID) {
 		h.renderError(w, http.StatusUnauthorized, "Unauthorized", "You don't have permission to view this page.")
 		HitsTotal.WithLabelValues(StatusDenied).Inc()
 		DeniedTotal.WithLabelValues(ReasonNotAdmin).Inc()

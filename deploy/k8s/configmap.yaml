@@ -108,6 +108,6 @@ data:
   EXPLAINABILITY_LINE_ENABLED: "true"
   # Expanded view (on-demand item detail pages)
   EXPANDED_VIEW_ENABLED: "false"
-  EXPANDED_VIEW_BASE_URL: ""
+  EXPANDED_VIEW_BASE_URL: "https://digest.lueurxax.org"
   EXPANDED_VIEW_TTL_HOURS: "72"
   EXPANDED_VIEW_REQUIRE_ADMIN: "true"

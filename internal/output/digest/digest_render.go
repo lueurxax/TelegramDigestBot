@@ -96,6 +96,8 @@ type digestRenderContext struct {
 	evidence                  map[string][]db.ItemEvidenceWithSource
 	clusterSummaryCache       []db.ClusterSummaryCacheEntry
 	clusterSummaryCacheLoaded bool
+	expandLinksEnabled        bool
+	expandBaseURL             string
 	logger                    *zerolog.Logger
 }
 
@@ -108,20 +110,25 @@ func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSetting
 		displayEnd = end.In(loc)
 	}
 
+	// Check if expanded view links are enabled
+	expandLinksEnabled := s.cfg.ExpandedViewEnabled && s.expandLinkGenerator != nil && s.cfg.ExpandedViewBaseURL != ""
+
 	return &digestRenderContext{
-		scheduler:     s,
-		llmClient:     s.llmClient,
-		settings:      settings,
-		items:         items,
-		clusters:      clusters,
-		start:         start,
-		end:           end,
-		displayStart:  displayStart,
-		displayEnd:    displayEnd,
-		seenSummaries: make(map[string]bool),
-		factChecks:    factChecks,
-		evidence:      evidence,
-		logger:        logger,
+		scheduler:          s,
+		llmClient:          s.llmClient,
+		settings:           settings,
+		items:              items,
+		clusters:           clusters,
+		start:              start,
+		end:                end,
+		displayStart:       displayStart,
+		displayEnd:         displayEnd,
+		seenSummaries:      make(map[string]bool),
+		factChecks:         factChecks,
+		evidence:           evidence,
+		expandLinksEnabled: expandLinksEnabled,
+		expandBaseURL:      s.cfg.ExpandedViewBaseURL,
+		logger:             logger,
 	}
 }
 
@@ -453,6 +460,11 @@ func (rc *digestRenderContext) renderNarrativeSection(sb *strings.Builder, narra
 	rc.appendExplainabilityLine(sb, allItems)
 
 	rc.appendEvidenceLine(sb, allItems)
+
+	// Add expand link for the first item
+	if len(allItems) > 0 {
+		rc.appendExpandLink(sb, allItems[0].ID)
+	}
 }
 
 func (rc *digestRenderContext) renderMultiItemCluster(ctx context.Context, sb *strings.Builder, c db.ClusterWithItems) bool {
@@ -531,6 +543,11 @@ func (rc *digestRenderContext) renderConsolidatedSummary(sb *strings.Builder, su
 
 	rc.appendEvidenceLine(sb, c.Items)
 
+	// Add expand link for the first (representative) item
+	if len(c.Items) > 0 {
+		rc.appendExpandLink(sb, c.Items[0].ID)
+	}
+
 	sb.WriteString(htmlutils.ItemEnd)
 	sb.WriteString("\n")
 }
@@ -580,6 +597,9 @@ func (rc *digestRenderContext) renderRepresentativeCluster(sb *strings.Builder, 
 		fmt.Fprintf(sb, " <i>(+%d related)</i>", len(c.Items)-1)
 	}
 
+	// Add expand link for the representative item
+	rc.appendExpandLink(sb, representative.ID)
+
 	sb.WriteString(htmlutils.ItemEnd)
 	sb.WriteString("\n\n")
 
@@ -624,6 +644,20 @@ func (rc *digestRenderContext) appendEvidenceLine(sb *strings.Builder, items []d
 			fmt.Fprintf(sb, " <i>(%s)</i>", html.EscapeString(ev.Source.Domain))
 		}
 	}
+}
+
+func (rc *digestRenderContext) appendExpandLink(sb *strings.Builder, itemID string) {
+	if !rc.expandLinksEnabled || itemID == "" {
+		return
+	}
+
+	token, err := rc.scheduler.expandLinkGenerator.Generate(itemID, ExpandedViewSystemUserID)
+	if err != nil {
+		rc.logger.Debug().Err(err).Str(logFieldItemID, itemID).Msg("failed to generate expand link token")
+		return
+	}
+
+	fmt.Fprintf(sb, "\n    📖 <a href=\"%s/i/%s\">More</a>", html.EscapeString(rc.expandBaseURL), token)
 }
 
 func (rc *digestRenderContext) appendExplainabilityLine(sb *strings.Builder, items []db.Item) {
@@ -879,6 +913,11 @@ func (rc *digestRenderContext) formatSummaryGroup(sb *strings.Builder, g summary
 
 	// Append evidence bullets (Phase 2)
 	rc.appendEvidenceLine(sb, g.items)
+
+	// Add expand link for the first item in the group
+	if len(g.items) > 0 {
+		rc.appendExpandLink(sb, g.items[0].ID)
+	}
 
 	sb.WriteString(htmlutils.ItemEnd)
 	sb.WriteString("\n")

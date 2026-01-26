@@ -38,6 +38,7 @@ const (
 	msgFactCheckWorkerStopped        = "fact check worker stopped"
 	msgEnrichmentWorkerStopped       = "enrichment worker stopped"
 	llmAPIKeyMock                    = "mock"
+	logFieldBaseURL                  = "base_url"
 )
 
 // App holds the application dependencies and provides methods to run different modes.
@@ -73,7 +74,7 @@ func (a *App) StartHealthServer(ctx context.Context) error {
 
 		expandedHandler = handler
 
-		a.logger.Info().Str("base_url", a.cfg.ExpandedViewBaseURL).Msg("Expanded view handler enabled")
+		a.logger.Info().Str(logFieldBaseURL, a.cfg.ExpandedViewBaseURL).Msg("Expanded view handler enabled")
 	}
 
 	srv := observability.NewServerWithExpanded(a.database, a.cfg.HealthPort, expandedHandler, a.logger)
@@ -93,6 +94,15 @@ func (a *App) RunBot(ctx context.Context) error {
 
 	// Create a digest scheduler for preview commands (nil poster since we only need BuildDigest)
 	digestBuilder := digest.New(a.cfg, a.database, nil, llmClient, a.logger)
+
+	// Set up expand link generator for preview commands
+	if a.cfg.ExpandedViewEnabled && a.cfg.ExpandedViewSigningSecret != "" {
+		tokenService := expandedview.NewTokenService(
+			a.cfg.ExpandedViewSigningSecret,
+			a.cfg.ExpandedViewTTLHours,
+		)
+		digestBuilder.SetExpandLinkGenerator(tokenService)
+	}
 
 	//nolint:contextcheck // Budget alert callback fires async with no request context
 	b, err := bot.New(a.cfg, a.database, digestBuilder, llmClient, a.logger)
@@ -362,6 +372,16 @@ func (a *App) RunDigest(ctx context.Context, once bool) error {
 	}
 
 	s := digest.New(a.cfg, a.database, b, llmClient, a.logger)
+
+	// Set up expand link generator if enabled
+	if a.cfg.ExpandedViewEnabled && a.cfg.ExpandedViewSigningSecret != "" {
+		tokenService := expandedview.NewTokenService(
+			a.cfg.ExpandedViewSigningSecret,
+			a.cfg.ExpandedViewTTLHours,
+		)
+		s.SetExpandLinkGenerator(tokenService)
+		a.logger.Info().Str(logFieldBaseURL, a.cfg.ExpandedViewBaseURL).Msg("Expanded view links enabled in digest")
+	}
 
 	if once {
 		if err := s.RunOnce(ctx); err != nil {

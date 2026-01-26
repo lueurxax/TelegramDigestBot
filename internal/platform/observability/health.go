@@ -64,6 +64,12 @@ func (s *Server) Start(ctx context.Context) error {
 
 	mux.Handle("/metrics", promhttp.Handler())
 
+	// Robots.txt to prevent indexing of expanded view pages
+	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = fmt.Fprint(w, "User-agent: *\nDisallow: /i/\n")
+	})
+
 	// Register expanded view handler if configured
 	if s.expandedHandler != nil {
 		mux.Handle(expandedViewPathBase, http.StripPrefix(expandedViewPathBase, s.expandedHandler))

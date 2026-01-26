@@ -166,6 +166,12 @@ const (
 	LogTruncateLength = 50
 )
 
+// Expanded view link constants
+const (
+	ExpandedViewSystemUserID = int64(0)
+	logFieldItemID           = "item_id"
+)
+
 // Threshold tuning constants
 const (
 	DefaultThresholdTuningStep = 0.05

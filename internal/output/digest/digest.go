@@ -43,12 +43,18 @@ type DigestPoster interface {
 	SendNotification(ctx context.Context, text string) error
 }
 
+// ExpandLinkGenerator generates tokens for expanded view links.
+type ExpandLinkGenerator interface {
+	Generate(itemID string, userID int64) (string, error)
+}
+
 type Scheduler struct {
-	cfg       *config.Config
-	database  Repository
-	bot       DigestPoster
-	llmClient llm.Client
-	logger    *zerolog.Logger
+	cfg                 *config.Config
+	database            Repository
+	bot                 DigestPoster
+	llmClient           llm.Client
+	expandLinkGenerator ExpandLinkGenerator
+	logger              *zerolog.Logger
 }
 
 func New(cfg *config.Config, database Repository, bot DigestPoster, llmClient llm.Client, logger *zerolog.Logger) *Scheduler {
@@ -59,6 +65,11 @@ func New(cfg *config.Config, database Repository, bot DigestPoster, llmClient ll
 		llmClient: llmClient,
 		logger:    logger,
 	}
+}
+
+// SetExpandLinkGenerator sets the optional expand link generator for digest items.
+func (s *Scheduler) SetExpandLinkGenerator(gen ExpandLinkGenerator) {
+	s.expandLinkGenerator = gen
 }
 
 func (s *Scheduler) getLockID() int64 {

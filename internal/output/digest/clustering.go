@@ -251,7 +251,7 @@ func (s *Scheduler) getEmbeddings(ctx context.Context, items []db.Item, logger *
 	for _, item := range items {
 		emb, err := s.database.GetItemEmbedding(ctx, item.ID)
 		if err != nil {
-			logger.Warn().Str("item_id", item.ID).Err(err).Msg("failed to get embedding for item")
+			logger.Warn().Str(logFieldItemID, item.ID).Err(err).Msg("failed to get embedding for item")
 			continue
 		}
 
