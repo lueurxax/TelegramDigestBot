@@ -194,10 +194,16 @@ func (e *Extractor) extractClaimsWithLLM(ctx context.Context, content string) ([
 }
 
 func (e *Extractor) buildClaimExtractionPrompt(content string) string {
-	return `Extract the most significant factual claims from the following text.
-Return a JSON array of objects, where each object has:
-- "text": the claim text (single sentence)
-- "entities": an array of objects with "text" and "type" (PERSON, ORG, LOC, MONEY, PERCENT)
+	return `Extract factual claims from the text below. Return ONLY a valid JSON array, no other text.
+
+Each claim object must have exactly these fields:
+- "text": string (the claim as a single sentence)
+- "entities": array of {"text": string, "type": string} where type is one of: PERSON, ORG, LOC, MONEY, PERCENT
+
+Example output:
+[{"text": "Company X reported $5 million in revenue", "entities": [{"text": "Company X", "type": "ORG"}, {"text": "$5 million", "type": "MONEY"}]}]
+
+Return empty array [] if no factual claims found. Do not include any explanation or markdown formatting.
 
 Text:
 ` + truncateText(content, llmInputLimit)

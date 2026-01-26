@@ -13,8 +13,8 @@ data:
       secret_key: "change-me"
       limiter: false
     outgoing:
-      request_timeout: 10.0
-      max_request_timeout: 15.0
+      request_timeout: 20.0
+      max_request_timeout: 25.0
     search:
       safe_search: 0
       formats:
