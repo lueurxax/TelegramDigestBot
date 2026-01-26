@@ -82,6 +82,37 @@ Where:
 - **consistencyScore** = messages_per_day / expected_frequency (posting regularity)
 - **signalScore** = items_created / messages_received (signal-to-noise ratio)
 
+### Reliability Adjustment
+
+After the base auto-weight is calculated, a reliability adjustment is applied based on user ratings from the past 60 days.
+
+**Rating decay:**
+```
+weight = exp(-age_days * ln(2) / 30)
+```
+Recent ratings have more impact (30-day half-life).
+
+**Reliability score:**
+```
+goodRate = weighted_good / weighted_total
+irrelevantRate = weighted_irrelevant / weighted_total
+reliability = clamp(0.5 + (goodRate - irrelevantRate) * 0.5, 0, 1)
+```
+
+**Weight delta:**
+```
+delta = (reliability - 0.5) * 0.2
+```
+
+This maps reliability 0→1 to delta -0.1→+0.1.
+
+**High irrelevance penalty:**
+If `irrelevantRate >= 0.35`, an additional -0.05 penalty is applied.
+
+### Minimum Sample Requirement
+
+Reliability adjustment only applies when a channel has at least `RATING_MIN_SAMPLE_CHANNEL` (default: 15) ratings. Channels with fewer ratings use only the stats-based weight.
+
 ### Auto-Weight Range
 
 Auto-calculated weights are constrained to **0.5-1.5** (more conservative than manual 0.1-2.0) to prevent extreme swings.
@@ -208,4 +239,6 @@ Channels with fewer than 10 messages in the rolling window keep the default weig
 
 ## See Also
 
-- [Content Quality System](../features/content-quality.md) - How relevance, ratings, and clustering fit together
+- [Content Quality](content-quality.md) - Relevance gates, threshold tuning, and clustering
+- [Pipeline Optimization](pipeline-optimization.md) - Pre-LLM filters and caching
+- [Corroboration](corroboration.md) - Multi-source importance boost

@@ -46,6 +46,48 @@ Channels are matched by (in priority order):
 
 ---
 
+## Corroboration-Based Importance Adjustment
+
+When multiple channels report the same story, the item's importance score is boosted. Conversely, single-source clusters with duplicate posts receive a penalty.
+
+### Boost Formula
+
+```
+boost = (channel_count - 1) * CORROBORATION_IMPORTANCE_BOOST
+new_importance = clamp(base_importance + boost, 0, 1)
+```
+
+With the default boost of 0.08:
+- 2 channels: +0.08 boost
+- 3 channels: +0.16 boost
+- 4 channels: +0.24 boost
+
+### Single-Source Penalty
+
+When a cluster has multiple items but only one source channel, a penalty is applied:
+
+```
+new_importance = clamp(base_importance - SINGLE_SOURCE_PENALTY, 0, 1)
+```
+
+This discourages repeated single-source reposts from dominating the digest.
+
+### Configuration
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `CORROBORATION_IMPORTANCE_BOOST` | float32 | `0.08` | Boost per additional channel |
+| `SINGLE_SOURCE_PENALTY` | float32 | `0.05` | Penalty for single-source clusters |
+
+### When Adjustments Apply
+
+- Applied **after** clustering, before digest selection
+- Only affects items within clusters
+- Score changes propagate to both cluster items and the main item index
+- If both boost and penalty are 0, no adjustments are made
+
+---
+
 ## Google Fact Check API
 
 The system queries Google's Fact Check Tools API to find human-verified fact-checks related to each item's content.
@@ -209,6 +251,7 @@ See [Source Enrichment](source-enrichment.md) for full documentation.
 
 ## See Also
 
+- [Pipeline Optimization](pipeline-optimization.md) - Heuristic filters and caching
 - [Source Enrichment](source-enrichment.md) - Multi-provider evidence retrieval
 - [Link Enrichment](link-enrichment.md) - URL resolution for message content
 - [Content Quality](content-quality.md) - Relevance gates and clustering

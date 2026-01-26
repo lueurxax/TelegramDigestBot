@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -102,6 +104,7 @@ type pipelineSettings struct {
 	linkMinWords               int
 	linkSnippetMaxChars        int
 	linkEmbeddingMaxMsgLen     int
+	summaryCachePromptVersion  string
 }
 
 const (
@@ -112,6 +115,10 @@ const (
 	dropReasonDedupSemanticSame   = "dedup_semantic_same_channel"
 	dropReasonDedupSemanticGlobal = "dedup_semantic_global"
 	dropReasonDedupStrictGlobal   = "dedup_strict_global"
+
+	defaultPromptVersion   = "v1"
+	summaryCacheMaxAgeDays = 30
+	hoursPerDay            = 24
 )
 
 func New(cfg *config.Config, database Repository, llmClient llm.Client, embeddingClient embeddings.Client, linkResolver LinkResolver, logger *zerolog.Logger) *Pipeline {
@@ -268,25 +275,26 @@ func (p *Pipeline) augmentTextWithLinks(c *llm.MessageInput, s *pipelineSettings
 
 func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logger) (*pipelineSettings, error) {
 	s := &pipelineSettings{
-		batchSize:              p.cfg.WorkerBatchSize,
-		relevanceThreshold:     p.cfg.RelevanceThreshold,
-		relevanceGateEnabled:   p.cfg.RelevanceGateEnabled,
-		relevanceGateMode:      p.cfg.RelevanceGateMode,
-		relevanceGateModel:     p.cfg.RelevanceGateModel,
-		linkEnrichmentEnabled:  p.cfg.LinkEnrichmentEnabled,
-		maxLinks:               p.cfg.MaxLinksPerMessage,
-		linkCacheTTL:           p.cfg.LinkCacheTTL,
-		tgLinkCacheTTL:         p.cfg.TelegramLinkCacheTTL,
-		linkEnrichmentScope:    p.cfg.LinkEnrichmentScope,
-		linkMinWords:           p.cfg.LinkMinWords,
-		linkSnippetMaxChars:    p.cfg.LinkSnippetMaxChars,
-		linkEmbeddingMaxMsgLen: p.cfg.LinkEmbeddingMaxMsgLen,
-		filtersMode:            FilterModeMixed,
-		dedupMode:              DedupModeSemantic,
-		dedupWindow:            time.Duration(p.cfg.ClusterTimeWindowHours) * time.Hour,
-		dedupSameChannelWindow: time.Duration(p.cfg.DedupSameChannelWindowHours) * time.Hour,
-		topicsEnabled:          true,
-		minLengthDefault:       DefaultMinLength,
+		batchSize:                 p.cfg.WorkerBatchSize,
+		relevanceThreshold:        p.cfg.RelevanceThreshold,
+		relevanceGateEnabled:      p.cfg.RelevanceGateEnabled,
+		relevanceGateMode:         p.cfg.RelevanceGateMode,
+		relevanceGateModel:        p.cfg.RelevanceGateModel,
+		linkEnrichmentEnabled:     p.cfg.LinkEnrichmentEnabled,
+		maxLinks:                  p.cfg.MaxLinksPerMessage,
+		linkCacheTTL:              p.cfg.LinkCacheTTL,
+		tgLinkCacheTTL:            p.cfg.TelegramLinkCacheTTL,
+		linkEnrichmentScope:       p.cfg.LinkEnrichmentScope,
+		linkMinWords:              p.cfg.LinkMinWords,
+		linkSnippetMaxChars:       p.cfg.LinkSnippetMaxChars,
+		linkEmbeddingMaxMsgLen:    p.cfg.LinkEmbeddingMaxMsgLen,
+		summaryCachePromptVersion: defaultPromptVersion,
+		filtersMode:               FilterModeMixed,
+		dedupMode:                 DedupModeSemantic,
+		dedupWindow:               time.Duration(p.cfg.ClusterTimeWindowHours) * time.Hour,
+		dedupSameChannelWindow:    time.Duration(p.cfg.DedupSameChannelWindowHours) * time.Hour,
+		topicsEnabled:             true,
+		minLengthDefault:          DefaultMinLength,
 		minLengthByLang: map[string]int{
 			"ru": p.cfg.FilterMinLengthRu,
 			"uk": p.cfg.FilterMinLengthUk,
@@ -759,35 +767,9 @@ func (p *Pipeline) runLLMProcessing(ctx context.Context, logger zerolog.Logger, 
 
 	results := make([]llm.BatchResult, len(candidates))
 	cached := make([]bool, len(candidates))
+	digestLang := normalizeLanguage(s.digestLanguage)
 
-	for i, candidate := range candidates {
-		if candidate.CanonicalHash == "" {
-			continue
-		}
-
-		entry, err := p.database.GetSummaryCache(ctx, candidate.CanonicalHash, normalizeLanguage(s.digestLanguage))
-		if err != nil {
-			if !errors.Is(err, db.ErrSummaryCacheNotFound) {
-				logger.Warn().Err(err).Str(LogFieldMsgID, candidate.ID).Msg("failed to load summary cache")
-			}
-
-			continue
-		}
-
-		if strings.TrimSpace(entry.Summary) == "" {
-			continue
-		}
-
-		results[i] = llm.BatchResult{
-			Index:           i,
-			RelevanceScore:  entry.RelevanceScore,
-			ImportanceScore: entry.ImportanceScore,
-			Topic:           entry.Topic,
-			Summary:         entry.Summary,
-			Language:        entry.Language,
-		}
-		cached[i] = true
-	}
+	p.loadCachedSummaries(ctx, logger, candidates, results, cached, digestLang, s.summaryCachePromptVersion)
 
 	// Group indices by model for Vision Routing
 	modelGroups := p.groupIndicesByModel(candidates, cached)
@@ -804,6 +786,58 @@ func (p *Pipeline) runLLMProcessing(ctx context.Context, logger zerolog.Logger, 
 	logger.Info().Int(LogFieldCount, len(candidates)).Dur("duration", time.Since(start)).Msg("LLM processing finished")
 
 	return results, nil
+}
+
+func (p *Pipeline) loadCachedSummaries(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, cached []bool, digestLang, promptVersion string) {
+	for i, candidate := range candidates {
+		entry, ok := p.lookupSummaryCache(ctx, logger, candidate, digestLang, promptVersion)
+		if !ok {
+			continue
+		}
+
+		results[i] = llm.BatchResult{
+			Index:           i,
+			RelevanceScore:  entry.RelevanceScore,
+			ImportanceScore: entry.ImportanceScore,
+			Topic:           entry.Topic,
+			Summary:         entry.Summary,
+			Language:        entry.Language,
+		}
+		cached[i] = true
+	}
+}
+
+func (p *Pipeline) lookupSummaryCache(ctx context.Context, logger zerolog.Logger, candidate llm.MessageInput, digestLang, promptVersion string) (*db.SummaryCacheEntry, bool) {
+	cacheKey := summaryCacheKey(candidate, promptVersion)
+	if cacheKey == "" {
+		return nil, false
+	}
+
+	entry, err := p.database.GetSummaryCache(ctx, cacheKey, digestLang)
+	if errors.Is(err, db.ErrSummaryCacheNotFound) && previewTextForCache(candidate) == "" {
+		entry, err = p.database.GetSummaryCache(ctx, candidate.CanonicalHash, digestLang)
+	}
+
+	if err != nil {
+		if !errors.Is(err, db.ErrSummaryCacheNotFound) {
+			logger.Warn().Err(err).Str(LogFieldMsgID, candidate.ID).Msg("failed to load summary cache")
+		}
+
+		return nil, false
+	}
+
+	if strings.TrimSpace(entry.Summary) == "" {
+		return nil, false
+	}
+
+	if summaryCacheMaxAgeDays > 0 {
+		maxAge := time.Duration(summaryCacheMaxAgeDays) * hoursPerDay * time.Hour
+		if time.Since(entry.UpdatedAt) > maxAge {
+			return nil, false
+		}
+	}
+
+	return entry, true
 }
 
 func (p *Pipeline) groupIndicesByModel(candidates []llm.MessageInput, cached []bool) map[string][]int {
@@ -969,7 +1003,7 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 			item.Summary = postProcessSummary(item.Summary, s.summaryMaxChars, s.summaryStripPhrasesFor(targetLang))
 		}
 
-		if p.saveAndMarkProcessed(ctx, logger, candidates[i], item, embeddings, s.digestLanguage) {
+		if p.saveAndMarkProcessed(ctx, logger, candidates[i], item, embeddings, s.digestLanguage, s.summaryCachePromptVersion) {
 			if item.Status == StatusReady {
 				readyCount++
 			} else {
@@ -1124,7 +1158,7 @@ func (p *Pipeline) determineStatus(c llm.MessageInput, relevanceScore float32, s
 	return StatusReady
 }
 
-func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, item *db.Item, embeddings map[string][]float32, digestLanguage string) bool {
+func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, item *db.Item, embeddings map[string][]float32, digestLanguage, promptVersion string) bool {
 	if err := p.database.SaveItem(ctx, item); err != nil {
 		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg("failed to save item")
 		observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
@@ -1149,7 +1183,8 @@ func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logg
 		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg(LogMsgFailedToMarkProcessed)
 	}
 
-	p.upsertSummaryCache(ctx, logger, c.CanonicalHash, digestLanguage, item)
+	cacheKey := summaryCacheKey(c, promptVersion)
+	p.upsertSummaryCache(ctx, logger, cacheKey, digestLanguage, item)
 
 	p.enqueueFactCheck(ctx, logger, item)
 	p.enqueueEnrichment(ctx, logger, item)
@@ -1217,13 +1252,13 @@ func (p *Pipeline) factCheckQueueHasCapacity(ctx context.Context, logger zerolog
 	return pending < p.cfg.FactCheckQueueMax
 }
 
-func (p *Pipeline) upsertSummaryCache(ctx context.Context, logger zerolog.Logger, canonicalHash, digestLanguage string, item *db.Item) {
-	if canonicalHash == "" || item == nil || strings.TrimSpace(item.Summary) == "" {
+func (p *Pipeline) upsertSummaryCache(ctx context.Context, logger zerolog.Logger, cacheKey, digestLanguage string, item *db.Item) {
+	if cacheKey == "" || item == nil || strings.TrimSpace(item.Summary) == "" {
 		return
 	}
 
 	entry := &db.SummaryCacheEntry{
-		CanonicalHash:   canonicalHash,
+		CanonicalHash:   cacheKey,
 		DigestLanguage:  normalizeLanguage(digestLanguage),
 		Summary:         item.Summary,
 		Topic:           item.Topic,
@@ -1235,6 +1270,36 @@ func (p *Pipeline) upsertSummaryCache(ctx context.Context, logger zerolog.Logger
 	if err := p.database.UpsertSummaryCache(ctx, entry); err != nil {
 		logger.Warn().Err(err).Str(LogFieldMsgID, item.RawMessageID).Msg("failed to upsert summary cache")
 	}
+}
+
+func previewTextForCache(c llm.MessageInput) string {
+	preview := strings.TrimSpace(c.PreviewText)
+	if preview == "" {
+		preview = extractPreviewText(c.MediaJSON)
+	}
+
+	return preview
+}
+
+func summaryCacheKey(c llm.MessageInput, promptVersion string) string {
+	base := strings.TrimSpace(c.CanonicalHash)
+	if base == "" {
+		return ""
+	}
+
+	version := strings.TrimSpace(promptVersion)
+	if version == "" {
+		version = defaultPromptVersion
+	}
+
+	preview := previewTextForCache(c)
+	if preview == "" {
+		return base + ":" + version
+	}
+
+	hash := sha256.Sum256([]byte(preview))
+
+	return base + ":" + version + ":" + hex.EncodeToString(hash[:])
 }
 
 func (p *Pipeline) enqueueEnrichment(ctx context.Context, logger zerolog.Logger, item *db.Item) {
