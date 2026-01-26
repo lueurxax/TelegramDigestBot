@@ -219,6 +219,7 @@ type Config struct {
 	ExpandedViewSigningSecret string `env:"EXPANDED_VIEW_SIGNING_SECRET" envDefault:""`
 	ExpandedViewTTLHours      int    `env:"EXPANDED_VIEW_TTL_HOURS" envDefault:"72"`
 	ExpandedViewRequireAdmin  bool   `env:"EXPANDED_VIEW_REQUIRE_ADMIN" envDefault:"true"`
+	ExpandedPromptMaxChars    int    `env:"EXPANDED_PROMPT_MAX_CHARS" envDefault:"12000"`
 }
 
 func Load() (*Config, error) {

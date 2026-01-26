@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"net/url"
 	"strings"
 	"time"
 
@@ -51,11 +50,12 @@ func NewRenderer() (*Renderer, error) {
 
 // ExpandedViewData contains all data for rendering the expanded view.
 type ExpandedViewData struct {
-	Item         *db.ItemDebugDetail
-	Evidence     []db.ItemEvidenceWithSource
-	ClusterItems []ClusterItemView
-	ChatGPTLink  string
-	GeneratedAt  time.Time
+	Item            *db.ItemDebugDetail
+	Evidence        []db.ItemEvidenceWithSource
+	ClusterItems    []ClusterItemView
+	ChatGPTPrompt   string // Full prompt text for clipboard copy
+	OriginalMsgLink string // Telegram link to original message
+	GeneratedAt     time.Time
 }
 
 // ClusterItemView is a simplified view of a cluster item.
@@ -91,56 +91,151 @@ func (r *Renderer) RenderError(w io.Writer, data *ErrorData) error {
 	return nil
 }
 
+// Default prompt size limits (can be overridden by config).
 const (
-	maxTextLen         = 1000
-	maxEvidenceSources = 3
+	defaultMaxPromptChars   = 12000
+	maxEvidenceSources      = 5
+	maxCorroborationItems   = 5
+	maxDescriptionLen       = 200
+	fmtBulletItem           = "- %s\n"
+	fmtBulletItemWithSource = "- @%s: %s\n"
 )
 
-// BuildChatGPTLink constructs a ChatGPT deep link with a pre-filled prompt.
-func BuildChatGPTLink(item *db.ItemDebugDetail, evidence []db.ItemEvidenceWithSource) string {
+// PromptBuilderConfig holds configuration for building the ChatGPT prompt.
+type PromptBuilderConfig struct {
+	MaxChars int
+}
+
+// BuildChatGPTPrompt constructs the full prompt text for ChatGPT Q&A.
+// This follows the proposal's "maximum context" approach: raw text, links,
+// corroboration text, original links, capped by prompt limits.
+func BuildChatGPTPrompt(item *db.ItemDebugDetail, evidence []db.ItemEvidenceWithSource, clusterItems []ClusterItemView, cfg PromptBuilderConfig) string {
+	if cfg.MaxChars <= 0 {
+		cfg.MaxChars = defaultMaxPromptChars
+	}
+
 	var sb strings.Builder
 
-	sb.WriteString("I'm reading about this topic:\n\n")
-	sb.WriteString("Topic: ")
+	writePromptHeader(&sb, item)
+	writePromptSource(&sb, item)
+	writePromptText(&sb, item)
+	writePromptCorroboration(&sb, clusterItems)
+	writePromptEvidence(&sb, evidence)
+	writePromptQuestions(&sb)
+
+	return truncatePrompt(sb.String(), cfg.MaxChars)
+}
+
+func writePromptHeader(sb *strings.Builder, item *db.ItemDebugDetail) {
+	sb.WriteString("I'm reading about this topic and want to understand it better.\n\n")
+	sb.WriteString("## Topic\n")
 	sb.WriteString(item.Topic)
-	sb.WriteString("\n\nSummary: ")
+	sb.WriteString("\n\n## Summary\n")
 	sb.WriteString(item.Summary)
-	sb.WriteString("\n\nOriginal text:\n")
+}
 
-	// Truncate text to avoid overly long prompts
-	text := item.Text
+func writePromptSource(sb *strings.Builder, item *db.ItemDebugDetail) {
+	sb.WriteString("\n\n## Original Source\n")
 
-	if len(text) > maxTextLen {
-		text = text[:maxTextLen] + "..."
+	if item.ChannelUsername != "" {
+		fmt.Fprintf(sb, "Telegram: https://t.me/%s/%d\n", item.ChannelUsername, item.MessageID)
+		fmt.Fprintf(sb, "Channel: @%s (%s)\n", item.ChannelUsername, item.ChannelTitle)
+	} else {
+		fmt.Fprintf(sb, "Telegram: https://t.me/c/%d/%d\n", item.ChannelPeerID, item.MessageID)
+		fmt.Fprintf(sb, "Channel: %s\n", item.ChannelTitle)
+	}
+}
+
+func writePromptText(sb *strings.Builder, item *db.ItemDebugDetail) {
+	sb.WriteString("\n## Original Text\n")
+	sb.WriteString(item.Text)
+
+	if item.PreviewText != "" && item.PreviewText != item.Text {
+		sb.WriteString("\n\n## Preview/Link Content\n")
+		sb.WriteString(item.PreviewText)
+	}
+}
+
+func writePromptCorroboration(sb *strings.Builder, clusterItems []ClusterItemView) {
+	if len(clusterItems) == 0 {
+		return
 	}
 
-	sb.WriteString(text)
+	sb.WriteString("\n\n## Related Items (Corroboration)\n")
+	sb.WriteString("Other sources reporting on the same topic:\n")
 
-	// Add evidence context if available
-	if len(evidence) > 0 {
-		sb.WriteString("\n\nRelated sources:\n")
+	for i, ci := range clusterItems {
+		if i >= maxCorroborationItems {
+			break
+		}
 
-		for i, ev := range evidence {
-			if i >= maxEvidenceSources {
-				break
-			}
-
-			sb.WriteString("- ")
-
-			if ev.Source.Title != "" {
-				sb.WriteString(ev.Source.Title)
-			} else {
-				sb.WriteString(ev.Source.URL)
-			}
-
-			sb.WriteString("\n")
+		if ci.ChannelUsername != "" {
+			fmt.Fprintf(sb, fmtBulletItemWithSource, ci.ChannelUsername, ci.Summary)
+		} else {
+			fmt.Fprintf(sb, fmtBulletItem, ci.Summary)
 		}
 	}
+}
 
-	sb.WriteString("\n\nPlease explain the background and significance of this topic. ")
-	sb.WriteString("What are the key facts I should know?")
+func writePromptEvidence(sb *strings.Builder, evidence []db.ItemEvidenceWithSource) {
+	if len(evidence) == 0 {
+		return
+	}
 
-	// ChatGPT doesn't have a direct deep link with prompt, so we link to the main page
-	// The user can paste the prompt from clipboard (future: add copy-to-clipboard JS)
-	return "https://chat.openai.com/?q=" + url.QueryEscape(sb.String())
+	sb.WriteString("\n\n## External Sources (Evidence)\n")
+
+	for i, ev := range evidence {
+		if i >= maxEvidenceSources {
+			break
+		}
+
+		writeEvidenceItem(sb, ev)
+	}
+}
+
+func writeEvidenceItem(sb *strings.Builder, ev db.ItemEvidenceWithSource) {
+	title := ev.Source.Title
+	if title == "" {
+		title = ev.Source.Domain
+	}
+
+	fmt.Fprintf(sb, fmtBulletItem, title)
+
+	if ev.Source.URL != "" {
+		fmt.Fprintf(sb, "  URL: %s\n", ev.Source.URL)
+	}
+
+	if ev.Source.Description != "" {
+		desc := ev.Source.Description
+		if len(desc) > maxDescriptionLen {
+			desc = desc[:maxDescriptionLen] + "..."
+		}
+
+		fmt.Fprintf(sb, "  Excerpt: %s\n", desc)
+	}
+}
+
+func writePromptQuestions(sb *strings.Builder) {
+	sb.WriteString("\n\n## Questions\n")
+	sb.WriteString("1. What is the background and context of this topic?\n")
+	sb.WriteString("2. What are the key facts I should know?\n")
+	sb.WriteString("3. Are there any important nuances or caveats?\n")
+	sb.WriteString("4. What are different perspectives on this topic?\n")
+}
+
+func truncatePrompt(s string, maxChars int) string {
+	if len(s) > maxChars {
+		return s[:maxChars-3] + "..."
+	}
+
+	return s
+}
+
+// BuildOriginalMsgLink constructs the Telegram link to the original message.
+func BuildOriginalMsgLink(item *db.ItemDebugDetail) string {
+	if item.ChannelUsername != "" {
+		return fmt.Sprintf("https://t.me/%s/%d", item.ChannelUsername, item.MessageID)
+	}
+
+	return fmt.Sprintf("https://t.me/c/%d/%d", item.ChannelPeerID, item.MessageID)
 }

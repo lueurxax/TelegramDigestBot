@@ -25,6 +25,9 @@ const (
 // Log field constants.
 const logFieldItemID = "item_id"
 
+// HTTP header constants.
+const headerContentType = "Content-Type"
+
 // Handler serves expanded item views.
 type Handler struct {
 	cfg          *config.Config
@@ -67,7 +70,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Cache-Control", "private, no-store")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set(headerContentType, "text/html; charset=utf-8")
 
 	// Rate limiting
 	clientIP := getClientIP(r)
@@ -171,16 +174,21 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		})
 	}
 
-	// Build ChatGPT link
-	chatGPTLink := BuildChatGPTLink(item, evidence)
+	// Build ChatGPT prompt with maximum context
+	promptCfg := PromptBuilderConfig{
+		MaxChars: h.cfg.ExpandedPromptMaxChars,
+	}
+	chatGPTPrompt := BuildChatGPTPrompt(item, evidence, clusterItems, promptCfg)
+	originalMsgLink := BuildOriginalMsgLink(item)
 
 	// Render
 	data := &ExpandedViewData{
-		Item:         item,
-		Evidence:     evidence,
-		ClusterItems: clusterItems,
-		ChatGPTLink:  chatGPTLink,
-		GeneratedAt:  time.Now(),
+		Item:            item,
+		Evidence:        evidence,
+		ClusterItems:    clusterItems,
+		ChatGPTPrompt:   chatGPTPrompt,
+		OriginalMsgLink: originalMsgLink,
+		GeneratedAt:     time.Now(),
 	}
 
 	if err := h.renderer.RenderExpanded(w, data); err != nil {
