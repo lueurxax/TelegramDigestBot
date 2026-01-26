@@ -17,6 +17,7 @@ type Config struct {
 	AppEnv                        string        `env:"APP_ENV" envDefault:"local"`
 	PostgresDSN                   string        `env:"POSTGRES_DSN,required"`
 	BotToken                      string        `env:"BOT_TOKEN,required"`
+	TelegramBotUsername           string        `env:"TELEGRAM_BOT_USERNAME" envDefault:""`
 	AdminIDs                      []int64       `env:"ADMIN_IDS" envSeparator:","`
 	TargetChatID                  int64         `env:"TARGET_CHAT_ID,required"`
 	TGAPIID                       int           `env:"TG_API_ID,required"`

@@ -67,9 +67,10 @@ type ClusterItemView struct {
 
 // ErrorData contains data for rendering error pages.
 type ErrorData struct {
-	Code    int
-	Title   string
-	Message string
+	Code        int
+	Title       string
+	Message     string
+	BotUsername string
 }
 
 // RenderExpanded renders the expanded view page.

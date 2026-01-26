@@ -23,8 +23,6 @@ data:
   LEADER_ELECTION_LEASE_NAME: "digest-scheduler-lease"
   # Telegram session
   TG_SESSION_PATH: "/app/data/tg.session"
-  # LLM settings
-  LLM_MODEL: "gpt-5-nano"
   # Worker settings
   WORKER_BATCH_SIZE: "10"
   WORKER_POLL_INTERVAL: "10s"
@@ -106,6 +104,8 @@ data:
   EMBEDDING_CIRCUIT_THRESHOLD: "5"
   EMBEDDING_CIRCUIT_TIMEOUT: "1m"
   EXPLAINABILITY_LINE_ENABLED: "true"
+  # Bot settings
+  TELEGRAM_BOT_USERNAME: ""
   # Expanded view (on-demand item detail pages)
   EXPANDED_VIEW_ENABLED: "false"
   EXPANDED_VIEW_BASE_URL: "https://digest.lueurxax.org"

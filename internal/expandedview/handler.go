@@ -198,9 +198,10 @@ func (h *Handler) renderError(w http.ResponseWriter, code int, title, message st
 	w.WriteHeader(code)
 
 	if err := h.renderer.RenderError(w, &ErrorData{
-		Code:    code,
-		Title:   title,
-		Message: message,
+		Code:        code,
+		Title:       title,
+		Message:     message,
+		BotUsername: h.cfg.TelegramBotUsername,
 	}); err != nil {
 		h.logger.Error().Err(err).Msg("Failed to render error page")
 	}

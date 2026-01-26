@@ -33,11 +33,19 @@
         }
         h1 { font-size: 1.25rem; margin-bottom: 1rem; }
         p { color: #666; margin-bottom: 1.5rem; }
-        a {
-            color: #2563eb;
+        .back-link {
+            display: inline-block;
+            background: #2563eb;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .back-link:hover {
+            background: #1d4ed8;
             text-decoration: none;
         }
-        a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -45,7 +53,11 @@
         <div class="error-code">{{.Code}}</div>
         <h1>{{.Title}}</h1>
         <p>{{.Message}}</p>
-        <a href="https://t.me/">Back to Telegram</a>
+        {{if .BotUsername}}
+        <a class="back-link" href="tg://resolve?domain={{.BotUsername}}" onclick="setTimeout(function(){window.location='https://t.me/{{.BotUsername}}'},500)">Back to chat</a>
+        {{else}}
+        <a class="back-link" href="https://t.me/">Back to Telegram</a>
+        {{end}}
     </div>
 </body>
 </html>
