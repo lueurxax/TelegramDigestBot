@@ -11,6 +11,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -130,6 +131,7 @@ func (b *Bot) handleAnnotateLabel(ctx context.Context, msg *tgbotapi.Message, ar
 		return
 	}
 
+	observability.ItemRatingsTotal.WithLabelValues(label).Inc()
 	b.reply(msg, fmt.Sprintf("Labeled item <code>%s</code> as <code>%s</code>.", item.ItemID, label))
 }
 
@@ -238,6 +240,10 @@ func formatAnnotationItem(item *db.AnnotationItem) string {
 	sb.WriteString(fmt.Sprintf(annotateBlockquoteFmt, summary))
 
 	text := strings.TrimSpace(item.Text)
+	if text == "" && strings.TrimSpace(item.PreviewText) != "" {
+		text = strings.TrimSpace(item.PreviewText)
+	}
+
 	if text != "" {
 		text = truncateAnnotationText(text, annotationTextLimit)
 		text = html.EscapeString(text)
@@ -305,6 +311,10 @@ func (b *Bot) handleAnnotateCallback(ctx context.Context, query *tgbotapi.Callba
 	if item == nil {
 		b.answerCallback(query, "No assigned annotation item.")
 		return
+	}
+
+	if action == RatingGood || action == RatingBad || action == RatingIrrelevant {
+		observability.ItemRatingsTotal.WithLabelValues(action).Inc()
 	}
 
 	b.answerCallback(query, "Saved. Sending next...")

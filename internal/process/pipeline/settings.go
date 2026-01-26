@@ -39,8 +39,18 @@ func (s *pipelineSettings) normalizeSummarySettings() {
 		s.summaryMaxChars = 220
 	}
 
-	if len(s.summaryStripPhrases) == 0 {
-		s.summaryStripPhrases = defaultSummaryStripPhrases
+	if len(s.summaryStripPhrasesDefault) == 0 {
+		s.summaryStripPhrasesDefault = defaultSummaryStripPhrases
+	}
+
+	if s.summaryStripPhrasesByLang == nil {
+		s.summaryStripPhrasesByLang = make(map[string][]string)
+	}
+
+	for _, lang := range []string{"ru", "uk", "en"} {
+		if len(s.summaryStripPhrasesByLang[lang]) == 0 {
+			s.summaryStripPhrasesByLang[lang] = s.summaryStripPhrasesDefault
+		}
 	}
 }
 
@@ -68,4 +78,15 @@ func parseDomainList(raw string) map[string]struct{} {
 	}
 
 	return out
+}
+
+func (s *pipelineSettings) summaryStripPhrasesFor(lang string) []string {
+	lang = strings.ToLower(strings.TrimSpace(lang))
+	if lang != "" {
+		if phrases, ok := s.summaryStripPhrasesByLang[lang]; ok && len(phrases) > 0 {
+			return phrases
+		}
+	}
+
+	return s.summaryStripPhrasesDefault
 }

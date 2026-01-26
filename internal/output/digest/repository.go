@@ -50,6 +50,7 @@ type Repository interface {
 	GetItemRatingsSince(ctx context.Context, since time.Time) ([]db.ItemRating, error)
 	UpsertChannelRatingStats(ctx context.Context, stats *db.RatingStats) error
 	UpsertGlobalRatingStats(ctx context.Context, stats *db.RatingStats) error
+	InsertThresholdTuningLog(ctx context.Context, entry *db.ThresholdTuningLogEntry) error
 
 	// Channel operations
 	GetActiveChannels(ctx context.Context) ([]db.Channel, error)

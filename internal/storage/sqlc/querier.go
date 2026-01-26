@@ -77,6 +77,7 @@ type Querier interface {
 	// Atomically claims messages by setting processing_started_at.
 	GetUnprocessedMessages(ctx context.Context, limit int32) ([]GetUnprocessedMessagesRow, error)
 	IncrementDiscoveryResolutionAttempts(ctx context.Context, id pgtype.UUID) error
+	InsertThresholdTuningLog(ctx context.Context, arg InsertThresholdTuningLogParams) error
 	IsChannelDiscoveredRejected(ctx context.Context, arg IsChannelDiscoveredRejectedParams) (bool, error)
 	IsChannelTracked(ctx context.Context, arg IsChannelTrackedParams) (bool, error)
 	LinkMessageToLink(ctx context.Context, arg LinkMessageToLinkParams) error
@@ -118,6 +119,7 @@ type Querier interface {
 	// This prevents the same channel from reappearing via different discovery paths
 	UpdateDiscoveryStatusByUsername(ctx context.Context, arg UpdateDiscoveryStatusByUsernameParams) error
 	// Channel stats queries
+	UpsertChannelQualityHistory(ctx context.Context, arg UpsertChannelQualityHistoryParams) error
 	UpsertChannelStats(ctx context.Context, arg UpsertChannelStatsParams) error
 	UpsertDiscoveredChannelByInvite(ctx context.Context, arg UpsertDiscoveredChannelByInviteParams) error
 	UpsertDiscoveredChannelByPeerID(ctx context.Context, arg UpsertDiscoveredChannelByPeerIDParams) error

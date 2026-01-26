@@ -43,10 +43,25 @@ var (
 		Help: "Average importance score for items in a digest window",
 	})
 
+	DigestAverageRelevance = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "digest_average_relevance",
+		Help: "Average relevance score for items in a digest window",
+	})
+
 	DigestReadyItems = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "digest_ready_items",
 		Help: "Number of items selected for a digest window",
 	})
+
+	DropsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_drops_total",
+		Help: "Total number of dropped messages by reason",
+	}, []string{"reason"})
+
+	ItemRatingsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_item_ratings_total",
+		Help: "Total number of item ratings by rating value",
+	}, []string{"rating"})
 
 	DiscoveryPending = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "digest_discovery_pending",

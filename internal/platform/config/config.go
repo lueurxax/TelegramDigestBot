@@ -69,6 +69,9 @@ type Config struct {
 	FilterMinLengthEn             int           `env:"FILTER_MIN_LENGTH_EN" envDefault:"15"`
 	SummaryMaxChars               int           `env:"SUMMARY_MAX_CHARS" envDefault:"220"`
 	SummaryStripPhrases           string        `env:"SUMMARY_STRIP_PHRASES" envDefault:""`
+	SummaryStripPhrasesRu         string        `env:"SUMMARY_STRIP_PHRASES_RU" envDefault:""`
+	SummaryStripPhrasesUk         string        `env:"SUMMARY_STRIP_PHRASES_UK" envDefault:""`
+	SummaryStripPhrasesEn         string        `env:"SUMMARY_STRIP_PHRASES_EN" envDefault:""`
 	DedupSameChannelWindowHours   int           `env:"DEDUP_SAME_CHANNEL_WINDOW_HOURS" envDefault:"6"`
 	CorroborationImportanceBoost  float32       `env:"CORROBORATION_IMPORTANCE_BOOST" envDefault:"0.08"`
 	SingleSourcePenalty           float32       `env:"SINGLE_SOURCE_PENALTY" envDefault:"0.05"`

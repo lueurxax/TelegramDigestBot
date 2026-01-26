@@ -171,6 +171,8 @@ func (db *DB) GetItemByID(ctx context.Context, id string) (*Item, error) {
 		Language:        r.Language.String,
 		Status:          r.Status,
 		ErrorJSON:       r.ErrorJson,
+		CreatedAt:       r.CreatedAt.Time,
+		FirstSeenAt:     r.FirstSeenAt.Time,
 	}, nil
 }
 

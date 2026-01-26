@@ -249,6 +249,7 @@ type Item struct {
 	Status          string             `json:"status"`
 	ErrorJson       []byte             `json:"error_json"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	FirstSeenAt     pgtype.Timestamptz `json:"first_seen_at"`
 	DigestedAt      pgtype.Timestamptz `json:"digested_at"`
 	RetryCount      int32              `json:"retry_count"`
 	NextRetryAt     pgtype.Timestamptz `json:"next_retry_at"`

@@ -3,6 +3,7 @@ package digest
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
@@ -11,6 +12,7 @@ import (
 
 const (
 	thresholdTuningWindowDays = 30
+	thresholdDeltaCap         = 0.3
 )
 
 // UpdateGlobalThresholds recalculates the global importance and relevance thresholds based on recent data.
@@ -127,13 +129,23 @@ func (s *Scheduler) getThresholdTuningBounds() (float32, float32) {
 }
 
 func (s *Scheduler) calculateThresholdDelta(net float64, step float32) float32 {
-	if net > float64(s.cfg.ThresholdTuningNetPositive) {
-		return -step
-	} else if net < float64(s.cfg.ThresholdTuningNetNegative) {
-		return step
+	if step <= 0 {
+		step = DefaultThresholdTuningStep
 	}
 
-	return 0
+	capped := net
+	if capped > thresholdDeltaCap {
+		capped = thresholdDeltaCap
+	} else if capped < -thresholdDeltaCap {
+		capped = -thresholdDeltaCap
+	}
+
+	delta := float32(capped) * step
+	if math.Abs(float64(delta)) < 1e-6 {
+		return 0
+	}
+
+	return delta
 }
 
 func (s *Scheduler) applyThresholdUpdates(ctx context.Context, delta, minVal, maxVal float32, net float64, logger *zerolog.Logger) error {
@@ -160,6 +172,16 @@ func (s *Scheduler) applyThresholdUpdates(ctx context.Context, delta, minVal, ma
 		if err := s.database.SaveSetting(ctx, "importance_threshold", newImportance); err != nil {
 			return fmt.Errorf("failed to save importance threshold: %w", err)
 		}
+	}
+
+	if err := s.database.InsertThresholdTuningLog(ctx, &db.ThresholdTuningLogEntry{
+		TunedAt:             time.Now(),
+		NetScore:            net,
+		Delta:               delta,
+		RelevanceThreshold:  newRelevance,
+		ImportanceThreshold: newImportance,
+	}); err != nil {
+		logger.Warn().Err(err).Msg("failed to write threshold tuning log")
 	}
 
 	logger.Info().

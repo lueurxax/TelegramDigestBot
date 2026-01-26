@@ -2262,6 +2262,7 @@ func (b *Bot) handleFeedback(ctx context.Context, msg *tgbotapi.Message) {
 		return
 	}
 
+	observability.ItemRatingsTotal.WithLabelValues(rating).Inc()
 	b.reply(msg, fmt.Sprintf("✅ Feedback for item <code>%s</code> recorded as <b>%s</b>.", html.EscapeString(itemID), html.EscapeString(rating)))
 }
 

@@ -21,6 +21,17 @@ type ChannelStatsEntry struct {
 	AvgRelevance     float64
 }
 
+// ChannelQualityEntry represents derived quality metrics per channel and period.
+type ChannelQualityEntry struct {
+	ChannelID     string
+	PeriodStart   time.Time
+	PeriodEnd     time.Time
+	InclusionRate float64
+	NoiseRate     float64
+	AvgImportance float64
+	AvgRelevance  float64
+}
+
 // RollingStats represents aggregated stats over a rolling window
 type RollingStats struct {
 	TotalMessages      int
@@ -50,6 +61,22 @@ func (db *DB) UpsertChannelStats(ctx context.Context, stats *ChannelStatsEntry) 
 		AvgRelevance:     pgtype.Float8{Float64: stats.AvgRelevance, Valid: stats.AvgRelevance > 0},
 	}); err != nil {
 		return fmt.Errorf("upsert channel stats: %w", err)
+	}
+
+	return nil
+}
+
+func (db *DB) UpsertChannelQualityHistory(ctx context.Context, entry *ChannelQualityEntry) error {
+	if err := db.Queries.UpsertChannelQualityHistory(ctx, sqlc.UpsertChannelQualityHistoryParams{
+		ChannelID:     toUUID(entry.ChannelID),
+		PeriodStart:   pgtype.Date{Time: entry.PeriodStart, Valid: true},
+		PeriodEnd:     pgtype.Date{Time: entry.PeriodEnd, Valid: true},
+		InclusionRate: pgtype.Float8{Float64: entry.InclusionRate, Valid: true},
+		NoiseRate:     pgtype.Float8{Float64: entry.NoiseRate, Valid: true},
+		AvgImportance: pgtype.Float8{Float64: entry.AvgImportance, Valid: entry.AvgImportance > 0},
+		AvgRelevance:  pgtype.Float8{Float64: entry.AvgRelevance, Valid: entry.AvgRelevance > 0},
+	}); err != nil {
+		return fmt.Errorf("upsert channel quality history: %w", err)
 	}
 
 	return nil
@@ -176,7 +203,28 @@ func (db *DB) CollectAndSaveChannelStats(ctx context.Context, start, end time.Ti
 		if err := db.UpsertChannelStats(ctx, entry); err != nil {
 			return err
 		}
+
+		quality := &ChannelQualityEntry{
+			ChannelID:     s.ChannelID,
+			PeriodStart:   periodStart,
+			PeriodEnd:     periodEnd,
+			InclusionRate: ratioFloat64(s.ItemsDigested, s.ItemsCreated),
+			NoiseRate:     ratioFloat64(s.ItemsCreated, s.MessagesReceived),
+			AvgImportance: s.AvgImportance,
+			AvgRelevance:  s.AvgRelevance,
+		}
+		if err := db.UpsertChannelQualityHistory(ctx, quality); err != nil {
+			return err
+		}
 	}
 
 	return nil
+}
+
+func ratioFloat64(numerator, denominator int64) float64 {
+	if denominator == 0 {
+		return 0
+	}
+
+	return float64(numerator) / float64(denominator)
 }

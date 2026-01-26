@@ -36,6 +36,7 @@ type ItemDebugDetail struct {
 	RelevanceScore  float32
 	ImportanceScore float32
 	Text            string
+	PreviewText     string
 	TGDate          time.Time
 	MessageID       int64
 	ChannelID       string
@@ -131,6 +132,7 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 		       i.relevance_score,
 		       i.importance_score,
 		       rm.text,
+		       rm.preview_text,
 		       rm.tg_date,
 		       rm.tg_message_id,
 		       c.id,
@@ -152,6 +154,7 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 		language     pgtype.Text
 		langSource   pgtype.Text
 		text         pgtype.Text
+		previewText  pgtype.Text
 		channelID    pgtype.UUID
 		user         pgtype.Text
 		title        pgtype.Text
@@ -171,6 +174,7 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 		&item.RelevanceScore,
 		&item.ImportanceScore,
 		&text,
+		&previewText,
 		&item.TGDate,
 		&item.MessageID,
 		&channelID,
@@ -193,6 +197,7 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 	item.Language = language.String
 	item.LanguageSource = langSource.String
 	item.Text = text.String
+	item.PreviewText = previewText.String
 	item.ChannelID = fromUUID(channelID)
 	item.ChannelUsername = user.String
 	item.ChannelTitle = title.String

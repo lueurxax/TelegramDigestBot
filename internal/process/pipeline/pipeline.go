@@ -67,40 +67,41 @@ type Pipeline struct {
 }
 
 type pipelineSettings struct {
-	batchSize               int
-	filterList              []db.Filter
-	adsFilterEnabled        bool
-	minLengthDefault        int
-	minLengthByLang         map[string]int
-	summaryMaxChars         int
-	summaryStripPhrases     []string
-	domainAllowlist         map[string]struct{}
-	domainDenylist          map[string]struct{}
-	adsKeywords             []string
-	skipForwards            bool
-	filtersMode             string
-	dedupMode               string
-	dedupWindow             time.Duration
-	dedupSameChannelWindow  time.Duration
-	topicsEnabled           bool
-	relevanceThreshold      float32
-	digestLanguage          string
-	visionRoutingEnabled    bool
-	tieredImportanceEnabled bool
-	digestTone              string
-	normalizeScores         bool
-	relevanceGateEnabled    bool
-	relevanceGateMode       string
-	relevanceGateModel      string
-	channelStats            map[string]db.ChannelStats
-	linkEnrichmentEnabled   bool
-	maxLinks                int
-	linkCacheTTL            time.Duration
-	tgLinkCacheTTL          time.Duration
-	linkEnrichmentScope     string
-	linkMinWords            int
-	linkSnippetMaxChars     int
-	linkEmbeddingMaxMsgLen  int
+	batchSize                  int
+	filterList                 []db.Filter
+	adsFilterEnabled           bool
+	minLengthDefault           int
+	minLengthByLang            map[string]int
+	summaryMaxChars            int
+	summaryStripPhrasesByLang  map[string][]string
+	summaryStripPhrasesDefault []string
+	domainAllowlist            map[string]struct{}
+	domainDenylist             map[string]struct{}
+	adsKeywords                []string
+	skipForwards               bool
+	filtersMode                string
+	dedupMode                  string
+	dedupWindow                time.Duration
+	dedupSameChannelWindow     time.Duration
+	topicsEnabled              bool
+	relevanceThreshold         float32
+	digestLanguage             string
+	visionRoutingEnabled       bool
+	tieredImportanceEnabled    bool
+	digestTone                 string
+	normalizeScores            bool
+	relevanceGateEnabled       bool
+	relevanceGateMode          string
+	relevanceGateModel         string
+	channelStats               map[string]db.ChannelStats
+	linkEnrichmentEnabled      bool
+	maxLinks                   int
+	linkCacheTTL               time.Duration
+	tgLinkCacheTTL             time.Duration
+	linkEnrichmentScope        string
+	linkMinWords               int
+	linkSnippetMaxChars        int
+	linkEmbeddingMaxMsgLen     int
 }
 
 const (
@@ -291,10 +292,15 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 			"uk": p.cfg.FilterMinLengthUk,
 			"en": p.cfg.FilterMinLengthEn,
 		},
-		summaryMaxChars:     p.cfg.SummaryMaxChars,
-		summaryStripPhrases: parseSummaryStripPhrases(p.cfg.SummaryStripPhrases),
-		domainAllowlist:     parseDomainList(p.cfg.DomainAllowlist),
-		domainDenylist:      parseDomainList(p.cfg.DomainDenylist),
+		summaryMaxChars:            p.cfg.SummaryMaxChars,
+		summaryStripPhrasesDefault: parseSummaryStripPhrases(p.cfg.SummaryStripPhrases),
+		summaryStripPhrasesByLang: map[string][]string{
+			"ru": parseSummaryStripPhrases(p.cfg.SummaryStripPhrasesRu),
+			"uk": parseSummaryStripPhrases(p.cfg.SummaryStripPhrasesUk),
+			"en": parseSummaryStripPhrases(p.cfg.SummaryStripPhrasesEn),
+		},
+		domainAllowlist: parseDomainList(p.cfg.DomainAllowlist),
+		domainDenylist:  parseDomainList(p.cfg.DomainDenylist),
 	}
 
 	p.getSetting(ctx, "worker_batch_size", &s.batchSize, logger)
@@ -397,6 +403,8 @@ func (p *Pipeline) recordDrop(ctx context.Context, logger zerolog.Logger, msgID,
 	if err := p.database.SaveRawMessageDropLog(ctx, msgID, reason, detail); err != nil {
 		logger.Warn().Str(LogFieldMsgID, msgID).Err(err).Msg("failed to save drop log")
 	}
+
+	observability.DropsTotal.WithLabelValues(reason).Inc()
 }
 
 func (p *Pipeline) recordRelevanceGateDecision(ctx context.Context, logger zerolog.Logger, msgID string, decision gateDecision) {
@@ -931,12 +939,16 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 	rejectedCount := 0
 
 	for i, res := range results {
-		res.Summary = postProcessSummary(res.Summary, s.summaryMaxChars, s.summaryStripPhrases)
+		lang, langSource := resolveItemLanguage(candidates[i], res)
+		res.Language = lang
+		stripPhrases := s.summaryStripPhrasesFor(lang)
+
+		res.Summary = postProcessSummary(res.Summary, s.summaryMaxChars, stripPhrases)
 
 		if res.Summary == "" || isWeakSummary(res.Summary) {
 			lead := selectLeadSentence(candidates[i].Text)
 			if lead != "" && !isMostlySymbols(lead) {
-				res.Summary = postProcessSummary(lead, s.summaryMaxChars, s.summaryStripPhrases)
+				res.Summary = postProcessSummary(lead, s.summaryMaxChars, stripPhrases)
 			}
 		}
 
@@ -946,9 +958,6 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 			continue
 		}
 
-		lang, langSource := resolveItemLanguage(candidates[i], res)
-		res.Language = lang
-
 		item := p.createItem(logger, candidates[i], res, s)
 		item.Language = lang
 		item.LanguageSource = langSource
@@ -956,7 +965,8 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 		if item.Status == StatusReady {
 			detectedLang := detectSummaryLanguage(item.Summary, item.Language)
 			item.Summary = p.translateSummaryIfNeeded(ctx, logger, candidates[i].ID, item.Summary, detectedLang, s)
-			item.Summary = postProcessSummary(item.Summary, s.summaryMaxChars, s.summaryStripPhrases)
+			targetLang := normalizeLanguage(s.digestLanguage)
+			item.Summary = postProcessSummary(item.Summary, s.summaryMaxChars, s.summaryStripPhrasesFor(targetLang))
 		}
 
 		if p.saveAndMarkProcessed(ctx, logger, candidates[i], item, embeddings, s.digestLanguage) {

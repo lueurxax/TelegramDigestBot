@@ -2509,3 +2509,314 @@ data:
       "version": 1,
       "weekStart": ""
     }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: digest-quality-dashboard
+  namespace: monitoring-system
+  labels:
+    grafana_dashboard: "1"
+data:
+  digest-quality.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 1,
+          "panels": [],
+          "title": "Quality Overview",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.2}, {"color": "red", "value": 0.4}]},
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 1},
+          "id": 2,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "(sum(rate(digest_drops_total{namespace=\"digest\"}[1h])) + sum(rate(digest_pipeline_processed_total{namespace=\"digest\",status=\"rejected\"}[1h])) + sum(rate(digest_item_ratings_total{namespace=\"digest\",rating=~\"bad|irrelevant\"}[1h]))) / sum(rate(digest_messages_ingested_total{namespace=\"digest\"}[1h]))",
+              "legendFormat": "low-signal",
+              "refId": "A"
+            }
+          ],
+          "title": "Low-Signal Rate (1h)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.1}, {"color": "red", "value": 0.2}]},
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1},
+          "id": 3,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(rate(digest_drops_total{namespace=\"digest\",reason=~\"dedup_.*|duplicate_batch\"}[1h])) / sum(rate(digest_messages_ingested_total{namespace=\"digest\"}[1h]))",
+              "legendFormat": "duplicate",
+              "refId": "A"
+            }
+          ],
+          "title": "Duplicate Rate (1h)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 9},
+          "id": 4,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "digest_average_importance{namespace=\"digest\"}",
+              "legendFormat": "importance",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "digest_average_relevance{namespace=\"digest\"}",
+              "legendFormat": "relevance",
+              "refId": "B"
+            }
+          ],
+          "title": "Average Importance & Relevance",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 9},
+          "id": 5,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.50, sum(rate(digest_time_to_digest_seconds_bucket{namespace=\"digest\"}[24h])) by (le))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.90, sum(rate(digest_time_to_digest_seconds_bucket{namespace=\"digest\"}[24h])) by (le))",
+              "legendFormat": "p90",
+              "refId": "B"
+            }
+          ],
+          "title": "Time-to-Digest (p50/p90)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "bars",
+                "fillOpacity": 60,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "normal"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "short"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 17},
+          "id": 6,
+          "options": {
+            "legend": {"calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "sum(rate(digest_drops_total{namespace=\"digest\",reason=~\"dedup_.*|duplicate_batch\"}[1h])) by (reason)",
+              "legendFormat": "{{reason}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Dedup Drops by Reason (1h)",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": ["digest", "quality"],
+      "templating": {
+        "list": [
+          {
+            "current": {"selected": false, "text": "VictoriaMetrics", "value": "VictoriaMetrics"},
+            "hide": 0,
+            "includeAll": false,
+            "label": "Data Source",
+            "multi": false,
+            "name": "datasource",
+            "options": [],
+            "query": "prometheus",
+            "queryValue": "",
+            "refresh": 1,
+            "regex": "",
+            "skipUrlSync": false,
+            "type": "datasource"
+          }
+        ]
+      },
+      "time": {"from": "now-24h", "to": "now"},
+      "timepicker": {},
+      "timezone": "",
+      "title": "Digest Quality",
+      "uid": "digest-quality",
+      "version": 1,
+      "weekStart": ""
+    }

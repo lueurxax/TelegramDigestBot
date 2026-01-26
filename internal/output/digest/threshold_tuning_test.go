@@ -108,81 +108,56 @@ func TestGetThresholdTuningBounds(t *testing.T) {
 
 func TestCalculateThresholdDelta(t *testing.T) {
 	tests := []struct {
-		name        string
-		net         float64
-		step        float32
-		netPositive float32
-		netNegative float32
-		wantDelta   float32
+		name      string
+		net       float64
+		step      float32
+		wantDelta float32
 	}{
 		{
-			name:        "positive net above threshold - decrease",
-			net:         0.5,
-			step:        0.1,
-			netPositive: 0.3,
-			netNegative: -0.3,
-			wantDelta:   -0.1,
+			name:      "positive net capped at 0.3",
+			net:       0.5,
+			step:      0.1,
+			wantDelta: 0.03,
 		},
 		{
-			name:        "negative net below threshold - increase",
-			net:         -0.5,
-			step:        0.1,
-			netPositive: 0.3,
-			netNegative: -0.3,
-			wantDelta:   0.1,
+			name:      "negative net capped at -0.3",
+			net:       -0.5,
+			step:      0.1,
+			wantDelta: -0.03,
 		},
 		{
-			name:        "net within neutral band - no change",
-			net:         0.0,
-			step:        0.1,
-			netPositive: 0.3,
-			netNegative: -0.3,
-			wantDelta:   0.0,
+			name:      "zero net yields no change",
+			net:       0.0,
+			step:      0.1,
+			wantDelta: 0.0,
 		},
 		{
-			name:        "net at positive threshold - decrease",
-			net:         0.31,
-			step:        0.05,
-			netPositive: 0.3,
-			netNegative: -0.3,
-			wantDelta:   -0.05,
+			name:      "net at positive cap",
+			net:       0.3,
+			step:      0.05,
+			wantDelta: 0.015,
 		},
 		{
-			name:        "net at negative threshold - increase",
-			net:         -0.31,
-			step:        0.05,
-			netPositive: 0.3,
-			netNegative: -0.3,
-			wantDelta:   0.05,
+			name:      "net at negative cap",
+			net:       -0.3,
+			step:      0.05,
+			wantDelta: -0.015,
 		},
 		{
-			name:        "net exactly at positive boundary - no change",
-			net:         0.3,
-			step:        0.1,
-			netPositive: 0.3,
-			netNegative: -0.3,
-			wantDelta:   0.0,
-		},
-		{
-			name:        "net exactly at negative boundary - no change",
-			net:         -0.3,
-			step:        0.1,
-			netPositive: 0.3,
-			netNegative: -0.3,
-			wantDelta:   0.0,
+			name:      "zero step uses default",
+			net:       0.2,
+			step:      0,
+			wantDelta: 0.01,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &Scheduler{cfg: &config.Config{
-				ThresholdTuningNetPositive: tt.netPositive,
-				ThresholdTuningNetNegative: tt.netNegative,
-			}}
+			s := &Scheduler{cfg: &config.Config{}}
 
 			got := s.calculateThresholdDelta(tt.net, tt.step)
 
-			if got != tt.wantDelta {
+			if diff := got - tt.wantDelta; diff < -0.0001 || diff > 0.0001 {
 				t.Errorf(testErrCalculateThresholdDelta, tt.net, tt.step, got, tt.wantDelta)
 			}
 		})
@@ -215,33 +190,14 @@ func TestClampThresholdExtremeValues(t *testing.T) {
 	})
 }
 
-func TestCalculateThresholdDeltaWithZeroThresholds(t *testing.T) {
-	s := &Scheduler{cfg: &config.Config{
-		ThresholdTuningNetPositive: testScoreZero,
-		ThresholdTuningNetNegative: testScoreZero,
-	}}
+func TestCalculateThresholdDeltaWithDefaultStep(t *testing.T) {
+	s := &Scheduler{cfg: &config.Config{}}
 
-	t.Run("positive net with zero threshold", func(t *testing.T) {
-		got := s.calculateThresholdDelta(0.1, DefaultThresholdTuningStep)
+	t.Run("default step applied", func(t *testing.T) {
+		got := s.calculateThresholdDelta(0.1, 0)
 
-		if got != -DefaultThresholdTuningStep {
-			t.Errorf("calculateThresholdDelta(0.1, %v) = %v, want %v", DefaultThresholdTuningStep, got, -DefaultThresholdTuningStep)
-		}
-	})
-
-	t.Run("negative net with zero threshold", func(t *testing.T) {
-		got := s.calculateThresholdDelta(-0.1, DefaultThresholdTuningStep)
-
-		if got != DefaultThresholdTuningStep {
-			t.Errorf("calculateThresholdDelta(-0.1, %v) = %v, want %v", DefaultThresholdTuningStep, got, DefaultThresholdTuningStep)
-		}
-	})
-
-	t.Run("exactly zero net", func(t *testing.T) {
-		got := s.calculateThresholdDelta(testScoreZero, DefaultThresholdTuningStep)
-
-		if got != testScoreZero {
-			t.Errorf("calculateThresholdDelta(%v, %v) = %v, want %v", testScoreZero, DefaultThresholdTuningStep, got, testScoreZero)
+		if diff := got - 0.005; diff < -0.0001 || diff > 0.0001 {
+			t.Errorf("calculateThresholdDelta(0.1, 0) = %v, want %v", got, 0.005)
 		}
 	})
 }

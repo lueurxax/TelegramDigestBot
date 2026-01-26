@@ -885,6 +885,9 @@ func writeEnrichmentDebugContent(sb *strings.Builder, item *db.ItemDebugDetail) 
 	}
 
 	text := buildEnrichmentSnippet("", item.Text, enrichmentDebugTextLimit)
+	if text == "" && strings.TrimSpace(item.PreviewText) != "" {
+		text = buildEnrichmentSnippet("", item.PreviewText, enrichmentDebugTextLimit)
+	}
 
 	if text != "" {
 		sb.WriteString(fmtTextHdr)

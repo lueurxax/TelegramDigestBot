@@ -96,21 +96,23 @@ WHERE processing_started_at IS NOT NULL
   AND processing_started_at < now() - $1::interval;
 
 -- name: SaveItem :one
-INSERT INTO items (raw_message_id, relevance_score, importance_score, topic, summary, language, language_source, status, retry_count, next_retry_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, NULL)
+INSERT INTO items (raw_message_id, relevance_score, importance_score, topic, summary, language, language_source, status, retry_count, next_retry_at, first_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, NULL, (SELECT tg_date FROM raw_messages WHERE id = $1))
 ON CONFLICT (raw_message_id) DO UPDATE SET
     relevance_score = $2, importance_score = $3, topic = $4, summary = $5, language = $6, language_source = $7, status = $8,
-    retry_count = 0, next_retry_at = NULL, error_json = NULL
+    retry_count = 0, next_retry_at = NULL, error_json = NULL,
+    first_seen_at = COALESCE(items.first_seen_at, EXCLUDED.first_seen_at)
 RETURNING id;
 
 -- name: SaveItemError :exec
-INSERT INTO items (raw_message_id, status, error_json, retry_count, next_retry_at)
-VALUES ($1, 'error', $2, 1, now() + interval '1 minute')
+INSERT INTO items (raw_message_id, status, error_json, retry_count, next_retry_at, first_seen_at)
+VALUES ($1, 'error', $2, 1, now() + interval '1 minute', (SELECT tg_date FROM raw_messages WHERE id = $1))
 ON CONFLICT (raw_message_id) DO UPDATE SET 
     status = 'error', 
     error_json = $2,
     retry_count = items.retry_count + 1,
-    next_retry_at = now() + (power(2, items.retry_count) * interval '1 minute');
+    next_retry_at = now() + (power(2, items.retry_count) * interval '1 minute'),
+    first_seen_at = COALESCE(items.first_seen_at, EXCLUDED.first_seen_at);
 
 -- name: DigestExists :one
 SELECT EXISTS(
@@ -130,7 +132,7 @@ ON CONFLICT (window_start, window_end) DO UPDATE SET
 DELETE FROM digests WHERE status = 'error';
 
 -- name: GetItemsForWindow :many
-SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language, i.status, rm.tg_date, c.username as source_channel, c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id, e.embedding
+SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language, i.status, i.first_seen_at, rm.tg_date, c.username as source_channel, c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id, e.embedding
 FROM items i
 JOIN raw_messages rm ON i.raw_message_id = rm.id
 JOIN channels c ON rm.channel_id = c.id
@@ -143,7 +145,7 @@ ORDER BY i.importance_score DESC, i.relevance_score DESC
 LIMIT $4;
 
 -- name: GetItemsForWindowWithMedia :many
-SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language, i.status, rm.tg_date, rm.media_data, c.username as source_channel, c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id, e.embedding
+SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language, i.status, i.first_seen_at, rm.tg_date, rm.media_data, c.username as source_channel, c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id, e.embedding
 FROM items i
 JOIN raw_messages rm ON i.raw_message_id = rm.id
 JOIN channels c ON rm.channel_id = c.id
@@ -245,7 +247,7 @@ UPDATE items SET status = 'retry', retry_count = 0, next_retry_at = now() WHERE 
 UPDATE items SET status = 'retry', retry_count = 0, next_retry_at = now() WHERE id = $1 AND status = 'error';
 
 -- name: GetItemByID :one
-SELECT id, raw_message_id, relevance_score, importance_score, topic, summary, language, status, error_json, created_at, digested_at
+SELECT id, raw_message_id, relevance_score, importance_score, topic, summary, language, status, error_json, created_at, first_seen_at, digested_at
 FROM items WHERE id = $1;
 
 -- name: GetSetting :one
@@ -676,6 +678,16 @@ JOIN items i ON ir.item_id = i.id
 JOIN raw_messages rm ON i.raw_message_id = rm.id
 WHERE ir.created_at >= $1;
 
+-- name: InsertThresholdTuningLog :exec
+INSERT INTO threshold_tuning_log (
+    tuned_at,
+    net_score,
+    delta,
+    relevance_threshold,
+    importance_threshold
+)
+VALUES ($1, $2, $3, $4, $5);
+
 -- Channel stats queries
 
 -- name: UpsertChannelStats :exec
@@ -685,6 +697,24 @@ ON CONFLICT (channel_id, period_start, period_end) DO UPDATE SET
     messages_received = channel_stats.messages_received + EXCLUDED.messages_received,
     items_created = channel_stats.items_created + EXCLUDED.items_created,
     items_digested = channel_stats.items_digested + EXCLUDED.items_digested,
+    avg_importance = EXCLUDED.avg_importance,
+    avg_relevance = EXCLUDED.avg_relevance,
+    updated_at = NOW();
+
+-- name: UpsertChannelQualityHistory :exec
+INSERT INTO channel_quality_history (
+    channel_id,
+    period_start,
+    period_end,
+    inclusion_rate,
+    noise_rate,
+    avg_importance,
+    avg_relevance
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (channel_id, period_start, period_end) DO UPDATE SET
+    inclusion_rate = EXCLUDED.inclusion_rate,
+    noise_rate = EXCLUDED.noise_rate,
     avg_importance = EXCLUDED.avg_importance,
     avg_relevance = EXCLUDED.avg_relevance,
     updated_at = NOW();

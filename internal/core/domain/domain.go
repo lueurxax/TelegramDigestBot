@@ -41,6 +41,7 @@ type Item struct {
 	Status             string
 	ErrorJSON          []byte
 	CreatedAt          time.Time
+	FirstSeenAt        time.Time
 	TGDate             time.Time
 	SourceChannel      string
 	SourceChannelTitle string

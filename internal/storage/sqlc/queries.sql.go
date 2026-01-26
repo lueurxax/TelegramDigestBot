@@ -1190,7 +1190,7 @@ func (q *Queries) GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context,
 }
 
 const getItemByID = `-- name: GetItemByID :one
-SELECT id, raw_message_id, relevance_score, importance_score, topic, summary, language, status, error_json, created_at, digested_at
+SELECT id, raw_message_id, relevance_score, importance_score, topic, summary, language, status, error_json, created_at, first_seen_at, digested_at
 FROM items WHERE id = $1
 `
 
@@ -1205,6 +1205,7 @@ type GetItemByIDRow struct {
 	Status          string             `json:"status"`
 	ErrorJson       []byte             `json:"error_json"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	FirstSeenAt     pgtype.Timestamptz `json:"first_seen_at"`
 	DigestedAt      pgtype.Timestamptz `json:"digested_at"`
 }
 
@@ -1222,6 +1223,7 @@ func (q *Queries) GetItemByID(ctx context.Context, id pgtype.UUID) (GetItemByIDR
 		&i.Status,
 		&i.ErrorJson,
 		&i.CreatedAt,
+		&i.FirstSeenAt,
 		&i.DigestedAt,
 	)
 	return i, err
@@ -1272,8 +1274,38 @@ func (q *Queries) GetItemRatingsSince(ctx context.Context, createdAt pgtype.Time
 	return items, nil
 }
 
+const insertThresholdTuningLog = `-- name: InsertThresholdTuningLog :exec
+INSERT INTO threshold_tuning_log (
+    tuned_at,
+    net_score,
+    delta,
+    relevance_threshold,
+    importance_threshold
+)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertThresholdTuningLogParams struct {
+	TunedAt             pgtype.Timestamptz `json:"tuned_at"`
+	NetScore            float64            `json:"net_score"`
+	Delta               float32            `json:"delta"`
+	RelevanceThreshold  float32            `json:"relevance_threshold"`
+	ImportanceThreshold float32            `json:"importance_threshold"`
+}
+
+func (q *Queries) InsertThresholdTuningLog(ctx context.Context, arg InsertThresholdTuningLogParams) error {
+	_, err := q.db.Exec(ctx, insertThresholdTuningLog,
+		arg.TunedAt,
+		arg.NetScore,
+		arg.Delta,
+		arg.RelevanceThreshold,
+		arg.ImportanceThreshold,
+	)
+	return err
+}
+
 const getItemsForWindow = `-- name: GetItemsForWindow :many
-SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language, i.status, rm.tg_date, c.username as source_channel, c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id, e.embedding
+SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language, i.status, i.first_seen_at, rm.tg_date, c.username as source_channel, c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id, e.embedding
 FROM items i
 JOIN raw_messages rm ON i.raw_message_id = rm.id
 JOIN channels c ON rm.channel_id = c.id
@@ -1302,6 +1334,7 @@ type GetItemsForWindowRow struct {
 	Summary            pgtype.Text        `json:"summary"`
 	Language           pgtype.Text        `json:"language"`
 	Status             string             `json:"status"`
+	FirstSeenAt        pgtype.Timestamptz `json:"first_seen_at"`
 	TgDate             pgtype.Timestamptz `json:"tg_date"`
 	SourceChannel      pgtype.Text        `json:"source_channel"`
 	SourceChannelTitle pgtype.Text        `json:"source_channel_title"`
@@ -1333,6 +1366,7 @@ func (q *Queries) GetItemsForWindow(ctx context.Context, arg GetItemsForWindowPa
 			&i.Summary,
 			&i.Language,
 			&i.Status,
+			&i.FirstSeenAt,
 			&i.TgDate,
 			&i.SourceChannel,
 			&i.SourceChannelTitle,
@@ -1351,7 +1385,7 @@ func (q *Queries) GetItemsForWindow(ctx context.Context, arg GetItemsForWindowPa
 }
 
 const getItemsForWindowWithMedia = `-- name: GetItemsForWindowWithMedia :many
-SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language, i.status, rm.tg_date, rm.media_data, c.username as source_channel, c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id, e.embedding
+SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language, i.status, i.first_seen_at, rm.tg_date, rm.media_data, c.username as source_channel, c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id, e.embedding
 FROM items i
 JOIN raw_messages rm ON i.raw_message_id = rm.id
 JOIN channels c ON rm.channel_id = c.id
@@ -1380,6 +1414,7 @@ type GetItemsForWindowWithMediaRow struct {
 	Summary            pgtype.Text        `json:"summary"`
 	Language           pgtype.Text        `json:"language"`
 	Status             string             `json:"status"`
+	FirstSeenAt        pgtype.Timestamptz `json:"first_seen_at"`
 	TgDate             pgtype.Timestamptz `json:"tg_date"`
 	MediaData          []byte             `json:"media_data"`
 	SourceChannel      pgtype.Text        `json:"source_channel"`
@@ -1412,6 +1447,7 @@ func (q *Queries) GetItemsForWindowWithMedia(ctx context.Context, arg GetItemsFo
 			&i.Summary,
 			&i.Language,
 			&i.Status,
+			&i.FirstSeenAt,
 			&i.TgDate,
 			&i.MediaData,
 			&i.SourceChannel,
@@ -2257,11 +2293,12 @@ func (q *Queries) SaveEmbedding(ctx context.Context, arg SaveEmbeddingParams) er
 }
 
 const saveItem = `-- name: SaveItem :one
-INSERT INTO items (raw_message_id, relevance_score, importance_score, topic, summary, language, language_source, status, retry_count, next_retry_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, NULL)
+INSERT INTO items (raw_message_id, relevance_score, importance_score, topic, summary, language, language_source, status, retry_count, next_retry_at, first_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, NULL, (SELECT tg_date FROM raw_messages WHERE id = $1))
 ON CONFLICT (raw_message_id) DO UPDATE SET
     relevance_score = $2, importance_score = $3, topic = $4, summary = $5, language = $6, language_source = $7, status = $8,
-    retry_count = 0, next_retry_at = NULL, error_json = NULL
+    retry_count = 0, next_retry_at = NULL, error_json = NULL,
+    first_seen_at = COALESCE(items.first_seen_at, EXCLUDED.first_seen_at)
 RETURNING id
 `
 
@@ -2293,13 +2330,14 @@ func (q *Queries) SaveItem(ctx context.Context, arg SaveItemParams) (pgtype.UUID
 }
 
 const saveItemError = `-- name: SaveItemError :exec
-INSERT INTO items (raw_message_id, status, error_json, retry_count, next_retry_at)
-VALUES ($1, 'error', $2, 1, now() + interval '1 minute')
+INSERT INTO items (raw_message_id, status, error_json, retry_count, next_retry_at, first_seen_at)
+VALUES ($1, 'error', $2, 1, now() + interval '1 minute', (SELECT tg_date FROM raw_messages WHERE id = $1))
 ON CONFLICT (raw_message_id) DO UPDATE SET 
     status = 'error', 
     error_json = $2,
     retry_count = items.retry_count + 1,
-    next_retry_at = now() + (power(2, items.retry_count) * interval '1 minute')
+    next_retry_at = now() + (power(2, items.retry_count) * interval '1 minute'),
+    first_seen_at = COALESCE(items.first_seen_at, EXCLUDED.first_seen_at)
 `
 
 type SaveItemErrorParams struct {
@@ -2815,6 +2853,48 @@ func (q *Queries) UpsertChannelStats(ctx context.Context, arg UpsertChannelStats
 		arg.MessagesReceived,
 		arg.ItemsCreated,
 		arg.ItemsDigested,
+		arg.AvgImportance,
+		arg.AvgRelevance,
+	)
+	return err
+}
+
+const upsertChannelQualityHistory = `-- name: UpsertChannelQualityHistory :exec
+INSERT INTO channel_quality_history (
+    channel_id,
+    period_start,
+    period_end,
+    inclusion_rate,
+    noise_rate,
+    avg_importance,
+    avg_relevance
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (channel_id, period_start, period_end) DO UPDATE SET
+    inclusion_rate = EXCLUDED.inclusion_rate,
+    noise_rate = EXCLUDED.noise_rate,
+    avg_importance = EXCLUDED.avg_importance,
+    avg_relevance = EXCLUDED.avg_relevance,
+    updated_at = NOW()
+`
+
+type UpsertChannelQualityHistoryParams struct {
+	ChannelID     pgtype.UUID   `json:"channel_id"`
+	PeriodStart   pgtype.Date   `json:"period_start"`
+	PeriodEnd     pgtype.Date   `json:"period_end"`
+	InclusionRate pgtype.Float8 `json:"inclusion_rate"`
+	NoiseRate     pgtype.Float8 `json:"noise_rate"`
+	AvgImportance pgtype.Float8 `json:"avg_importance"`
+	AvgRelevance  pgtype.Float8 `json:"avg_relevance"`
+}
+
+func (q *Queries) UpsertChannelQualityHistory(ctx context.Context, arg UpsertChannelQualityHistoryParams) error {
+	_, err := q.db.Exec(ctx, upsertChannelQualityHistory,
+		arg.ChannelID,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.InclusionRate,
+		arg.NoiseRate,
 		arg.AvgImportance,
 		arg.AvgRelevance,
 	)

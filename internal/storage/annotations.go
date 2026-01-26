@@ -30,6 +30,7 @@ type AnnotationItem struct {
 	ItemID          string
 	Summary         string
 	Text            string
+	PreviewText     string
 	Topic           string
 	Status          string
 	RelevanceScore  float32
@@ -362,6 +363,7 @@ func (db *DB) getAnnotationItemByID(ctx context.Context, id string) (*Annotation
 		       i.importance_score,
 		       i.status,
 		       rm.text,
+		       rm.preview_text,
 		       rm.tg_date,
 		       rm.tg_message_id,
 		       c.username,
@@ -378,6 +380,7 @@ func (db *DB) getAnnotationItemByID(ctx context.Context, id string) (*Annotation
 		summary pgtype.Text
 		topic   pgtype.Text
 		text    pgtype.Text
+		preview pgtype.Text
 		user    pgtype.Text
 		title   pgtype.Text
 	)
@@ -392,6 +395,7 @@ func (db *DB) getAnnotationItemByID(ctx context.Context, id string) (*Annotation
 		&item.ImportanceScore,
 		&item.Status,
 		&text,
+		&preview,
 		&item.TGDate,
 		&item.MessageID,
 		&user,
@@ -409,6 +413,7 @@ func (db *DB) getAnnotationItemByID(ctx context.Context, id string) (*Annotation
 	item.Summary = summary.String
 	item.Topic = topic.String
 	item.Text = text.String
+	item.PreviewText = preview.String
 	item.ChannelUsername = user.String
 	item.ChannelTitle = title.String
 
