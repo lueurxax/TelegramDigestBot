@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -13,6 +14,7 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/solr"
+	"github.com/lueurxax/telegram-digest-bot/internal/expandedview"
 	"github.com/lueurxax/telegram-digest-bot/internal/ingest/reader"
 	"github.com/lueurxax/telegram-digest-bot/internal/output/digest"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
@@ -56,7 +58,25 @@ func New(cfg *config.Config, database *db.DB, logger *zerolog.Logger) *App {
 
 // StartHealthServer starts the health check and metrics server.
 func (a *App) StartHealthServer(ctx context.Context) error {
-	srv := observability.NewServer(a.database, a.cfg.HealthPort, a.logger)
+	var expandedHandler http.Handler
+
+	if a.cfg.ExpandedViewEnabled && a.cfg.ExpandedViewSigningSecret != "" {
+		tokenService := expandedview.NewTokenService(
+			a.cfg.ExpandedViewSigningSecret,
+			a.cfg.ExpandedViewTTLHours,
+		)
+
+		handler, err := expandedview.NewHandler(a.cfg, tokenService, a.database, a.logger)
+		if err != nil {
+			return fmt.Errorf("expanded view handler init: %w", err)
+		}
+
+		expandedHandler = handler
+
+		a.logger.Info().Str("base_url", a.cfg.ExpandedViewBaseURL).Msg("Expanded view handler enabled")
+	}
+
+	srv := observability.NewServerWithExpanded(a.database, a.cfg.HealthPort, expandedHandler, a.logger)
 
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("health server start: %w", err)

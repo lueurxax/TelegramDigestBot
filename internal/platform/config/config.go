@@ -211,6 +211,13 @@ type Config struct {
 	TelegramLinkSeedingEnabled bool   `env:"TELEGRAM_LINK_SEEDING_ENABLED" envDefault:"false"`
 	CrawlerQueueMaxPending     int    `env:"CRAWLER_QUEUE_MAX_PENDING" envDefault:"10000"`
 	LinkSeedExtDenylist        string `env:"LINK_SEED_EXT_DENYLIST" envDefault:".zip,.exe,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.rar,.7z,.tar,.gz"`
+
+	// Expanded view settings (on-demand item detail pages)
+	ExpandedViewEnabled       bool   `env:"EXPANDED_VIEW_ENABLED" envDefault:"false"`
+	ExpandedViewBaseURL       string `env:"EXPANDED_VIEW_BASE_URL" envDefault:""`
+	ExpandedViewSigningSecret string `env:"EXPANDED_VIEW_SIGNING_SECRET" envDefault:""`
+	ExpandedViewTTLHours      int    `env:"EXPANDED_VIEW_TTL_HOURS" envDefault:"72"`
+	ExpandedViewRequireAdmin  bool   `env:"EXPANDED_VIEW_REQUIRE_ADMIN" envDefault:"true"`
 }
 
 func Load() (*Config, error) {

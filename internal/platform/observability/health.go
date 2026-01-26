@@ -13,14 +13,16 @@ import (
 )
 
 const (
-	shutdownTimeout   = 5 * time.Second
-	readHeaderTimeout = 10 * time.Second
+	shutdownTimeout      = 5 * time.Second
+	readHeaderTimeout    = 10 * time.Second
+	expandedViewPathBase = "/i/"
 )
 
 type Server struct {
-	db     *db.DB
-	port   int
-	logger *zerolog.Logger
+	db              *db.DB
+	port            int
+	logger          *zerolog.Logger
+	expandedHandler http.Handler
 }
 
 func NewServer(db *db.DB, port int, logger *zerolog.Logger) *Server {
@@ -28,6 +30,16 @@ func NewServer(db *db.DB, port int, logger *zerolog.Logger) *Server {
 		db:     db,
 		port:   port,
 		logger: logger,
+	}
+}
+
+// NewServerWithExpanded creates a server with an optional expanded view handler.
+func NewServerWithExpanded(db *db.DB, port int, expandedHandler http.Handler, logger *zerolog.Logger) *Server {
+	return &Server{
+		db:              db,
+		port:            port,
+		logger:          logger,
+		expandedHandler: expandedHandler,
 	}
 }
 
@@ -51,6 +63,11 @@ func (s *Server) Start(ctx context.Context) error {
 	})
 
 	mux.Handle("/metrics", promhttp.Handler())
+
+	// Register expanded view handler if configured
+	if s.expandedHandler != nil {
+		mux.Handle(expandedViewPathBase, http.StripPrefix(expandedViewPathBase, s.expandedHandler))
+	}
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", s.port),

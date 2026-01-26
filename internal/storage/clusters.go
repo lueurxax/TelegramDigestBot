@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
 
@@ -84,4 +86,71 @@ func (db *DB) GetClustersForWindow(ctx context.Context, start, end time.Time) ([
 	}
 
 	return result, nil
+}
+
+// ClusterItemInfo is a simplified view of a cluster item for display.
+type ClusterItemInfo struct {
+	ID              string
+	Summary         string
+	ChannelUsername string
+}
+
+// GetClusterForItem returns the cluster containing the given item, along with all items in that cluster.
+func (db *DB) GetClusterForItem(ctx context.Context, itemID string) (*ClusterWithItems, []ClusterItemInfo, error) {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT c.id, c.topic, ci2.item_id, i.summary, ch.username
+		FROM cluster_items ci
+		JOIN clusters c ON ci.cluster_id = c.id
+		JOIN cluster_items ci2 ON c.id = ci2.cluster_id
+		JOIN items i ON ci2.item_id = i.id
+		JOIN raw_messages rm ON i.raw_message_id = rm.id
+		JOIN channels ch ON rm.channel_id = ch.id
+		WHERE ci.item_id = $1
+		ORDER BY i.importance_score DESC
+	`, toUUID(itemID))
+	if err != nil {
+		return nil, nil, fmt.Errorf("get cluster for item: %w", err)
+	}
+	defer rows.Close()
+
+	var cluster *ClusterWithItems
+
+	var items []ClusterItemInfo
+
+	for rows.Next() {
+		var (
+			clusterIDRaw pgtype.UUID
+			clusterTopic pgtype.Text
+			itemIDRaw    pgtype.UUID
+			summary      pgtype.Text
+			username     pgtype.Text
+		)
+
+		if err := rows.Scan(&clusterIDRaw, &clusterTopic, &itemIDRaw, &summary, &username); err != nil {
+			return nil, nil, fmt.Errorf("scan cluster item: %w", err)
+		}
+
+		if cluster == nil {
+			cluster = &ClusterWithItems{
+				ID:    fromUUID(clusterIDRaw),
+				Topic: clusterTopic.String,
+			}
+		}
+
+		iID := fromUUID(itemIDRaw)
+		// Skip the item we're looking up (we don't want to show it in "related items")
+		if iID != itemID {
+			items = append(items, ClusterItemInfo{
+				ID:              iID,
+				Summary:         summary.String,
+				ChannelUsername: username.String,
+			})
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate cluster rows: %w", err)
+	}
+
+	return cluster, items, nil
 }
