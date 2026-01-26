@@ -33,7 +33,7 @@ spec:
             port:
               name: http
       - path: /robots.txt
-        pathType: Exact
+        pathType: ImplementationSpecific
         backend:
           service:
             name: digest-bot-http
