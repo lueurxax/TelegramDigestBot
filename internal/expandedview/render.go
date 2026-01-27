@@ -313,6 +313,19 @@ func writeEvidenceItem(sb *strings.Builder, ev db.ItemEvidenceWithSource) {
 
 		fmt.Fprintf(sb, "  Excerpt: %s\n", desc)
 	}
+
+	// Include matched claims if available
+	if len(ev.MatchedClaimsJSON) > 0 {
+		var claims []MatchedClaim
+		if err := json.Unmarshal(ev.MatchedClaimsJSON, &claims); err == nil && len(claims) > 0 {
+			sb.WriteString("  Matched claims:\n")
+
+			for _, c := range claims {
+				fmt.Fprintf(sb, "    - Item: %s\n", c.ItemClaim)
+				fmt.Fprintf(sb, "      Evidence: %s\n", c.EvidenceClaim)
+			}
+		}
+	}
 }
 
 func writePromptQuestions(sb *strings.Builder) {
@@ -351,7 +364,7 @@ type ShortcutConfig struct {
 // Default shortcut URL limits.
 const (
 	defaultShortcutMaxChars   = 2000
-	shortcutURLTruncateSuffix = "...\n\n[Full prompt: use Copy Prompt button]"
+	shortcutURLTruncateSuffix = "...\n\n[Prompt truncated for URL length]"
 	urlEncodedSpace           = "%20" // iOS Shortcuts expects %20, not +
 )
 

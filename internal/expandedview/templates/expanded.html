@@ -110,15 +110,6 @@
             font-size: 1rem;
         }
         .btn:hover { opacity: 0.9; }
-        .btn-secondary {
-            background: #6b7280;
-        }
-        .btn-group {
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-            margin-top: 1rem;
-        }
         .prompt-container {
             margin-top: 1rem;
         }
@@ -134,15 +125,6 @@
             overflow-y: auto;
             font-family: monospace;
             margin-top: 0.5rem;
-        }
-        .copy-feedback {
-            display: none;
-            color: var(--success);
-            font-size: 0.875rem;
-            margin-left: 0.5rem;
-        }
-        .copy-feedback.show {
-            display: inline;
         }
         details {
             margin-top: 1rem;
@@ -267,84 +249,33 @@
         </div>
         {{end}}
 
+        {{if .ShortcutEnabled}}
         <div class="card">
             <h2>Deep Dive with ChatGPT</h2>
-            <p>Want to explore this topic further? Use the options below to send the context to ChatGPT.</p>
+            <p>Tap below to explore this topic further with ChatGPT.</p>
 
-            {{if .ShortcutEnabled}}
             <div class="shortcut-section">
-                <a href="{{.ShortcutURL | safeURL}}" class="btn btn-primary" onclick="copyPromptBeforeShortcut()">
+                <a href="{{.ShortcutURL | safeURL}}" class="btn btn-primary">
                     📱 Ask on iPhone/Mac
                 </a>
                 <div class="shortcut-help">
                     Requires <a href="{{.ShortcutICloudURL}}" target="_blank" rel="noopener">one-time shortcut installation</a>
                 </div>
             </div>
-            {{end}}
 
-            <div class="btn-group">
-                <button type="button" class="btn" onclick="copyPrompt()">
-                    📋 Copy Prompt
-                </button>
-                <span id="copy-feedback" class="copy-feedback">✓ Copied!</span>
-            </div>
             <details>
                 <summary>View prompt</summary>
                 <div class="prompt-container">
-                    <div id="prompt-text" class="prompt-text">{{.ChatGPTPrompt}}</div>
+                    <div class="prompt-text">{{.ChatGPTPrompt}}</div>
                 </div>
             </details>
         </div>
+        {{end}}
 
         <div class="footer">
             Generated {{.GeneratedAt.Format "Jan 2, 2006 15:04:05 MST"}}
         </div>
     </div>
 
-    <script>
-        function copyPrompt() {
-            var promptText = document.getElementById('prompt-text').innerText;
-            navigator.clipboard.writeText(promptText).then(function() {
-                var feedback = document.getElementById('copy-feedback');
-                feedback.classList.add('show');
-                setTimeout(function() {
-                    feedback.classList.remove('show');
-                }, 2000);
-            }).catch(function(err) {
-                // Fallback for older browsers
-                copyPromptFallback(promptText);
-            });
-        }
-
-        function copyPromptFallback(text) {
-            var textArea = document.createElement('textarea');
-            textArea.value = text;
-            textArea.style.position = 'fixed';
-            textArea.style.left = '-9999px';
-            document.body.appendChild(textArea);
-            textArea.select();
-            try {
-                document.execCommand('copy');
-                var feedback = document.getElementById('copy-feedback');
-                feedback.classList.add('show');
-                setTimeout(function() {
-                    feedback.classList.remove('show');
-                }, 2000);
-            } catch (e) {
-                alert('Failed to copy. Please select and copy the text manually.');
-            }
-            document.body.removeChild(textArea);
-        }
-
-        // Copy full prompt to clipboard before opening shortcuts URL (safety net)
-        function copyPromptBeforeShortcut() {
-            var promptText = document.getElementById('prompt-text').innerText;
-            navigator.clipboard.writeText(promptText).catch(function(err) {
-                // Fallback - try to copy anyway
-                copyPromptFallback(promptText);
-            });
-            // Don't prevent default - let the link open the shortcuts:// URL
-        }
-    </script>
 </body>
 </html>

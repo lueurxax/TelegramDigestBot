@@ -79,7 +79,7 @@ Use Apple Shortcuts to send the full prompt to ChatGPT in one tap for iOS/macOS 
 #### How It Works
 Use the `shortcuts://` URL scheme to trigger a pre-installed shortcut:
 ```
-shortcuts://run-shortcut?name=Ask%20ChatGPT&input=text&text=<url_encoded_prompt>
+shortcuts://run-shortcut?name=Ask%20ChatGPT&input=<url_encoded_prompt>
 ```
 
 **User flow:**
@@ -146,7 +146,7 @@ The `shortcuts://` URL scheme will fail if:
 **Proposed button behavior:**
 ```javascript
 function askViaShortcut() {
-  window.location.href = 'shortcuts://run-shortcut?name=...&input=text&text=...';
+  window.location.href = 'shortcuts://run-shortcut?name=...&input=...';
 }
 ```
 
@@ -162,9 +162,9 @@ function askViaShortcut() {
 - Android users remain on manual copy/paste flow until similar integration available
 
 ### Prompt Size Limits
-- **Shortcuts URL:** Truncated to ~2000 chars due to URL length limits
-- `EXPANDED_PROMPT_MAX_CHARS` (default 12000) only applies to URL-based methods
-- When truncated, add suffix: "... [Prompt truncated for Shortcuts URL]"
+- **Shortcuts URL:** Truncated to `EXPANDED_SHORTCUT_URL_MAX_CHARS` (default 2000) due to URL length limits
+- **View prompt:** Shows full prompt without truncation
+- When URL truncated, add suffix: "... [Prompt truncated for URL length]"
 
 ### HTML Template
 - Simple server-rendered template with inline CSS.
@@ -193,7 +193,6 @@ EXPANDED_VIEW_SIGNING_SECRET=changeme
 EXPANDED_VIEW_TTL_HOURS=72
 EXPANDED_VIEW_REQUIRE_ADMIN=true
 EXPANDED_VIEW_ALLOW_SYSTEM_TOKENS=true  # Allow digest links to bypass admin check
-EXPANDED_PROMPT_MAX_CHARS=12000
 TELEGRAM_BOT_USERNAME=MyBot  # For error page deep links
 ```
 

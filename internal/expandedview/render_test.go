@@ -62,9 +62,12 @@ func TestRenderer_RenderExpanded(t *testing.T) {
 				MessageID:       67890,
 			},
 		},
-		ChatGPTPrompt:   "Test prompt for ChatGPT",
-		OriginalMsgLink: "https://t.me/testchannel/12345",
-		GeneratedAt:     time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+		ChatGPTPrompt:     "Test prompt for ChatGPT",
+		OriginalMsgLink:   "https://t.me/testchannel/12345",
+		GeneratedAt:       time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+		ShortcutEnabled:   true,
+		ShortcutURL:       "shortcuts://run-shortcut?name=Test",
+		ShortcutICloudURL: "https://icloud.com/shortcuts/test",
 	}
 
 	var buf bytes.Buffer
@@ -446,7 +449,7 @@ func TestBuildShortcutURL(t *testing.T) {
 			maxChars:     100,
 			wantContains: []string{
 				"shortcuts://run-shortcut",
-				"Full%20prompt",
+				"truncated%20for%20URL",
 			},
 		},
 	}
