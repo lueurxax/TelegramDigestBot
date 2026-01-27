@@ -2,9 +2,11 @@ package expandedview
 
 import (
 	"embed"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -22,6 +24,15 @@ var templateFuncs = template.FuncMap{
 	// safeHTML marks a string as safe HTML (for LLM-generated summaries with basic formatting)
 	"safeHTML": func(s string) template.HTML {
 		return template.HTML(s) //nolint:gosec // summaries are LLM-generated, admin-only page
+	},
+	// mediaDataURL converts binary image data to a base64 data URL for inline display
+	"mediaDataURL": func(data []byte) string {
+		if len(data) == 0 {
+			return ""
+		}
+		// Detect MIME type from magic bytes
+		mimeType := http.DetectContentType(data)
+		return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
 	},
 }
 

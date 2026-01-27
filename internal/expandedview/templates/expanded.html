@@ -42,6 +42,16 @@
         .score-value { font-size: 1.5rem; font-weight: bold; color: var(--primary); }
         .score-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
         .summary { font-size: 1.1rem; margin-bottom: 1rem; }
+        .media-container {
+            margin-top: 1rem;
+            text-align: center;
+        }
+        .media-image {
+            max-width: 100%;
+            max-height: 400px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
         .original-text {
             background: #f8f9fa;
             border-left: 3px solid var(--primary);
@@ -157,6 +167,11 @@
                     <div class="score-label">Importance</div>
                 </div>
             </div>
+            {{if .Item.MediaData}}
+            <div class="media-container">
+                <img src="{{.Item.MediaData | mediaDataURL}}" alt="Message media" class="media-image">
+            </div>
+            {{end}}
         </div>
 
         <div class="card">

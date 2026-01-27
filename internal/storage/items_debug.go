@@ -44,6 +44,7 @@ type ItemDebugDetail struct {
 	ChannelTitle    string
 	ChannelDesc     string
 	ChannelPeerID   int64
+	MediaData       []byte // Image data from the message (JPEG/PNG)
 }
 
 // SearchItemsByText looks for items with matching summary or raw text.
@@ -135,6 +136,7 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 		       rm.preview_text,
 		       rm.tg_date,
 		       rm.tg_message_id,
+		       rm.media_data,
 		       c.id,
 		       c.username,
 		       c.title,
@@ -177,6 +179,7 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 		&previewText,
 		&item.TGDate,
 		&item.MessageID,
+		&item.MediaData,
 		&channelID,
 		&user,
 		&title,
