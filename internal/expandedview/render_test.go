@@ -425,9 +425,9 @@ func TestBuildShortcutURL(t *testing.T) {
 			maxChars:     2000,
 			wantContains: []string{
 				"shortcuts://run-shortcut",
-				"name=Ask+ChatGPT",
+				"name=Ask%20ChatGPT",
 				"input=text",
-				"text=Hello+world",
+				"text=Hello%20world",
 			},
 		},
 		{
@@ -437,7 +437,7 @@ func TestBuildShortcutURL(t *testing.T) {
 			maxChars:     2000,
 			wantContains: []string{
 				"shortcuts://run-shortcut",
-				"text=What+is+2%2B2%3F",
+				"text=What%20is%202%2B2%3F",
 			},
 		},
 		{
@@ -447,7 +447,7 @@ func TestBuildShortcutURL(t *testing.T) {
 			maxChars:     100,
 			wantContains: []string{
 				"shortcuts://run-shortcut",
-				"Full+prompt",
+				"Full%20prompt",
 			},
 		},
 	}
@@ -475,7 +475,7 @@ func TestBuildShortcutURL_DefaultMaxChars(t *testing.T) {
 	shortPrompt := "Test prompt"
 	url := BuildShortcutURL("Test", shortPrompt, 0)
 
-	if !strings.Contains(url, "Test+prompt") {
+	if !strings.Contains(url, "Test%20prompt") {
 		t.Error("BuildShortcutURL with maxChars=0 should use default and include prompt")
 	}
 }

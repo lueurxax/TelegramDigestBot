@@ -325,6 +325,7 @@ type ShortcutConfig struct {
 const (
 	defaultShortcutMaxChars   = 2000
 	shortcutURLTruncateSuffix = "...\n\n[Full prompt: use Copy Prompt button]"
+	urlEncodedSpace           = "%20" // iOS Shortcuts expects %20, not +
 )
 
 // BuildShortcutURL constructs the shortcuts:// URL for Apple Shortcuts integration.
@@ -343,8 +344,9 @@ func BuildShortcutURL(shortcutName, fullPrompt string, maxChars int) string {
 	}
 
 	// URL-encode the prompt and shortcut name
-	encodedName := url.QueryEscape(shortcutName)
-	encodedPrompt := url.QueryEscape(prompt)
+	// Use %20 for spaces instead of + (iOS Shortcuts expects %20)
+	encodedName := strings.ReplaceAll(url.QueryEscape(shortcutName), "+", urlEncodedSpace)
+	encodedPrompt := strings.ReplaceAll(url.QueryEscape(prompt), "+", urlEncodedSpace)
 
 	return fmt.Sprintf("shortcuts://run-shortcut?name=%s&input=text&text=%s", encodedName, encodedPrompt)
 }
