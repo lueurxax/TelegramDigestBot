@@ -62,7 +62,10 @@ type ExpandedViewData struct {
 type ClusterItemView struct {
 	ID              string
 	Summary         string
+	Text            string // Full message text for maximum context
 	ChannelUsername string
+	ChannelPeerID   int64
+	MessageID       int64
 }
 
 // ErrorData contains data for rendering error pages.
@@ -161,7 +164,7 @@ func writePromptCorroboration(sb *strings.Builder, clusterItems []ClusterItemVie
 		return
 	}
 
-	sb.WriteString("\n\n## Related Items (Corroboration)\n")
+	sb.WriteString("\n\n## Duplicate/Related Messages (Corroboration)\n")
 	sb.WriteString("Other sources reporting on the same topic:\n")
 
 	for i, ci := range clusterItems {
@@ -169,10 +172,20 @@ func writePromptCorroboration(sb *strings.Builder, clusterItems []ClusterItemVie
 			break
 		}
 
+		// Write source attribution with link
 		if ci.ChannelUsername != "" {
-			fmt.Fprintf(sb, fmtBulletItemWithSource, ci.ChannelUsername, ci.Summary)
-		} else {
-			fmt.Fprintf(sb, fmtBulletItem, ci.Summary)
+			fmt.Fprintf(sb, "\n### @%s\n", ci.ChannelUsername)
+			fmt.Fprintf(sb, "Link: https://t.me/%s/%d\n", ci.ChannelUsername, ci.MessageID)
+		} else if ci.ChannelPeerID != 0 {
+			fmt.Fprintf(sb, "\n### Channel %d\n", ci.ChannelPeerID)
+			fmt.Fprintf(sb, "Link: https://t.me/c/%d/%d\n", ci.ChannelPeerID, ci.MessageID)
+		}
+
+		// Write full message text (not just summary)
+		if ci.Text != "" {
+			fmt.Fprintf(sb, "Message:\n%s\n", ci.Text)
+		} else if ci.Summary != "" {
+			fmt.Fprintf(sb, "Summary: %s\n", ci.Summary)
 		}
 	}
 }

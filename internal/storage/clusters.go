@@ -92,13 +92,16 @@ func (db *DB) GetClustersForWindow(ctx context.Context, start, end time.Time) ([
 type ClusterItemInfo struct {
 	ID              string
 	Summary         string
+	Text            string // Full message text for maximum context prompts
 	ChannelUsername string
+	ChannelPeerID   int64
+	MessageID       int64
 }
 
 // GetClusterForItem returns the cluster containing the given item, along with all items in that cluster.
 func (db *DB) GetClusterForItem(ctx context.Context, itemID string) (*ClusterWithItems, []ClusterItemInfo, error) {
 	rows, err := db.Pool.Query(ctx, `
-		SELECT c.id, c.topic, ci2.item_id, i.summary, ch.username
+		SELECT c.id, c.topic, ci2.item_id, i.summary, rm.text, ch.username, ch.tg_peer_id, rm.tg_msg_id
 		FROM cluster_items ci
 		JOIN clusters c ON ci.cluster_id = c.id
 		JOIN cluster_items ci2 ON c.id = ci2.cluster_id
@@ -123,10 +126,13 @@ func (db *DB) GetClusterForItem(ctx context.Context, itemID string) (*ClusterWit
 			clusterTopic pgtype.Text
 			itemIDRaw    pgtype.UUID
 			summary      pgtype.Text
+			text         pgtype.Text
 			username     pgtype.Text
+			peerID       pgtype.Int8
+			msgID        pgtype.Int8
 		)
 
-		if err := rows.Scan(&clusterIDRaw, &clusterTopic, &itemIDRaw, &summary, &username); err != nil {
+		if err := rows.Scan(&clusterIDRaw, &clusterTopic, &itemIDRaw, &summary, &text, &username, &peerID, &msgID); err != nil {
 			return nil, nil, fmt.Errorf("scan cluster item: %w", err)
 		}
 
@@ -143,7 +149,10 @@ func (db *DB) GetClusterForItem(ctx context.Context, itemID string) (*ClusterWit
 			items = append(items, ClusterItemInfo{
 				ID:              iID,
 				Summary:         summary.String,
+				Text:            text.String,
 				ChannelUsername: username.String,
+				ChannelPeerID:   peerID.Int64,
+				MessageID:       msgID.Int64,
 			})
 		}
 	}

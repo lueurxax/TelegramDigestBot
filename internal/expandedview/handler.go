@@ -187,7 +187,10 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		clusterItems = append(clusterItems, ClusterItemView{
 			ID:              ci.ID,
 			Summary:         ci.Summary,
+			Text:            ci.Text,
 			ChannelUsername: ci.ChannelUsername,
+			ChannelPeerID:   ci.ChannelPeerID,
+			MessageID:       ci.MessageID,
 		})
 	}
 
