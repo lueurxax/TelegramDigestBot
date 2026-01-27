@@ -78,6 +78,19 @@
         .agreement-high { color: var(--success); }
         .agreement-medium { color: var(--warning); }
         .evidence-desc { font-size: 0.9rem; }
+        .matched-claims {
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        .matched-claim {
+            margin-bottom: 0.25rem;
+            padding-left: 0.5rem;
+            border-left: 2px solid var(--primary);
+        }
+        .matched-claim-label { color: var(--text-muted); font-size: 0.75rem; }
         .cluster-item {
             padding: 0.5rem 0;
             border-bottom: 1px solid var(--border);
@@ -194,7 +207,7 @@
 
         <div class="card">
             <h2>Summary</h2>
-            <p class="summary">{{.Item.Summary | safeHTML}}</p>
+            <p class="summary">{{if .AllowSafeHTML}}{{.Item.Summary | safeHTML}}{{else}}{{.Item.Summary}}{{end}}</p>
         </div>
 
         <div class="card">
@@ -214,6 +227,18 @@
                     {{if .IsContradiction}}&bull; <strong>Contradicts</strong>{{end}}
                 </div>
                 {{if .Source.Description}}<p class="evidence-desc">{{.Source.Description}}</p>{{end}}
+                {{$claims := .MatchedClaimsJSON | parseMatchedClaims}}
+                {{if $claims}}
+                <div class="matched-claims">
+                    <div class="matched-claim-label">Matched Claims:</div>
+                    {{range $claims}}
+                    <div class="matched-claim">
+                        <div><strong>Item:</strong> {{.ItemClaim}}</div>
+                        <div><strong>Evidence:</strong> {{.EvidenceClaim}}</div>
+                    </div>
+                    {{end}}
+                </div>
+                {{end}}
             </div>
             {{end}}
         </div>
@@ -230,9 +255,13 @@
             {{range .ClusterItems}}
             <div class="cluster-item">
                 <div>{{.Summary}}</div>
-                {{if .ChannelUsername}}
-                <div class="cluster-channel">via @{{.ChannelUsername}}</div>
-                {{end}}
+                <div class="cluster-channel">
+                    {{if .ChannelUsername}}
+                    via <a href="https://t.me/{{.ChannelUsername}}/{{.MessageID}}" target="_blank" rel="noopener">@{{.ChannelUsername}}</a>
+                    {{else if .ChannelPeerID}}
+                    via <a href="https://t.me/c/{{.ChannelPeerID}}/{{.MessageID}}" target="_blank" rel="noopener">private channel</a>
+                    {{end}}
+                </div>
             </div>
             {{end}}
         </div>

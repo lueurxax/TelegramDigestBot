@@ -207,6 +207,10 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		shortcutURL = BuildShortcutURL(h.cfg.ExpandedShortcutName, chatGPTPrompt, h.cfg.ExpandedShortcutMaxChars)
 	}
 
+	// Determine if HTML rendering is safe
+	// Only allow safeHTML when admin-only mode is enforced (no public system tokens)
+	allowSafeHTML := h.cfg.ExpandedViewRequireAdmin && !h.cfg.ExpandedViewAllowSystemTokens
+
 	// Render
 	data := &ExpandedViewData{
 		Item:            item,
@@ -220,6 +224,9 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		ShortcutEnabled:   h.cfg.ExpandedShortcutEnabled,
 		ShortcutURL:       shortcutURL,
 		ShortcutICloudURL: h.cfg.ExpandedShortcutICloudURL,
+
+		// Security
+		AllowSafeHTML: allowSafeHTML,
 	}
 
 	if err := h.renderer.RenderExpanded(w, data); err != nil {

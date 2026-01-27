@@ -27,7 +27,7 @@ Provide a read-only expansion page for each digest item. The expansion uses exis
 - Message image (if available).
 - Evidence list with agreement scores and matched claims.
 - Corroborating channels and cluster context.
-- Button: `Copy Prompt to Clipboard` + `Open ChatGPT` link.
+- Button: `📱 Ask on iPhone/Mac` (Apple Shortcuts only).
 
 ## Design
 
@@ -65,14 +65,11 @@ Provide a read-only expansion page for each digest item. The expansion uses exis
   - Duplicate/related messages with their links and full text
   - Evidence sources with URLs and descriptions
   - Standard questions for exploration
-- Copy to clipboard via JavaScript (with fallback for older browsers).
-- Link to ChatGPT for pasting.
+- Prompt is passed directly to the Apple Shortcuts flow (no copy/paste UI).
 
-### ChatGPT Integration via Apple Shortcuts (Planned Enhancement)
+### ChatGPT Integration via Apple Shortcuts
 
-> **Status: PROPOSED**
-
-The current flow requires multiple steps: click item → open ChatGPT → view prompt → copy → paste → send. This section proposes streamlined integration for iOS/macOS users via Apple Shortcuts.
+Use Apple Shortcuts to send the full prompt to ChatGPT in one tap for iOS/macOS users.
 
 #### Why Apple Shortcuts Only
 - **User-Agent detection is unreliable** - Telegram in-app browser, Safari vs WebView, and other edge cases make platform detection error-prone
@@ -95,15 +92,13 @@ shortcuts://run-shortcut?name=Ask%20ChatGPT&input=text&text=<url_encoded_prompt>
 - Copy to clipboard + open ChatGPT app (simplest fallback)
 
 #### Proposed UI
-Show Apple Shortcuts + manual fallback (iOS/macOS only):
+Show Apple Shortcuts only (iOS/macOS only):
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Deep Dive with ChatGPT                                     │
 ├─────────────────────────────────────────────────────────────┤
 │  [📱 Ask on iPhone/Mac]     ← shortcuts:// URL             │
 │     ℹ️ Requires one-time shortcut installation              │
-│                                                             │
-│  [📋 Copy Prompt]           ← Always available fallback    │
 │                                                             │
 │  ▸ View prompt                                              │
 │  ▸ Install shortcut (iCloud link)                           │
@@ -112,7 +107,6 @@ Show Apple Shortcuts + manual fallback (iOS/macOS only):
 
 **Behavior:**
 - "Ask on iPhone/Mac" button visible (iOS/macOS only)
-- "Copy Prompt" always available as safe fallback
 - Collapsible "Install shortcut" link for first-time setup
 
 #### Shortcut Resources
@@ -130,9 +124,8 @@ EXPANDED_SHORTCUT_URL_MAX_CHARS=2000  # URL-safe limit for shortcuts:// scheme
 ```
 
 #### Prompt Size Strategy
-- **Clipboard copy:** Uses full prompt (no truncation, or `EXPANDED_PROMPT_MAX_CHARS` if set)
 - **Shortcuts URL:** Truncated to `EXPANDED_SHORTCUT_URL_MAX_CHARS` (default 2000) due to URL length limits
-- When URL prompt is truncated, append note: "... [Full prompt copied to clipboard]"
+- When URL prompt is truncated, append note: "... [Prompt truncated for Shortcuts URL]"
 
 #### Error Handling: Shortcut Not Installed
 The `shortcuts://` URL scheme will fail if:
@@ -149,17 +142,11 @@ The `shortcuts://` URL scheme will fail if:
 1. Button text clearly indicates requirement: "Ask on iPhone/Mac (requires shortcut)"
 2. Prominent "Install shortcut" link shown above or alongside the button
 3. Help text: "First time? Install the shortcut, then try again"
-4. "Copy Prompt" fallback always visible and clearly labeled as alternative
-5. Optional: JavaScript `onclick` handler that copies prompt to clipboard before opening shortcuts URL, so user has fallback if shortcut fails
 
 **Proposed button behavior:**
 ```javascript
 function askViaShortcut() {
-  // Always copy to clipboard first as safety net
-  copyPromptToClipboard();
-  // Then attempt to open shortcut
   window.location.href = 'shortcuts://run-shortcut?name=...&input=text&text=...';
-  // Show toast: "Prompt copied! If shortcut doesn't open, paste manually in ChatGPT"
 }
 ```
 
@@ -168,7 +155,6 @@ function askViaShortcut() {
 2. Upload shortcut to iCloud and obtain share link
 3. Update HTML template with new buttons and installation link
 4. URL-encode prompt text for `shortcuts://` URL (handle length limits gracefully)
-5. Add clipboard copy as pre-action before shortcut URL to ensure fallback
 
 #### Future Considerations
 - OpenAI acquired Workflow/Shortcuts founders (October 2025) - native `chatgpt://` deep linking may come
@@ -176,10 +162,9 @@ function askViaShortcut() {
 - Android users remain on manual copy/paste flow until similar integration available
 
 ### Prompt Size Limits
-- **Clipboard copy / View prompt:** Full prompt without truncation (ChatGPT handles large inputs)
 - **Shortcuts URL:** Truncated to ~2000 chars due to URL length limits
 - `EXPANDED_PROMPT_MAX_CHARS` (default 12000) only applies to URL-based methods
-- When truncated, add suffix: "... [Full context available via Copy Prompt]"
+- When truncated, add suffix: "... [Prompt truncated for Shortcuts URL]"
 
 ### HTML Template
 - Simple server-rendered template with inline CSS.
@@ -252,4 +237,4 @@ TELEGRAM_BOT_USERNAME=MyBot  # For error page deep links
 | Should digest links be admin-only? | Configurable. With `EXPANDED_VIEW_ALLOW_SYSTEM_TOKENS=true`, digest links (user_id=0) bypass admin check so recipients can view. |
 | How are original links extracted? | Links are extracted from `entities_json` (TextURL entities) and `media_json` (webpage links) using the `linkextract.ExtractAllURLs` function. Up to 10 links are included in the prompt. |
 | How to streamline ChatGPT integration? | Apple Shortcuts only (iOS/macOS). No User-Agent detection (unreliable in Telegram WebView). Always show both "Ask on iPhone/Mac" button and "Copy Prompt" fallback. Pre-copy to clipboard before opening shortcut URL as safety net. |
-| Should prompts be truncated? | Clipboard copy uses full prompt (no truncation). Shortcuts URL truncated to ~2000 chars due to URL limits. Truncated prompts note: "Full context available via Copy Prompt". |
+| Should prompts be truncated? | Shortcuts URL truncated to ~2000 chars due to URL limits. Truncated prompts note: "Prompt truncated for Shortcuts URL". |

@@ -3,7 +3,9 @@ package expandedview
 import (
 	"embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"io"
 	"net/http"
@@ -15,6 +17,13 @@ import (
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
+// MatchedClaim represents a matched claim between item and evidence.
+type MatchedClaim struct {
+	ItemClaim     string  `json:"item_claim"`
+	EvidenceClaim string  `json:"evidence_claim"`
+	Score         float32 `json:"score"`
+}
+
 //go:embed templates/*.html
 var templateFS embed.FS
 
@@ -24,9 +33,12 @@ var templateFuncs = template.FuncMap{
 		return float64(a) * b
 	},
 	// safeHTML marks a string as safe HTML (for LLM-generated summaries with basic formatting)
+	// SECURITY: Only use when AllowSafeHTML is true in ExpandedViewData
 	"safeHTML": func(s string) template.HTML {
 		return template.HTML(s) //nolint:gosec // summaries are LLM-generated, admin-only page
 	},
+	// escapeHTML escapes HTML special characters for safe display
+	"escapeHTML": html.EscapeString,
 	// isImageMedia checks if the binary data is a valid image that can be displayed
 	"isImageMedia": func(data []byte) bool {
 		if len(data) == 0 {
@@ -47,6 +59,17 @@ var templateFuncs = template.FuncMap{
 	// safeURL marks a URL as safe (for shortcuts:// and other custom schemes)
 	"safeURL": func(s string) template.URL {
 		return template.URL(s) //nolint:gosec // shortcut URLs are server-generated, admin-only page
+	},
+	// parseMatchedClaims parses JSON matched claims from evidence
+	"parseMatchedClaims": func(data []byte) []MatchedClaim {
+		if len(data) == 0 {
+			return nil
+		}
+		var claims []MatchedClaim
+		if err := json.Unmarshal(data, &claims); err != nil {
+			return nil
+		}
+		return claims
 	},
 }
 
@@ -90,6 +113,10 @@ type ExpandedViewData struct {
 	ShortcutEnabled   bool   // Whether shortcut button should be shown
 	ShortcutURL       string // shortcuts://run-shortcut URL with encoded prompt
 	ShortcutICloudURL string // iCloud link to install the shortcut
+
+	// Security: controls whether HTML is rendered in summary
+	// Set to true only for admin-only mode; false allows system tokens (public links)
+	AllowSafeHTML bool
 }
 
 // ClusterItemView is a simplified view of a cluster item.
@@ -348,5 +375,5 @@ func BuildShortcutURL(shortcutName, fullPrompt string, maxChars int) string {
 	encodedName := strings.ReplaceAll(url.QueryEscape(shortcutName), "+", urlEncodedSpace)
 	encodedPrompt := strings.ReplaceAll(url.QueryEscape(prompt), "+", urlEncodedSpace)
 
-	return fmt.Sprintf("shortcuts://run-shortcut?name=%s&input=text&text=%s", encodedName, encodedPrompt)
+	return fmt.Sprintf("shortcuts://run-shortcut?name=%s&input=%s", encodedName, encodedPrompt)
 }

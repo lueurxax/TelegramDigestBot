@@ -426,8 +426,7 @@ func TestBuildShortcutURL(t *testing.T) {
 			wantContains: []string{
 				"shortcuts://run-shortcut",
 				"name=Ask%20ChatGPT",
-				"input=text",
-				"text=Hello%20world",
+				"input=Hello%20world",
 			},
 		},
 		{
@@ -437,7 +436,7 @@ func TestBuildShortcutURL(t *testing.T) {
 			maxChars:     2000,
 			wantContains: []string{
 				"shortcuts://run-shortcut",
-				"text=What%20is%202%2B2%3F",
+				"input=What%20is%202%2B2%3F",
 			},
 		},
 		{
