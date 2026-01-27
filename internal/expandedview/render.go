@@ -19,6 +19,10 @@ var templateFuncs = template.FuncMap{
 	"mul": func(a float32, b float64) float64 {
 		return float64(a) * b
 	},
+	// safeHTML marks a string as safe HTML (for LLM-generated summaries with basic formatting)
+	"safeHTML": func(s string) template.HTML {
+		return template.HTML(s) //nolint:gosec // summaries are LLM-generated, admin-only page
+	},
 }
 
 // Renderer handles HTML template rendering.

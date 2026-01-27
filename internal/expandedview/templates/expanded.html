@@ -161,7 +161,7 @@
 
         <div class="card">
             <h2>Summary</h2>
-            <p class="summary">{{.Item.Summary}}</p>
+            <p class="summary">{{.Item.Summary | safeHTML}}</p>
         </div>
 
         <div class="card">
