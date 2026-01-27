@@ -44,6 +44,10 @@ var templateFuncs = template.FuncMap{
 		mimeType := http.DetectContentType(data)
 		return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
 	},
+	// safeURL marks a URL as safe (for shortcuts:// and other custom schemes)
+	"safeURL": func(s string) template.URL {
+		return template.URL(s) //nolint:gosec // shortcut URLs are server-generated, admin-only page
+	},
 }
 
 // Renderer handles HTML template rendering.

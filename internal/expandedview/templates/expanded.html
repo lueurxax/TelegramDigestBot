@@ -244,7 +244,7 @@
 
             {{if .ShortcutEnabled}}
             <div class="shortcut-section">
-                <a href="{{.ShortcutURL}}" class="btn btn-primary" onclick="copyPromptBeforeShortcut()">
+                <a href="{{.ShortcutURL | safeURL}}" class="btn btn-primary" onclick="copyPromptBeforeShortcut()">
                     📱 Ask on iPhone/Mac
                 </a>
                 <div class="shortcut-help">
