@@ -168,8 +168,9 @@ const (
 
 // Expanded view link constants
 const (
-	ExpandedViewSystemUserID = int64(0)
-	logFieldItemID           = "item_id"
+	ExpandedViewSystemUserID    = int64(0)
+	logFieldItemID              = "item_id"
+	logMsgExpandLinkTokenFailed = "failed to generate expand link token"
 )
 
 // Threshold tuning constants

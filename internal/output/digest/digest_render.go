@@ -461,10 +461,8 @@ func (rc *digestRenderContext) renderNarrativeSection(sb *strings.Builder, narra
 
 	rc.appendEvidenceLine(sb, allItems)
 
-	// Add expand link for the first item
-	if len(allItems) > 0 {
-		rc.appendExpandLink(sb, allItems[0].ID)
-	}
+	// Add expand links for all items in the narrative
+	rc.appendExpandLinksForItems(sb, allItems)
 }
 
 func (rc *digestRenderContext) renderMultiItemCluster(ctx context.Context, sb *strings.Builder, c db.ClusterWithItems) bool {
@@ -653,11 +651,49 @@ func (rc *digestRenderContext) appendExpandLink(sb *strings.Builder, itemID stri
 
 	token, err := rc.scheduler.expandLinkGenerator.Generate(itemID, ExpandedViewSystemUserID)
 	if err != nil {
-		rc.logger.Debug().Err(err).Str(logFieldItemID, itemID).Msg("failed to generate expand link token")
+		rc.logger.Debug().Err(err).Str(logFieldItemID, itemID).Msg(logMsgExpandLinkTokenFailed)
 		return
 	}
 
 	fmt.Fprintf(sb, "\n    📖 <a href=\"%s/i/%s\">More</a>", html.EscapeString(rc.expandBaseURL), token)
+}
+
+// appendExpandLinksForItems adds expand links for multiple items (used in narrative sections).
+func (rc *digestRenderContext) appendExpandLinksForItems(sb *strings.Builder, items []db.Item) {
+	if !rc.expandLinksEnabled || len(items) == 0 {
+		return
+	}
+
+	// Limit to avoid too many links
+	maxLinks := 5
+	if len(items) < maxLinks {
+		maxLinks = len(items)
+	}
+
+	sb.WriteString("\n    📖 ")
+
+	for i := 0; i < maxLinks; i++ {
+		if items[i].ID == "" {
+			continue
+		}
+
+		token, err := rc.scheduler.expandLinkGenerator.Generate(items[i].ID, ExpandedViewSystemUserID)
+		if err != nil {
+			rc.logger.Debug().Err(err).Str(logFieldItemID, items[i].ID).Msg(logMsgExpandLinkTokenFailed)
+			continue
+		}
+
+		if i > 0 {
+			sb.WriteString(" · ")
+		}
+
+		// Use item index as label when multiple links
+		fmt.Fprintf(sb, "<a href=\"%s/i/%s\">%d</a>", html.EscapeString(rc.expandBaseURL), token, i+1)
+	}
+
+	if len(items) > maxLinks {
+		fmt.Fprintf(sb, " (+%d)", len(items)-maxLinks)
+	}
 }
 
 func (rc *digestRenderContext) appendExplainabilityLine(sb *strings.Builder, items []db.Item) {
