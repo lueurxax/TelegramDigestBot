@@ -194,9 +194,9 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		})
 	}
 
-	// Build ChatGPT prompt - full version for clipboard (no truncation)
+	// Build ChatGPT prompt - full version for View prompt section (no truncation)
 	promptCfg := PromptBuilderConfig{
-		MaxChars: 0, // No truncation for clipboard copy
+		MaxChars: 0, // No truncation for View prompt section
 	}
 	chatGPTPrompt := BuildChatGPTPrompt(item, evidence, clusterItems, promptCfg)
 	originalMsgLink := BuildOriginalMsgLink(item)

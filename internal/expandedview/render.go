@@ -105,7 +105,7 @@ type ExpandedViewData struct {
 	Item            *db.ItemDebugDetail
 	Evidence        []db.ItemEvidenceWithSource
 	ClusterItems    []ClusterItemView
-	ChatGPTPrompt   string // Full prompt text for clipboard copy (no truncation)
+	ChatGPTPrompt   string // Full prompt text for View prompt section (no truncation)
 	OriginalMsgLink string // Telegram link to original message
 	GeneratedAt     time.Time
 
@@ -187,7 +187,7 @@ func BuildChatGPTPrompt(item *db.ItemDebugDetail, evidence []db.ItemEvidenceWith
 
 	result := sb.String()
 
-	// MaxChars <= 0 means no truncation (full prompt for clipboard)
+	// MaxChars <= 0 means no truncation (full prompt for View prompt section)
 	if cfg.MaxChars > 0 {
 		result = truncatePrompt(result, cfg.MaxChars)
 	}
