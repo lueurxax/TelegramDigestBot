@@ -9,6 +9,9 @@ import (
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
+// Test constants.
+const testTruncationSuffix = "..."
+
 func requireRenderer(t *testing.T) *Renderer {
 	t.Helper()
 
@@ -280,6 +283,54 @@ func TestBuildChatGPTPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildChatGPTPrompt_WithOriginalLinks(t *testing.T) {
+	// Simulate entities_json with a TextURL entity
+	// The entities JSON contains URL entities that linkextract can parse
+	entitiesJSON := []byte(`[{"_":"messageEntityTextUrl","offset":0,"length":10,"url":"https://news.example.com/article"}]`)
+
+	item := &db.ItemDebugDetail{
+		Topic:        "Test Topic",
+		Summary:      "Test Summary",
+		Text:         "Check this link for details",
+		EntitiesJSON: entitiesJSON,
+	}
+
+	cfg := PromptBuilderConfig{MaxChars: 12000}
+
+	prompt := BuildChatGPTPrompt(item, nil, nil, cfg)
+
+	// Should include the Links in Message section with the URL
+	linksHeader := "## Links in Message"
+	if !strings.Contains(prompt, linksHeader) {
+		t.Errorf("Prompt should contain %q section when URLs are present", linksHeader)
+	}
+
+	if !strings.Contains(prompt, "https://news.example.com/article") {
+		t.Error("Prompt should contain the extracted URL from entities")
+	}
+}
+
+func TestBuildChatGPTPrompt_NoLinksSection(t *testing.T) {
+	// Item with no URLs in text or entities
+	item := &db.ItemDebugDetail{
+		Topic:        "Test Topic",
+		Summary:      "Test Summary",
+		Text:         "Just some plain text without any links",
+		EntitiesJSON: nil,
+		MediaJSON:    nil,
+	}
+
+	cfg := PromptBuilderConfig{MaxChars: 12000}
+
+	prompt := BuildChatGPTPrompt(item, nil, nil, cfg)
+
+	// Should NOT include Links in Message section when there are no URLs
+	linksHeader := "Links in Message"
+	if strings.Contains(prompt, linksHeader) {
+		t.Errorf("Prompt should not contain %q section when no URLs are present", linksHeader)
+	}
+}
+
 func TestBuildChatGPTPrompt_Truncation(t *testing.T) {
 	item := &db.ItemDebugDetail{
 		Topic:   "Topic",
@@ -295,8 +346,8 @@ func TestBuildChatGPTPrompt_Truncation(t *testing.T) {
 		t.Errorf("Prompt should be truncated to %d chars, got %d", 1000, len(prompt))
 	}
 
-	if !strings.HasSuffix(prompt, "...") {
-		t.Error("Truncated prompt should end with '...'")
+	if !strings.HasSuffix(prompt, testTruncationSuffix) {
+		t.Errorf("Truncated prompt should end with %q", testTruncationSuffix)
 	}
 }
 
@@ -332,5 +383,99 @@ func TestBuildOriginalMsgLink(t *testing.T) {
 				t.Errorf("BuildOriginalMsgLink() = %v, want %v", got, tt.wantLink)
 			}
 		})
+	}
+}
+
+func TestBuildChatGPTPrompt_NoTruncation(t *testing.T) {
+	// Very long text that would normally be truncated
+	longText := strings.Repeat("x", 20000)
+	item := &db.ItemDebugDetail{
+		Topic:   "Topic",
+		Summary: "Summary",
+		Text:    longText,
+	}
+
+	// MaxChars = 0 means no truncation
+	cfg := PromptBuilderConfig{MaxChars: 0}
+
+	prompt := BuildChatGPTPrompt(item, nil, nil, cfg)
+
+	// Should contain the full long text without truncation
+	if !strings.Contains(prompt, longText) {
+		t.Error("Prompt with MaxChars=0 should not truncate the text")
+	}
+
+	if strings.HasSuffix(prompt, testTruncationSuffix) {
+		t.Errorf("Prompt with MaxChars=0 should not end with truncation suffix %q", testTruncationSuffix)
+	}
+}
+
+func TestBuildShortcutURL(t *testing.T) {
+	tests := []struct {
+		name         string
+		shortcutName string
+		prompt       string
+		maxChars     int
+		wantContains []string
+	}{
+		{
+			name:         "basic shortcut URL",
+			shortcutName: "Ask ChatGPT",
+			prompt:       "Hello world",
+			maxChars:     2000,
+			wantContains: []string{
+				"shortcuts://run-shortcut",
+				"name=Ask+ChatGPT",
+				"input=text",
+				"text=Hello+world",
+			},
+		},
+		{
+			name:         "URL encodes special characters",
+			shortcutName: "Ask ChatGPT",
+			prompt:       "What is 2+2?",
+			maxChars:     2000,
+			wantContains: []string{
+				"shortcuts://run-shortcut",
+				"text=What+is+2%2B2%3F",
+			},
+		},
+		{
+			name:         "truncates long prompt",
+			shortcutName: "Ask ChatGPT",
+			prompt:       strings.Repeat("x", 3000),
+			maxChars:     100,
+			wantContains: []string{
+				"shortcuts://run-shortcut",
+				"Full+prompt",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := BuildShortcutURL(tt.shortcutName, tt.prompt, tt.maxChars)
+
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("BuildShortcutURL() = %v, want to contain %v", got, want)
+				}
+			}
+
+			// Verify it starts with the correct scheme
+			if !strings.HasPrefix(got, "shortcuts://") {
+				t.Errorf("BuildShortcutURL() should start with shortcuts://, got %v", got)
+			}
+		})
+	}
+}
+
+func TestBuildShortcutURL_DefaultMaxChars(t *testing.T) {
+	// Test that maxChars=0 uses default
+	shortPrompt := "Test prompt"
+	url := BuildShortcutURL("Test", shortPrompt, 0)
+
+	if !strings.Contains(url, "Test+prompt") {
+		t.Error("BuildShortcutURL with maxChars=0 should use default and include prompt")
 	}
 }

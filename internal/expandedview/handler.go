@@ -194,12 +194,18 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		})
 	}
 
-	// Build ChatGPT prompt with maximum context
+	// Build ChatGPT prompt - full version for clipboard (no truncation)
 	promptCfg := PromptBuilderConfig{
-		MaxChars: h.cfg.ExpandedPromptMaxChars,
+		MaxChars: 0, // No truncation for clipboard copy
 	}
 	chatGPTPrompt := BuildChatGPTPrompt(item, evidence, clusterItems, promptCfg)
 	originalMsgLink := BuildOriginalMsgLink(item)
+
+	// Build Apple Shortcuts URL if enabled
+	var shortcutURL string
+	if h.cfg.ExpandedShortcutEnabled {
+		shortcutURL = BuildShortcutURL(h.cfg.ExpandedShortcutName, chatGPTPrompt, h.cfg.ExpandedShortcutMaxChars)
+	}
 
 	// Render
 	data := &ExpandedViewData{
@@ -209,6 +215,11 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		ChatGPTPrompt:   chatGPTPrompt,
 		OriginalMsgLink: originalMsgLink,
 		GeneratedAt:     time.Now(),
+
+		// Apple Shortcuts
+		ShortcutEnabled:   h.cfg.ExpandedShortcutEnabled,
+		ShortcutURL:       shortcutURL,
+		ShortcutICloudURL: h.cfg.ExpandedShortcutICloudURL,
 	}
 
 	if err := h.renderer.RenderExpanded(w, data); err != nil {

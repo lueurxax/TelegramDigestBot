@@ -7,9 +7,11 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/core/links/linkextract"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -24,6 +26,14 @@ var templateFuncs = template.FuncMap{
 	// safeHTML marks a string as safe HTML (for LLM-generated summaries with basic formatting)
 	"safeHTML": func(s string) template.HTML {
 		return template.HTML(s) //nolint:gosec // summaries are LLM-generated, admin-only page
+	},
+	// isImageMedia checks if the binary data is a valid image that can be displayed
+	"isImageMedia": func(data []byte) bool {
+		if len(data) == 0 {
+			return false
+		}
+		mimeType := http.DetectContentType(data)
+		return strings.HasPrefix(mimeType, "image/")
 	},
 	// mediaDataURL converts binary image data to a base64 data URL for inline display
 	"mediaDataURL": func(data []byte) string {
@@ -68,9 +78,14 @@ type ExpandedViewData struct {
 	Item            *db.ItemDebugDetail
 	Evidence        []db.ItemEvidenceWithSource
 	ClusterItems    []ClusterItemView
-	ChatGPTPrompt   string // Full prompt text for clipboard copy
+	ChatGPTPrompt   string // Full prompt text for clipboard copy (no truncation)
 	OriginalMsgLink string // Telegram link to original message
 	GeneratedAt     time.Time
+
+	// Apple Shortcuts integration
+	ShortcutEnabled   bool   // Whether shortcut button should be shown
+	ShortcutURL       string // shortcuts://run-shortcut URL with encoded prompt
+	ShortcutICloudURL string // iCloud link to install the shortcut
 }
 
 // ClusterItemView is a simplified view of a cluster item.
@@ -114,6 +129,7 @@ const (
 	defaultMaxPromptChars   = 12000
 	maxEvidenceSources      = 5
 	maxCorroborationItems   = 5
+	maxOriginalLinks        = 10
 	maxDescriptionLen       = 200
 	fmtBulletItem           = "- %s\n"
 	fmtBulletItemWithSource = "- @%s: %s\n"
@@ -128,20 +144,24 @@ type PromptBuilderConfig struct {
 // This follows the proposal's "maximum context" approach: raw text, links,
 // corroboration text, original links, capped by prompt limits.
 func BuildChatGPTPrompt(item *db.ItemDebugDetail, evidence []db.ItemEvidenceWithSource, clusterItems []ClusterItemView, cfg PromptBuilderConfig) string {
-	if cfg.MaxChars <= 0 {
-		cfg.MaxChars = defaultMaxPromptChars
-	}
-
 	var sb strings.Builder
 
 	writePromptHeader(&sb, item)
 	writePromptSource(&sb, item)
 	writePromptText(&sb, item)
+	writePromptOriginalLinks(&sb, item)
 	writePromptCorroboration(&sb, clusterItems)
 	writePromptEvidence(&sb, evidence)
 	writePromptQuestions(&sb)
 
-	return truncatePrompt(sb.String(), cfg.MaxChars)
+	result := sb.String()
+
+	// MaxChars <= 0 means no truncation (full prompt for clipboard)
+	if cfg.MaxChars > 0 {
+		result = truncatePrompt(result, cfg.MaxChars)
+	}
+
+	return result
 }
 
 func writePromptHeader(sb *strings.Builder, item *db.ItemDebugDetail) {
@@ -171,6 +191,27 @@ func writePromptText(sb *strings.Builder, item *db.ItemDebugDetail) {
 	if item.PreviewText != "" && item.PreviewText != item.Text {
 		sb.WriteString("\n\n## Preview/Link Content\n")
 		sb.WriteString(item.PreviewText)
+	}
+}
+
+func writePromptOriginalLinks(sb *strings.Builder, item *db.ItemDebugDetail) {
+	// Extract URLs from message entities and media JSON
+	urls := linkextract.ExtractAllURLs(item.Text, item.EntitiesJSON, item.MediaJSON)
+	if len(urls) == 0 {
+		return
+	}
+
+	sb.WriteString("\n\n## Links in Message\n")
+	sb.WriteString("URLs referenced in the original message:\n")
+
+	for i, url := range urls {
+		if i >= maxOriginalLinks {
+			fmt.Fprintf(sb, "... and %d more links\n", len(urls)-maxOriginalLinks)
+
+			break
+		}
+
+		fmt.Fprintf(sb, fmtBulletItem, url)
 	}
 }
 
@@ -266,4 +307,40 @@ func BuildOriginalMsgLink(item *db.ItemDebugDetail) string {
 	}
 
 	return fmt.Sprintf("https://t.me/c/%d/%d", item.ChannelPeerID, item.MessageID)
+}
+
+// ShortcutConfig holds configuration for building the Apple Shortcuts URL.
+type ShortcutConfig struct {
+	Enabled      bool
+	ShortcutName string
+	ICloudURL    string
+	MaxChars     int
+}
+
+// Default shortcut URL limits.
+const (
+	defaultShortcutMaxChars   = 2000
+	shortcutURLTruncateSuffix = "...\n\n[Full prompt: use Copy Prompt button]"
+)
+
+// BuildShortcutURL constructs the shortcuts:// URL for Apple Shortcuts integration.
+// The prompt is truncated to fit within URL length limits.
+func BuildShortcutURL(shortcutName, fullPrompt string, maxChars int) string {
+	if maxChars <= 0 {
+		maxChars = defaultShortcutMaxChars
+	}
+
+	// Truncate prompt for URL, leaving room for the suffix
+	prompt := fullPrompt
+	suffixLen := len(shortcutURLTruncateSuffix)
+
+	if len(prompt) > maxChars-suffixLen {
+		prompt = prompt[:maxChars-suffixLen] + shortcutURLTruncateSuffix
+	}
+
+	// URL-encode the prompt and shortcut name
+	encodedName := url.QueryEscape(shortcutName)
+	encodedPrompt := url.QueryEscape(prompt)
+
+	return fmt.Sprintf("shortcuts://run-shortcut?name=%s&input=text&text=%s", encodedName, encodedPrompt)
 }

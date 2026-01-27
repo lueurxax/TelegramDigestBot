@@ -221,6 +221,12 @@ type Config struct {
 	ExpandedViewRequireAdmin      bool   `env:"EXPANDED_VIEW_REQUIRE_ADMIN" envDefault:"true"`
 	ExpandedViewAllowSystemTokens bool   `env:"EXPANDED_VIEW_ALLOW_SYSTEM_TOKENS" envDefault:"false"`
 	ExpandedPromptMaxChars        int    `env:"EXPANDED_PROMPT_MAX_CHARS" envDefault:"12000"`
+
+	// Apple Shortcuts integration for ChatGPT
+	ExpandedShortcutEnabled   bool   `env:"EXPANDED_CHATGPT_SHORTCUT_ENABLED" envDefault:"false"`
+	ExpandedShortcutName      string `env:"EXPANDED_CHATGPT_SHORTCUT_NAME" envDefault:"Ask ChatGPT"`
+	ExpandedShortcutICloudURL string `env:"EXPANDED_CHATGPT_SHORTCUT_ICLOUD_URL" envDefault:""`
+	ExpandedShortcutMaxChars  int    `env:"EXPANDED_SHORTCUT_URL_MAX_CHARS" envDefault:"2000"`
 }
 
 func Load() (*Config, error) {

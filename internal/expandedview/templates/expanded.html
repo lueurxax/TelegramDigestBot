@@ -139,6 +139,24 @@
             color: var(--primary);
             font-size: 0.9rem;
         }
+        .shortcut-section {
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .shortcut-section .btn-primary {
+            background: #10b981;
+            font-size: 1.1rem;
+            padding: 1rem 2rem;
+        }
+        .shortcut-help {
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .shortcut-help a {
+            color: var(--primary);
+        }
         .empty { color: var(--text-muted); font-style: italic; }
         .footer { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin-top: 2rem; }
     </style>
@@ -167,7 +185,7 @@
                     <div class="score-label">Importance</div>
                 </div>
             </div>
-            {{if .Item.MediaData}}
+            {{if .Item.MediaData | isImageMedia}}
             <div class="media-container">
                 <img src="{{.Item.MediaData | mediaDataURL}}" alt="Message media" class="media-image">
             </div>
@@ -222,10 +240,22 @@
 
         <div class="card">
             <h2>Deep Dive with ChatGPT</h2>
-            <p>Want to explore this topic further? Copy the prompt below and paste it into ChatGPT for detailed context and analysis.</p>
+            <p>Want to explore this topic further? Use the options below to send the context to ChatGPT.</p>
+
+            {{if .ShortcutEnabled}}
+            <div class="shortcut-section">
+                <a href="{{.ShortcutURL}}" class="btn btn-primary" onclick="copyPromptBeforeShortcut()">
+                    📱 Ask on iPhone/Mac
+                </a>
+                <div class="shortcut-help">
+                    Requires <a href="{{.ShortcutICloudURL}}" target="_blank" rel="noopener">one-time shortcut installation</a>
+                </div>
+            </div>
+            {{end}}
+
             <div class="btn-group">
                 <button type="button" class="btn" onclick="copyPrompt()">
-                    Copy Prompt to Clipboard
+                    📋 Copy Prompt
                 </button>
                 <a href="https://chat.openai.com/" target="_blank" rel="noopener" class="btn btn-secondary">
                     Open ChatGPT
@@ -256,24 +286,38 @@
                 }, 2000);
             }).catch(function(err) {
                 // Fallback for older browsers
-                var textArea = document.createElement('textarea');
-                textArea.value = promptText;
-                textArea.style.position = 'fixed';
-                textArea.style.left = '-9999px';
-                document.body.appendChild(textArea);
-                textArea.select();
-                try {
-                    document.execCommand('copy');
-                    var feedback = document.getElementById('copy-feedback');
-                    feedback.classList.add('show');
-                    setTimeout(function() {
-                        feedback.classList.remove('show');
-                    }, 2000);
-                } catch (e) {
-                    alert('Failed to copy. Please select and copy the text manually.');
-                }
-                document.body.removeChild(textArea);
+                copyPromptFallback(promptText);
             });
+        }
+
+        function copyPromptFallback(text) {
+            var textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-9999px';
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                var feedback = document.getElementById('copy-feedback');
+                feedback.classList.add('show');
+                setTimeout(function() {
+                    feedback.classList.remove('show');
+                }, 2000);
+            } catch (e) {
+                alert('Failed to copy. Please select and copy the text manually.');
+            }
+            document.body.removeChild(textArea);
+        }
+
+        // Copy full prompt to clipboard before opening shortcuts URL (safety net)
+        function copyPromptBeforeShortcut() {
+            var promptText = document.getElementById('prompt-text').innerText;
+            navigator.clipboard.writeText(promptText).catch(function(err) {
+                // Fallback - try to copy anyway
+                copyPromptFallback(promptText);
+            });
+            // Don't prevent default - let the link open the shortcuts:// URL
         }
     </script>
 </body>

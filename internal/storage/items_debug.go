@@ -45,6 +45,8 @@ type ItemDebugDetail struct {
 	ChannelDesc     string
 	ChannelPeerID   int64
 	MediaData       []byte // Image data from the message (JPEG/PNG)
+	EntitiesJSON    []byte // Telegram message entities (contains URLs, mentions, etc.)
+	MediaJSON       []byte // Telegram media metadata (contains webpage URLs, etc.)
 }
 
 // SearchItemsByText looks for items with matching summary or raw text.
@@ -137,6 +139,8 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 		       rm.tg_date,
 		       rm.tg_message_id,
 		       rm.media_data,
+		       rm.entities_json,
+		       rm.media_json,
 		       c.id,
 		       c.username,
 		       c.title,
@@ -180,6 +184,8 @@ func (db *DB) GetItemDebugDetail(ctx context.Context, id string) (*ItemDebugDeta
 		&item.TGDate,
 		&item.MessageID,
 		&item.MediaData,
+		&item.EntitiesJSON,
+		&item.MediaJSON,
 		&channelID,
 		&user,
 		&title,

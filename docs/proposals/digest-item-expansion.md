@@ -10,10 +10,9 @@ Provide a read-only expansion page for each digest item. The expansion uses exis
 ## Goals
 - Provide deeper context without increasing baseline LLM usage.
 - Enable user-driven Q&A for specific items via ChatGPT.
-- Keep access restricted to bot admins.
+- Control access via signed tokens with optional admin-only mode.
 
 ## Non-Goals
-- Public access or multi-user research portal.
 - Running a full chat UI inside the bot.
 - Long-term storage of Q&A sessions.
 
@@ -21,28 +20,31 @@ Provide a read-only expansion page for each digest item. The expansion uses exis
 ### Digest Output
 - Add a short link or button per item:
   - `More: https://digest.local/i/<token>`
+- Narrative sections show numbered links to all underlying items (up to 5).
 
 ### Expanded Item View
 - Raw message text, summary, scores, topic, and channel.
+- Message image (if available).
 - Evidence list with agreement scores and matched claims.
 - Corroborating channels and cluster context.
-- Button: `Open in ChatGPT` (pre-filled prompt).
+- Button: `Copy Prompt to Clipboard` + `Open ChatGPT` link.
 
 ## Design
 
 ### Delivery
-- Served by the existing bot HTTP server (new handler).
+- Served by the health/metrics HTTP server (port 8080 by default).
 - HTML response (simple template) for direct viewing; no separate service.
-- Uses existing ingress + TLS; `EXPANDED_VIEW_BASE_URL` must route to the bot HTTP server.
+- Uses existing ingress + TLS; `EXPANDED_VIEW_BASE_URL` must route to the health server's `/i/` path.
 
 ### Access Control
 - Use signed, time-limited tokens to prevent guessing.
-- Token payload includes `item_id`, `admin_user_id`, and `exp`.
-- Verify token and admin status on every request.
+- Token payload includes `item_id`, `user_id`, and `exp`.
+- Two access modes controlled by configuration:
+  - **Admin-only mode** (`EXPANDED_VIEW_REQUIRE_ADMIN=true`): Only admins can view.
+  - **System tokens** (`EXPANDED_VIEW_ALLOW_SYSTEM_TOKENS=true`): Digest-generated links (user_id=0) bypass admin check, allowing digest recipients to view expanded items.
 - Links expire after `EXPANDED_VIEW_TTL_HOURS` (default 72).
 - Mark pages as `noindex` and block public search engines.
-- Token in URL path is acceptable for admin-only use; avoid logging full URLs and set `Referrer-Policy: no-referrer`.
-- Optional hardening (future): exchange token for a short-lived httpOnly cookie via `POST /i`.
+- Token in URL path; avoid logging full URLs and set `Referrer-Policy: no-referrer`.
 
 ### Token Format
 - `token = base64url(item_id|user_id|exp|sig)`
@@ -54,16 +56,130 @@ Provide a read-only expansion page for each digest item. The expansion uses exis
 - Show claim matches and agreement scores.
 - If evidence is missing, show `No evidence available`.
 
-### ChatGPT Deep Link
-- Build prompt from summary + top evidence lines + original link(s).
-- Open ChatGPT with the prompt (user subscription).
-- URL format: `https://chat.openai.com/` + auto-copy prompt to clipboard (preferred, stable).
-- If a provider-supported deep-link format exists, use it; otherwise fall back to copy.
+### ChatGPT Prompt
+- Build prompt with maximum context:
+  - Topic + summary
+  - Original Telegram link
+  - Full raw message text + preview text
+  - Links extracted from message entities and media (URLs referenced in the message)
+  - Duplicate/related messages with their links and full text
+  - Evidence sources with URLs and descriptions
+  - Standard questions for exploration
+- Copy to clipboard via JavaScript (with fallback for older browsers).
+- Link to ChatGPT for pasting.
+
+### ChatGPT Integration via Apple Shortcuts (Planned Enhancement)
+
+> **Status: PROPOSED**
+
+The current flow requires multiple steps: click item → open ChatGPT → view prompt → copy → paste → send. This section proposes streamlined integration for iOS/macOS users via Apple Shortcuts.
+
+#### Why Apple Shortcuts Only
+- **User-Agent detection is unreliable** - Telegram in-app browser, Safari vs WebView, and other edge cases make platform detection error-prone
+- **ChatGPT `?q=` parameter limitations** - URL length limits (~2000 chars), doesn't work on mobile app, doesn't work with Custom GPTs
+- **Apple Shortcuts provides reliable integration** - Native URL scheme, works across iOS/iPadOS/macOS, integrates with ChatGPT app
+
+#### How It Works
+Use the `shortcuts://` URL scheme to trigger a pre-installed shortcut:
+```
+shortcuts://run-shortcut?name=Ask%20ChatGPT&input=text&text=<url_encoded_prompt>
+```
+
+**User flow:**
+1. **One-time setup:** User installs "Ask ChatGPT" shortcut via iCloud link
+2. **Usage:** Click "Ask on iPhone/Mac" button → Shortcuts app opens → runs shortcut → ChatGPT responds
+
+**Shortcut implementation options:**
+- Use native ChatGPT app Siri Shortcuts actions (recommended, requires ChatGPT app)
+- Call OpenAI API directly within shortcut (requires user's API key)
+- Copy to clipboard + open ChatGPT app (simplest fallback)
+
+#### Proposed UI
+Show Apple Shortcuts + manual fallback (iOS/macOS only):
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Deep Dive with ChatGPT                                     │
+├─────────────────────────────────────────────────────────────┤
+│  [📱 Ask on iPhone/Mac]     ← shortcuts:// URL             │
+│     ℹ️ Requires one-time shortcut installation              │
+│                                                             │
+│  [📋 Copy Prompt]           ← Always available fallback    │
+│                                                             │
+│  ▸ View prompt                                              │
+│  ▸ Install shortcut (iCloud link)                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Behavior:**
+- "Ask on iPhone/Mac" button visible (iOS/macOS only)
+- "Copy Prompt" always available as safe fallback
+- Collapsible "Install shortcut" link for first-time setup
+
+#### Shortcut Resources
+- [Share to ChatGPT Shortcut](https://github.com/reorx/Share-to-ChatGPT-Shortcut) - shares text with personalized prompts
+- [S-GPT by MacStories](https://www.macstories.net/ios/introducing-s-gpt-a-shortcut-to-connect-openais-chatgpt-with-native-features-of-apples-operating-systems/) - deep native integration
+- [RoutineHub Share to ChatGPT](https://routinehub.co/shortcut/14636/) - community shortcut repository
+- [Apple Shortcuts URL Scheme Docs](https://support.apple.com/guide/shortcuts/run-a-shortcut-from-a-url-apd624386f42/ios)
+
+#### Configuration
+```bash
+EXPANDED_CHATGPT_SHORTCUT_ENABLED=true
+EXPANDED_CHATGPT_SHORTCUT_NAME=Ask%20ChatGPT
+EXPANDED_CHATGPT_SHORTCUT_ICLOUD_URL=https://www.icloud.com/shortcuts/xxx
+EXPANDED_SHORTCUT_URL_MAX_CHARS=2000  # URL-safe limit for shortcuts:// scheme
+```
+
+#### Prompt Size Strategy
+- **Clipboard copy:** Uses full prompt (no truncation, or `EXPANDED_PROMPT_MAX_CHARS` if set)
+- **Shortcuts URL:** Truncated to `EXPANDED_SHORTCUT_URL_MAX_CHARS` (default 2000) due to URL length limits
+- When URL prompt is truncated, append note: "... [Full prompt copied to clipboard]"
+
+#### Error Handling: Shortcut Not Installed
+The `shortcuts://` URL scheme will fail if:
+- User hasn't installed the shortcut
+- Shortcut was deleted or renamed
+- User is on non-Apple platform
+- Shortcuts app is restricted (corporate devices, parental controls)
+
+**Expected behavior when shortcut is missing:**
+- **iOS/macOS:** System shows "Shortcut not found" alert or silently fails to open
+- **Non-Apple platforms:** Link does nothing (no app to handle `shortcuts://` scheme)
+
+**UX mitigation:**
+1. Button text clearly indicates requirement: "Ask on iPhone/Mac (requires shortcut)"
+2. Prominent "Install shortcut" link shown above or alongside the button
+3. Help text: "First time? Install the shortcut, then try again"
+4. "Copy Prompt" fallback always visible and clearly labeled as alternative
+5. Optional: JavaScript `onclick` handler that copies prompt to clipboard before opening shortcuts URL, so user has fallback if shortcut fails
+
+**Proposed button behavior:**
+```javascript
+function askViaShortcut() {
+  // Always copy to clipboard first as safety net
+  copyPromptToClipboard();
+  // Then attempt to open shortcut
+  window.location.href = 'shortcuts://run-shortcut?name=...&input=text&text=...';
+  // Show toast: "Prompt copied! If shortcut doesn't open, paste manually in ChatGPT"
+}
+```
+
+#### Implementation Steps
+1. Create "Ask ChatGPT" shortcut that accepts text input and sends to ChatGPT app
+2. Upload shortcut to iCloud and obtain share link
+3. Update HTML template with new buttons and installation link
+4. URL-encode prompt text for `shortcuts://` URL (handle length limits gracefully)
+5. Add clipboard copy as pre-action before shortcut URL to ensure fallback
+
+#### Future Considerations
+- OpenAI acquired Workflow/Shortcuts founders (October 2025) - native `chatgpt://` deep linking may come
+- Monitor for official ChatGPT mobile app URL scheme support
+- Android users remain on manual copy/paste flow until similar integration available
 
 ### Prompt Size Limits
-- Cap prompt size by tokens or characters to avoid exceeding ChatGPT limits.
-- `EXPANDED_PROMPT_MAX_TOKENS` (default 3000) or `EXPANDED_PROMPT_MAX_CHARS` (default 12000).
-- Truncate duplicate messages first, then evidence lines, then raw text if needed.
+- **Clipboard copy / View prompt:** Full prompt without truncation (ChatGPT handles large inputs)
+- **Shortcuts URL:** Truncated to ~2000 chars due to URL length limits
+- `EXPANDED_PROMPT_MAX_CHARS` (default 12000) only applies to URL-based methods
+- When truncated, add suffix: "... [Full context available via Copy Prompt]"
 
 ### HTML Template
 - Simple server-rendered template with inline CSS.
@@ -73,12 +189,13 @@ Provide a read-only expansion page for each digest item. The expansion uses exis
 ### API
 - `GET /i/:token` → HTML page.
 - Errors:
-  - `401` invalid token or non-admin
+  - `401` invalid token, non-admin, or system token denied
   - `404` item not found
   - `410` token expired
-- Error UX: minimal HTML page with a short explanation and a “Back to chat” link.
-- “Back to chat” should use a Telegram deep link (`tg://resolve?domain=<bot_username>`) with a web fallback to `https://t.me/<bot_username>`.
-- Rate limit: basic IP throttling to deter brute-force token guessing.
+  - `429` rate limited
+- Error UX: minimal HTML page with a short explanation and a "Back to chat" link.
+- "Back to chat" uses Telegram deep link (`tg://resolve?domain=<bot_username>`) with fallback to `https://t.me/<bot_username>`.
+- Rate limit: IP-based throttling (10 req/min, burst 20) to deter brute-force token guessing.
 
 ## Schema Additions
 None. Uses existing items, raw_messages, evidence, and cluster tables.
@@ -90,27 +207,31 @@ EXPANDED_VIEW_BASE_URL=https://digest.local
 EXPANDED_VIEW_SIGNING_SECRET=changeme
 EXPANDED_VIEW_TTL_HOURS=72
 EXPANDED_VIEW_REQUIRE_ADMIN=true
+EXPANDED_VIEW_ALLOW_SYSTEM_TOKENS=true  # Allow digest links to bypass admin check
+EXPANDED_PROMPT_MAX_CHARS=12000
+TELEGRAM_BOT_USERNAME=MyBot  # For error page deep links
 ```
 
 ## Dependencies
 - Postgres (items, raw_messages, clusters, evidence tables).
-- Bot HTTP server exposed via ingress/TLS.
+- Health server exposed via ingress/TLS.
 - ChatGPT web for Q&A (external).
 
 ## Observability
-- Counters: `expanded_view_hits_total`, `expanded_view_denied_total`, `expanded_view_errors_total`.
+- Counters: `expanded_view_hits_total{status}`, `expanded_view_denied_total{reason}`, `expanded_view_errors_total{type}`.
+- Histogram: `expanded_view_latency_seconds`.
 - Log token validation failures and missing item IDs (redact full token).
 
 ## Data Queries
-- Item + raw message by `item_id`.
+- Item + raw message (text, preview_text, media_data, entities_json, media_json) by `item_id`.
 - Evidence list by `item_id` (top N by agreement).
-- Cluster context (cluster ID, summary, member channels).
-- Corroboration list (distinct channels from cluster).
+- Cluster context (cluster ID, topic, member items with full text).
 
 ## Rollout
 - Ship behind `EXPANDED_VIEW_ENABLED=false`.
-- Enable for admin only, verify access control and templates.
-- Add `robots.txt` + `noindex` response headers.
+- Add K8s secret for `EXPANDED_VIEW_SIGNING_SECRET`.
+- Configure ingress to route `/i/` and `/robots.txt` to health server.
+- Enable and verify access control and templates.
 
 ## Success Criteria
 - Users can open expanded context in 1 click.
@@ -119,11 +240,16 @@ EXPANDED_VIEW_REQUIRE_ADMIN=true
 
 ## Testing Strategy
 - Unit: token signing/validation, expiry handling.
-- HTTP: 200/401/404/410 responses.
-- Render: HTML template includes evidence + links.
+- HTTP: 200/401/404/410/429 responses.
+- Render: HTML template includes evidence, cluster items, images.
+- Prompt: BuildChatGPTPrompt includes all sections with proper truncation.
 
 ## Decisions
 | Question | Answer |
 | --- | --- |
-| Should expanded views be indexed or always private? | Indexed internally only (Solr), not public web indexing. This reuses the existing item index; no new expanded-view index. |
-| Should prompts include raw message text or summary+evidence only? | Maximum context: raw text, links, corroboration text, original links, and all duplicate messages in one prompt, capped by prompt limits. |
+| Should expanded views be indexed or always private? | Not indexed by search engines (noindex headers + robots.txt). Items stored in Postgres only. |
+| Should prompts include raw message text or summary+evidence only? | Maximum context: raw text, preview text, extracted links from entities/media, corroboration with full text and links, evidence with URLs, capped by char limits. |
+| Should digest links be admin-only? | Configurable. With `EXPANDED_VIEW_ALLOW_SYSTEM_TOKENS=true`, digest links (user_id=0) bypass admin check so recipients can view. |
+| How are original links extracted? | Links are extracted from `entities_json` (TextURL entities) and `media_json` (webpage links) using the `linkextract.ExtractAllURLs` function. Up to 10 links are included in the prompt. |
+| How to streamline ChatGPT integration? | Apple Shortcuts only (iOS/macOS). No User-Agent detection (unreliable in Telegram WebView). Always show both "Ask on iPhone/Mac" button and "Copy Prompt" fallback. Pre-copy to clipboard before opening shortcut URL as safety net. |
+| Should prompts be truncated? | Clipboard copy uses full prompt (no truncation). Shortcuts URL truncated to ~2000 chars due to URL limits. Truncated prompts note: "Full context available via Copy Prompt". |
