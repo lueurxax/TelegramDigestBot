@@ -10,6 +10,7 @@ WHERE i.raw_message_id = rm.id;
 UPDATE evidence_sources
 SET search_vector = to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(description, ''));
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION update_items_search_vector() RETURNS trigger AS $$
 DECLARE
     rm_text text;
@@ -19,11 +20,13 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER items_search_vector_trigger
 BEFORE INSERT OR UPDATE OF summary, topic, raw_message_id ON items
 FOR EACH ROW EXECUTE FUNCTION update_items_search_vector();
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION update_items_search_vector_from_raw_message() RETURNS trigger AS $$
 BEGIN
     UPDATE items i
@@ -32,17 +35,20 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER raw_messages_search_vector_trigger
 AFTER UPDATE OF text ON raw_messages
 FOR EACH ROW EXECUTE FUNCTION update_items_search_vector_from_raw_message();
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION update_evidence_sources_search_vector() RETURNS trigger AS $$
 BEGIN
     NEW.search_vector := to_tsvector('simple', coalesce(NEW.title, '') || ' ' || coalesce(NEW.description, ''));
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER evidence_sources_search_vector_trigger
 BEFORE INSERT OR UPDATE OF title, description ON evidence_sources
@@ -199,4 +205,3 @@ DROP FUNCTION IF EXISTS update_items_search_vector;
 
 ALTER TABLE items DROP COLUMN IF EXISTS search_vector;
 ALTER TABLE evidence_sources DROP COLUMN IF EXISTS search_vector;
-ALTER TABLE items DROP COLUMN IF EXISTS search_vector;
