@@ -39,6 +39,7 @@ func (b *Bot) registerCoreCommands(r *commandRegistry) {
 	r.handlers["setup"] = b.handleSetup
 	r.handlers[CmdStatus] = b.handleStatus
 	r.handlers["preview"] = b.handlePreview
+	r.handlers[CmdResearch] = b.handleResearch
 
 	// Namespace commands
 	r.handlers[CmdChannel] = b.handleChannelNamespace

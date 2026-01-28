@@ -90,6 +90,7 @@ const (
 	CmdOthersNarrative    = "others_narrative"
 	CmdOthersNarrativeAlt = "othersnarrative"
 	CmdLLM                = "llm"
+	CmdResearch           = "research"
 )
 
 // Setting keys.

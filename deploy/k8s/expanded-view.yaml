@@ -32,6 +32,13 @@ spec:
             name: digest-bot-http
             port:
               name: http
+      - path: /research/
+        pathType: Prefix
+        backend:
+          service:
+            name: digest-bot-http
+            port:
+              name: http
       - path: /robots.txt
         pathType: ImplementationSpecific
         backend:

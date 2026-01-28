@@ -911,7 +911,7 @@ func (db *DB) GetClaimsForSource(ctx context.Context, sourceID string) ([]Eviden
 	}
 
 	if rows.Err() != nil {
-		return nil, fmt.Errorf("iterate claims: %w", rows.Err())
+		return nil, fmt.Errorf(errFmtIterateClaims, rows.Err())
 	}
 
 	return claims, nil

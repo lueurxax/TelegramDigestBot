@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.Title}}</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #111827; background: #f8fafc; }
+      header { background: #111827; color: #f9fafb; padding: 12px 20px; }
+      header a { color: #f9fafb; text-decoration: none; margin-right: 12px; }
+      main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+      th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; vertical-align: top; }
+      th { background: #f3f4f6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+      form input, form select { padding: 6px 8px; margin-right: 6px; }
+      .btn { background: #2563eb; color: #fff; border: none; padding: 7px 12px; border-radius: 6px; cursor: pointer; }
+      .hint { color: #6b7280; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a href="/research/">Home</a>
+      <a href="/research/search">Search</a>
+      <a href="/research/claims">Claims</a>
+      <a href="/research/channels/overlap">Channel Overlap</a>
+      <a href="/research/topics/timeline?bucket=weekly">Topic Timeline</a>
+      <a href="/research/diff/weekly">Weekly Diff</a>
+    </header>
+    <main>
+      <h1>{{.Title}}</h1>
+      <form action="/research/search" method="get">
+        <input type="text" name="q" placeholder="Query" value="{{.Params.Query}}" />
+        <input type="text" name="channel" placeholder="@channel" value="{{.Params.Channel}}" />
+        <input type="text" name="topic" placeholder="Topic" value="{{.Params.Topic}}" />
+        <input type="text" name="lang" placeholder="Language" value="{{.Params.Lang}}" />
+        <input type="text" name="from" placeholder="From (YYYY-MM-DD)" value="{{formatDatePtr .Params.From}}" />
+        <input type="text" name="to" placeholder="To (YYYY-MM-DD)" value="{{formatDatePtr .Params.To}}" />
+        <input type="number" name="limit" min="1" max="200" value="{{.Params.Limit}}" />
+        <input type="number" name="offset" min="0" value="{{.Params.Offset}}" />
+        <select name="scope">
+          <option value="items" {{if eq .Scope "items"}}selected{{end}}>Items</option>
+          <option value="evidence" {{if eq .Scope "evidence"}}selected{{end}}>Evidence</option>
+          <option value="all" {{if eq .Scope "all"}}selected{{end}}>All</option>
+        </select>
+        <label>
+          <input type="checkbox" name="include_count" value="true" {{if .Params.IncludeCount}}checked{{end}} />
+          Include counts
+        </label>
+        <button class="btn" type="submit">Search</button>
+      </form>
+
+      <h2>Items</h2>
+      {{if .ItemCount}}<p class="hint">Total items: {{.ItemCount.Total}}</p>{{end}}
+      {{if .Items}}
+      <table>
+        <thead>
+          <tr>
+            <th>Summary</th>
+            <th>Topic</th>
+            <th>Channel</th>
+            <th>Date</th>
+            <th>Score</th>
+            <th>Link</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Items}}
+          <tr>
+            <td>{{truncate .Summary 160}}</td>
+            <td>{{.Topic}}</td>
+            <td>{{.ChannelTitle}} {{if .ChannelUsername}}(@{{.ChannelUsername}}){{end}}</td>
+            <td>{{formatTime .TGDate}}</td>
+            <td>{{formatFloat .Score}}</td>
+            <td><a href="/research/item/{{.ID}}">View</a></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="hint">No items matched.</p>
+      {{end}}
+
+      <h2>Evidence</h2>
+      {{if .EvidenceCount}}<p class="hint">Total evidence: {{.EvidenceCount.Total}}</p>{{end}}
+      {{if .Evidence}}
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Domain</th>
+            <th>Agreement</th>
+            <th>Item</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Evidence}}
+          <tr>
+            <td><a href="{{.URL}}">{{truncate .Title 120}}</a></td>
+            <td>{{.Domain}}</td>
+            <td>{{formatFloat32 .AgreementScore}}</td>
+            <td><a href="/research/item/{{.ItemID}}">{{truncate .ItemSummary 80}}</a></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="hint">No evidence matched.</p>
+      {{end}}
+    </main>
+  </body>
+</html>

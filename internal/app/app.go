@@ -23,6 +23,7 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/process/factcheck"
 	"github.com/lueurxax/telegram-digest-bot/internal/process/linkseeder"
 	"github.com/lueurxax/telegram-digest-bot/internal/process/pipeline"
+	"github.com/lueurxax/telegram-digest-bot/internal/research"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -59,7 +60,10 @@ func New(cfg *config.Config, database *db.DB, logger *zerolog.Logger) *App {
 
 // StartHealthServer starts the health check and metrics server.
 func (a *App) StartHealthServer(ctx context.Context) error {
-	var expandedHandler http.Handler
+	var (
+		expandedHandler http.Handler
+		researchHandler http.Handler
+	)
 
 	if a.cfg.ExpandedViewEnabled && a.cfg.ExpandedViewSigningSecret != "" {
 		tokenService := expandedview.NewTokenService(
@@ -75,9 +79,18 @@ func (a *App) StartHealthServer(ctx context.Context) error {
 		expandedHandler = handler
 
 		a.logger.Info().Str(logFieldBaseURL, a.cfg.ExpandedViewBaseURL).Msg("Expanded view handler enabled")
+
+		authService := research.NewAuthTokenService(a.cfg.ExpandedViewSigningSecret, research.DefaultLoginTokenTTL)
+
+		researchHandler, err = research.NewHandler(a.cfg, a.database, authService, a.logger)
+		if err != nil {
+			return fmt.Errorf("research handler init: %w", err)
+		}
+
+		a.logger.Info().Str(logFieldBaseURL, a.cfg.ExpandedViewBaseURL).Msg("Research handler enabled")
 	}
 
-	srv := observability.NewServerWithExpanded(a.database, a.cfg.HealthPort, expandedHandler, a.logger)
+	srv := observability.NewServerWithHandlers(a.database, a.cfg.HealthPort, expandedHandler, researchHandler, a.logger)
 
 	if err := srv.Start(ctx); err != nil {
 		return fmt.Errorf("health server start: %w", err)

@@ -31,6 +31,7 @@ This directory contains all documentation for the Telegram Digest Bot project.
 |----------|-------------|
 | [Editor Mode](features/editor-mode.md) | Narrative rendering, tiered importance, consolidated clusters |
 | [Vision & Images](features/vision-images.md) | Vision routing, cover images, AI-generated covers |
+| [Item Expansion](features/item-expansion.md) | Expanded item views with evidence, context, and ChatGPT Q&A |
 
 ### Enrichment & Verification
 
@@ -56,7 +57,6 @@ These documents describe features under consideration or in development.
 |----------|-------------|
 | [LLM Budget Guardrails](proposals/llm-budget-guardrails.md) | Per-model budgets and rate limits |
 | [Research & Visualization](proposals/research-interactivity-visualization.md) | Interactive research UI and analytics |
-| [Digest Item Expansion](proposals/digest-item-expansion.md) | Expandable digest items with full content |
 | [Telegram Link Seeding](proposals/telegram-link-seeding.md) | Seeding evidence from Telegram links |
 
 ## Other

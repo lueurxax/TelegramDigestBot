@@ -22,7 +22,7 @@ data:
       - json
     engines:
     - name: duckduckgo
-      disabled: false
+      disabled: true  # Disabled due to CAPTCHA blocking
     - name: bing
       disabled: false
     - name: brave
@@ -90,12 +90,14 @@ spec:
             port: 8080
           initialDelaySeconds: 20
           periodSeconds: 20
+          timeoutSeconds: 5
         readinessProbe:
           httpGet:
             path: /
             port: 8080
           initialDelaySeconds: 10
           periodSeconds: 10
+          timeoutSeconds: 5
       volumes:
       - name: searxng-config
         configMap:

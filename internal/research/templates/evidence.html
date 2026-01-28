@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.Title}}</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #111827; background: #f8fafc; }
+      header { background: #111827; color: #f9fafb; padding: 12px 20px; }
+      header a { color: #f9fafb; text-decoration: none; margin-right: 12px; }
+      main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; vertical-align: top; }
+      th { background: #f3f4f6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+      .hint { color: #6b7280; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a href="/research/">Home</a>
+      <a href="/research/search">Search</a>
+      <a href="/research/claims">Claims</a>
+      <a href="/research/channels/overlap">Channel Overlap</a>
+      <a href="/research/topics/timeline?bucket=weekly">Topic Timeline</a>
+      <a href="/research/diff/weekly">Weekly Diff</a>
+    </header>
+    <main>
+      <h1>{{.Title}}</h1>
+      <p class="hint">Item: {{.ItemID}}</p>
+      {{if .Evidence}}
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Domain</th>
+            <th>Agreement</th>
+            <th>Provider</th>
+            <th>Matched At</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Evidence}}
+          <tr>
+            <td><a href="{{.Source.URL}}">{{truncate .Source.Title 140}}</a></td>
+            <td>{{.Source.Domain}}</td>
+            <td>{{formatFloat32 .AgreementScore}}</td>
+            <td>{{.Source.Provider}}</td>
+            <td>{{formatTime .MatchedAt}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="hint">No evidence sources found.</p>
+      {{end}}
+    </main>
+  </body>
+</html>

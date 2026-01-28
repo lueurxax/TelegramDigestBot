@@ -2567,6 +2567,7 @@ func TestHelpSummaryMessage(t *testing.T) {
 		"/config",
 		"/ai",
 		"/system",
+		"/research",
 		"/scores",
 		"/factcheck",
 		"/enrichment",
@@ -2818,7 +2819,7 @@ func TestBotFatherCommandsMessage(t *testing.T) {
 		t.Error("botFatherCommandsMessage() missing 'start'")
 	}
 
-	if !containsString(msg, "help") {
+	if !containsString(msg, enrichmentSubCmdHelp) {
 		t.Error("botFatherCommandsMessage() missing 'help'")
 	}
 

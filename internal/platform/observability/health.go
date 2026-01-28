@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
+	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 )
@@ -16,6 +16,7 @@ const (
 	shutdownTimeout      = 5 * time.Second
 	readHeaderTimeout    = 10 * time.Second
 	expandedViewPathBase = "/i/"
+	researchPathBase     = "/research/"
 )
 
 type Server struct {
@@ -23,6 +24,7 @@ type Server struct {
 	port            int
 	logger          *zerolog.Logger
 	expandedHandler http.Handler
+	researchHandler http.Handler
 }
 
 func NewServer(db *db.DB, port int, logger *zerolog.Logger) *Server {
@@ -35,11 +37,17 @@ func NewServer(db *db.DB, port int, logger *zerolog.Logger) *Server {
 
 // NewServerWithExpanded creates a server with an optional expanded view handler.
 func NewServerWithExpanded(db *db.DB, port int, expandedHandler http.Handler, logger *zerolog.Logger) *Server {
+	return NewServerWithHandlers(db, port, expandedHandler, nil, logger)
+}
+
+// NewServerWithHandlers creates a server with optional expanded view and research handlers.
+func NewServerWithHandlers(db *db.DB, port int, expandedHandler http.Handler, researchHandler http.Handler, logger *zerolog.Logger) *Server {
 	return &Server{
 		db:              db,
 		port:            port,
 		logger:          logger,
 		expandedHandler: expandedHandler,
+		researchHandler: researchHandler,
 	}
 }
 
@@ -67,12 +75,20 @@ func (s *Server) Start(ctx context.Context) error {
 	// Robots.txt to prevent indexing of expanded view pages
 	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = fmt.Fprint(w, "User-agent: *\nDisallow: /i/\n")
+		_, _ = fmt.Fprint(w, "User-agent: *\nDisallow: /i/\nDisallow: /research/\n")
 	})
 
 	// Register expanded view handler if configured
 	if s.expandedHandler != nil {
 		mux.Handle(expandedViewPathBase, http.StripPrefix(expandedViewPathBase, s.expandedHandler))
+	}
+
+	// Register research handler if configured
+	if s.researchHandler != nil {
+		mux.HandleFunc("/research", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, researchPathBase, http.StatusMovedPermanently)
+		})
+		mux.Handle(researchPathBase, http.StripPrefix(researchPathBase, s.researchHandler))
 	}
 
 	srv := &http.Server{

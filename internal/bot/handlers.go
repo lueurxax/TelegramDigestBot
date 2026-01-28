@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/schedule"
+	"github.com/lueurxax/telegram-digest-bot/internal/research"
 	"github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -3037,6 +3039,7 @@ func (b *Bot) handleHelp(_ context.Context, msg *tgbotapi.Message) {
 		"ai":          helpAIMessage(),
 		"enrichment":  enrichmentHelpMessage(),
 		"system":      helpSystemMessage(),
+		"research":    helpResearchMessage(),
 		"scores":      helpScoresMessage(),
 		"factcheck":   helpFactCheckMessage(),
 		"ratings":     helpRatingsMessage(),
@@ -3056,6 +3059,36 @@ func (b *Bot) handleBotFather(_ context.Context, msg *tgbotapi.Message) {
 	b.reply(msg, botFatherCommandsMessage())
 }
 
+func (b *Bot) handleResearch(_ context.Context, msg *tgbotapi.Message) {
+	args := strings.Fields(msg.CommandArguments())
+	if len(args) == 0 || strings.EqualFold(args[0], "help") {
+		b.reply(msg, helpResearchMessage())
+		return
+	}
+
+	if !strings.EqualFold(args[0], "login") {
+		b.reply(msg, helpResearchMessage())
+		return
+	}
+
+	if !b.cfg.ExpandedViewEnabled || b.cfg.ExpandedViewSigningSecret == "" || b.cfg.ExpandedViewBaseURL == "" {
+		b.reply(msg, "❌ Research dashboard is not configured. Set EXPANDED_VIEW_ENABLED, EXPANDED_VIEW_SIGNING_SECRET, and EXPANDED_VIEW_BASE_URL.")
+		return
+	}
+
+	tokenService := research.NewAuthTokenService(b.cfg.ExpandedViewSigningSecret, research.DefaultLoginTokenTTL)
+
+	token, err := tokenService.Generate(msg.From.ID)
+	if err != nil {
+		b.reply(msg, fmt.Sprintf("❌ Failed to generate login token: %s", html.EscapeString(err.Error())))
+		return
+	}
+
+	baseURL := strings.TrimRight(b.cfg.ExpandedViewBaseURL, "/")
+	loginURL := fmt.Sprintf("%s/research/login?token=%s", baseURL, url.QueryEscape(token))
+	b.reply(msg, fmt.Sprintf("🔐 <b>Research Login</b>\n%s", html.EscapeString(loginURL)))
+}
+
 func helpSummaryMessage() string {
 	return "👋 <b>Telegram Digest Bot</b>\n\n" +
 		"Quick start:\n" +
@@ -3069,10 +3102,11 @@ func helpSummaryMessage() string {
 		"• <code>/schedule</code> - Digest timing\n" +
 		"• <code>/config</code> - Settings\n" +
 		"• <code>/ai</code> - AI features\n" +
-		"• <code>/system</code> - Diagnostics\n\n" +
+		"• <code>/system</code> - Diagnostics\n" +
+		"• <code>/research</code> - Research dashboard\n\n" +
 		"Data & feedback:\n" +
 		"• <code>/scores</code> <code>/factcheck</code> <code>/enrichment</code> <code>/ratings</code> <code>/annotate</code> <code>/feedback</code>\n\n" +
-		"More: <code>/help &lt;topic&gt;</code> (channels, discover, filters, schedule, config, ai, enrichment, system, scores, factcheck, ratings, annotate)\n" +
+		"More: <code>/help &lt;topic&gt;</code> (channels, discover, filters, schedule, config, ai, enrichment, system, research, scores, factcheck, ratings, annotate)\n" +
 		"Full list: <code>/help all</code>\n" +
 		"BotFather list: <code>/help botfather</code>"
 }
@@ -3186,6 +3220,11 @@ func helpAnnotateMessage() string {
 		"• <code>/annotate</code> - enqueue/next/label/skip/stats"
 }
 
+func helpResearchMessage() string {
+	return "🔎 <b>Research Dashboard</b>\n" +
+		"• <code>/research login</code> - generate a login link for the research UI"
+}
+
 func helpAllMessage() string {
 	return helpSummaryMessage() + "\n\n" +
 		helpChannelsMessage() + "\n\n" +
@@ -3196,6 +3235,7 @@ func helpAllMessage() string {
 		helpAIMessage() + "\n\n" +
 		enrichmentHelpMessage() + "\n\n" +
 		helpSystemMessage() + "\n\n" +
+		helpResearchMessage() + "\n\n" +
 		helpScoresMessage() + "\n\n" +
 		helpFactCheckMessage() + "\n\n" +
 		helpRatingsMessage() + "\n\n" +
@@ -3216,6 +3256,7 @@ func botFatherCommandsMessage() string {
 		"schedule - Digest schedule\n" +
 		"ai - AI features\n" +
 		"system - System tools\n" +
+		"research - Research dashboard\n" +
 		"scores - Score stats\n" +
 		"factcheck - Fact check status\n" +
 		"ratings - Rating stats\n" +

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.Title}}</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #111827; background: #f8fafc; }
+      header { background: #111827; color: #f9fafb; padding: 12px 20px; }
+      header a { color: #f9fafb; text-decoration: none; margin-right: 12px; }
+      main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+      th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; vertical-align: top; }
+      th { background: #f3f4f6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+      .block { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 16px; white-space: pre-wrap; }
+      .hint { color: #6b7280; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a href="/research/">Home</a>
+      <a href="/research/search">Search</a>
+      <a href="/research/claims">Claims</a>
+      <a href="/research/channels/overlap">Channel Overlap</a>
+      <a href="/research/topics/timeline?bucket=weekly">Topic Timeline</a>
+      <a href="/research/diff/weekly">Weekly Diff</a>
+    </header>
+    <main>
+      <h1>{{.Title}}</h1>
+
+      <div class="block">
+        <strong>Summary</strong>
+        <div>{{.Item.Summary}}</div>
+      </div>
+
+      <table>
+        <tr><th>ID</th><td>{{.Item.ID}}</td></tr>
+        <tr><th>Status</th><td>{{.Item.Status}}</td></tr>
+        <tr><th>Topic</th><td>{{.Item.Topic}}</td></tr>
+        <tr><th>Language</th><td>{{.Item.Language}} ({{.Item.LanguageSource}})</td></tr>
+        <tr><th>Relevance</th><td>{{formatFloat32 .Item.RelevanceScore}}</td></tr>
+        <tr><th>Importance</th><td>{{formatFloat32 .Item.ImportanceScore}}</td></tr>
+        <tr><th>Date</th><td>{{formatTime .Item.TGDate}}</td></tr>
+        <tr><th>Channel</th><td>{{.Item.ChannelTitle}} {{if .Item.ChannelUsername}}(@{{.Item.ChannelUsername}}){{end}}</td></tr>
+        <tr><th>Message</th><td>{{.Item.MessageID}}</td></tr>
+      </table>
+
+      <h2>Text</h2>
+      <div class="block">{{.Item.Text}}</div>
+
+      {{if .Item.PreviewText}}
+      <h2>Preview</h2>
+      <div class="block">{{.Item.PreviewText}}</div>
+      {{end}}
+
+      <div class="block">
+        <strong>Evidence</strong>
+        {{if .Evidence}}
+        <div class="hint">Total evidence: {{len .Evidence}}</div>
+        <div><a href="/research/evidence/{{.Item.ID}}">View evidence sources</a></div>
+        {{else}}
+        <div class="hint">No evidence found.</div>
+        {{end}}
+      </div>
+
+      {{if .Cluster}}
+      <div class="block">
+        <strong>Cluster</strong>
+        <div class="hint">Cluster ID: {{.Cluster.ClusterID}}</div>
+        <div><a href="/research/cluster/{{.Cluster.ClusterID}}">View cluster details</a></div>
+      </div>
+      {{end}}
+
+      {{if .ClusterItems}}
+      <h2>Cluster Items</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Summary</th>
+            <th>Channel</th>
+            <th>Date</th>
+            <th>Scores</th>
+            <th>Link</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .ClusterItems}}
+          <tr>
+            <td>{{truncate .Summary 140}}</td>
+            <td>{{.ChannelTitle}} {{if .ChannelUsername}}(@{{.ChannelUsername}}){{end}}</td>
+            <td>{{formatTime .TGDate}}</td>
+            <td>imp {{formatFloat32 .Importance}} / rel {{formatFloat32 .Relevance}}</td>
+            <td><a href="/research/item/{{.ItemID}}">View</a></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{end}}
+    </main>
+  </body>
+</html>

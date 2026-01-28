@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.Title}}</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #111827; background: #f8fafc; }
+      header { background: #111827; color: #f9fafb; padding: 12px 20px; }
+      header a { color: #f9fafb; text-decoration: none; margin-right: 12px; }
+      main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+      .card { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+      .hint { color: #6b7280; font-size: 13px; }
+      form input, form select { padding: 6px 8px; margin-right: 6px; }
+      .btn { background: #2563eb; color: #fff; border: none; padding: 7px 12px; border-radius: 6px; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a href="/research/">Home</a>
+      <a href="/research/search">Search</a>
+      <a href="/research/claims">Claims</a>
+      <a href="/research/channels/overlap">Channel Overlap</a>
+      <a href="/research/topics/timeline?bucket=weekly">Topic Timeline</a>
+      <a href="/research/diff/weekly">Weekly Diff</a>
+    </header>
+    <main>
+      <h1>{{.Title}}</h1>
+      <p class="hint">Generated at {{formatTime .Now}}</p>
+
+      <div class="card">
+        <h2>Quick Search</h2>
+        <form action="/research/search" method="get">
+          <input type="text" name="q" placeholder="Query" />
+          <input type="text" name="channel" placeholder="@channel" />
+          <input type="text" name="topic" placeholder="Topic" />
+          <input type="text" name="lang" placeholder="Language" />
+          <select name="scope">
+            <option value="items">Items</option>
+            <option value="evidence">Evidence</option>
+            <option value="all">All</option>
+          </select>
+          <button class="btn" type="submit">Search</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Common Views</h2>
+        <p><a href="/research/search">Search items and evidence</a></p>
+        <p><a href="/research/claims">Claim ledger</a></p>
+        <p><a href="/research/channels/overlap">Channel overlap (Jaccard)</a></p>
+        <p><a href="/research/topics/timeline?bucket=weekly">Topic timeline (weekly)</a></p>
+        <p><a href="/research/diff/weekly?from=2026-01-01&amp;to=2026-01-08">Weekly diff (example)</a></p>
+      </div>
+    </main>
+  </body>
+</html>
