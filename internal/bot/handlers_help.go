@@ -146,7 +146,8 @@ func helpAnnotateMessage() string {
 // helpResearchMessage returns the help message for research commands.
 func helpResearchMessage() string {
 	return "\U0001F50E <b>Research Dashboard</b>\n" +
-		"\u2022 <code>/research login</code> - generate a login link for the research UI"
+		"\u2022 <code>/research login</code> - generate a login link for the research UI\n" +
+		"\u2022 <code>/research rebuild</code> - refresh research materialized views"
 }
 
 // helpAllMessage returns the combined help message for all commands.

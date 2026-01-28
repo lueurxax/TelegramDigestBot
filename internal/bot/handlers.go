@@ -2865,34 +2865,41 @@ func (b *Bot) handleBotFather(_ context.Context, msg *tgbotapi.Message) {
 	b.reply(msg, botFatherCommandsMessage())
 }
 
-func (b *Bot) handleResearch(_ context.Context, msg *tgbotapi.Message) {
+func (b *Bot) handleResearch(ctx context.Context, msg *tgbotapi.Message) {
 	args := strings.Fields(msg.CommandArguments())
 	if len(args) == 0 || strings.EqualFold(args[0], "help") {
 		b.reply(msg, helpResearchMessage())
 		return
 	}
 
-	if !strings.EqualFold(args[0], "login") {
+	switch {
+	case strings.EqualFold(args[0], "login"):
+		if !b.cfg.ExpandedViewEnabled || b.cfg.ExpandedViewSigningSecret == "" || b.cfg.ExpandedViewBaseURL == "" {
+			b.reply(msg, "❌ Research dashboard is not configured. Set EXPANDED_VIEW_ENABLED, EXPANDED_VIEW_SIGNING_SECRET, and EXPANDED_VIEW_BASE_URL.")
+			return
+		}
+
+		tokenService := research.NewAuthTokenService(b.cfg.ExpandedViewSigningSecret, research.DefaultLoginTokenTTL)
+
+		token, err := tokenService.Generate(msg.From.ID)
+		if err != nil {
+			b.reply(msg, fmt.Sprintf("❌ Failed to generate login token: %s", html.EscapeString(err.Error())))
+			return
+		}
+
+		baseURL := strings.TrimRight(b.cfg.ExpandedViewBaseURL, "/")
+		loginURL := fmt.Sprintf("%s/research/login?token=%s", baseURL, url.QueryEscape(token))
+		b.reply(msg, fmt.Sprintf("🔐 <b>Research Login</b>\n%s", html.EscapeString(loginURL)))
+	case strings.EqualFold(args[0], "rebuild"):
+		if err := b.database.RefreshResearchMaterializedViews(ctx); err != nil {
+			b.reply(msg, fmt.Sprintf("❌ Research rebuild failed: %s", html.EscapeString(err.Error())))
+			return
+		}
+
+		b.reply(msg, "✅ Research rebuild complete.")
+	default:
 		b.reply(msg, helpResearchMessage())
-		return
 	}
-
-	if !b.cfg.ExpandedViewEnabled || b.cfg.ExpandedViewSigningSecret == "" || b.cfg.ExpandedViewBaseURL == "" {
-		b.reply(msg, "❌ Research dashboard is not configured. Set EXPANDED_VIEW_ENABLED, EXPANDED_VIEW_SIGNING_SECRET, and EXPANDED_VIEW_BASE_URL.")
-		return
-	}
-
-	tokenService := research.NewAuthTokenService(b.cfg.ExpandedViewSigningSecret, research.DefaultLoginTokenTTL)
-
-	token, err := tokenService.Generate(msg.From.ID)
-	if err != nil {
-		b.reply(msg, fmt.Sprintf("❌ Failed to generate login token: %s", html.EscapeString(err.Error())))
-		return
-	}
-
-	baseURL := strings.TrimRight(b.cfg.ExpandedViewBaseURL, "/")
-	loginURL := fmt.Sprintf("%s/research/login?token=%s", baseURL, url.QueryEscape(token))
-	b.reply(msg, fmt.Sprintf("🔐 <b>Research Login</b>\n%s", html.EscapeString(loginURL)))
 }
 
 func (b *Bot) handleErrors(ctx context.Context, msg *tgbotapi.Message) {

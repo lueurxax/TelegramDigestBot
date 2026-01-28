@@ -105,6 +105,9 @@ type Repository interface {
 	// LLM usage operations
 	GetDailyLLMUsage(ctx context.Context) (*db.LLMUsageSummary, error)
 	GetMonthlyLLMUsage(ctx context.Context) (*db.LLMUsageSummary, error)
+
+	// Research operations
+	RefreshResearchMaterializedViews(ctx context.Context) error
 }
 
 // Compile-time assertion that *db.DB implements Repository.
