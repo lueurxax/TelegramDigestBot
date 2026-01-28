@@ -1624,7 +1624,15 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 		FROM (
 			SELECT ec.claim_text AS claim_text,
 			       MIN(rm.tg_date) AS first_seen_at,
-			       (ARRAY_AGG(DISTINCT ci.cluster_id ORDER BY rm.tg_date ASC))[1] AS origin_cluster_id,
+			       (SELECT ci2.cluster_id
+			        FROM evidence_claims ec2
+			        JOIN item_evidence ie2 ON ie2.evidence_id = ec2.evidence_id
+			        JOIN items i2 ON i2.id = ie2.item_id
+			        JOIN raw_messages rm2 ON i2.raw_message_id = rm2.id
+			        JOIN cluster_items ci2 ON ci2.item_id = i2.id
+			        WHERE ec2.claim_text = ec.claim_text
+			        ORDER BY rm2.tg_date ASC
+			        LIMIT 1) AS origin_cluster_id,
 			       ARRAY_AGG(DISTINCT ci.cluster_id) AS cluster_ids
 			FROM evidence_claims ec
 			JOIN item_evidence ie ON ie.evidence_id = ec.evidence_id

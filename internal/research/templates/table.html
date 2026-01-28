@@ -45,7 +45,7 @@
         </tbody>
       </table>
       {{else}}
-      <p class="hint">No data available.</p>
+      {{if not .Description}}<p class="hint">No data available.</p>{{end}}
       {{end}}
 
       {{if .SecondaryRows}}
