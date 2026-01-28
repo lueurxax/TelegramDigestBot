@@ -1546,29 +1546,17 @@ func (db *DB) GetTopicDrift(ctx context.Context, from, to *time.Time, limit int)
 	args = append(args, safeIntToInt32(limit))
 
 	query := fmt.Sprintf(`
-		WITH ranked AS (
+		WITH topic_summary AS (
 			SELECT cluster_id,
-			       topic,
-			       window_start,
-			       window_end,
-			       ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY window_start ASC) AS rn_first,
-			       ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY window_start DESC) AS rn_last,
-			       COUNT(DISTINCT topic) OVER (PARTITION BY cluster_id) AS distinct_topics,
-			       MIN(window_start) OVER (PARTITION BY cluster_id) AS first_seen,
-			       MAX(window_end) OVER (PARTITION BY cluster_id) AS last_seen
+			       (ARRAY_AGG(topic ORDER BY window_start ASC))[1] AS first_topic,
+			       (ARRAY_AGG(topic ORDER BY window_start DESC))[1] AS last_topic,
+			       COUNT(DISTINCT topic) AS distinct_topics,
+			       MIN(window_start) AS first_seen,
+			       MAX(window_end) AS last_seen
 			FROM cluster_topic_history
 			WHERE %s
-		),
-		topic_summary AS (
-			SELECT cluster_id,
-			       MAX(CASE WHEN rn_first = 1 THEN topic END) AS first_topic,
-			       MAX(CASE WHEN rn_last = 1 THEN topic END) AS last_topic,
-			       MAX(distinct_topics) AS distinct_topics,
-			       MAX(first_seen) AS first_seen,
-			       MAX(last_seen) AS last_seen
-			FROM ranked
 			GROUP BY cluster_id
-			HAVING MAX(distinct_topics) > 1
+			HAVING COUNT(DISTINCT topic) > 1
 		),
 		ranked_items AS (
 			SELECT ci.cluster_id,

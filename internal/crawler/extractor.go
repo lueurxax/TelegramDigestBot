@@ -334,9 +334,12 @@ type linkElement struct {
 }
 
 // extractLinkElements extracts <link> elements from HTML.
+// Note: lowerHTML and originalHTML may have different byte lengths due to Unicode
+// case conversion, so we must validate bounds before slicing.
 func extractLinkElements(lowerHTML, originalHTML string) []linkElement {
 	var elements []linkElement
 
+	originalLen := len(originalHTML)
 	idx := 0
 
 	for {
@@ -353,6 +356,14 @@ func extractLinkElements(lowerHTML, originalHTML string) []linkElement {
 		}
 
 		end += start
+
+		// Validate bounds before slicing - strings may have different lengths
+		// due to Unicode case conversion (e.g., Turkish İ, German ß)
+		if end+1 > originalLen {
+			idx = end + 1
+			continue
+		}
+
 		tagContent := originalHTML[start : end+1]
 		lowerTag := lowerHTML[start : end+1]
 
@@ -373,9 +384,12 @@ func extractLinkElements(lowerHTML, originalHTML string) []linkElement {
 }
 
 // extractAttr extracts an attribute value from a tag.
+// Note: lowerTag and originalTag may have different byte lengths due to Unicode
+// case conversion, so we must validate bounds before slicing.
 func extractAttr(lowerTag, originalTag, attrName string) string {
 	// Find attribute in lowercase tag
 	patterns := []string{attrName + `="`, attrName + `='`}
+	originalLen := len(originalTag)
 
 	for _, pattern := range patterns {
 		idx := strings.Index(lowerTag, pattern)
@@ -384,10 +398,21 @@ func extractAttr(lowerTag, originalTag, attrName string) string {
 		}
 
 		start := idx + len(pattern)
+
+		// Validate bounds before slicing
+		if start >= originalLen {
+			continue
+		}
+
 		quote := pattern[len(pattern)-1]
 		end := strings.IndexByte(originalTag[start:], quote)
 
 		if end == -1 {
+			continue
+		}
+
+		// Validate end bounds
+		if start+end > originalLen {
 			continue
 		}
 
@@ -891,21 +916,34 @@ func (e *Extractor) buildFeedResult(parsed *url.URL, body []byte) (*ExtractionRe
 }
 
 // extractHTMLTitle extracts the content of the <title> tag.
+// Uses consistent lowercase string to avoid index mismatches with multi-byte characters.
 func extractHTMLTitle(html string) string {
 	const (
 		titleStart = "<title>"
 		titleEnd   = "</title>"
 	)
 
-	startIdx := strings.Index(strings.ToLower(html), titleStart)
+	lowerHTML := strings.ToLower(html)
+
+	startIdx := strings.Index(lowerHTML, titleStart)
 	if startIdx == -1 {
 		return ""
 	}
 
 	startIdx += len(titleStart)
-	endIdx := strings.Index(strings.ToLower(html[startIdx:]), titleEnd)
 
+	// Validate bounds before slicing
+	if startIdx >= len(html) {
+		return ""
+	}
+
+	endIdx := strings.Index(lowerHTML[startIdx:], titleEnd)
 	if endIdx == -1 {
+		return ""
+	}
+
+	// Validate end bounds
+	if startIdx+endIdx > len(html) {
 		return ""
 	}
 
@@ -954,13 +992,20 @@ func removeTagBlock(html, tag string) string {
 	result := html
 
 	for {
-		startIdx := strings.Index(strings.ToLower(result), startTag)
+		lowerResult := strings.ToLower(result)
+		startIdx := strings.Index(lowerResult, startTag)
+
 		if startIdx == -1 {
 			break
 		}
 
+		// Validate bounds before slicing
+		if startIdx >= len(result) {
+			break
+		}
+
 		// Find matching end tag
-		endIdx := strings.Index(strings.ToLower(result[startIdx:]), endTag)
+		endIdx := strings.Index(lowerResult[startIdx:], endTag)
 		if endIdx == -1 {
 			// No closing tag, remove to end of string
 			result = result[:startIdx]
@@ -968,7 +1013,15 @@ func removeTagBlock(html, tag string) string {
 			break
 		}
 
-		result = result[:startIdx] + result[startIdx+endIdx+len(endTag):]
+		// Validate end bounds
+		endPos := startIdx + endIdx + len(endTag)
+		if endPos > len(result) {
+			result = result[:startIdx]
+
+			break
+		}
+
+		result = result[:startIdx] + result[endPos:]
 	}
 
 	return result

@@ -182,7 +182,19 @@ func (c *Crawler) processNextBatch(ctx context.Context) {
 }
 
 // processURL crawls a single URL.
+// Includes panic recovery to prevent individual URL failures from crashing the pod.
 func (c *Crawler) processURL(ctx context.Context, doc *solr.Document) {
+	// Recover from panics to prevent pod crash on malformed HTML
+	defer func() {
+		if r := recover(); r != nil {
+			c.logger.Error().
+				Interface("panic", r).
+				Str(fieldURL, doc.URL).
+				Msg("Recovered from panic during URL processing")
+			IncrementExtractionErrors()
+		}
+	}()
+
 	c.logger.Debug().Str(fieldURL, doc.URL).Int("depth", doc.CrawlDepth).Msg("Processing URL")
 
 	IncrementProcessed()
