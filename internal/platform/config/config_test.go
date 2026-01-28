@@ -12,9 +12,7 @@ const (
 	testEnvTargetChatID = "TARGET_CHAT_ID"
 	testEnvTGAPIID      = "TG_API_ID"
 	testEnvTGAPIHash    = "TG_API_HASH"
-	//nolint:gosec // Test env key name, not a credential.
-	testEnvLLMAPIKey = "LLM_API_KEY"
-	testEnvAdminIDs  = "ADMIN_IDS"
+	testEnvAdminIDs     = "ADMIN_IDS"
 )
 
 // Test values.
@@ -24,7 +22,6 @@ const (
 	testTargetChatID       = "-1001234567890"
 	testTGAPIID            = "12345"
 	testTGAPIHash          = "abcdef123456"
-	testLLMAPIKey          = "sk-test-key"
 	testErrLoad            = "Load() error = %v"
 	testDefaultEnv         = "local"
 	testDefaultModel       = "gpt-4o-mini"
@@ -40,7 +37,6 @@ func setRequiredEnvVars(t *testing.T) {
 	t.Setenv(testEnvTargetChatID, testTargetChatID)
 	t.Setenv(testEnvTGAPIID, testTGAPIID)
 	t.Setenv(testEnvTGAPIHash, testTGAPIHash)
-	t.Setenv(testEnvLLMAPIKey, testLLMAPIKey)
 }
 
 func TestLoad_MissingRequired(t *testing.T) {
@@ -50,7 +46,6 @@ func TestLoad_MissingRequired(t *testing.T) {
 	os.Unsetenv(testEnvTargetChatID)
 	os.Unsetenv(testEnvTGAPIID)
 	os.Unsetenv(testEnvTGAPIHash)
-	os.Unsetenv(testEnvLLMAPIKey)
 
 	_, err := Load()
 	if err == nil {

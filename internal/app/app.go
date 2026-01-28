@@ -249,11 +249,11 @@ func (a *App) refreshResearchOnce(ctx context.Context) {
 }
 
 func (a *App) configureEnrichmentWorker(worker *enrichment.Worker, llmClient llm.Client) {
-	if a.hasValidLLMKey() {
+	if a.hasConfiguredLLMProvider() {
 		worker.EnableLLMExtraction(llmClient, a.cfg.LLMModel)
 	}
 
-	if a.cfg.EnrichmentQueryLLM && a.hasValidLLMKey() {
+	if a.cfg.EnrichmentQueryLLM && a.hasConfiguredLLMProvider() {
 		queryModel := a.cfg.EnrichmentQueryLLMModel
 		if queryModel == "" {
 			queryModel = a.cfg.LLMModel
@@ -272,8 +272,24 @@ func (a *App) configureEnrichmentWorker(worker *enrichment.Worker, llmClient llm
 	}
 }
 
-func (a *App) hasValidLLMKey() bool {
-	return a.cfg.LLMAPIKey != "" && a.cfg.LLMAPIKey != llmAPIKeyMock
+func (a *App) hasConfiguredLLMProvider() bool {
+	if a.cfg.LLMAPIKey != "" && a.cfg.LLMAPIKey != llmAPIKeyMock {
+		return true
+	}
+
+	if a.cfg.AnthropicAPIKey != "" {
+		return true
+	}
+
+	if a.cfg.GoogleAPIKey != "" || a.cfg.GoogleAPIKeyPaid != "" {
+		return true
+	}
+
+	if a.cfg.OpenRouterAPIKey != "" {
+		return true
+	}
+
+	return false
 }
 
 func (a *App) runDiscoveryReconciliation(ctx context.Context) {

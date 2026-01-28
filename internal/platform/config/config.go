@@ -25,7 +25,7 @@ type Config struct {
 	TGPhone                       string        `env:"TG_PHONE"`
 	TG2FAPassword                 string        `env:"TG_2FA_PASSWORD"`
 	TGSessionPath                 string        `env:"TG_SESSION_PATH" envDefault:"./tg.session"`
-	LLMAPIKey                     string        `env:"LLM_API_KEY,required"`
+	LLMAPIKey                     string        `env:"LLM_API_KEY"`
 	LLMModel                      string        `env:"LLM_MODEL" envDefault:"gpt-4o-mini"`
 	DigestWindow                  string        `env:"DIGEST_WINDOW" envDefault:"60m"`
 	DigestTopN                    int           `env:"DIGEST_TOP_N" envDefault:"20"`
