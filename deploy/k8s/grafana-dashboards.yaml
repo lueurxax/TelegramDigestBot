@@ -3062,3 +3062,128 @@ data:
       "version": 1,
       "weekStart": ""
     }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: digest-research-dashboard
+  namespace: monitoring-system
+  labels:
+    grafana_dashboard: "1"
+data:
+  digest-research.json: |
+    {
+      "annotations": {"list": []},
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 0,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+          "id": 1,
+          "panels": [],
+          "title": "Research API",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 1},
+          "id": 2,
+          "targets": [
+            {
+              "expr": "sum by (route) (rate(research_api_requests_total[5m]))",
+              "legendFormat": "{{route}}",
+              "refId": "A"
+            }
+          ],
+          "title": "Research Requests (rate)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1},
+          "id": 3,
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum by (le, route) (rate(research_api_latency_seconds_bucket[5m])))",
+              "legendFormat": "{{route}} p95",
+              "refId": "A"
+            }
+          ],
+          "title": "Research Latency (p95)",
+          "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 9},
+          "id": 4,
+          "panels": [],
+          "title": "Enrichment Signals",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 10},
+          "id": 5,
+          "targets": [
+            {
+              "expr": "rate(digest_enrichment_matches_total[5m])",
+              "legendFormat": "matches",
+              "refId": "A"
+            }
+          ],
+          "title": "Evidence Matches (rate)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 10},
+          "id": 6,
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.5, sum by (le) (rate(digest_time_to_digest_seconds_bucket[5m])))",
+              "legendFormat": "p50",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.9, sum by (le) (rate(digest_time_to_digest_seconds_bucket[5m])))",
+              "legendFormat": "p90",
+              "refId": "B"
+            }
+          ],
+          "title": "Time to Digest (p50/p90)",
+          "type": "timeseries"
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "tags": ["research"],
+      "templating": {
+        "list": [
+          {
+            "current": {"selected": false, "text": "Prometheus", "value": "Prometheus"},
+            "hide": 0,
+            "label": "datasource",
+            "name": "datasource",
+            "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource"
+          }
+        ]
+      },
+      "time": {"from": "now-24h", "to": "now"},
+      "timepicker": {},
+      "timezone": "",
+      "title": "Digest Research",
+      "uid": "digest-research",
+      "version": 1,
+      "weekStart": ""
+    }

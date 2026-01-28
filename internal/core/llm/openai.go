@@ -132,6 +132,22 @@ func (c *openaiClient) SetBudgetAlertCallback(_ func(alert BudgetAlert)) {}
 // RecordTokensForBudget implements Client interface (no-op for single provider).
 func (c *openaiClient) RecordTokensForBudget(_ int) {}
 
+// ExtractBullets extracts key bullet points from a message.
+// This is a stub implementation - actual bullet extraction logic will be added later.
+func (c *openaiClient) ExtractBullets(_ context.Context, input BulletExtractionInput, _, _ string) (BulletExtractionResult, error) {
+	// Stub: return the input text as a single bullet with default scores
+	return BulletExtractionResult{
+		Bullets: []ExtractedBullet{
+			{
+				Text:            input.Summary,
+				RelevanceScore:  fallbackBulletScore,
+				ImportanceScore: fallbackBulletScore,
+				Topic:           "",
+			},
+		},
+	}, nil
+}
+
 // Ensure openaiClient implements Provider interface.
 var _ Provider = (*openaiClient)(nil)
 

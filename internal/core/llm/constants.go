@@ -102,6 +102,9 @@ const (
 	mockConfidenceScore = 0.5
 )
 
+// Fallback score for bullet extraction stubs
+const fallbackBulletScore = 0.5
+
 // Circuit breaker defaults
 const (
 	defaultCircuitThreshold = 5

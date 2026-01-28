@@ -527,5 +527,21 @@ func (p *openRouterProvider) GenerateDigestCover(_ context.Context, _ []string, 
 	return nil, ErrNoImageProvider
 }
 
+// ExtractBullets extracts key bullet points from a message.
+// This is a stub implementation - actual bullet extraction logic will be added later.
+func (p *openRouterProvider) ExtractBullets(_ context.Context, input BulletExtractionInput, _, _ string) (BulletExtractionResult, error) {
+	// Stub: return the input text as a single bullet with default scores
+	return BulletExtractionResult{
+		Bullets: []ExtractedBullet{
+			{
+				Text:            input.Summary,
+				RelevanceScore:  fallbackBulletScore,
+				ImportanceScore: fallbackBulletScore,
+				Topic:           "",
+			},
+		},
+	}, nil
+}
+
 // Ensure openRouterProvider implements Provider interface.
 var _ Provider = (*openRouterProvider)(nil)

@@ -31,17 +31,18 @@ const (
 	slowQueryThreshold     = 2 * time.Second
 
 	// Route path constants.
-	routeLogin    = "login"
-	routeSearch   = "search"
-	routeItem     = "item/"
-	routeCluster  = "cluster/"
-	routeEvidence = "evidence/"
-	routeSettings = "settings"
-	routeChannels = "channels/"
-	routeClaims   = "claims"
-	routeRebuild  = "rebuild"
-	routeTopics   = "topics/"
-	routeDiff     = "diff/"
+	routeLogin     = "login"
+	routeSearch    = "search"
+	routeItem      = "item/"
+	routeCluster   = "cluster/"
+	routeEvidence  = "evidence/"
+	routeSettings  = "settings"
+	routeChannels  = "channels/"
+	routeClaims    = "claims"
+	routeRebuild   = "rebuild"
+	routeTopics    = "topics/"
+	routeLanguages = "languages/"
+	routeDiff      = "diff/"
 
 	// Scope constants.
 	scopeAll      = "all"
@@ -93,6 +94,12 @@ const (
 	// Source constants.
 	sourceEnv = "env"
 	sourceDB  = "db"
+
+	// Query parameter constants.
+	queryParamChannel = "channel"
+
+	// Format constants for percentage display.
+	percentMultiplier = 100
 )
 
 // Static errors for err113 compliance.
@@ -166,29 +173,61 @@ func (h *Handler) dispatchPath(w http.ResponseWriter, r *http.Request, path stri
 	}
 }
 
-// dispatchExtendedPath handles additional route patterns.
+// extendedRouteHandler is used for table-driven routing in dispatchExtendedPath.
+type extendedRouteHandler func(h *Handler, w http.ResponseWriter, r *http.Request, path string) (int, int)
+
+// extendedRoute defines a route prefix and its handler.
+type extendedRoute struct {
+	prefix  string
+	name    string
+	handler extendedRouteHandler
+}
+
+// extendedRoutes defines the routing table for dispatchExtendedPath.
+// Order matters: more specific prefixes must come before less specific ones.
+var extendedRoutes = []extendedRoute{
+	{routeChannels + "overlap", "channels_overlap", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleChannelOverlap(w, r)
+	}},
+	{routeChannels + "quality", "channels_quality", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleChannelQualitySummary(w, r)
+	}},
+	{routeChannels + "bias", "channels_bias", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleChannelBias(w, r)
+	}},
+	{routeChannels, "channels_detail", func(h *Handler, w http.ResponseWriter, r *http.Request, path string) (int, int) {
+		return h.handleChannelDetail(w, r, strings.TrimPrefix(path, routeChannels))
+	}},
+	{routeTopics + "timeline", "topics_timeline", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleTopicTimeline(w, r)
+	}},
+	{routeTopics + "drift", "topics_drift", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleTopicDrift(w, r)
+	}},
+	{routeLanguages + "coverage", "languages_coverage", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleLanguageCoverage(w, r)
+	}},
+	{routeClaims, "claims", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleClaims(w, r)
+	}},
+	{routeDiff + "weekly", "diff_weekly", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleWeeklyDiff(w, r)
+	}},
+	{routeRebuild, "rebuild", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleRebuild(w, r), 0
+	}},
+}
+
+// dispatchExtendedPath handles additional route patterns using table-driven routing.
 func (h *Handler) dispatchExtendedPath(w http.ResponseWriter, r *http.Request, path string) (route string, status int, resultSize int) {
-	switch {
-	case strings.HasPrefix(path, routeChannels+"overlap"):
-		s, rs := h.handleChannelOverlap(w, r)
-		return "channels_overlap", s, rs
-	case strings.HasPrefix(path, routeTopics+"timeline"):
-		s, rs := h.handleTopicTimeline(w, r)
-		return "topics_timeline", s, rs
-	case strings.HasPrefix(path, routeChannels):
-		s, rs := h.handleChannelDetail(w, r, strings.TrimPrefix(path, routeChannels))
-		return "channels_detail", s, rs
-	case strings.HasPrefix(path, routeClaims):
-		s, rs := h.handleClaims(w, r)
-		return "claims", s, rs
-	case strings.HasPrefix(path, routeDiff+"weekly"):
-		s, rs := h.handleWeeklyDiff(w, r)
-		return "diff_weekly", s, rs
-	case strings.HasPrefix(path, routeRebuild):
-		return "rebuild", h.handleRebuild(w, r), 0
-	default:
-		return "not_found", h.writeError(w, r, http.StatusNotFound, errTitleNotFound, "Unknown research endpoint."), 0
+	for _, rt := range extendedRoutes {
+		if strings.HasPrefix(path, rt.prefix) {
+			s, rs := rt.handler(h, w, r, path)
+			return rt.name, s, rs
+		}
 	}
+
+	return "not_found", h.writeError(w, r, http.StatusNotFound, errTitleNotFound, "Unknown research endpoint."), 0
 }
 
 // recordMetrics records request metrics.
@@ -489,10 +528,24 @@ func (h *Handler) handleEvidence(w http.ResponseWriter, r *http.Request, itemID 
 	evidence := evidenceMap[itemID]
 
 	if wantsHTML(r) {
+		rows := make([]EvidenceViewRow, 0, len(evidence))
+		for _, entry := range evidence {
+			rows = append(rows, EvidenceViewRow{
+				URL:                entry.Source.URL,
+				Title:              entry.Source.Title,
+				Domain:             entry.Source.Domain,
+				Provider:           entry.Source.Provider,
+				AgreementScore:     entry.AgreementScore,
+				IsContradiction:    entry.IsContradiction,
+				MatchedAt:          entry.MatchedAt,
+				MatchedClaimsCount: countMatchedClaims(entry.MatchedClaimsJSON),
+			})
+		}
+
 		data := EvidenceViewData{
-			Title:    "Evidence Sources",
-			ItemID:   itemID,
-			Evidence: evidence,
+			Title:        "Evidence Sources",
+			ItemID:       itemID,
+			EvidenceRows: rows,
 		}
 		if err := h.renderHTML(w, "evidence.html", data); err != nil {
 			h.logger.Error().Err(err).Msg("render evidence failed")
@@ -692,6 +745,13 @@ func (h *Handler) handleTopicTimeline(w http.ResponseWriter, r *http.Request) (i
 		return h.writeError(w, r, http.StatusBadRequest, errTitleInvalidRange, err.Error()), 0
 	}
 
+	if from == nil && to == nil {
+		now := time.Now().UTC()
+		start := now.AddDate(-1, 0, 0)
+		from = &start
+		to = &now
+	}
+
 	bucket, err := normalizeTimelineBucket(r.URL.Query().Get("bucket"))
 	if err != nil {
 		return h.writeError(w, r, http.StatusBadRequest, "Invalid Bucket", "Use day, week, or month."), 0
@@ -724,6 +784,253 @@ func (h *Handler) handleTopicTimeline(w http.ResponseWriter, r *http.Request) (i
 	}
 
 	return h.writeJSON(w, http.StatusOK, points), len(points)
+}
+
+func (h *Handler) handleTopicDrift(w http.ResponseWriter, r *http.Request) (int, int) {
+	if _, ok := h.requireSession(w, r); !ok {
+		return http.StatusUnauthorized, 0
+	}
+
+	from, to, err := parseRange(r)
+	if err != nil {
+		return h.writeError(w, r, http.StatusBadRequest, errTitleInvalidRange, err.Error()), 0
+	}
+
+	limit := parseLimit(r, defaultSearchLimit)
+
+	entries, err := h.db.GetTopicDrift(r.Context(), from, to, limit)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("get topic drift failed")
+		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load topic drift."), 0
+	}
+
+	if wantsHTML(r) {
+		rows := make([][]string, 0, len(entries))
+		for _, entry := range entries {
+			rows = append(rows, []string{
+				entry.ClusterID,
+				entry.FirstTopic,
+				entry.LastTopic,
+				strconv.Itoa(entry.DistinctTopics),
+				entry.FirstSeenAt.Format(researchQueryLayout),
+				entry.LastSeenAt.Format(researchQueryLayout),
+			})
+		}
+
+		data := TableViewData{
+			Title:       "Topic Drift",
+			Headers:     []string{"Cluster", "First Topic", "Last Topic", "Distinct Topics", "First Seen", "Last Seen"},
+			Rows:        rows,
+			Description: "Clusters where topic labels shift over time (based on item topics).",
+		}
+		if err := h.renderHTML(w, tmplTable, data); err != nil {
+			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
+		}
+
+		return http.StatusOK, len(rows)
+	}
+
+	return h.writeJSON(w, http.StatusOK, entries), len(entries)
+}
+
+func (h *Handler) handleLanguageCoverage(w http.ResponseWriter, r *http.Request) (int, int) {
+	if _, ok := h.requireSession(w, r); !ok {
+		return http.StatusUnauthorized, 0
+	}
+
+	from, to, err := parseRange(r)
+	if err != nil {
+		return h.writeError(w, r, http.StatusBadRequest, errTitleInvalidRange, err.Error()), 0
+	}
+
+	limit := parseLimit(r, defaultSearchLimit)
+
+	entries, err := h.db.GetLanguageCoverage(r.Context(), from, to, limit)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("get language coverage failed")
+		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load language coverage."), 0
+	}
+
+	if wantsHTML(r) {
+		rows := make([][]string, 0, len(entries))
+		for _, entry := range entries {
+			rows = append(rows, []string{
+				entry.FromLang,
+				entry.ToLang,
+				strconv.Itoa(entry.ClusterCount),
+				fmt.Sprintf("%.1f", entry.AvgLagHours),
+			})
+		}
+
+		data := TableViewData{
+			Title:       "Cross-Language Coverage",
+			Headers:     []string{"From", "To", "Clusters", "Avg Lag (h)"},
+			Rows:        rows,
+			Description: "Language pairs observed within the same cluster (lag based on first appearance).",
+		}
+		if err := h.renderHTML(w, tmplTable, data); err != nil {
+			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
+		}
+
+		return http.StatusOK, len(rows)
+	}
+
+	return h.writeJSON(w, http.StatusOK, entries), len(entries)
+}
+
+func (h *Handler) handleChannelQualitySummary(w http.ResponseWriter, r *http.Request) (int, int) {
+	if _, ok := h.requireSession(w, r); !ok {
+		return http.StatusUnauthorized, 0
+	}
+
+	from, to, err := parseRange(r)
+	if err != nil {
+		return h.writeError(w, r, http.StatusBadRequest, errTitleInvalidRange, err.Error()), 0
+	}
+
+	if from == nil && to == nil {
+		now := time.Now().UTC()
+		start := now.AddDate(0, 0, -30)
+		from = &start
+		to = &now
+	}
+
+	limit := parseLimit(r, defaultSearchLimit)
+
+	entries, err := h.db.GetChannelQualitySummary(r.Context(), from, to, limit)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("get channel quality summary failed")
+		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load channel quality summary."), 0
+	}
+
+	if wantsHTML(r) {
+		rows := make([][]string, 0, len(entries))
+		for _, entry := range entries {
+			name := entry.ChannelTitle
+			if entry.ChannelUsername != "" {
+				name = fmt.Sprintf("%s (@%s)", entry.ChannelTitle, entry.ChannelUsername)
+			}
+
+			rows = append(rows, []string{
+				name,
+				formatPercent(entry.InclusionRate),
+				formatPercent(entry.NoiseRate),
+				fmt.Sprintf(fmtFloat2, entry.AvgImportance),
+				fmt.Sprintf(fmtFloat2, entry.AvgRelevance),
+				entry.PeriodEnd.Format(researchQueryLayout),
+			})
+		}
+
+		data := TableViewData{
+			Title:       "Channel Quality (Latest)",
+			Headers:     []string{"Channel", "Inclusion", "Noise", "Avg Importance", "Avg Relevance", "Period End"},
+			Rows:        rows,
+			Description: "Latest channel quality snapshot (defaults to last 30 days).",
+		}
+		if err := h.renderHTML(w, tmplTable, data); err != nil {
+			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
+		}
+
+		return http.StatusOK, len(rows)
+	}
+
+	return h.writeJSON(w, http.StatusOK, entries), len(entries)
+}
+
+// parseChannelParam extracts and validates the channel parameter from a request.
+func parseChannelParam(r *http.Request) string {
+	param := strings.TrimSpace(r.URL.Query().Get(queryParamChannel))
+	if param == "" {
+		param = strings.TrimSpace(r.URL.Query().Get("channel_id"))
+	}
+
+	return param
+}
+
+// resolveChannelWithError resolves a channel and returns appropriate HTTP error responses.
+func (h *Handler) resolveChannelWithError(w http.ResponseWriter, r *http.Request, channelParam string) (*db.ResearchChannelRef, int, bool) {
+	ref, err := h.db.ResolveChannelRef(r.Context(), channelParam)
+	if err == nil {
+		return ref, 0, true
+	}
+
+	if errors.Is(err, db.ErrResearchChannelNotFound) {
+		return nil, h.writeError(w, r, http.StatusNotFound, errTitleNotFound, "Channel not found."), false
+	}
+
+	h.logger.Error().Err(err).Msg("resolve channel failed")
+
+	return nil, h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to resolve channel."), false
+}
+
+// formatChannelTitle formats a channel title with optional username.
+func formatChannelTitle(baseTitle string, ref *db.ResearchChannelRef) string {
+	if ref.Username != "" {
+		return fmt.Sprintf("%s (%s @%s)", baseTitle, ref.Title, ref.Username)
+	}
+
+	return fmt.Sprintf("%s (%s)", baseTitle, ref.Title)
+}
+
+func (h *Handler) handleChannelBias(w http.ResponseWriter, r *http.Request) (int, int) {
+	if _, ok := h.requireSession(w, r); !ok {
+		return http.StatusUnauthorized, 0
+	}
+
+	channelParam := parseChannelParam(r)
+	if channelParam == "" {
+		return h.writeError(w, r, http.StatusBadRequest, errTitleBadRequest, "Channel parameter is required."), 0
+	}
+
+	ref, status, ok := h.resolveChannelWithError(w, r, channelParam)
+	if !ok {
+		return status, 0
+	}
+
+	from, to, err := parseRange(r)
+	if err != nil {
+		return h.writeError(w, r, http.StatusBadRequest, errTitleInvalidRange, err.Error()), 0
+	}
+
+	entries, err := h.db.GetChannelBias(r.Context(), ref.ID, from, to, parseLimit(r, defaultSearchLimit))
+	if err != nil {
+		h.logger.Error().Err(err).Msg("get channel bias failed")
+
+		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load channel bias."), 0
+	}
+
+	if !wantsHTML(r) {
+		return h.writeJSON(w, http.StatusOK, entries), len(entries)
+	}
+
+	return h.renderChannelBiasHTML(w, r, ref, entries)
+}
+
+func (h *Handler) renderChannelBiasHTML(w http.ResponseWriter, r *http.Request, ref *db.ResearchChannelRef, entries []db.ResearchChannelBiasEntry) (int, int) {
+	rows := make([][]string, 0, len(entries))
+	for _, entry := range entries {
+		rows = append(rows, []string{
+			entry.Topic,
+			formatPercent(entry.ChannelShare),
+			formatPercent(entry.GlobalShare),
+			fmt.Sprintf(fmtFloat2, entry.IndexRatio),
+			strconv.Itoa(entry.ChannelCount),
+			strconv.Itoa(entry.GlobalCount),
+		})
+	}
+
+	data := TableViewData{
+		Title:       formatChannelTitle("Channel Bias Lens", ref),
+		Headers:     []string{"Topic", "Channel Share", "Global Share", "Index", "Channel Count", "Global Count"},
+		Rows:        rows,
+		Description: "Topic over/under-indexing relative to the global distribution.",
+	}
+
+	if err := h.renderHTML(w, tmplTable, data); err != nil {
+		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
+	}
+
+	return http.StatusOK, len(rows)
 }
 
 func normalizeTimelineBucket(raw string) (string, error) {
@@ -874,7 +1181,14 @@ func (h *Handler) handleClaims(w http.ResponseWriter, r *http.Request) (int, int
 	if wantsHTML(r) {
 		rows := make([][]string, 0, len(claims))
 		for _, c := range claims {
-			rows = append(rows, []string{c.ID, c.ClaimText, c.FirstSeenAt.Format(time.RFC3339)})
+			rows = append(rows, []string{
+				c.ID,
+				c.ClaimText,
+				c.FirstSeenAt.Format(time.RFC3339),
+				c.OriginClusterID,
+				strconv.Itoa(len(c.ClusterIDs)),
+				strconv.Itoa(len(c.ContradictedBy)),
+			})
 		}
 
 		description := ""
@@ -884,7 +1198,7 @@ func (h *Handler) handleClaims(w http.ResponseWriter, r *http.Request) (int, int
 
 		data := TableViewData{
 			Title:       "Claim Ledger",
-			Headers:     []string{"ID", "Claim", "First Seen"},
+			Headers:     []string{"ID", "Claim", "First Seen", "Origin Cluster", "Clusters", "Contradicted"},
 			Rows:        rows,
 			Description: description,
 		}
@@ -1028,7 +1342,7 @@ func parseSearchParams(r *http.Request) (db.ResearchSearchParams, string, error)
 	q := r.URL.Query()
 	params := db.ResearchSearchParams{
 		Query:        strings.TrimSpace(q.Get("q")),
-		Channel:      strings.TrimSpace(q.Get("channel")),
+		Channel:      strings.TrimSpace(q.Get(queryParamChannel)),
 		Topic:        strings.TrimSpace(q.Get("topic")),
 		Lang:         strings.TrimSpace(q.Get("lang")),
 		Limit:        parseLimit(r, defaultSearchLimit),
@@ -1284,6 +1598,33 @@ func formatTimePtr(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
+func formatPercent(value float64) string {
+	if value <= 0 {
+		return "0%"
+	}
+
+	return fmt.Sprintf("%.1f%%", value*percentMultiplier)
+}
+
+type matchedClaim struct {
+	ItemClaim     string  `json:"item_claim"`
+	EvidenceClaim string  `json:"evidence_claim"`
+	Score         float32 `json:"score"`
+}
+
+func countMatchedClaims(raw []byte) int {
+	if len(raw) == 0 {
+		return 0
+	}
+
+	var claims []matchedClaim
+	if err := json.Unmarshal(raw, &claims); err != nil {
+		return 0
+	}
+
+	return len(claims)
+}
+
 func clampFloat32(value, min, max float32) float32 {
 	if value < min {
 		return min
@@ -1393,9 +1734,9 @@ type ClusterViewData struct {
 }
 
 type EvidenceViewData struct {
-	Title    string
-	ItemID   string
-	Evidence []db.ItemEvidenceWithSource
+	Title        string
+	ItemID       string
+	EvidenceRows []EvidenceViewRow
 }
 
 type TableViewData struct {
@@ -1412,6 +1753,17 @@ type SettingEntry struct {
 	Name   string `json:"name"`
 	Value  string `json:"value"`
 	Source string `json:"source"`
+}
+
+type EvidenceViewRow struct {
+	URL                string
+	Title              string
+	Domain             string
+	Provider           string
+	AgreementScore     float32
+	IsContradiction    bool
+	MatchedAt          time.Time
+	MatchedClaimsCount int
 }
 
 type ItemExplainData struct {

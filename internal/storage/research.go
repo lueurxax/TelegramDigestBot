@@ -14,10 +14,29 @@ import (
 // Sentinel errors for research queries.
 var (
 	ErrResearchClusterNotFound       = errors.New("research cluster not found")
+	ErrResearchChannelNotFound       = errors.New("research channel not found")
 	ErrResearchSessionNotFound       = errors.New("research session not found")
 	ErrChannelRelevanceNotConfigured = errors.New("channel relevance not configured")
 	ErrRelevanceGateNotFound         = errors.New("relevance gate decision not found")
 )
+
+// nullableFloat64 extracts a float64 from a pgtype.Float8, returning 0 if not valid.
+func nullableFloat64(v pgtype.Float8) float64 {
+	if v.Valid {
+		return v.Float64
+	}
+
+	return 0
+}
+
+// nullableDate extracts a time.Time from a pgtype.Date, returning zero time if not valid.
+func nullableDate(v pgtype.Date) time.Time {
+	if v.Valid {
+		return v.Time
+	}
+
+	return time.Time{}
+}
 
 const (
 	// Time bucket constants for PostgreSQL date_trunc.
@@ -28,6 +47,7 @@ const (
 	defaultSearchLimit  = 50
 	maxSearchLimit      = 200
 	recencyHalfLifeDays = 14.0
+	maxOverlapChannels  = 200
 
 	// SQL join constant.
 	sqlAndJoin = " AND "
@@ -157,6 +177,13 @@ type ResearchSearchResultCount struct {
 	Total int
 }
 
+// ResearchChannelRef holds basic channel identity info.
+type ResearchChannelRef struct {
+	ID       string
+	Username string
+	Title    string
+}
+
 // normalizeSearchLimit clamps the limit to valid range.
 func normalizeSearchLimit(limit int) int {
 	if limit <= 0 {
@@ -168,6 +195,57 @@ func normalizeSearchLimit(limit int) int {
 	}
 
 	return limit
+}
+
+// ResolveChannelRef resolves a channel identifier (UUID or @username) to a channel reference.
+func (db *DB) ResolveChannelRef(ctx context.Context, value string) (*ResearchChannelRef, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil, ErrResearchChannelNotFound
+	}
+
+	trimmed = strings.TrimPrefix(trimmed, "@")
+
+	if id := toUUID(trimmed); id.Valid {
+		row := db.Pool.QueryRow(ctx, `
+			SELECT id, username, title
+			FROM channels
+			WHERE id = $1
+		`, id)
+
+		return scanChannelRef(row)
+	}
+
+	normalized := normalizeUsername(trimmed)
+	row := db.Pool.QueryRow(ctx, `
+		SELECT id, username, title
+		FROM channels
+		WHERE username = $1
+	`, normalized)
+
+	return scanChannelRef(row)
+}
+
+func scanChannelRef(row pgx.Row) (*ResearchChannelRef, error) {
+	var (
+		id       pgtype.UUID
+		username pgtype.Text
+		title    pgtype.Text
+	)
+
+	if err := row.Scan(&id, &username, &title); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrResearchChannelNotFound
+		}
+
+		return nil, fmt.Errorf("get channel: %w", err)
+	}
+
+	return &ResearchChannelRef{
+		ID:       fromUUID(id),
+		Username: username.String,
+		Title:    title.String,
+	}, nil
 }
 
 // buildItemSearchQuery builds the SQL query and args for item search.
@@ -778,6 +856,43 @@ type ResearchChannelOverlapSummary struct {
 	TotalChannels  int
 }
 
+type ResearchChannelQualitySummary struct {
+	ChannelID       string
+	ChannelTitle    string
+	ChannelUsername string
+	PeriodStart     time.Time
+	PeriodEnd       time.Time
+	InclusionRate   float64
+	NoiseRate       float64
+	AvgImportance   float64
+	AvgRelevance    float64
+}
+
+type ResearchChannelBiasEntry struct {
+	Topic        string
+	ChannelCount int
+	GlobalCount  int
+	ChannelShare float64
+	GlobalShare  float64
+	IndexRatio   float64
+}
+
+type ResearchLanguageCoverageEntry struct {
+	FromLang     string
+	ToLang       string
+	ClusterCount int
+	AvgLagHours  float64
+}
+
+type ResearchTopicDriftEntry struct {
+	ClusterID      string
+	FirstTopic     string
+	LastTopic      string
+	DistinctTopics int
+	FirstSeenAt    time.Time
+	LastSeenAt     time.Time
+}
+
 type ResearchClaimsSummary struct {
 	ClaimsCount         int
 	EvidenceClaimsCount int
@@ -797,11 +912,26 @@ func (db *DB) GetChannelOverlap(ctx context.Context, from, to *time.Time, limit 
 
 	if from == nil && to == nil {
 		rows, err = db.Pool.Query(ctx, `
+			WITH top_channels AS (
+				SELECT channel_id
+				FROM (
+					SELECT channel_a AS channel_id, total_a AS total_clusters
+					FROM mv_channel_overlap
+					UNION ALL
+					SELECT channel_b AS channel_id, total_b AS total_clusters
+					FROM mv_channel_overlap
+				) ranked
+				GROUP BY channel_id, total_clusters
+				ORDER BY total_clusters DESC
+				LIMIT $1
+			)
 			SELECT channel_a, channel_b, shared_clusters, total_a, total_b, jaccard
 			FROM mv_channel_overlap
+			WHERE channel_a IN (SELECT channel_id FROM top_channels)
+			  AND channel_b IN (SELECT channel_id FROM top_channels)
 			ORDER BY jaccard DESC
-			LIMIT $1
-		`, safeIntToInt32(limit))
+			LIMIT $2
+		`, safeIntToInt32(maxOverlapChannels), safeIntToInt32(limit))
 	} else {
 		args := []any{}
 		where := []string{"1=1"}
@@ -927,6 +1057,384 @@ func (db *DB) GetChannelOverlapSummary(ctx context.Context) (ResearchChannelOver
 		SharedClusters: int(sharedClusters.Int64),
 		TotalChannels:  int(totalChannels.Int64),
 	}, nil
+}
+
+func (db *DB) GetChannelQualitySummary(ctx context.Context, from, to *time.Time, limit int) ([]ResearchChannelQualitySummary, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+
+	args := []any{}
+	where := []string{"1=1"}
+
+	if from != nil {
+		args = append(args, *from)
+		where = append(where, fmt.Sprintf("q.period_start >= $%d", len(args)))
+	}
+
+	if to != nil {
+		args = append(args, *to)
+		where = append(where, fmt.Sprintf("q.period_end <= $%d", len(args)))
+	}
+
+	args = append(args, safeIntToInt32(limit))
+
+	query := fmt.Sprintf(`
+		WITH ranked AS (
+			SELECT q.channel_id,
+			       q.period_start,
+			       q.period_end,
+			       q.inclusion_rate,
+			       q.noise_rate,
+			       q.avg_importance,
+			       q.avg_relevance,
+			       c.username,
+			       c.title,
+			       ROW_NUMBER() OVER (PARTITION BY q.channel_id ORDER BY q.period_end DESC) AS rn
+			FROM channel_quality_history q
+			JOIN channels c ON q.channel_id = c.id
+			WHERE %s
+		)
+		SELECT channel_id, username, title, period_start, period_end, inclusion_rate, noise_rate, avg_importance, avg_relevance
+		FROM ranked
+		WHERE rn = 1
+		ORDER BY noise_rate DESC
+		LIMIT $%d
+	`, strings.Join(where, sqlAndJoin), len(args))
+
+	rows, err := db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get channel quality summary: %w", err)
+	}
+	defer rows.Close()
+
+	results := []ResearchChannelQualitySummary{}
+
+	for rows.Next() {
+		var (
+			channelID pgtype.UUID
+			username  pgtype.Text
+			title     pgtype.Text
+			start     pgtype.Date
+			end       pgtype.Date
+			inclusion pgtype.Float8
+			noise     pgtype.Float8
+			avgImp    pgtype.Float8
+			avgRel    pgtype.Float8
+		)
+
+		if err := rows.Scan(&channelID, &username, &title, &start, &end, &inclusion, &noise, &avgImp, &avgRel); err != nil {
+			return nil, fmt.Errorf("scan channel quality summary: %w", err)
+		}
+
+		results = append(results, ResearchChannelQualitySummary{
+			ChannelID:       fromUUID(channelID),
+			ChannelTitle:    title.String,
+			ChannelUsername: username.String,
+			PeriodStart:     nullableDate(start),
+			PeriodEnd:       nullableDate(end),
+			InclusionRate:   nullableFloat64(inclusion),
+			NoiseRate:       nullableFloat64(noise),
+			AvgImportance:   nullableFloat64(avgImp),
+			AvgRelevance:    nullableFloat64(avgRel),
+		})
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate channel quality summary: %w", rows.Err())
+	}
+
+	return results, nil
+}
+
+func (db *DB) GetChannelBias(ctx context.Context, channelID string, from, to *time.Time, limit int) ([]ResearchChannelBiasEntry, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	args := []any{toUUID(channelID)}
+	where := []string{"rm.channel_id = $1"}
+
+	if from != nil {
+		args = append(args, *from)
+		where = append(where, fmt.Sprintf(fmtDateFrom, len(args)))
+	}
+
+	if to != nil {
+		args = append(args, *to)
+		where = append(where, fmt.Sprintf(fmtDateTo, len(args)))
+	}
+
+	args = append(args, safeIntToInt32(limit))
+
+	query := fmt.Sprintf(`
+		WITH channel_items AS (
+			SELECT i.topic, COUNT(*) AS count
+			FROM items i
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			WHERE %s AND i.topic IS NOT NULL AND i.topic <> ''
+			GROUP BY i.topic
+		),
+		global_items AS (
+			SELECT i.topic, COUNT(*) AS count
+			FROM items i
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			WHERE i.topic IS NOT NULL AND i.topic <> '' %s
+			GROUP BY i.topic
+		),
+		totals AS (
+			SELECT
+				COALESCE((SELECT SUM(count) FROM channel_items), 0) AS channel_total,
+				COALESCE((SELECT SUM(count) FROM global_items), 0) AS global_total
+		)
+		SELECT ci.topic,
+		       ci.count,
+		       gi.count,
+		       (ci.count::float / NULLIF(t.channel_total, 0)) AS channel_share,
+		       (gi.count::float / NULLIF(t.global_total, 0)) AS global_share,
+		       (ci.count::float / NULLIF(t.channel_total, 0)) / NULLIF((gi.count::float / NULLIF(t.global_total, 0)), 0) AS index_ratio
+		FROM channel_items ci
+		JOIN global_items gi ON gi.topic = ci.topic
+		CROSS JOIN totals t
+		ORDER BY index_ratio DESC
+		LIMIT $%d
+	`, strings.Join(where, sqlAndJoin), buildGlobalTopicFilter(from, to), len(args))
+
+	rows, err := db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get channel bias: %w", err)
+	}
+	defer rows.Close()
+
+	results := []ResearchChannelBiasEntry{}
+
+	for rows.Next() {
+		var (
+			topic        pgtype.Text
+			channelCnt   int
+			globalCnt    int
+			channelShare pgtype.Float8
+			globalShare  pgtype.Float8
+			indexRatio   pgtype.Float8
+		)
+		if err := rows.Scan(&topic, &channelCnt, &globalCnt, &channelShare, &globalShare, &indexRatio); err != nil {
+			return nil, fmt.Errorf("scan channel bias: %w", err)
+		}
+
+		results = append(results, ResearchChannelBiasEntry{
+			Topic:        topic.String,
+			ChannelCount: channelCnt,
+			GlobalCount:  globalCnt,
+			ChannelShare: nullableFloat64(channelShare),
+			GlobalShare:  nullableFloat64(globalShare),
+			IndexRatio:   nullableFloat64(indexRatio),
+		})
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate channel bias: %w", rows.Err())
+	}
+
+	return results, nil
+}
+
+func buildGlobalTopicFilter(from, to *time.Time) string {
+	clauses := []string{}
+	argIndex := 2
+
+	if from != nil {
+		clauses = append(clauses, fmt.Sprintf("rm.tg_date >= $%d", argIndex))
+		argIndex++
+	}
+
+	if to != nil {
+		clauses = append(clauses, fmt.Sprintf("rm.tg_date <= $%d", argIndex))
+	}
+
+	if len(clauses) == 0 {
+		return ""
+	}
+
+	return " AND " + strings.Join(clauses, " AND ")
+}
+
+func (db *DB) GetLanguageCoverage(ctx context.Context, from, to *time.Time, limit int) ([]ResearchLanguageCoverageEntry, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	args := []any{}
+	where := []string{"i.language IS NOT NULL", "i.language <> ''"}
+
+	if from != nil {
+		args = append(args, *from)
+		where = append(where, fmt.Sprintf(fmtDateFrom, len(args)))
+	}
+
+	if to != nil {
+		args = append(args, *to)
+		where = append(where, fmt.Sprintf(fmtDateTo, len(args)))
+	}
+
+	args = append(args, safeIntToInt32(limit))
+
+	query := fmt.Sprintf(`
+		WITH cluster_lang AS (
+			SELECT ci.cluster_id, i.language AS lang, MIN(rm.tg_date) AS first_seen
+			FROM cluster_items ci
+			JOIN items i ON ci.item_id = i.id
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			WHERE %s
+			GROUP BY ci.cluster_id, i.language
+		),
+		pairs AS (
+			SELECT a.cluster_id,
+			       a.lang AS from_lang,
+			       b.lang AS to_lang,
+			       EXTRACT(epoch FROM (b.first_seen - a.first_seen)) / 3600 AS lag_hours
+			FROM cluster_lang a
+			JOIN cluster_lang b ON a.cluster_id = b.cluster_id AND a.lang <> b.lang
+			WHERE b.first_seen >= a.first_seen
+		)
+		SELECT from_lang, to_lang, COUNT(DISTINCT cluster_id), AVG(lag_hours)
+		FROM pairs
+		GROUP BY from_lang, to_lang
+		ORDER BY COUNT(DISTINCT cluster_id) DESC
+		LIMIT $%d
+	`, strings.Join(where, sqlAndJoin), len(args))
+
+	rows, err := db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get language coverage: %w", err)
+	}
+	defer rows.Close()
+
+	results := []ResearchLanguageCoverageEntry{}
+
+	for rows.Next() {
+		var (
+			fromLang pgtype.Text
+			toLang   pgtype.Text
+			count    int
+			avgLag   pgtype.Float8
+		)
+
+		if err := rows.Scan(&fromLang, &toLang, &count, &avgLag); err != nil {
+			return nil, fmt.Errorf("scan language coverage: %w", err)
+		}
+
+		entry := ResearchLanguageCoverageEntry{
+			FromLang:     fromLang.String,
+			ToLang:       toLang.String,
+			ClusterCount: count,
+		}
+		if avgLag.Valid {
+			entry.AvgLagHours = avgLag.Float64
+		}
+
+		results = append(results, entry)
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate language coverage: %w", rows.Err())
+	}
+
+	return results, nil
+}
+
+func (db *DB) GetTopicDrift(ctx context.Context, from, to *time.Time, limit int) ([]ResearchTopicDriftEntry, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	args := []any{}
+	where := []string{"i.topic IS NOT NULL", "i.topic <> ''"}
+
+	if from != nil {
+		args = append(args, *from)
+		where = append(where, fmt.Sprintf(fmtDateFrom, len(args)))
+	}
+
+	if to != nil {
+		args = append(args, *to)
+		where = append(where, fmt.Sprintf(fmtDateTo, len(args)))
+	}
+
+	args = append(args, safeIntToInt32(limit))
+
+	query := fmt.Sprintf(`
+		WITH cluster_topics AS (
+			SELECT ci.cluster_id,
+			       i.topic,
+			       rm.tg_date,
+			       ROW_NUMBER() OVER (PARTITION BY ci.cluster_id ORDER BY rm.tg_date ASC) AS rn_first,
+			       ROW_NUMBER() OVER (PARTITION BY ci.cluster_id ORDER BY rm.tg_date DESC) AS rn_last
+			FROM cluster_items ci
+			JOIN items i ON ci.item_id = i.id
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			WHERE %s
+		),
+		agg AS (
+			SELECT cluster_id,
+			       MAX(CASE WHEN rn_first = 1 THEN topic END) AS first_topic,
+			       MAX(CASE WHEN rn_last = 1 THEN topic END) AS last_topic,
+			       COUNT(DISTINCT topic) AS distinct_topics,
+			       MIN(tg_date) AS first_seen,
+			       MAX(tg_date) AS last_seen
+			FROM cluster_topics
+			GROUP BY cluster_id
+		)
+		SELECT cluster_id, first_topic, last_topic, distinct_topics, first_seen, last_seen
+		FROM agg
+		WHERE distinct_topics > 1 AND first_topic IS NOT NULL AND last_topic IS NOT NULL AND first_topic <> last_topic
+		ORDER BY distinct_topics DESC, last_seen DESC
+		LIMIT $%d
+	`, strings.Join(where, sqlAndJoin), len(args))
+
+	rows, err := db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get topic drift: %w", err)
+	}
+	defer rows.Close()
+
+	results := []ResearchTopicDriftEntry{}
+
+	for rows.Next() {
+		var (
+			clusterID pgtype.UUID
+			first     pgtype.Text
+			last      pgtype.Text
+			count     int
+			firstSeen pgtype.Timestamptz
+			lastSeen  pgtype.Timestamptz
+		)
+
+		if err := rows.Scan(&clusterID, &first, &last, &count, &firstSeen, &lastSeen); err != nil {
+			return nil, fmt.Errorf("scan topic drift: %w", err)
+		}
+
+		entry := ResearchTopicDriftEntry{
+			ClusterID:      fromUUID(clusterID),
+			FirstTopic:     first.String,
+			LastTopic:      last.String,
+			DistinctTopics: count,
+		}
+		if firstSeen.Valid {
+			entry.FirstSeenAt = firstSeen.Time
+		}
+
+		if lastSeen.Valid {
+			entry.LastSeenAt = lastSeen.Time
+		}
+
+		results = append(results, entry)
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate topic drift: %w", rows.Err())
+	}
+
+	return results, nil
 }
 
 func (db *DB) GetClaimsSummary(ctx context.Context) (ResearchClaimsSummary, error) {
@@ -1620,7 +2128,7 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 		       first_seen_at,
 		       origin_cluster_id,
 		       cluster_ids,
-		       '{}'::uuid[]
+		       COALESCE(contradicted_by, '{}'::uuid[])
 		FROM (
 			SELECT ec.claim_text AS claim_text,
 			       MIN(rm.tg_date) AS first_seen_at,
@@ -1633,7 +2141,8 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 			        WHERE ec2.claim_text = ec.claim_text
 			        ORDER BY rm2.tg_date ASC
 			        LIMIT 1) AS origin_cluster_id,
-			       ARRAY_AGG(DISTINCT ci.cluster_id) AS cluster_ids
+			       ARRAY_AGG(DISTINCT ci.cluster_id) AS cluster_ids,
+			       ARRAY_AGG(DISTINCT ie.evidence_id) FILTER (WHERE ie.is_contradiction) AS contradicted_by
 			FROM evidence_claims ec
 			JOIN item_evidence ie ON ie.evidence_id = ec.evidence_id
 			JOIN items i ON i.id = ie.item_id

@@ -28,24 +28,28 @@
     <main>
       <h1>{{.Title}}</h1>
       <p class="hint">Item: {{.ItemID}}</p>
-      {{if .Evidence}}
+      {{if .EvidenceRows}}
       <table>
         <thead>
           <tr>
             <th>Title</th>
             <th>Domain</th>
             <th>Agreement</th>
+            <th>Contradiction</th>
+            <th>Matched Claims</th>
             <th>Provider</th>
             <th>Matched At</th>
           </tr>
         </thead>
         <tbody>
-          {{range .Evidence}}
+          {{range .EvidenceRows}}
           <tr>
-            <td><a href="{{.Source.URL}}">{{truncate .Source.Title 140}}</a></td>
-            <td>{{.Source.Domain}}</td>
+            <td><a href="{{.URL}}">{{truncate .Title 140}}</a></td>
+            <td>{{.Domain}}</td>
             <td>{{formatFloat32 .AgreementScore}}</td>
-            <td>{{.Source.Provider}}</td>
+            <td>{{if .IsContradiction}}yes{{else}}no{{end}}</td>
+            <td>{{.MatchedClaimsCount}}</td>
+            <td>{{.Provider}}</td>
             <td>{{formatTime .MatchedAt}}</td>
           </tr>
           {{end}}

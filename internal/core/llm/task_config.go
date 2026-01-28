@@ -14,6 +14,7 @@ const (
 	TaskTypeRelevanceGate  TaskType = "relevance_gate"
 	TaskTypeCompress       TaskType = "compress"
 	TaskTypeImageGen       TaskType = "image_gen"
+	TaskTypeBulletExtract  TaskType = "bullet_extract"
 )
 
 // ProviderModel specifies a provider and model combination.
@@ -104,6 +105,15 @@ func DefaultTaskConfig() map[TaskType]TaskProviderChain {
 		TaskTypeImageGen: {
 			Default:   ProviderModel{Provider: ProviderOpenAI, Model: "gpt-image-1.5"},
 			Fallbacks: []ProviderModel{},
+		},
+
+		// BulletExtract: Fast model for extracting bullet points (Google → OpenAI → OpenRouter)
+		TaskTypeBulletExtract: {
+			Default: ProviderModel{Provider: ProviderGoogle, Model: "gemini-2.0-flash-lite"},
+			Fallbacks: []ProviderModel{
+				{Provider: ProviderOpenAI, Model: "gpt-5-nano"},
+				{Provider: ProviderOpenRouter, Model: "meta-llama/llama-3.1-8b-instruct"},
+			},
 		},
 	}
 }

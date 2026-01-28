@@ -51,6 +51,7 @@ type Provider interface {
 	GenerateClusterTopic(ctx context.Context, items []domain.Item, targetLanguage, model string) (string, error)
 	RelevanceGate(ctx context.Context, text, model, prompt string) (RelevanceGateResult, error)
 	CompressSummariesForCover(ctx context.Context, summaries []string, model string) ([]string, error)
+	ExtractBullets(ctx context.Context, input BulletExtractionInput, targetLanguage, model string) (BulletExtractionResult, error)
 
 	// Optional capability - not all providers support image generation
 	SupportsImageGeneration() bool

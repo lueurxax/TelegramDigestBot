@@ -240,6 +240,14 @@ func (r *Registry) CompressSummariesForCover(ctx context.Context, summaries []st
 	})
 }
 
+// ExtractBullets implements Client interface with task-aware fallback.
+// It extracts key bullet points from a message for bulletized digest output.
+func (r *Registry) ExtractBullets(ctx context.Context, input BulletExtractionInput, targetLanguage, model string) (BulletExtractionResult, error) {
+	return executeWithTaskFallback(r, TaskTypeBulletExtract, model, func(p Provider, m string) (BulletExtractionResult, error) {
+		return p.ExtractBullets(ctx, input, targetLanguage, m)
+	})
+}
+
 // GenerateDigestCover implements Client interface.
 // Uses task-aware fallback for image generation (OpenAI only).
 func (r *Registry) GenerateDigestCover(ctx context.Context, topics []string, narrative string) ([]byte, error) {

@@ -129,5 +129,19 @@ func (p *mockProvider) GenerateDigestCover(_ context.Context, _ []string, _ stri
 	return nil, nil
 }
 
+// ExtractBullets returns a single bullet with the input summary for mock provider.
+func (p *mockProvider) ExtractBullets(_ context.Context, input BulletExtractionInput, _, _ string) (BulletExtractionResult, error) {
+	return BulletExtractionResult{
+		Bullets: []ExtractedBullet{
+			{
+				Text:            input.Summary,
+				RelevanceScore:  fallbackBulletScore,
+				ImportanceScore: fallbackBulletScore,
+				Topic:           "",
+			},
+		},
+	}, nil
+}
+
 // Ensure mockProvider implements Provider interface.
 var _ Provider = (*mockProvider)(nil)

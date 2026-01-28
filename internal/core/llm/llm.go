@@ -40,6 +40,27 @@ type EvidenceSource struct {
 // ItemEvidence maps item IDs to their associated evidence sources.
 type ItemEvidence map[string][]EvidenceSource
 
+// BulletExtractionInput contains the input for bullet extraction.
+type BulletExtractionInput struct {
+	Text        string // Raw message text
+	PreviewText string // Preview/link content if available
+	Summary     string // Existing summary for context
+	MaxBullets  int    // Maximum number of bullets to extract (0 = default)
+}
+
+// ExtractedBullet represents a single bullet point extracted from a message.
+type ExtractedBullet struct {
+	Text            string  `json:"text"`             // The bullet text content
+	RelevanceScore  float32 `json:"relevance_score"`  // Relevance score (0-1)
+	ImportanceScore float32 `json:"importance_score"` // Importance score (0-1)
+	Topic           string  `json:"topic"`            // Topic classification
+}
+
+// BulletExtractionResult contains the result of bullet extraction.
+type BulletExtractionResult struct {
+	Bullets []ExtractedBullet `json:"bullets"`
+}
+
 type Client interface {
 	ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage string, model string, tone string) ([]BatchResult, error)
 	TranslateText(ctx context.Context, text string, targetLanguage string, model string) (string, error)
@@ -53,6 +74,8 @@ type Client interface {
 	CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error)
 	GenerateDigestCover(ctx context.Context, topics []string, narrative string) ([]byte, error)
 	GetProviderStatuses() []ProviderStatus
+	// Bullet extraction for bulletized digest output
+	ExtractBullets(ctx context.Context, input BulletExtractionInput, targetLanguage string, model string) (BulletExtractionResult, error)
 	// Budget tracking methods
 	SetBudgetLimit(limit int64)
 	GetBudgetStatus() (dailyTokens, dailyLimit int64, percentage float64)
