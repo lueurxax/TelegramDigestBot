@@ -25,6 +25,10 @@
       <a href="/research/claims">Claims</a>
       <a href="/research/channels/overlap">Channel Overlap</a>
       <a href="/research/topics/timeline?bucket=week">Topic Timeline</a>
+      <a href="/research/topics/drift">Topic Drift</a>
+      <a href="/research/languages/coverage">Cross-Language</a>
+      <a href="/research/channels/quality">Channel Quality</a>
+      <a href="/research/channels/bias?channel=@example">Channel Bias</a>
       <a href="/research/diff/weekly">Weekly Diff</a>
     </header>
     <main>
@@ -34,6 +38,7 @@
         <input type="text" name="channel" placeholder="@channel" value="{{.Params.Channel}}" />
         <input type="text" name="topic" placeholder="Topic" value="{{.Params.Topic}}" />
         <input type="text" name="lang" placeholder="Language" value="{{.Params.Lang}}" />
+        <input type="text" name="provider" placeholder="Provider" value="{{.Params.Provider}}" />
         <input type="text" name="from" placeholder="From (YYYY-MM-DD)" value="{{formatDatePtr .Params.From}}" />
         <input type="text" name="to" placeholder="To (YYYY-MM-DD)" value="{{formatDatePtr .Params.To}}" />
         <input type="number" name="limit" min="1" max="200" value="{{.Params.Limit}}" />
@@ -90,6 +95,7 @@
             <th>Title</th>
             <th>Domain</th>
             <th>Agreement</th>
+            <th>Provider</th>
             <th>Item</th>
           </tr>
         </thead>
@@ -99,6 +105,7 @@
             <td><a href="{{.URL}}">{{truncate .Title 120}}</a></td>
             <td>{{.Domain}}</td>
             <td>{{formatFloat32 .AgreementScore}}</td>
+            <td>{{.Provider}}</td>
             <td><a href="/research/item/{{.ItemID}}">{{truncate .ItemSummary 80}}</a></td>
           </tr>
           {{end}}

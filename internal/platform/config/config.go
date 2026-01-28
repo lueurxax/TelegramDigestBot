@@ -16,6 +16,11 @@ const hoursPerDay = 24
 type Config struct {
 	AppEnv                        string        `env:"APP_ENV" envDefault:"local"`
 	PostgresDSN                   string        `env:"POSTGRES_DSN,required"`
+	DBMaxConnections              int32         `env:"DB_MAX_CONNECTIONS" envDefault:"25"`
+	DBMinConnections              int32         `env:"DB_MIN_CONNECTIONS" envDefault:"5"`
+	DBMaxConnIdleTime             time.Duration `env:"DB_MAX_CONN_IDLE_TIME" envDefault:"30m"`
+	DBMaxConnLifetime             time.Duration `env:"DB_MAX_CONN_LIFETIME" envDefault:"1h"`
+	DBHealthCheckPeriod           time.Duration `env:"DB_HEALTH_CHECK_PERIOD" envDefault:"1m"`
 	BotToken                      string        `env:"BOT_TOKEN,required"`
 	TelegramBotUsername           string        `env:"TELEGRAM_BOT_USERNAME" envDefault:""`
 	AdminIDs                      []int64       `env:"ADMIN_IDS" envSeparator:","`

@@ -9,6 +9,8 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
 
+const errInsertChannelWeightHistory = "insert channel weight history: %w"
+
 // ChannelStatsEntry represents stats for a channel over a period
 type ChannelStatsEntry struct {
 	ChannelID        string
@@ -131,6 +133,10 @@ func (db *DB) UpdateChannelAutoWeight(ctx context.Context, channelID string, wei
 		ImportanceWeight: pgtype.Float4{Float32: weight, Valid: true},
 	}); err != nil {
 		return fmt.Errorf("update channel auto weight: %w", err)
+	}
+
+	if err := db.insertChannelWeightHistory(ctx, channelID, weight, true, false, "auto", nil); err != nil {
+		return fmt.Errorf(errInsertChannelWeightHistory, err)
 	}
 
 	return nil

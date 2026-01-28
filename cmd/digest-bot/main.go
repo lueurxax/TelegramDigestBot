@@ -33,7 +33,15 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	database, err := db.New(ctx, cfg.PostgresDSN)
+	poolOpts := db.PoolOptions{
+		MaxConns:          cfg.DBMaxConnections,
+		MinConns:          cfg.DBMinConnections,
+		MaxConnIdleTime:   cfg.DBMaxConnIdleTime,
+		MaxConnLifetime:   cfg.DBMaxConnLifetime,
+		HealthCheckPeriod: cfg.DBHealthCheckPeriod,
+	}
+
+	database, err := db.NewWithOptions(ctx, cfg.PostgresDSN, poolOpts)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to connect to database")
 	}

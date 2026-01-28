@@ -710,7 +710,7 @@ func TestBuildMessageTextPart(t *testing.T) {
 
 func TestNew_MockClient(t *testing.T) {
 	cfg := &config.Config{LLMAPIKey: ""}
-	client := New(context.Background(), cfg, nil, nil)
+	client := New(context.Background(), cfg, nil, nil, nil)
 
 	if client == nil {
 		t.Fatal("New() returned nil for empty API key")
@@ -730,7 +730,7 @@ func TestNew_MockClient(t *testing.T) {
 
 func TestNew_MockClientExplicit(t *testing.T) {
 	cfg := &config.Config{LLMAPIKey: testAPIKeyMock}
-	client := New(context.Background(), cfg, nil, nil)
+	client := New(context.Background(), cfg, nil, nil, nil)
 
 	if client == nil {
 		t.Fatal("New() returned nil for mock API key")
@@ -750,7 +750,7 @@ func TestNew_MockClientExplicit(t *testing.T) {
 
 func TestMockClient_ProcessBatch(t *testing.T) {
 	cfg := &config.Config{LLMAPIKey: ""}
-	client := New(context.Background(), cfg, nil, nil)
+	client := New(context.Background(), cfg, nil, nil, nil)
 
 	messages := []MessageInput{
 		{RawMessage: domain.RawMessage{Text: "Message 1", ChannelTitle: "Channel1"}},
@@ -783,7 +783,7 @@ func TestMockClient_ProcessBatch(t *testing.T) {
 
 func TestMockClient_TranslateText(t *testing.T) {
 	cfg := &config.Config{LLMAPIKey: ""}
-	client := New(context.Background(), cfg, nil, nil)
+	client := New(context.Background(), cfg, nil, nil, nil)
 
 	text := "Hello world"
 
@@ -799,7 +799,7 @@ func TestMockClient_TranslateText(t *testing.T) {
 
 func TestMockClient_GenerateNarrative(t *testing.T) {
 	cfg := &config.Config{LLMAPIKey: ""}
-	client := New(context.Background(), cfg, nil, nil)
+	client := New(context.Background(), cfg, nil, nil, nil)
 
 	items := []domain.Item{
 		{ID: "1", Summary: "Summary 1"},
@@ -826,7 +826,7 @@ func TestMockClient_GenerateNarrative(t *testing.T) {
 
 func TestMockClient_SummarizeCluster(t *testing.T) {
 	cfg := &config.Config{LLMAPIKey: ""}
-	client := New(context.Background(), cfg, nil, nil)
+	client := New(context.Background(), cfg, nil, nil, nil)
 
 	items := []domain.Item{
 		{ID: "1", Summary: "Summary 1"},
@@ -850,7 +850,7 @@ func TestMockClient_SummarizeCluster(t *testing.T) {
 
 func TestMockClient_GenerateClusterTopic(t *testing.T) {
 	cfg := &config.Config{LLMAPIKey: ""}
-	client := New(context.Background(), cfg, nil, nil)
+	client := New(context.Background(), cfg, nil, nil, nil)
 
 	t.Run("with items", func(t *testing.T) {
 		items := []domain.Item{
@@ -883,7 +883,7 @@ func TestMockClient_GenerateClusterTopic(t *testing.T) {
 
 func TestMockClient_RelevanceGate(t *testing.T) {
 	cfg := &config.Config{LLMAPIKey: ""}
-	client := New(context.Background(), cfg, nil, nil)
+	client := New(context.Background(), cfg, nil, nil, nil)
 
 	result, err := client.RelevanceGate(context.Background(), "some text", testModelGPT4, "custom prompt")
 	if err != nil {
@@ -901,7 +901,7 @@ func TestMockClient_RelevanceGate(t *testing.T) {
 
 func TestMockClient_CompressSummariesForCover(t *testing.T) {
 	cfg := &config.Config{LLMAPIKey: ""}
-	client := New(context.Background(), cfg, nil, nil)
+	client := New(context.Background(), cfg, nil, nil, nil)
 
 	summaries := []string{"Summary one", "Summary two", "Summary three"}
 
@@ -924,7 +924,7 @@ func TestMockClient_CompressSummariesForCover(t *testing.T) {
 
 func TestMockClient_GenerateDigestCover(t *testing.T) {
 	cfg := &config.Config{LLMAPIKey: ""}
-	client := New(context.Background(), cfg, nil, nil)
+	client := New(context.Background(), cfg, nil, nil, nil)
 
 	result, err := client.GenerateDigestCover(context.Background(), []string{"Tech", "News"}, "Some narrative")
 	// Mock provider doesn't support image generation, so Registry returns ErrNoImageProvider

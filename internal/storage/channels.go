@@ -343,10 +343,63 @@ func (db *DB) UpdateChannelWeight(ctx context.Context, identifier string, weight
 		return nil, fmt.Errorf("update channel weight: %w", err)
 	}
 
+	if channelID, err := db.lookupChannelID(ctx, identifier); err == nil {
+		updatedByValue := updatedBy
+		if err := db.insertChannelWeightHistory(ctx, channelID, weight, autoEnabled, override, reason, &updatedByValue); err != nil {
+			return nil, fmt.Errorf(errInsertChannelWeightHistory, err)
+		}
+	}
+
 	return &UpdateChannelWeightResult{
 		Username: row.Username.String,
 		Title:    row.Title.String,
 	}, nil
+}
+
+func (db *DB) lookupChannelID(ctx context.Context, identifier string) (string, error) {
+	row := db.Pool.QueryRow(ctx, `
+		SELECT id
+		FROM channels
+		WHERE username = $1 OR '@' || username = $1 OR tg_peer_id::text = $1 OR id::text = $1
+	`, identifier)
+
+	var channelID pgtype.UUID
+	if err := row.Scan(&channelID); err != nil {
+		return "", fmt.Errorf("lookup channel id: %w", err)
+	}
+
+	return fromUUID(channelID), nil
+}
+
+func (db *DB) insertChannelWeightHistory(
+	ctx context.Context,
+	channelID string,
+	weight float32,
+	autoEnabled bool,
+	override bool,
+	reason string,
+	updatedBy *int64,
+) error {
+	var updatedByVal pgtype.Int8
+	if updatedBy != nil {
+		updatedByVal = toInt8(*updatedBy)
+	}
+
+	_, err := db.Pool.Exec(ctx, `
+		INSERT INTO channel_weight_history (
+			channel_id,
+			importance_weight,
+			auto_weight_enabled,
+			weight_override,
+			reason,
+			updated_by
+		) VALUES ($1, $2, $3, $4, $5, $6)
+	`, toUUID(channelID), weight, autoEnabled, override, reason, updatedByVal)
+	if err != nil {
+		return fmt.Errorf(errInsertChannelWeightHistory, err)
+	}
+
+	return nil
 }
 
 func (db *DB) UpdateChannelRelevanceDelta(ctx context.Context, channelID string, delta float32, autoEnabled bool) error {

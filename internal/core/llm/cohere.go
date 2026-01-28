@@ -54,11 +54,12 @@ var (
 
 // cohereProvider implements the Provider interface for Cohere.
 type cohereProvider struct {
-	cfg         *config.Config
-	httpClient  *http.Client
-	logger      *zerolog.Logger
-	rateLimiter *rate.Limiter
-	promptStore PromptStore
+	cfg           *config.Config
+	httpClient    *http.Client
+	logger        *zerolog.Logger
+	rateLimiter   *rate.Limiter
+	promptStore   PromptStore
+	usageRecorder UsageRecorder
 }
 
 // cohereChatRequest represents the Cohere Chat API request.
@@ -103,7 +104,7 @@ type cohereErrorResponse struct {
 }
 
 // NewCohereProvider creates a new Cohere LLM provider.
-func NewCohereProvider(cfg *config.Config, store PromptStore, logger *zerolog.Logger) *cohereProvider {
+func NewCohereProvider(cfg *config.Config, store PromptStore, recorder UsageRecorder, logger *zerolog.Logger) *cohereProvider {
 	rateLimit := cfg.RateLimitRPS
 	if rateLimit == 0 {
 		rateLimit = 1
@@ -114,9 +115,10 @@ func NewCohereProvider(cfg *config.Config, store PromptStore, logger *zerolog.Lo
 		httpClient: &http.Client{
 			Timeout: cohereDefaultTimeout,
 		},
-		logger:      logger,
-		rateLimiter: rate.NewLimiter(rate.Limit(float64(rateLimit)), cohereRateLimiterBurst),
-		promptStore: store,
+		logger:        logger,
+		rateLimiter:   rate.NewLimiter(rate.Limit(float64(rateLimit)), cohereRateLimiterBurst),
+		promptStore:   store,
+		usageRecorder: recorder,
 	}
 }
 
@@ -257,11 +259,12 @@ func (p *cohereProvider) ProcessBatch(ctx context.Context, messages []MessageInp
 
 	result, err := p.callCohereAPI(ctx, promptContent, model, cohereMaxTokensDefault)
 	if err != nil {
-		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskSummarize, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskSummarize, 0, 0, false)
+
 		return nil, err
 	}
 
-	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskSummarize, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskSummarize, result.PromptTokens, result.CompletionTokens, true)
 
 	return p.parseProcessBatchResponse(result.Text, messages)
 }
@@ -310,11 +313,12 @@ func (p *cohereProvider) TranslateText(ctx context.Context, text, targetLanguage
 
 	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensShort)
 	if err != nil {
-		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTranslate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTranslate, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTranslate, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTranslate, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -329,11 +333,12 @@ func (p *cohereProvider) CompleteText(ctx context.Context, prompt, model string)
 
 	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
 	if err != nil {
-		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskComplete, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskComplete, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskComplete, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskComplete, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -353,11 +358,12 @@ func (p *cohereProvider) GenerateNarrative(ctx context.Context, items []domain.I
 
 	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
 	if err != nil {
-		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -377,11 +383,12 @@ func (p *cohereProvider) GenerateNarrativeWithEvidence(ctx context.Context, item
 
 	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensDefault)
 	if err != nil {
-		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskNarrative, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -401,11 +408,12 @@ func (p *cohereProvider) SummarizeCluster(ctx context.Context, items []domain.It
 
 	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensTiny)
 	if err != nil {
-		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -425,11 +433,12 @@ func (p *cohereProvider) SummarizeClusterWithEvidence(ctx context.Context, items
 
 	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensTiny)
 	if err != nil {
-		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -449,11 +458,12 @@ func (p *cohereProvider) GenerateClusterTopic(ctx context.Context, items []domai
 
 	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensNano)
 	if err != nil {
-		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTopic, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTopic, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTopic, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskTopic, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -471,12 +481,12 @@ func (p *cohereProvider) RelevanceGate(ctx context.Context, text, model, prompt 
 
 	apiResult, err := p.callCohereAPI(ctx, fullPrompt, model, cohereMaxTokensMicro)
 	if err != nil {
-		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskRelevanceGate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskRelevanceGate, 0, 0, false)
+
 		return RelevanceGateResult{}, err
 	}
 
-	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskRelevanceGate, apiResult.PromptTokens, apiResult.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
-
+	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskRelevanceGate, apiResult.PromptTokens, apiResult.CompletionTokens, true)
 	responseText := extractJSON(apiResult.Text)
 
 	var result RelevanceGateResult
@@ -508,12 +518,12 @@ func (p *cohereProvider) CompressSummariesForCover(ctx context.Context, summarie
 
 	result, err := p.callCohereAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, model, cohereMaxTokensTiny)
 	if err != nil {
-		RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCompress, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCompress, 0, 0, false)
+
 		return nil, err
 	}
 
-	RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCompress, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
-
+	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCompress, result.PromptTokens, result.CompletionTokens, true)
 	lines := strings.Split(strings.TrimSpace(result.Text), "\n")
 
 	var compressed []string

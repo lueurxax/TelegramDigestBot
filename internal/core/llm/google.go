@@ -63,12 +63,13 @@ func sanitizeUTF8(s string) string {
 // googleProvider implements the Provider interface for Google Gemini.
 // It supports automatic switching from free tier to paid tier on rate limit errors.
 type googleProvider struct {
-	cfg         *config.Config
-	clientFree  *genai.Client
-	clientPaid  *genai.Client
-	logger      *zerolog.Logger
-	rateLimiter *rate.Limiter
-	promptStore PromptStore
+	cfg           *config.Config
+	clientFree    *genai.Client
+	clientPaid    *genai.Client
+	logger        *zerolog.Logger
+	rateLimiter   *rate.Limiter
+	promptStore   PromptStore
+	usageRecorder UsageRecorder
 
 	mu         sync.RWMutex
 	usePaidKey bool
@@ -76,7 +77,7 @@ type googleProvider struct {
 
 // NewGoogleProvider creates a new Google Gemini LLM provider.
 // It supports automatic switching from free tier (GOOGLE_API_KEY) to paid tier (GOOGLE_API_KEY_PAID).
-func NewGoogleProvider(ctx context.Context, cfg *config.Config, store PromptStore, logger *zerolog.Logger) (*googleProvider, error) {
+func NewGoogleProvider(ctx context.Context, cfg *config.Config, store PromptStore, recorder UsageRecorder, logger *zerolog.Logger) (*googleProvider, error) {
 	// Create free tier client (required)
 	clientFree, err := genai.NewClient(ctx, option.WithAPIKey(cfg.GoogleAPIKey))
 	if err != nil {
@@ -106,13 +107,14 @@ func NewGoogleProvider(ctx context.Context, cfg *config.Config, store PromptStor
 	}
 
 	return &googleProvider{
-		cfg:         cfg,
-		clientFree:  clientFree,
-		clientPaid:  clientPaid,
-		logger:      logger,
-		rateLimiter: rate.NewLimiter(rate.Limit(float64(rateLimit)), googleRateLimiterBurst),
-		promptStore: store,
-		usePaidKey:  false,
+		cfg:           cfg,
+		clientFree:    clientFree,
+		clientPaid:    clientPaid,
+		logger:        logger,
+		rateLimiter:   rate.NewLimiter(rate.Limit(float64(rateLimit)), googleRateLimiterBurst),
+		promptStore:   store,
+		usageRecorder: recorder,
+		usePaidKey:    false,
 	}, nil
 }
 
@@ -276,13 +278,13 @@ func (p *googleProvider) ProcessBatch(ctx context.Context, messages []MessageInp
 
 	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(content.String())))
 	if err != nil {
-		RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskSummarize, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskSummarize, 0, 0, false)
 
 		return nil, fmt.Errorf(errGoogleGenAICompletion, err)
 	}
 
 	promptTokens, completionTokens := extractGoogleTokenUsage(resp)
-	RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskSummarize, promptTokens, completionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskSummarize, promptTokens, completionTokens, true)
 
 	responseText := extractGoogleResponseText(resp)
 	if responseText == "" {
@@ -338,19 +340,23 @@ func (p *googleProvider) TranslateText(ctx context.Context, text, targetLanguage
 
 	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
-		RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskTranslate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskTranslate, 0, 0, false)
 
 		return "", fmt.Errorf("google genai translation: %w", err)
 	}
 
 	promptTokens, completionTokens := extractGoogleTokenUsage(resp)
-	RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskTranslate, promptTokens, completionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskTranslate, promptTokens, completionTokens, true)
 
 	return strings.TrimSpace(extractGoogleResponseText(resp)), nil
 }
 
 // CompleteText implements Provider interface.
 func (p *googleProvider) CompleteText(ctx context.Context, prompt, model string) (string, error) {
+	return p.generateText(ctx, model, TaskComplete, prompt, "google genai completion")
+}
+
+func (p *googleProvider) generateText(ctx context.Context, model, task, prompt, errContext string) (string, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
 		return "", fmt.Errorf(errRateLimiterSimple, err)
 	}
@@ -359,13 +365,13 @@ func (p *googleProvider) CompleteText(ctx context.Context, prompt, model string)
 
 	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
-		RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskComplete, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, task, 0, 0, false)
 
-		return "", fmt.Errorf("google genai completion: %w", err)
+		return "", fmt.Errorf(errFmtContextWrap, errContext, err)
 	}
 
 	promptTokens, completionTokens := extractGoogleTokenUsage(resp)
-	RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskComplete, promptTokens, completionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, task, promptTokens, completionTokens, true)
 
 	return strings.TrimSpace(extractGoogleResponseText(resp)), nil
 }
@@ -376,24 +382,9 @@ func (p *googleProvider) GenerateNarrative(ctx context.Context, items []domain.I
 		return "", nil
 	}
 
-	if err := p.rateLimiter.Wait(ctx); err != nil {
-		return "", fmt.Errorf(errRateLimiterSimple, err)
-	}
-
 	prompt := buildNarrativePrompt(items, nil, targetLanguage, tone, defaultNarrativePrompt)
-	resolvedModel := p.resolveModel(model)
 
-	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
-	if err != nil {
-		RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
-
-		return "", fmt.Errorf("google genai narrative: %w", err)
-	}
-
-	promptTokens, completionTokens := extractGoogleTokenUsage(resp)
-	RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskNarrative, promptTokens, completionTokens, true) //nolint:contextcheck // fire-and-forget
-
-	return strings.TrimSpace(extractGoogleResponseText(resp)), nil
+	return p.generateText(ctx, model, TaskNarrative, prompt, "google genai narrative")
 }
 
 // GenerateNarrativeWithEvidence implements Provider interface.
@@ -402,24 +393,9 @@ func (p *googleProvider) GenerateNarrativeWithEvidence(ctx context.Context, item
 		return "", nil
 	}
 
-	if err := p.rateLimiter.Wait(ctx); err != nil {
-		return "", fmt.Errorf(errRateLimiterSimple, err)
-	}
-
 	prompt := buildNarrativePrompt(items, evidence, targetLanguage, tone, defaultNarrativePrompt)
-	resolvedModel := p.resolveModel(model)
 
-	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
-	if err != nil {
-		RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
-
-		return "", fmt.Errorf("google genai narrative with evidence: %w", err)
-	}
-
-	promptTokens, completionTokens := extractGoogleTokenUsage(resp)
-	RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskNarrative, promptTokens, completionTokens, true) //nolint:contextcheck // fire-and-forget
-
-	return strings.TrimSpace(extractGoogleResponseText(resp)), nil
+	return p.generateText(ctx, model, TaskNarrative, prompt, "google genai narrative with evidence")
 }
 
 // SummarizeCluster implements Provider interface.
@@ -428,24 +404,9 @@ func (p *googleProvider) SummarizeCluster(ctx context.Context, items []domain.It
 		return "", nil
 	}
 
-	if err := p.rateLimiter.Wait(ctx); err != nil {
-		return "", fmt.Errorf(errRateLimiterSimple, err)
-	}
-
 	prompt := buildClusterSummaryPrompt(items, nil, targetLanguage, tone, defaultClusterSummaryPrompt)
-	resolvedModel := p.resolveModel(model)
 
-	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
-	if err != nil {
-		RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
-
-		return "", fmt.Errorf("google genai cluster summary: %w", err)
-	}
-
-	promptTokens, completionTokens := extractGoogleTokenUsage(resp)
-	RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskCluster, promptTokens, completionTokens, true) //nolint:contextcheck // fire-and-forget
-
-	return strings.TrimSpace(extractGoogleResponseText(resp)), nil
+	return p.generateText(ctx, model, TaskCluster, prompt, "google genai cluster summary")
 }
 
 // SummarizeClusterWithEvidence implements Provider interface.
@@ -454,24 +415,9 @@ func (p *googleProvider) SummarizeClusterWithEvidence(ctx context.Context, items
 		return "", nil
 	}
 
-	if err := p.rateLimiter.Wait(ctx); err != nil {
-		return "", fmt.Errorf(errRateLimiterSimple, err)
-	}
-
 	prompt := buildClusterSummaryPrompt(items, evidence, targetLanguage, tone, defaultClusterSummaryPrompt)
-	resolvedModel := p.resolveModel(model)
 
-	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
-	if err != nil {
-		RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
-
-		return "", fmt.Errorf("google genai cluster summary with evidence: %w", err)
-	}
-
-	promptTokens, completionTokens := extractGoogleTokenUsage(resp)
-	RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskCluster, promptTokens, completionTokens, true) //nolint:contextcheck // fire-and-forget
-
-	return strings.TrimSpace(extractGoogleResponseText(resp)), nil
+	return p.generateText(ctx, model, TaskCluster, prompt, "google genai cluster summary with evidence")
 }
 
 // GenerateClusterTopic implements Provider interface.
@@ -489,13 +435,13 @@ func (p *googleProvider) GenerateClusterTopic(ctx context.Context, items []domai
 
 	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))
 	if err != nil {
-		RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskTopic, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskTopic, 0, 0, false)
 
 		return "", fmt.Errorf("google genai cluster topic: %w", err)
 	}
 
 	promptTokens, completionTokens := extractGoogleTokenUsage(resp)
-	RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskTopic, promptTokens, completionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskTopic, promptTokens, completionTokens, true)
 
 	return strings.TrimSpace(extractGoogleResponseText(resp)), nil
 }
@@ -511,13 +457,13 @@ func (p *googleProvider) RelevanceGate(ctx context.Context, text, model, prompt 
 
 	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(fullPrompt)))
 	if err != nil {
-		RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskRelevanceGate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskRelevanceGate, 0, 0, false)
 
 		return RelevanceGateResult{}, fmt.Errorf("google genai relevance gate: %w", err)
 	}
 
 	promptTokens, completionTokens := extractGoogleTokenUsage(resp)
-	RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskRelevanceGate, promptTokens, completionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskRelevanceGate, promptTokens, completionTokens, true)
 
 	responseText := extractJSON(extractGoogleResponseText(resp))
 
@@ -551,13 +497,13 @@ func (p *googleProvider) CompressSummariesForCover(ctx context.Context, summarie
 
 	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(compressSummariesSystemPrompt+"\n\n"+prompt)))
 	if err != nil {
-		RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskCompress, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskCompress, 0, 0, false)
 
 		return nil, fmt.Errorf("google genai compress summaries: %w", err)
 	}
 
 	promptTokens, completionTokens := extractGoogleTokenUsage(resp)
-	RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskCompress, promptTokens, completionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskCompress, promptTokens, completionTokens, true)
 
 	responseText := extractGoogleResponseText(resp)
 	lines := strings.Split(strings.TrimSpace(responseText), "\n")

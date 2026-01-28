@@ -30,13 +30,14 @@ type Registry struct {
 	taskConfig      map[TaskType]TaskProviderChain
 	modelOverrides  map[TaskType]string // Per-task model overrides from config
 	budgetTracker   *BudgetTracker
+	usageRecorder   UsageRecorder
 	logger          *zerolog.Logger
 }
 
 // NewRegistry creates a new provider registry.
 func NewRegistry(logger *zerolog.Logger) *Registry {
 	bt := NewBudgetTracker(0, logger) // 0 means no limit
-	SetGlobalBudgetTracker(bt)
+	recorder := NewUsageRecorder(bt, nil, logger)
 
 	return &Registry{
 		providers:       make(map[ProviderName]Provider),
@@ -45,8 +46,21 @@ func NewRegistry(logger *zerolog.Logger) *Registry {
 		taskConfig:      DefaultTaskConfig(),
 		modelOverrides:  make(map[TaskType]string),
 		budgetTracker:   bt,
+		usageRecorder:   recorder,
 		logger:          logger,
 	}
+}
+
+// UsageRecorder returns the usage recorder for passing to providers.
+func (r *Registry) UsageRecorder() UsageRecorder {
+	return r.usageRecorder
+}
+
+// SetUsageStore sets the usage store for persisting token usage to the database.
+// This should be called after the registry is created but before providers are used.
+func (r *Registry) SetUsageStore(store UsageStore) {
+	// Create a new recorder with the store
+	r.usageRecorder = NewUsageRecorder(r.budgetTracker, store, r.logger)
 }
 
 // Register adds a provider to the registry.
@@ -528,93 +542,6 @@ func (r *Registry) GetProviderStatuses() []ProviderStatus {
 	}
 
 	return statuses
-}
-
-// globalBudgetTracker holds a reference to the active budget tracker for token recording.
-//
-//nolint:gochecknoglobals
-var globalBudgetTracker *BudgetTracker
-
-// globalUsageStore holds a reference to the usage store for persisting token usage.
-//
-//nolint:gochecknoglobals
-var globalUsageStore UsageStore
-
-// SetGlobalBudgetTracker sets the global budget tracker reference.
-func SetGlobalBudgetTracker(bt *BudgetTracker) {
-	globalBudgetTracker = bt
-}
-
-// SetGlobalUsageStore sets the global usage store reference.
-func SetGlobalUsageStore(store UsageStore) {
-	globalUsageStore = store
-}
-
-// RecordTokenUsage records token usage metrics for an LLM request.
-func RecordTokenUsage(provider, model, task string, promptTokens, completionTokens int, success bool) {
-	recordTokenMetrics(provider, model, task, promptTokens, completionTokens, success)
-
-	cost := estimateCost(provider, model, promptTokens, completionTokens)
-	recordCostMetric(provider, model, task, cost, success)
-	recordToBudgetTracker(promptTokens, completionTokens, success)
-	persistUsageToDatabase(provider, model, task, promptTokens, completionTokens, cost, success)
-}
-
-// recordTokenMetrics records Prometheus metrics for token usage.
-func recordTokenMetrics(provider, model, task string, promptTokens, completionTokens int, success bool) {
-	status := StatusSuccess
-	if !success {
-		status = StatusError
-	}
-
-	observability.LLMRequests.WithLabelValues(provider, model, task, status).Inc()
-
-	if promptTokens > 0 {
-		observability.LLMTokensPrompt.WithLabelValues(provider, model, task).Add(float64(promptTokens))
-	}
-
-	if completionTokens > 0 {
-		observability.LLMTokensCompletion.WithLabelValues(provider, model, task).Add(float64(completionTokens))
-	}
-}
-
-// recordCostMetric records the estimated cost metric in millicents.
-func recordCostMetric(provider, model, task string, cost float64, success bool) {
-	if cost > 0 && success {
-		costMillicents := cost * usdToMillicents
-		observability.LLMEstimatedCost.WithLabelValues(provider, model, task).Add(costMillicents)
-	}
-}
-
-// recordToBudgetTracker records token usage to the budget tracker.
-func recordToBudgetTracker(promptTokens, completionTokens int, success bool) {
-	if globalBudgetTracker == nil || !success {
-		return
-	}
-
-	totalTokens := promptTokens + completionTokens
-	if totalTokens > 0 {
-		globalBudgetTracker.RecordTokens(totalTokens)
-	}
-}
-
-// persistUsageToDatabase stores usage in the database asynchronously.
-func persistUsageToDatabase(provider, model, task string, promptTokens, completionTokens int, cost float64, success bool) {
-	if globalUsageStore == nil || !success {
-		return
-	}
-
-	// Use background context since this is fire-and-forget.
-	// The context is intentionally not passed from callers because:
-	// 1. RecordTokenUsage is called synchronously and should not block on DB writes
-	// 2. Usage storage is best-effort and shouldn't fail the LLM request if it fails
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), usageStorageTimeout)
-		defer cancel()
-
-		//nolint:errcheck,gosec // fire-and-forget: errors are intentionally ignored
-		globalUsageStore.IncrementLLMUsage(ctx, provider, model, task, promptTokens, completionTokens, cost)
-	}()
 }
 
 // SetBudgetLimit sets the daily token budget limit.

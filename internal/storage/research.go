@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -44,22 +45,34 @@ const (
 	bucketDay   = "day"
 	bucketMonth = "month"
 
-	defaultSearchLimit  = 50
-	maxSearchLimit      = 200
-	recencyHalfLifeDays = 14.0
-	maxOverlapChannels  = 200
+	defaultSearchLimit     = 50
+	maxSearchLimit         = 200
+	defaultTopicDriftLimit = 100
+	recencyHalfLifeDays    = 14.0
+	maxOverlapChannels     = 200
+	topicDriftMinJaccard   = 0.6
+	topicDriftMinEmbedding = 0.6
+	langLinkMinSimilarity  = 0.8
+	langLinkMaxLagSeconds  = 604800
+	originTopicLimit       = 5
+
+	// Slice preallocation capacity for timeline queries.
+	timelineArgsCapacity = 2
 
 	// SQL join constant.
 	sqlAndJoin = " AND "
 
 	// SQL format patterns for building dynamic queries.
 	fmtScoreExpr       = "(0.5 * i.importance_score + 0.5 * exp(-extract(epoch from (now() - rm.tg_date)) / 86400 / %.1f))"
-	fmtTextIlike       = "(i.summary ILIKE $%d OR rm.text ILIKE $%d)"
+	fmtTextIlike       = "(i.summary ILIKE $%d OR rm.text ILIKE $%d OR c.title ILIKE $%d OR c.username ILIKE $%d)"
+	fmtSearchTS        = "(i.search_vector @@ plainto_tsquery('simple', $%d) OR c.title ILIKE $%d OR c.username ILIKE $%d)"
 	fmtEvidenceIlike   = "(es.title ILIKE $%d OR es.description ILIKE $%d)"
 	fmtDateFrom        = "rm.tg_date >= $%d"
 	fmtDateTo          = "rm.tg_date <= $%d"
 	fmtEvidenceDateGte = "es.crawled_at >= $%d"
 	fmtEvidenceDateLte = "es.crawled_at <= $%d"
+	fmtCfaDateFrom     = "cfa.first_seen_at >= $%d"
+	fmtCfaDateTo       = "cfa.first_seen_at <= $%d"
 
 	// Error message format.
 	errFmtIterateClaims = "iterate claims: %w"
@@ -133,6 +146,7 @@ type ResearchSearchParams struct {
 	Channel      string
 	Topic        string
 	Lang         string
+	Provider     string
 	Limit        int
 	Offset       int
 	IncludeCount bool
@@ -256,7 +270,16 @@ func buildItemSearchQuery(params ResearchSearchParams, where []string, args []an
 		rankExpr := fmt.Sprintf("ts_rank_cd(i.search_vector, plainto_tsquery('simple', $%d))", tsQueryIdx)
 		scoreExpr := fmt.Sprintf("(0.5 * %s + 0.3 * i.importance_score + 0.2 * exp(-extract(epoch from (now() - rm.tg_date)) / 86400 / %.1f))", rankExpr, recencyHalfLifeDays)
 
-		where = append(where, fmt.Sprintf("i.search_vector @@ plainto_tsquery('simple', $%d)", tsQueryIdx))
+		pattern := "%" + SanitizeUTF8(params.Query) + "%"
+		args = append(args, pattern)
+		patternIdx := len(args)
+
+		where = append(where, fmt.Sprintf(
+			fmtSearchTS,
+			tsQueryIdx,
+			patternIdx,
+			patternIdx,
+		))
 
 		return fmt.Sprintf(sqlSearchItems, scoreExpr, strings.Join(where, sqlAndJoin), limit, params.Offset), args
 	}
@@ -266,7 +289,7 @@ func buildItemSearchQuery(params ResearchSearchParams, where []string, args []an
 		args = append(args, pattern)
 		patternIdx := len(args)
 		scoreExpr := fmt.Sprintf(fmtScoreExpr, recencyHalfLifeDays)
-		where = append(where, fmt.Sprintf(fmtTextIlike, patternIdx, patternIdx))
+		where = append(where, fmt.Sprintf(fmtTextIlike, patternIdx, patternIdx, patternIdx, patternIdx))
 
 		return fmt.Sprintf(sqlSearchItems, scoreExpr, strings.Join(where, sqlAndJoin), limit, params.Offset), args
 	}
@@ -470,8 +493,26 @@ func (db *DB) SearchResearchEvidence(ctx context.Context, params ResearchSearchP
 
 func (db *DB) countResearchItems(ctx context.Context, params ResearchSearchParams, channel string) (int, error) {
 	where, args := buildResearchItemFilters(params, channel)
-	where, args = applyResearchQueryFilter(params.Query, where, args,
-		"i.search_vector", "(i.summary ILIKE $%d OR rm.text ILIKE $%d)")
+
+	if params.Query != "" && len([]rune(params.Query)) >= 3 {
+		args = append(args, params.Query)
+		tsQueryIdx := len(args)
+		pattern := "%" + SanitizeUTF8(params.Query) + "%"
+		args = append(args, pattern)
+		patternIdx := len(args)
+
+		where = append(where, fmt.Sprintf(
+			fmtSearchTS,
+			tsQueryIdx,
+			patternIdx,
+			patternIdx,
+		))
+	} else if params.Query != "" {
+		pattern := "%" + SanitizeUTF8(params.Query) + "%"
+		args = append(args, pattern)
+		patternIdx := len(args)
+		where = append(where, fmt.Sprintf(fmtTextIlike, patternIdx, patternIdx, patternIdx, patternIdx))
+	}
 
 	return db.executeCountQuery(ctx, `
 		SELECT COUNT(*)
@@ -529,11 +570,32 @@ func (db *DB) executeCountQuery(ctx context.Context, queryTemplate string, where
 }
 
 func buildResearchItemFilters(params ResearchSearchParams, channel string) ([]string, []any) {
-	return buildResearchCommonFilters(params, channel)
+	where, args := buildResearchCommonFilters(params, channel)
+
+	if params.Provider != "" {
+		args = append(args, params.Provider)
+		where = append(where, fmt.Sprintf(`
+			EXISTS (
+				SELECT 1
+				FROM item_evidence ie
+				JOIN evidence_sources es ON es.id = ie.evidence_id
+				WHERE ie.item_id = i.id AND es.provider = $%d
+			)
+		`, len(args)))
+	}
+
+	return where, args
 }
 
 func buildResearchEvidenceFilters(params ResearchSearchParams, channel string) ([]string, []any) {
-	return buildResearchCommonFilters(params, channel)
+	where, args := buildResearchCommonFilters(params, channel)
+
+	if params.Provider != "" {
+		args = append(args, params.Provider)
+		where = append(where, fmt.Sprintf("es.provider = $%d", len(args)))
+	}
+
+	return where, args
 }
 
 // buildResearchCommonFilters builds shared filter conditions for research queries.
@@ -842,12 +904,16 @@ func (db *DB) getResearchClusterChannels(ctx context.Context, clusterUUID pgtype
 
 // ResearchChannelOverlapEdge represents overlap metrics between channels.
 type ResearchChannelOverlapEdge struct {
-	ChannelA string
-	ChannelB string
-	Shared   int
-	TotalA   int
-	TotalB   int
-	Jaccard  float64
+	ChannelA         string
+	ChannelB         string
+	ChannelATitle    string
+	ChannelAUsername string
+	ChannelBTitle    string
+	ChannelBUsername string
+	Shared           int
+	TotalA           int
+	TotalB           int
+	Jaccard          float64
 }
 
 type ResearchChannelOverlapSummary struct {
@@ -857,15 +923,31 @@ type ResearchChannelOverlapSummary struct {
 }
 
 type ResearchChannelQualitySummary struct {
-	ChannelID       string
-	ChannelTitle    string
-	ChannelUsername string
-	PeriodStart     time.Time
-	PeriodEnd       time.Time
-	InclusionRate   float64
-	NoiseRate       float64
-	AvgImportance   float64
-	AvgRelevance    float64
+	ChannelID         string
+	ChannelTitle      string
+	ChannelUsername   string
+	PeriodStart       time.Time
+	PeriodEnd         time.Time
+	InclusionRate     float64
+	NoiseRate         float64
+	AvgImportance     float64
+	AvgRelevance      float64
+	DigestShare       float64
+	ItemsDigested     int
+	RelevanceStddev   float64
+	ImportanceWeight  float64
+	AutoWeightEnabled bool
+	WeightOverride    bool
+	WeightUpdatedAt   time.Time
+}
+
+type ResearchChannelWeightEntry struct {
+	ImportanceWeight  float64
+	AutoWeightEnabled bool
+	WeightOverride    bool
+	Reason            string
+	UpdatedBy         int64
+	UpdatedAt         time.Time
 }
 
 type ResearchChannelBiasEntry struct {
@@ -925,8 +1007,19 @@ func (db *DB) GetChannelOverlap(ctx context.Context, from, to *time.Time, limit 
 				ORDER BY total_clusters DESC
 				LIMIT $1
 			)
-			SELECT channel_a, channel_b, shared_clusters, total_a, total_b, jaccard
+			SELECT channel_a,
+			       channel_b,
+			       shared_clusters,
+			       total_a,
+			       total_b,
+			       jaccard,
+			       ca.title,
+			       ca.username,
+			       cb.title,
+			       cb.username
 			FROM mv_channel_overlap
+			JOIN channels ca ON ca.id = channel_a
+			JOIN channels cb ON cb.id = channel_b
 			WHERE channel_a IN (SELECT channel_id FROM top_channels)
 			  AND channel_b IN (SELECT channel_id FROM top_channels)
 			ORDER BY jaccard DESC
@@ -974,10 +1067,16 @@ func (db *DB) GetChannelOverlap(ctx context.Context, from, to *time.Time, limit 
 			       s.shared_clusters,
 			       c1.total_clusters AS total_a,
 			       c2.total_clusters AS total_b,
-			       (s.shared_clusters::double precision / (c1.total_clusters + c2.total_clusters - s.shared_clusters)) AS jaccard
+			       (s.shared_clusters::double precision / (c1.total_clusters + c2.total_clusters - s.shared_clusters)) AS jaccard,
+			       ca.title,
+			       ca.username,
+			       cb.title,
+			       cb.username
 			FROM shared s
 			JOIN cluster_counts c1 ON s.channel_a = c1.channel_id
 			JOIN cluster_counts c2 ON s.channel_b = c2.channel_id
+			JOIN channels ca ON ca.id = s.channel_a
+			JOIN channels cb ON cb.id = s.channel_b
 			ORDER BY jaccard DESC
 			LIMIT $%d
 		`, strings.Join(where, sqlAndJoin), len(args))
@@ -1000,18 +1099,26 @@ func (db *DB) GetChannelOverlap(ctx context.Context, from, to *time.Time, limit 
 			totalA   int
 			totalB   int
 			jaccard  float64
+			titleA   pgtype.Text
+			userA    pgtype.Text
+			titleB   pgtype.Text
+			userB    pgtype.Text
 		)
-		if err := rows.Scan(&channelA, &channelB, &shared, &totalA, &totalB, &jaccard); err != nil {
+		if err := rows.Scan(&channelA, &channelB, &shared, &totalA, &totalB, &jaccard, &titleA, &userA, &titleB, &userB); err != nil {
 			return nil, fmt.Errorf("scan channel overlap: %w", err)
 		}
 
 		results = append(results, ResearchChannelOverlapEdge{
-			ChannelA: fromUUID(channelA),
-			ChannelB: fromUUID(channelB),
-			Shared:   shared,
-			TotalA:   totalA,
-			TotalB:   totalB,
-			Jaccard:  jaccard,
+			ChannelA:         fromUUID(channelA),
+			ChannelB:         fromUUID(channelB),
+			ChannelATitle:    titleA.String,
+			ChannelAUsername: userA.String,
+			ChannelBTitle:    titleB.String,
+			ChannelBUsername: userB.String,
+			Shared:           shared,
+			TotalA:           totalA,
+			TotalB:           totalB,
+			Jaccard:          jaccard,
 		})
 	}
 
@@ -1065,16 +1172,24 @@ func (db *DB) GetChannelQualitySummary(ctx context.Context, from, to *time.Time,
 	}
 
 	args := []any{}
-	where := []string{"1=1"}
+	qualityWhere := []string{"1=1"}
+	statsWhere := []string{"1=1"}
+	varianceWhere := []string{"1=1"}
 
 	if from != nil {
 		args = append(args, *from)
-		where = append(where, fmt.Sprintf("q.period_start >= $%d", len(args)))
+		argIdx := len(args)
+		qualityWhere = append(qualityWhere, fmt.Sprintf("q.period_start >= $%d", argIdx))
+		statsWhere = append(statsWhere, fmt.Sprintf("cs.period_start >= $%d", argIdx))
+		varianceWhere = append(varianceWhere, fmt.Sprintf(fmtDateFrom, argIdx))
 	}
 
 	if to != nil {
 		args = append(args, *to)
-		where = append(where, fmt.Sprintf("q.period_end <= $%d", len(args)))
+		argIdx := len(args)
+		qualityWhere = append(qualityWhere, fmt.Sprintf("q.period_end <= $%d", argIdx))
+		statsWhere = append(statsWhere, fmt.Sprintf("cs.period_end <= $%d", argIdx))
+		varianceWhere = append(varianceWhere, fmt.Sprintf(fmtDateTo, argIdx))
 	}
 
 	args = append(args, safeIntToInt32(limit))
@@ -1090,17 +1205,62 @@ func (db *DB) GetChannelQualitySummary(ctx context.Context, from, to *time.Time,
 			       q.avg_relevance,
 			       c.username,
 			       c.title,
+			       c.importance_weight,
+			       c.auto_weight_enabled,
+			       c.weight_override,
+			       c.weight_updated_at,
 			       ROW_NUMBER() OVER (PARTITION BY q.channel_id ORDER BY q.period_end DESC) AS rn
 			FROM channel_quality_history q
 			JOIN channels c ON q.channel_id = c.id
 			WHERE %s
+		),
+		stats_window AS (
+			SELECT cs.channel_id,
+			       SUM(cs.items_digested)::bigint AS items_digested
+			FROM channel_stats cs
+			WHERE %s
+			GROUP BY cs.channel_id
+		),
+		stats_totals AS (
+			SELECT COALESCE(SUM(items_digested), 0)::bigint AS total_digested
+			FROM stats_window
+		),
+		variance_window AS (
+			SELECT rm.channel_id,
+			       stddev_samp(i.relevance_score) AS relevance_stddev
+			FROM items i
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			WHERE i.status IN ('ready', 'digested') AND %s
+			GROUP BY rm.channel_id
 		)
-		SELECT channel_id, username, title, period_start, period_end, inclusion_rate, noise_rate, avg_importance, avg_relevance
+		SELECT ranked.channel_id,
+		       ranked.username,
+		       ranked.title,
+		       ranked.period_start,
+		       ranked.period_end,
+		       ranked.inclusion_rate,
+		       ranked.noise_rate,
+		       ranked.avg_importance,
+		       ranked.avg_relevance,
+		       COALESCE(stats_window.items_digested, 0)::bigint AS items_digested,
+		       CASE
+			       WHEN stats_totals.total_digested > 0
+			       THEN stats_window.items_digested::double precision / stats_totals.total_digested
+			       ELSE 0
+		       END AS digest_share,
+		       COALESCE(variance_window.relevance_stddev, 0) AS relevance_stddev,
+		       COALESCE(ranked.importance_weight, 1) AS importance_weight,
+		       ranked.auto_weight_enabled,
+		       ranked.weight_override,
+		       ranked.weight_updated_at
 		FROM ranked
+		LEFT JOIN stats_window ON stats_window.channel_id = ranked.channel_id
+		CROSS JOIN stats_totals
+		LEFT JOIN variance_window ON variance_window.channel_id = ranked.channel_id
 		WHERE rn = 1
 		ORDER BY noise_rate DESC
 		LIMIT $%d
-	`, strings.Join(where, sqlAndJoin), len(args))
+	`, strings.Join(qualityWhere, sqlAndJoin), strings.Join(statsWhere, sqlAndJoin), strings.Join(varianceWhere, sqlAndJoin), len(args))
 
 	rows, err := db.Pool.Query(ctx, query, args...)
 	if err != nil {
@@ -1112,32 +1272,68 @@ func (db *DB) GetChannelQualitySummary(ctx context.Context, from, to *time.Time,
 
 	for rows.Next() {
 		var (
-			channelID pgtype.UUID
-			username  pgtype.Text
-			title     pgtype.Text
-			start     pgtype.Date
-			end       pgtype.Date
-			inclusion pgtype.Float8
-			noise     pgtype.Float8
-			avgImp    pgtype.Float8
-			avgRel    pgtype.Float8
+			channelID     pgtype.UUID
+			username      pgtype.Text
+			title         pgtype.Text
+			start         pgtype.Date
+			end           pgtype.Date
+			inclusion     pgtype.Float8
+			noise         pgtype.Float8
+			avgImp        pgtype.Float8
+			avgRel        pgtype.Float8
+			itemsDigested pgtype.Int8
+			digestShare   pgtype.Float8
+			relStddev     pgtype.Float8
+			impWeight     pgtype.Float8
+			autoEnabled   pgtype.Bool
+			override      pgtype.Bool
+			weightUpdated pgtype.Timestamptz
 		)
 
-		if err := rows.Scan(&channelID, &username, &title, &start, &end, &inclusion, &noise, &avgImp, &avgRel); err != nil {
+		if err := rows.Scan(
+			&channelID,
+			&username,
+			&title,
+			&start,
+			&end,
+			&inclusion,
+			&noise,
+			&avgImp,
+			&avgRel,
+			&itemsDigested,
+			&digestShare,
+			&relStddev,
+			&impWeight,
+			&autoEnabled,
+			&override,
+			&weightUpdated,
+		); err != nil {
 			return nil, fmt.Errorf("scan channel quality summary: %w", err)
 		}
 
-		results = append(results, ResearchChannelQualitySummary{
-			ChannelID:       fromUUID(channelID),
-			ChannelTitle:    title.String,
-			ChannelUsername: username.String,
-			PeriodStart:     nullableDate(start),
-			PeriodEnd:       nullableDate(end),
-			InclusionRate:   nullableFloat64(inclusion),
-			NoiseRate:       nullableFloat64(noise),
-			AvgImportance:   nullableFloat64(avgImp),
-			AvgRelevance:    nullableFloat64(avgRel),
-		})
+		entry := ResearchChannelQualitySummary{
+			ChannelID:         fromUUID(channelID),
+			ChannelTitle:      title.String,
+			ChannelUsername:   username.String,
+			PeriodStart:       nullableDate(start),
+			PeriodEnd:         nullableDate(end),
+			InclusionRate:     nullableFloat64(inclusion),
+			NoiseRate:         nullableFloat64(noise),
+			AvgImportance:     nullableFloat64(avgImp),
+			AvgRelevance:      nullableFloat64(avgRel),
+			DigestShare:       nullableFloat64(digestShare),
+			ItemsDigested:     int(itemsDigested.Int64),
+			RelevanceStddev:   nullableFloat64(relStddev),
+			ImportanceWeight:  nullableFloat64(impWeight),
+			AutoWeightEnabled: autoEnabled.Bool,
+			WeightOverride:    override.Bool,
+		}
+
+		if weightUpdated.Valid {
+			entry.WeightUpdatedAt = weightUpdated.Time
+		}
+
+		results = append(results, entry)
 	}
 
 	if rows.Err() != nil {
@@ -1264,40 +1460,41 @@ func (db *DB) GetLanguageCoverage(ctx context.Context, from, to *time.Time, limi
 	}
 
 	args := []any{}
-	where := []string{"i.language IS NOT NULL", "i.language <> ''"}
+	where := []string{"cl.language IS NOT NULL", "cl.language <> ''"}
 
 	if from != nil {
 		args = append(args, *from)
-		where = append(where, fmt.Sprintf(fmtDateFrom, len(args)))
+		where = append(where, fmt.Sprintf("ms.first_seen_at >= $%d", len(args)))
 	}
 
 	if to != nil {
 		args = append(args, *to)
-		where = append(where, fmt.Sprintf(fmtDateTo, len(args)))
+		where = append(where, fmt.Sprintf("ms.first_seen_at <= $%d", len(args)))
 	}
 
 	args = append(args, safeIntToInt32(limit))
 
 	query := fmt.Sprintf(`
 		WITH cluster_lang AS (
-			SELECT ci.cluster_id, i.language AS lang, MIN(rm.tg_date) AS first_seen
-			FROM cluster_items ci
-			JOIN items i ON ci.item_id = i.id
-			JOIN raw_messages rm ON i.raw_message_id = rm.id
-			WHERE %s
-			GROUP BY ci.cluster_id, i.language
+			SELECT cfa.cluster_id, i.language
+			FROM cluster_first_appearance cfa
+			JOIN items i ON cfa.first_item_id = i.id
+			WHERE i.language IS NOT NULL AND i.language <> ''
 		),
-		pairs AS (
-			SELECT a.cluster_id,
-			       a.lang AS from_lang,
-			       b.lang AS to_lang,
-			       EXTRACT(epoch FROM (b.first_seen - a.first_seen)) / 3600 AS lag_hours
-			FROM cluster_lang a
-			JOIN cluster_lang b ON a.cluster_id = b.cluster_id AND a.lang <> b.lang
-			WHERE b.first_seen >= a.first_seen
+		links AS (
+			SELECT l.cluster_id,
+			       l.linked_cluster_id,
+			       cl.language AS from_lang,
+			       l.language AS to_lang,
+			       abs(EXTRACT(epoch FROM (mt.first_seen_at - ms.first_seen_at))) / 3600 AS lag_hours
+			FROM cluster_language_links l
+			JOIN cluster_lang cl ON l.cluster_id = cl.cluster_id
+			JOIN mv_cluster_stats ms ON l.cluster_id = ms.cluster_id
+			JOIN mv_cluster_stats mt ON l.linked_cluster_id = mt.cluster_id
+			WHERE %s
 		)
 		SELECT from_lang, to_lang, COUNT(DISTINCT cluster_id), AVG(lag_hours)
-		FROM pairs
+		FROM links
 		GROUP BY from_lang, to_lang
 		ORDER BY COUNT(DISTINCT cluster_id) DESC
 		LIMIT $%d
@@ -1343,51 +1540,73 @@ func (db *DB) GetLanguageCoverage(ctx context.Context, from, to *time.Time, limi
 }
 
 func (db *DB) GetTopicDrift(ctx context.Context, from, to *time.Time, limit int) ([]ResearchTopicDriftEntry, error) {
-	if limit <= 0 {
-		limit = 100
-	}
+	limit = defaultLimit(limit, defaultTopicDriftLimit)
 
-	args := []any{}
-	where := []string{"i.topic IS NOT NULL", "i.topic <> ''"}
-
-	if from != nil {
-		args = append(args, *from)
-		where = append(where, fmt.Sprintf(fmtDateFrom, len(args)))
-	}
-
-	if to != nil {
-		args = append(args, *to)
-		where = append(where, fmt.Sprintf(fmtDateTo, len(args)))
-	}
-
+	args, where := buildTopicDriftFilters(from, to)
 	args = append(args, safeIntToInt32(limit))
 
 	query := fmt.Sprintf(`
-		WITH cluster_topics AS (
+		WITH ranked AS (
+			SELECT cluster_id,
+			       topic,
+			       window_start,
+			       window_end,
+			       ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY window_start ASC) AS rn_first,
+			       ROW_NUMBER() OVER (PARTITION BY cluster_id ORDER BY window_start DESC) AS rn_last,
+			       COUNT(DISTINCT topic) OVER (PARTITION BY cluster_id) AS distinct_topics,
+			       MIN(window_start) OVER (PARTITION BY cluster_id) AS first_seen,
+			       MAX(window_end) OVER (PARTITION BY cluster_id) AS last_seen
+			FROM cluster_topic_history
+			WHERE %s
+		),
+		topic_summary AS (
+			SELECT cluster_id,
+			       MAX(CASE WHEN rn_first = 1 THEN topic END) AS first_topic,
+			       MAX(CASE WHEN rn_last = 1 THEN topic END) AS last_topic,
+			       MAX(distinct_topics) AS distinct_topics,
+			       MAX(first_seen) AS first_seen,
+			       MAX(last_seen) AS last_seen
+			FROM ranked
+			GROUP BY cluster_id
+			HAVING MAX(distinct_topics) > 1
+		),
+		ranked_items AS (
 			SELECT ci.cluster_id,
-			       i.topic,
+			       i.id AS item_id,
 			       rm.tg_date,
 			       ROW_NUMBER() OVER (PARTITION BY ci.cluster_id ORDER BY rm.tg_date ASC) AS rn_first,
 			       ROW_NUMBER() OVER (PARTITION BY ci.cluster_id ORDER BY rm.tg_date DESC) AS rn_last
 			FROM cluster_items ci
 			JOIN items i ON ci.item_id = i.id
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
-			WHERE %s
 		),
-		agg AS (
+		first_last AS (
 			SELECT cluster_id,
-			       MAX(CASE WHEN rn_first = 1 THEN topic END) AS first_topic,
-			       MAX(CASE WHEN rn_last = 1 THEN topic END) AS last_topic,
-			       COUNT(DISTINCT topic) AS distinct_topics,
-			       MIN(tg_date) AS first_seen,
-			       MAX(tg_date) AS last_seen
-			FROM cluster_topics
+			       MAX(CASE WHEN rn_first = 1 THEN item_id END) AS first_item_id,
+			       MAX(CASE WHEN rn_last = 1 THEN item_id END) AS last_item_id
+			FROM ranked_items
 			GROUP BY cluster_id
+		),
+		embedding_similarity AS (
+			SELECT fl.cluster_id,
+			       CASE
+			         WHEN e1.embedding IS NOT NULL AND e2.embedding IS NOT NULL THEN 1 - (e1.embedding <=> e2.embedding)
+			         ELSE NULL
+			       END AS similarity
+			FROM first_last fl
+			LEFT JOIN embeddings e1 ON e1.item_id = fl.first_item_id
+			LEFT JOIN embeddings e2 ON e2.item_id = fl.last_item_id
 		)
-		SELECT cluster_id, first_topic, last_topic, distinct_topics, first_seen, last_seen
-		FROM agg
-		WHERE distinct_topics > 1 AND first_topic IS NOT NULL AND last_topic IS NOT NULL AND first_topic <> last_topic
-		ORDER BY distinct_topics DESC, last_seen DESC
+		SELECT ts.cluster_id,
+		       ts.first_topic,
+		       ts.last_topic,
+		       ts.distinct_topics,
+		       ts.first_seen,
+		       ts.last_seen,
+		       es.similarity
+		FROM topic_summary ts
+		LEFT JOIN embedding_similarity es ON es.cluster_id = ts.cluster_id
+		ORDER BY ts.distinct_topics DESC, ts.last_seen DESC
 		LIMIT $%d
 	`, strings.Join(where, sqlAndJoin), len(args))
 
@@ -1400,34 +1619,14 @@ func (db *DB) GetTopicDrift(ctx context.Context, from, to *time.Time, limit int)
 	results := []ResearchTopicDriftEntry{}
 
 	for rows.Next() {
-		var (
-			clusterID pgtype.UUID
-			first     pgtype.Text
-			last      pgtype.Text
-			count     int
-			firstSeen pgtype.Timestamptz
-			lastSeen  pgtype.Timestamptz
-		)
-
-		if err := rows.Scan(&clusterID, &first, &last, &count, &firstSeen, &lastSeen); err != nil {
-			return nil, fmt.Errorf("scan topic drift: %w", err)
+		entry, skip, err := scanTopicDriftRow(rows)
+		if err != nil {
+			return nil, err
 		}
 
-		entry := ResearchTopicDriftEntry{
-			ClusterID:      fromUUID(clusterID),
-			FirstTopic:     first.String,
-			LastTopic:      last.String,
-			DistinctTopics: count,
+		if !skip {
+			results = append(results, entry)
 		}
-		if firstSeen.Valid {
-			entry.FirstSeenAt = firstSeen.Time
-		}
-
-		if lastSeen.Valid {
-			entry.LastSeenAt = lastSeen.Time
-		}
-
-		results = append(results, entry)
 	}
 
 	if rows.Err() != nil {
@@ -1435,6 +1634,141 @@ func (db *DB) GetTopicDrift(ctx context.Context, from, to *time.Time, limit int)
 	}
 
 	return results, nil
+}
+
+func scanTopicDriftRow(rows pgx.Rows) (ResearchTopicDriftEntry, bool, error) {
+	var (
+		clusterID pgtype.UUID
+		first     pgtype.Text
+		last      pgtype.Text
+		count     int
+		firstSeen pgtype.Timestamptz
+		lastSeen  pgtype.Timestamptz
+		embedSim  pgtype.Float8
+	)
+
+	if err := rows.Scan(&clusterID, &first, &last, &count, &firstSeen, &lastSeen, &embedSim); err != nil {
+		return ResearchTopicDriftEntry{}, false, fmt.Errorf("scan topic drift: %w", err)
+	}
+
+	if shouldSkipDriftEntry(first.String, last.String, embedSim) {
+		return ResearchTopicDriftEntry{}, true, nil
+	}
+
+	entry := ResearchTopicDriftEntry{
+		ClusterID:      fromUUID(clusterID),
+		FirstTopic:     first.String,
+		LastTopic:      last.String,
+		DistinctTopics: count,
+	}
+
+	if firstSeen.Valid {
+		entry.FirstSeenAt = firstSeen.Time
+	}
+
+	if lastSeen.Valid {
+		entry.LastSeenAt = lastSeen.Time
+	}
+
+	return entry, false, nil
+}
+
+func shouldSkipDriftEntry(first, last string, embedSim pgtype.Float8) bool {
+	similarity := topicSimilarity(first, last)
+	if similarity >= topicDriftMinJaccard {
+		return true
+	}
+
+	return embedSim.Valid && embedSim.Float64 >= topicDriftMinEmbedding
+}
+
+func buildTopicDriftFilters(from, to *time.Time) ([]any, []string) {
+	args := []any{}
+	where := []string{"topic IS NOT NULL", "topic <> ''"}
+
+	if from != nil {
+		args = append(args, *from)
+		where = append(where, fmt.Sprintf("window_start >= $%d", len(args)))
+	}
+
+	if to != nil {
+		args = append(args, *to)
+		where = append(where, fmt.Sprintf("window_end <= $%d", len(args)))
+	}
+
+	return args, where
+}
+
+func defaultLimit(limit, defaultVal int) int {
+	if limit <= 0 {
+		return defaultVal
+	}
+
+	return limit
+}
+
+func topicSimilarity(a, b string) float64 {
+	tokensA := tokenizeTopic(a)
+
+	tokensB := tokenizeTopic(b)
+	if len(tokensA) == 0 || len(tokensB) == 0 {
+		return 0
+	}
+
+	setA := make(map[string]struct{}, len(tokensA))
+	for _, t := range tokensA {
+		setA[t] = struct{}{}
+	}
+
+	setB := make(map[string]struct{}, len(tokensB))
+	for _, t := range tokensB {
+		setB[t] = struct{}{}
+	}
+
+	var intersection int
+
+	for t := range setA {
+		if _, ok := setB[t]; ok {
+			intersection++
+		}
+	}
+
+	union := len(setA) + len(setB) - intersection
+	if union == 0 {
+		return 0
+	}
+
+	return float64(intersection) / float64(union)
+}
+
+func tokenizeTopic(value string) []string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return nil
+	}
+
+	var (
+		tokens  []string
+		current strings.Builder
+	)
+
+	for _, r := range normalized {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			current.WriteRune(r)
+			continue
+		}
+
+		if current.Len() > 0 {
+			tokens = append(tokens, current.String())
+			current.Reset()
+		}
+	}
+
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
+
+	return tokens
 }
 
 func (db *DB) GetClaimsSummary(ctx context.Context) (ResearchClaimsSummary, error) {
@@ -1471,6 +1805,13 @@ type ResearchTopicTimelinePoint struct {
 	AvgRelevance  float64
 }
 
+// ResearchTopicVolatilityEntry represents topic churn metrics per bucket.
+type ResearchTopicVolatilityEntry struct {
+	BucketDate     time.Time
+	DistinctTopics int
+	NewTopics      int
+}
+
 // buildTimelineFilters builds the where clause and args for timeline queries.
 func buildTimelineFilters(from, to *time.Time, args []any) ([]string, []any) {
 	where := []string{"1=1"}
@@ -1491,27 +1832,9 @@ func buildTimelineFilters(from, to *time.Time, args []any) ([]string, []any) {
 // GetTopicTimeline returns topic timeline data.
 func (db *DB) GetTopicTimeline(ctx context.Context, bucket string, from, to *time.Time, limit int) ([]ResearchTopicTimelinePoint, error) {
 	bucket = normalizeTimelineBucket(bucket)
+	limit = defaultLimit(limit, maxSearchLimit)
 
-	if limit <= 0 {
-		limit = 200
-	}
-
-	args := []any{bucket}
-	where, args := buildTimelineFilters(from, to, args)
-
-	query := fmt.Sprintf(`
-		SELECT date_trunc($1, rm.tg_date) AS bucket_date,
-		       i.topic,
-		       COUNT(*) AS item_count,
-		       AVG(i.importance_score) AS avg_importance,
-		       AVG(i.relevance_score) AS avg_relevance
-		FROM items i
-		JOIN raw_messages rm ON i.raw_message_id = rm.id
-		WHERE %s
-		GROUP BY bucket_date, i.topic
-		ORDER BY bucket_date DESC
-		LIMIT %d
-	`, strings.Join(where, sqlAndJoin), limit)
+	query, args := buildTopicTimelineQuery(bucket, from, to, limit)
 
 	rows, err := db.Pool.Query(ctx, query, args...)
 	if err != nil {
@@ -1519,34 +1842,90 @@ func (db *DB) GetTopicTimeline(ctx context.Context, bucket string, from, to *tim
 	}
 	defer rows.Close()
 
+	return scanTopicTimelineRows(rows)
+}
+
+func buildTopicTimelineQuery(bucket string, from, to *time.Time, limit int) (string, []any) {
+	if bucket == bucketWeek {
+		return buildWeekTimelineQuery(from, to, limit)
+	}
+
+	return buildDynamicTimelineQuery(bucket, from, to, limit)
+}
+
+func buildWeekTimelineQuery(from, to *time.Time, limit int) (string, []any) {
+	var args []any
+
+	where := []string{"1=1"}
+
+	if from != nil {
+		args = append(args, *from)
+		where = append(where, fmt.Sprintf("bucket_date >= $%d", len(args)))
+	}
+
+	if to != nil {
+		args = append(args, *to)
+		where = append(where, fmt.Sprintf("bucket_date <= $%d", len(args)))
+	}
+
+	args = append(args, safeIntToInt32(limit))
+
+	query := fmt.Sprintf(`
+		WITH ranked AS (
+			SELECT bucket_date,
+			       topic,
+			       item_count,
+			       avg_importance,
+			       avg_relevance,
+			       ROW_NUMBER() OVER (PARTITION BY bucket_date ORDER BY item_count DESC) AS rn
+			FROM mv_topic_timeline
+			WHERE %s
+		)
+		SELECT bucket_date, topic, item_count, avg_importance, avg_relevance
+		FROM ranked
+		WHERE rn <= $%d
+		ORDER BY bucket_date DESC, item_count DESC
+	`, strings.Join(where, sqlAndJoin), len(args))
+
+	return query, args
+}
+
+func buildDynamicTimelineQuery(bucket string, from, to *time.Time, limit int) (string, []any) {
+	args := make([]any, 0, timelineArgsCapacity)
+	args = append(args, bucket)
+
+	where, args := buildTimelineFilters(from, to, args)
+	args = append(args, safeIntToInt32(limit))
+
+	query := fmt.Sprintf(`
+		WITH ranked AS (
+			SELECT date_trunc($1, rm.tg_date) AS bucket_date,
+			       i.topic,
+			       COUNT(*) AS item_count,
+			       AVG(i.importance_score) AS avg_importance,
+			       AVG(i.relevance_score) AS avg_relevance,
+			       ROW_NUMBER() OVER (PARTITION BY date_trunc($1, rm.tg_date) ORDER BY COUNT(*) DESC) AS rn
+			FROM items i
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			WHERE %s
+			GROUP BY bucket_date, i.topic
+		)
+		SELECT bucket_date, topic, item_count, avg_importance, avg_relevance
+		FROM ranked
+		WHERE rn <= $%d
+		ORDER BY bucket_date DESC, item_count DESC
+	`, strings.Join(where, sqlAndJoin), len(args))
+
+	return query, args
+}
+
+func scanTopicTimelineRows(rows pgx.Rows) ([]ResearchTopicTimelinePoint, error) {
 	points := []ResearchTopicTimelinePoint{}
 
 	for rows.Next() {
-		var (
-			bucketDate pgtype.Timestamptz
-			topic      pgtype.Text
-			count      int
-			avgImp     pgtype.Float8
-			avgRel     pgtype.Float8
-		)
-		if err := rows.Scan(&bucketDate, &topic, &count, &avgImp, &avgRel); err != nil {
-			return nil, fmt.Errorf("scan topic timeline: %w", err)
-		}
-
-		entry := ResearchTopicTimelinePoint{
-			Topic:     topic.String,
-			ItemCount: count,
-		}
-		if bucketDate.Valid {
-			entry.BucketDate = bucketDate.Time
-		}
-
-		if avgImp.Valid {
-			entry.AvgImportance = avgImp.Float64
-		}
-
-		if avgRel.Valid {
-			entry.AvgRelevance = avgRel.Float64
+		entry, err := scanTopicTimelineRow(rows)
+		if err != nil {
+			return nil, err
 		}
 
 		points = append(points, entry)
@@ -1557,6 +1936,138 @@ func (db *DB) GetTopicTimeline(ctx context.Context, bucket string, from, to *tim
 	}
 
 	return points, nil
+}
+
+func scanTopicTimelineRow(rows pgx.Rows) (ResearchTopicTimelinePoint, error) {
+	var (
+		bucketDate pgtype.Timestamptz
+		topic      pgtype.Text
+		count      int
+		avgImp     pgtype.Float8
+		avgRel     pgtype.Float8
+	)
+
+	if err := rows.Scan(&bucketDate, &topic, &count, &avgImp, &avgRel); err != nil {
+		return ResearchTopicTimelinePoint{}, fmt.Errorf("scan topic timeline: %w", err)
+	}
+
+	entry := ResearchTopicTimelinePoint{
+		Topic:     topic.String,
+		ItemCount: count,
+	}
+
+	if bucketDate.Valid {
+		entry.BucketDate = bucketDate.Time
+	}
+
+	if avgImp.Valid {
+		entry.AvgImportance = avgImp.Float64
+	}
+
+	if avgRel.Valid {
+		entry.AvgRelevance = avgRel.Float64
+	}
+
+	return entry, nil
+}
+
+func bucketInterval(bucket string) string {
+	switch bucket {
+	case bucketDay:
+		return "1 day"
+	case bucketMonth:
+		return "1 month"
+	default:
+		return "1 week"
+	}
+}
+
+// GetTopicVolatility returns topic churn metrics per bucket.
+func (db *DB) GetTopicVolatility(ctx context.Context, bucket string, from, to *time.Time, limit int) ([]ResearchTopicVolatilityEntry, error) {
+	bucket = normalizeTimelineBucket(bucket)
+
+	if limit <= 0 {
+		limit = 52
+	}
+
+	args := make([]any, 0, timelineArgsCapacity)
+	args = append(args, bucket)
+	where, args := buildTimelineFilters(from, to, args)
+	where = append(where, "i.topic IS NOT NULL", "i.topic <> ''")
+
+	interval := bucketInterval(bucket)
+
+	args = append(args, safeIntToInt32(limit))
+
+	query := fmt.Sprintf(`
+		WITH bucket_topics AS (
+			SELECT date_trunc($1, rm.tg_date) AS bucket_date,
+			       i.topic
+			FROM items i
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			WHERE %s
+			GROUP BY bucket_date, i.topic
+		),
+		summary AS (
+			SELECT bucket_date,
+			       COUNT(*) AS topic_count
+			FROM bucket_topics
+			GROUP BY bucket_date
+		),
+		new_topics AS (
+			SELECT cur.bucket_date,
+			       COUNT(*) AS new_topics
+			FROM bucket_topics cur
+			LEFT JOIN bucket_topics prev
+			  ON prev.topic = cur.topic
+			 AND prev.bucket_date = cur.bucket_date - INTERVAL '%s'
+			WHERE prev.topic IS NULL
+			GROUP BY cur.bucket_date
+		)
+		SELECT s.bucket_date,
+		       s.topic_count,
+		       COALESCE(n.new_topics, 0) AS new_topics
+		FROM summary s
+		LEFT JOIN new_topics n ON n.bucket_date = s.bucket_date
+		ORDER BY s.bucket_date DESC
+		LIMIT $%d
+	`, strings.Join(where, sqlAndJoin), interval, len(args))
+
+	rows, err := db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get topic volatility: %w", err)
+	}
+	defer rows.Close()
+
+	entries := []ResearchTopicVolatilityEntry{}
+
+	for rows.Next() {
+		var (
+			bucketDate pgtype.Timestamptz
+			count      int
+			newTopics  int
+		)
+
+		if err := rows.Scan(&bucketDate, &count, &newTopics); err != nil {
+			return nil, fmt.Errorf("scan topic volatility: %w", err)
+		}
+
+		entry := ResearchTopicVolatilityEntry{
+			DistinctTopics: count,
+			NewTopics:      newTopics,
+		}
+		if bucketDate.Valid {
+			entry.BucketDate = bucketDate.Time
+		}
+
+		entries = append(entries, entry)
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate topic volatility: %w", rows.Err())
+	}
+
+	return entries, nil
 }
 
 // ResearchChannelQualityEntry represents channel quality history.
@@ -1672,6 +2183,85 @@ func (db *DB) GetChannelQualityHistory(ctx context.Context, channelID string, fr
 	return entries, nil
 }
 
+// GetChannelWeightHistory returns weight history entries for a channel.
+func (db *DB) GetChannelWeightHistory(ctx context.Context, channelID string, from, to *time.Time, limit int) ([]ResearchChannelWeightEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	args := []any{toUUID(channelID)}
+	where := []string{"channel_id = $1"}
+
+	if from != nil {
+		args = append(args, *from)
+		where = append(where, fmt.Sprintf("updated_at >= $%d", len(args)))
+	}
+
+	if to != nil {
+		args = append(args, *to)
+		where = append(where, fmt.Sprintf("updated_at <= $%d", len(args)))
+	}
+
+	args = append(args, safeIntToInt32(limit))
+
+	rows, err := db.Pool.Query(ctx, fmt.Sprintf(`
+		SELECT importance_weight,
+		       auto_weight_enabled,
+		       weight_override,
+		       reason,
+		       updated_by,
+		       updated_at
+		FROM channel_weight_history
+		WHERE %s
+		ORDER BY updated_at DESC
+		LIMIT $%d
+	`, strings.Join(where, sqlAndJoin), len(args)), args...)
+	if err != nil {
+		return nil, fmt.Errorf("get channel weight history: %w", err)
+	}
+	defer rows.Close()
+
+	entries := []ResearchChannelWeightEntry{}
+
+	for rows.Next() {
+		var (
+			weight    pgtype.Float4
+			auto      pgtype.Bool
+			override  pgtype.Bool
+			reason    pgtype.Text
+			updatedBy pgtype.Int8
+			updatedAt pgtype.Timestamptz
+		)
+
+		if err := rows.Scan(&weight, &auto, &override, &reason, &updatedBy, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan channel weight history: %w", err)
+		}
+
+		entry := ResearchChannelWeightEntry{
+			ImportanceWeight:  float64(weight.Float32),
+			AutoWeightEnabled: auto.Bool,
+			WeightOverride:    override.Bool,
+			Reason:            reason.String,
+		}
+
+		if updatedBy.Valid {
+			entry.UpdatedBy = updatedBy.Int64
+		}
+
+		if updatedAt.Valid {
+			entry.UpdatedAt = updatedAt.Time
+		}
+
+		entries = append(entries, entry)
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate channel weight history: %w", rows.Err())
+	}
+
+	return entries, nil
+}
+
 // ResearchClaimEntry represents a claim ledger row.
 type ResearchClaimEntry struct {
 	ID              string
@@ -1751,11 +2341,19 @@ func (db *DB) GetClaims(ctx context.Context, from, to *time.Time, limit int) ([]
 
 // ResearchOriginStats represents origin vs amplifier stats.
 type ResearchOriginStats struct {
-	ChannelID     string
-	OriginCount   int
-	TotalCount    int
-	OriginRate    float64
-	AmplifierRate float64
+	ChannelID       string
+	OriginCount     int
+	TotalCount      int
+	OriginRate      float64
+	AmplifierRate   float64
+	OriginTopics    []ResearchOriginTopicEntry
+	AmplifierTopics []ResearchOriginTopicEntry
+}
+
+// ResearchOriginTopicEntry represents top topics for origin/amplifier stats.
+type ResearchOriginTopicEntry struct {
+	Topic string
+	Count int
 }
 
 // GetOriginStats returns origin vs amplifier stats for a channel.
@@ -1766,12 +2364,12 @@ func (db *DB) GetOriginStats(ctx context.Context, channelID string, from, to *ti
 
 	if from != nil {
 		args = append(args, *from)
-		where = append(where, fmt.Sprintf("cfa.first_seen_at >= $%d", len(args)))
+		where = append(where, fmt.Sprintf(fmtCfaDateFrom, len(args)))
 	}
 
 	if to != nil {
 		args = append(args, *to)
-		where = append(where, fmt.Sprintf("cfa.first_seen_at <= $%d", len(args)))
+		where = append(where, fmt.Sprintf(fmtCfaDateTo, len(args)))
 	}
 
 	row := db.Pool.QueryRow(ctx, fmt.Sprintf(`
@@ -1823,7 +2421,136 @@ func (db *DB) GetOriginStats(ctx context.Context, channelID string, from, to *ti
 		stats.AmplifierRate = 1 - stats.OriginRate
 	}
 
+	originTopics, err := db.getOriginTopicBreakdown(ctx, channelUUID, from, to, true)
+	if err != nil {
+		return nil, err
+	}
+
+	amplifierTopics, err := db.getOriginTopicBreakdown(ctx, channelUUID, from, to, false)
+	if err != nil {
+		return nil, err
+	}
+
+	stats.OriginTopics = originTopics
+	stats.AmplifierTopics = amplifierTopics
+
 	return stats, nil
+}
+
+func (db *DB) getOriginTopicBreakdown(ctx context.Context, channelUUID pgtype.UUID, from, to *time.Time, origin bool) ([]ResearchOriginTopicEntry, error) {
+	args, where := buildOriginFilters(channelUUID, from, to, origin)
+	args = append(args, safeIntToInt32(originTopicLimit))
+
+	query := buildOriginTopicQuery(where, len(args), origin)
+
+	rows, err := db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, formatOriginError("get", origin, err)
+	}
+	defer rows.Close()
+
+	return scanOriginTopicRows(rows)
+}
+
+func buildOriginFilters(channelUUID pgtype.UUID, from, to *time.Time, origin bool) ([]any, []string) {
+	args := []any{channelUUID}
+	where := []string{}
+
+	if origin {
+		where = append(where, "cfa.channel_id = $1")
+		args, where = appendOriginTimeFilters(args, where, from, to, fmtCfaDateFrom, fmtCfaDateTo)
+	} else {
+		where = append(where, "ch.id = $1")
+		args, where = appendOriginTimeFilters(args, where, from, to, fmtDateFrom, fmtDateTo)
+	}
+
+	return args, where
+}
+
+func appendOriginTimeFilters(args []any, where []string, from, to *time.Time, fromFmt, toFmt string) ([]any, []string) {
+	if from != nil {
+		args = append(args, *from)
+		where = append(where, fmt.Sprintf(fromFmt, len(args)))
+	}
+
+	if to != nil {
+		args = append(args, *to)
+		where = append(where, fmt.Sprintf(toFmt, len(args)))
+	}
+
+	return args, where
+}
+
+func buildOriginTopicQuery(where []string, limitIdx int, origin bool) string {
+	if origin {
+		return fmt.Sprintf(`
+			SELECT c.topic, COUNT(*) AS cnt
+			FROM cluster_first_appearance cfa
+			JOIN clusters c ON c.id = cfa.cluster_id
+			WHERE %s AND c.topic IS NOT NULL AND c.topic <> ''
+			GROUP BY c.topic
+			ORDER BY cnt DESC
+			LIMIT $%d
+		`, strings.Join(where, sqlAndJoin), limitIdx)
+	}
+
+	return fmt.Sprintf(`
+		WITH channel_clusters AS (
+			SELECT DISTINCT ci.cluster_id
+			FROM cluster_items ci
+			JOIN items i ON ci.item_id = i.id
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			JOIN channels ch ON rm.channel_id = ch.id
+			WHERE %s
+		),
+		amplifier_clusters AS (
+			SELECT cc.cluster_id
+			FROM channel_clusters cc
+			LEFT JOIN cluster_first_appearance cfa ON cfa.cluster_id = cc.cluster_id
+			WHERE cfa.channel_id IS DISTINCT FROM $1
+		)
+		SELECT c.topic, COUNT(*) AS cnt
+		FROM amplifier_clusters ac
+		JOIN clusters c ON c.id = ac.cluster_id
+		WHERE c.topic IS NOT NULL AND c.topic <> ''
+		GROUP BY c.topic
+		ORDER BY cnt DESC
+		LIMIT $%d
+	`, strings.Join(where, sqlAndJoin), limitIdx)
+}
+
+func formatOriginError(action string, origin bool, err error) error {
+	if origin {
+		return fmt.Errorf("%s origin topics: %w", action, err)
+	}
+
+	return fmt.Errorf("%s amplifier topics: %w", action, err)
+}
+
+func scanOriginTopicRows(rows pgx.Rows) ([]ResearchOriginTopicEntry, error) {
+	entries := []ResearchOriginTopicEntry{}
+
+	for rows.Next() {
+		var (
+			topic pgtype.Text
+			count int
+		)
+
+		if err := rows.Scan(&topic, &count); err != nil {
+			return nil, fmt.Errorf("scan origin topics: %w", err)
+		}
+
+		entries = append(entries, ResearchOriginTopicEntry{
+			Topic: topic.String,
+			Count: count,
+		})
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate origin topics: %w", rows.Err())
+	}
+
+	return entries, nil
 }
 
 // ResearchWeeklyDiff represents weekly topic diff summary.
@@ -1834,9 +2561,11 @@ type ResearchWeeklyDiff struct {
 
 // ResearchWeeklyChannelDiff represents weekly channel diff summary.
 type ResearchWeeklyChannelDiff struct {
-	ChannelID    string
-	ChannelTitle string
-	Delta        int
+	ChannelID       string
+	ChannelTitle    string
+	Delta           int
+	ImportanceDelta float64
+	RelevanceDelta  float64
 }
 
 type ChannelRelevanceSettings struct {
@@ -1927,7 +2656,11 @@ func (db *DB) GetWeeklyChannelDiff(ctx context.Context, from, to time.Time, limi
 
 	rows, err := db.Pool.Query(ctx, `
 		WITH current AS (
-			SELECT ch.id AS channel_id, ch.title AS channel_title, COUNT(*) AS cnt
+			SELECT ch.id AS channel_id,
+			       ch.title AS channel_title,
+			       COUNT(*) AS cnt,
+			       AVG(i.importance_score) AS avg_importance,
+			       AVG(i.relevance_score) AS avg_relevance
 			FROM items i
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
 			JOIN channels ch ON rm.channel_id = ch.id
@@ -1935,7 +2668,11 @@ func (db *DB) GetWeeklyChannelDiff(ctx context.Context, from, to time.Time, limi
 			GROUP BY ch.id, ch.title
 		),
 		prev AS (
-			SELECT ch.id AS channel_id, ch.title AS channel_title, COUNT(*) AS cnt
+			SELECT ch.id AS channel_id,
+			       ch.title AS channel_title,
+			       COUNT(*) AS cnt,
+			       AVG(i.importance_score) AS avg_importance,
+			       AVG(i.relevance_score) AS avg_relevance
 			FROM items i
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
 			JOIN channels ch ON rm.channel_id = ch.id
@@ -1944,7 +2681,9 @@ func (db *DB) GetWeeklyChannelDiff(ctx context.Context, from, to time.Time, limi
 		)
 		SELECT COALESCE(c.channel_id, p.channel_id) AS channel_id,
 		       COALESCE(c.channel_title, p.channel_title) AS channel_title,
-		       COALESCE(c.cnt, 0) - COALESCE(p.cnt, 0) AS delta
+		       COALESCE(c.cnt, 0) - COALESCE(p.cnt, 0) AS delta,
+		       COALESCE(c.avg_importance, 0) - COALESCE(p.avg_importance, 0) AS importance_delta,
+		       COALESCE(c.avg_relevance, 0) - COALESCE(p.avg_relevance, 0) AS relevance_delta
 		FROM current c
 		FULL OUTER JOIN prev p ON c.channel_id = p.channel_id
 		ORDER BY delta DESC
@@ -1962,15 +2701,19 @@ func (db *DB) GetWeeklyChannelDiff(ctx context.Context, from, to time.Time, limi
 			channelID    pgtype.UUID
 			channelTitle pgtype.Text
 			delta        int
+			impDelta     pgtype.Float8
+			relDelta     pgtype.Float8
 		)
-		if err := rows.Scan(&channelID, &channelTitle, &delta); err != nil {
+		if err := rows.Scan(&channelID, &channelTitle, &delta, &impDelta, &relDelta); err != nil {
 			return nil, fmt.Errorf("scan weekly channel diff: %w", err)
 		}
 
 		results = append(results, ResearchWeeklyChannelDiff{
-			ChannelID:    fromUUID(channelID),
-			ChannelTitle: channelTitle.String,
-			Delta:        delta,
+			ChannelID:       fromUUID(channelID),
+			ChannelTitle:    channelTitle.String,
+			Delta:           delta,
+			ImportanceDelta: nullableFloat64(impDelta),
+			RelevanceDelta:  nullableFloat64(relDelta),
 		})
 	}
 
@@ -2104,16 +2847,15 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 
 	if _, err := db.Pool.Exec(ctx, `
 		INSERT INTO cluster_topic_history (cluster_id, topic, window_start, window_end)
-		SELECT c.id,
-		       c.topic,
-		       MIN(rm.tg_date),
-		       MAX(rm.tg_date)
-		FROM clusters c
-		JOIN cluster_items ci ON c.id = ci.cluster_id
+		SELECT ci.cluster_id,
+		       i.topic,
+		       date_trunc('week', rm.tg_date),
+		       date_trunc('week', rm.tg_date) + INTERVAL '7 days'
+		FROM cluster_items ci
 		JOIN items i ON ci.item_id = i.id
 		JOIN raw_messages rm ON i.raw_message_id = rm.id
-		WHERE c.topic IS NOT NULL
-		GROUP BY c.id, c.topic
+		WHERE i.topic IS NOT NULL AND i.topic <> ''
+		GROUP BY ci.cluster_id, i.topic, date_trunc('week', rm.tg_date)
 	`); err != nil {
 		return fmt.Errorf("populate cluster_topic_history: %w", err)
 	}
@@ -2152,6 +2894,58 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 		) AS grouped
 	`); err != nil {
 		return fmt.Errorf("populate claims: %w", err)
+	}
+
+	if _, err := db.Pool.Exec(ctx, "TRUNCATE cluster_language_links"); err != nil {
+		return fmt.Errorf("truncate cluster_language_links: %w", err)
+	}
+
+	if _, err := db.Pool.Exec(ctx, fmt.Sprintf(`
+		WITH cluster_rep AS (
+			SELECT ci.cluster_id,
+			       i.language,
+			       e.embedding,
+			       rm.tg_date,
+			       ROW_NUMBER() OVER (
+						PARTITION BY ci.cluster_id
+						ORDER BY i.importance_score DESC NULLS LAST, rm.tg_date DESC
+			       ) AS rn
+			FROM cluster_items ci
+			JOIN items i ON ci.item_id = i.id
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			JOIN embeddings e ON e.item_id = i.id
+			WHERE i.language IS NOT NULL AND i.language <> ''
+		),
+		rep AS (
+			SELECT cluster_id, language, embedding, tg_date
+			FROM cluster_rep
+			WHERE rn = 1
+		),
+		pairs AS (
+			SELECT a.cluster_id AS cluster_id,
+			       b.cluster_id AS linked_cluster_id,
+			       a.language AS source_lang,
+			       b.language AS target_lang,
+			       1 - (a.embedding <=> b.embedding) AS similarity,
+			       a.tg_date AS source_date,
+			       b.tg_date AS target_date
+			FROM rep a
+			JOIN rep b ON a.cluster_id < b.cluster_id AND a.language <> b.language
+			WHERE abs(EXTRACT(epoch FROM (a.tg_date - b.tg_date))) <= %d
+		),
+		filtered AS (
+			SELECT cluster_id, linked_cluster_id, source_lang, target_lang, similarity
+			FROM pairs
+			WHERE similarity >= %0.2f
+		)
+		INSERT INTO cluster_language_links (cluster_id, language, linked_cluster_id, confidence)
+		SELECT cluster_id, target_lang, linked_cluster_id, similarity
+		FROM filtered
+		UNION ALL
+		SELECT linked_cluster_id, source_lang, cluster_id, similarity
+		FROM filtered
+	`, langLinkMaxLagSeconds, langLinkMinSimilarity)); err != nil {
+		return fmt.Errorf("populate cluster_language_links: %w", err)
 	}
 
 	return nil

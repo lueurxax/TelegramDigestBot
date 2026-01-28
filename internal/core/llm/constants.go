@@ -86,6 +86,7 @@ const (
 	errFmtDecodeResponse = "decode response: %w"
 	errFmtAPIWithMessage = "%w (%d): %s"
 	errFmtAPIStatusOnly  = "%w: status %d"
+	errFmtContextWrap    = "%s: %w"
 )
 
 // Numeric constants

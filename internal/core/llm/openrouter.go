@@ -56,11 +56,12 @@ var (
 
 // openRouterProvider implements the Provider interface for OpenRouter.
 type openRouterProvider struct {
-	cfg         *config.Config
-	httpClient  *http.Client
-	logger      *zerolog.Logger
-	rateLimiter *rate.Limiter
-	promptStore PromptStore
+	cfg           *config.Config
+	httpClient    *http.Client
+	logger        *zerolog.Logger
+	rateLimiter   *rate.Limiter
+	promptStore   PromptStore
+	usageRecorder UsageRecorder
 }
 
 // openRouterChatRequest represents the OpenRouter Chat API request (OpenAI-compatible).
@@ -104,7 +105,7 @@ type openRouterErrorResponse struct {
 }
 
 // NewOpenRouterProvider creates a new OpenRouter LLM provider.
-func NewOpenRouterProvider(cfg *config.Config, store PromptStore, logger *zerolog.Logger) *openRouterProvider {
+func NewOpenRouterProvider(cfg *config.Config, store PromptStore, recorder UsageRecorder, logger *zerolog.Logger) *openRouterProvider {
 	rateLimit := cfg.RateLimitRPS
 	if rateLimit == 0 {
 		rateLimit = 1
@@ -115,9 +116,10 @@ func NewOpenRouterProvider(cfg *config.Config, store PromptStore, logger *zerolo
 		httpClient: &http.Client{
 			Timeout: openRouterDefaultTimeout,
 		},
-		logger:      logger,
-		rateLimiter: rate.NewLimiter(rate.Limit(float64(rateLimit)), openRouterRateLimiterBurst),
-		promptStore: store,
+		logger:        logger,
+		rateLimiter:   rate.NewLimiter(rate.Limit(float64(rateLimit)), openRouterRateLimiterBurst),
+		promptStore:   store,
+		usageRecorder: recorder,
 	}
 }
 
@@ -251,11 +253,12 @@ func (p *openRouterProvider) ProcessBatch(ctx context.Context, messages []Messag
 
 	result, err := p.callOpenRouterAPI(ctx, promptContent, model, openRouterMaxTokensDefault)
 	if err != nil {
-		RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskSummarize, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskSummarize, 0, 0, false)
+
 		return nil, err
 	}
 
-	RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskSummarize, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskSummarize, result.PromptTokens, result.CompletionTokens, true)
 
 	return p.parseProcessBatchResponse(result.Text, messages)
 }
@@ -304,11 +307,12 @@ func (p *openRouterProvider) TranslateText(ctx context.Context, text, targetLang
 
 	result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensShort)
 	if err != nil {
-		RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskTranslate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskTranslate, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskTranslate, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskTranslate, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -323,11 +327,12 @@ func (p *openRouterProvider) CompleteText(ctx context.Context, prompt, model str
 
 	result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensDefault)
 	if err != nil {
-		RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskComplete, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskComplete, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskComplete, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskComplete, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -347,11 +352,12 @@ func (p *openRouterProvider) GenerateNarrative(ctx context.Context, items []doma
 
 	result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensDefault)
 	if err != nil {
-		RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskNarrative, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskNarrative, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskNarrative, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -371,11 +377,12 @@ func (p *openRouterProvider) GenerateNarrativeWithEvidence(ctx context.Context, 
 
 	result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensDefault)
 	if err != nil {
-		RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskNarrative, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskNarrative, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskNarrative, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -395,11 +402,12 @@ func (p *openRouterProvider) SummarizeCluster(ctx context.Context, items []domai
 
 	result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensTiny)
 	if err != nil {
-		RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -419,11 +427,12 @@ func (p *openRouterProvider) SummarizeClusterWithEvidence(ctx context.Context, i
 
 	result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensTiny)
 	if err != nil {
-		RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -443,11 +452,12 @@ func (p *openRouterProvider) GenerateClusterTopic(ctx context.Context, items []d
 
 	result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensNano)
 	if err != nil {
-		RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskTopic, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskTopic, 0, 0, false)
+
 		return "", err
 	}
 
-	RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskTopic, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskTopic, result.PromptTokens, result.CompletionTokens, true)
 
 	return strings.TrimSpace(result.Text), nil
 }
@@ -465,12 +475,12 @@ func (p *openRouterProvider) RelevanceGate(ctx context.Context, text, model, pro
 
 	apiResult, err := p.callOpenRouterAPI(ctx, fullPrompt, model, openRouterMaxTokensMicro)
 	if err != nil {
-		RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskRelevanceGate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskRelevanceGate, 0, 0, false)
+
 		return RelevanceGateResult{}, err
 	}
 
-	RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskRelevanceGate, apiResult.PromptTokens, apiResult.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
-
+	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskRelevanceGate, apiResult.PromptTokens, apiResult.CompletionTokens, true)
 	responseText := extractJSON(apiResult.Text)
 
 	var result RelevanceGateResult
@@ -502,12 +512,12 @@ func (p *openRouterProvider) CompressSummariesForCover(ctx context.Context, summ
 
 	result, err := p.callOpenRouterAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, model, openRouterMaxTokensTiny)
 	if err != nil {
-		RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCompress, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCompress, 0, 0, false)
+
 		return nil, err
 	}
 
-	RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCompress, result.PromptTokens, result.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
-
+	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCompress, result.PromptTokens, result.CompletionTokens, true)
 	lines := strings.Split(strings.TrimSpace(result.Text), "\n")
 
 	var compressed []string

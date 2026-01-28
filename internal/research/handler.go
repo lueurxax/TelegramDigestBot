@@ -29,6 +29,8 @@ const (
 	maxSearchLimit         = 200
 	defaultWeeklyDiffLimit = 10
 	slowQueryThreshold     = 2 * time.Second
+	weightHistoryLimit     = 50
+	fmtChannelLabel        = "%s (@%s)"
 
 	// Route path constants.
 	routeLogin     = "login"
@@ -711,7 +713,9 @@ func (h *Handler) handleChannelOverlap(w http.ResponseWriter, r *http.Request) (
 	if wantsHTML(r) {
 		rows := make([][]string, 0, len(edges))
 		for _, edge := range edges {
-			rows = append(rows, []string{edge.ChannelA, edge.ChannelB, strconv.Itoa(edge.Shared), fmt.Sprintf("%.3f", edge.Jaccard)})
+			labelA := formatOverlapChannelLabel(edge.ChannelA, edge.ChannelATitle, edge.ChannelAUsername)
+			labelB := formatOverlapChannelLabel(edge.ChannelB, edge.ChannelBTitle, edge.ChannelBUsername)
+			rows = append(rows, []string{labelA, labelB, strconv.Itoa(edge.Shared), fmt.Sprintf("%.3f", edge.Jaccard)})
 		}
 
 		description := ""
@@ -745,12 +749,7 @@ func (h *Handler) handleTopicTimeline(w http.ResponseWriter, r *http.Request) (i
 		return h.writeError(w, r, http.StatusBadRequest, errTitleInvalidRange, err.Error()), 0
 	}
 
-	if from == nil && to == nil {
-		now := time.Now().UTC()
-		start := now.AddDate(-1, 0, 0)
-		from = &start
-		to = &now
-	}
+	from, to = defaultYearRange(from, to)
 
 	bucket, err := normalizeTimelineBucket(r.URL.Query().Get("bucket"))
 	if err != nil {
@@ -762,28 +761,66 @@ func (h *Handler) handleTopicTimeline(w http.ResponseWriter, r *http.Request) (i
 	points, err := h.db.GetTopicTimeline(r.Context(), bucket, from, to, limit)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("get topic timeline failed")
+
 		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load timeline."), 0
 	}
 
+	volatility, err := h.db.GetTopicVolatility(r.Context(), bucket, from, to, limit)
+	if err != nil {
+		h.logger.Debug().Err(err).Msg("get topic volatility failed (non-fatal)")
+	}
+
 	if wantsHTML(r) {
-		rows := make([][]string, 0, len(points))
-		for _, p := range points {
-			rows = append(rows, []string{p.BucketDate.Format(researchQueryLayout), p.Topic, strconv.Itoa(p.ItemCount)})
-		}
-
-		data := TableViewData{
-			Title:   "Topic Timeline",
-			Headers: []string{"Bucket", "Topic", "Count"},
-			Rows:    rows,
-		}
-		if err := h.renderHTML(w, tmplTable, data); err != nil {
-			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
-		}
-
-		return http.StatusOK, len(rows)
+		return h.renderTopicTimelineHTML(w, r, points, volatility)
 	}
 
 	return h.writeJSON(w, http.StatusOK, points), len(points)
+}
+
+// defaultYearRange returns a one-year default range if both from and to are nil.
+func defaultYearRange(from, to *time.Time) (*time.Time, *time.Time) {
+	if from != nil || to != nil {
+		return from, to
+	}
+
+	now := time.Now().UTC()
+	start := now.AddDate(-1, 0, 0)
+
+	return &start, &now
+}
+
+func (h *Handler) renderTopicTimelineHTML(w http.ResponseWriter, r *http.Request, points []db.ResearchTopicTimelinePoint, volatility []db.ResearchTopicVolatilityEntry) (int, int) {
+	rows := make([][]string, 0, len(points))
+	for _, p := range points {
+		rows = append(rows, []string{p.BucketDate.Format(researchQueryLayout), p.Topic, strconv.Itoa(p.ItemCount)})
+	}
+
+	data := TableViewData{
+		Title:   "Topic Timeline",
+		Headers: []string{"Bucket", "Topic", "Count"},
+		Rows:    rows,
+	}
+
+	if len(volatility) > 0 {
+		volRows := make([][]string, 0, len(volatility))
+		for _, entry := range volatility {
+			volRows = append(volRows, []string{
+				entry.BucketDate.Format(researchQueryLayout),
+				strconv.Itoa(entry.DistinctTopics),
+				strconv.Itoa(entry.NewTopics),
+			})
+		}
+
+		data.SecondaryTitle = "Topic Volatility"
+		data.SecondaryHeaders = []string{"Bucket", "Distinct Topics", "New Topics"}
+		data.SecondaryRows = volRows
+	}
+
+	if err := h.renderHTML(w, tmplTable, data); err != nil {
+		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
+	}
+
+	return http.StatusOK, len(rows)
 }
 
 func (h *Handler) handleTopicDrift(w http.ResponseWriter, r *http.Request) (int, int) {
@@ -866,7 +903,7 @@ func (h *Handler) handleLanguageCoverage(w http.ResponseWriter, r *http.Request)
 			Title:       "Cross-Language Coverage",
 			Headers:     []string{"From", "To", "Clusters", "Avg Lag (h)"},
 			Rows:        rows,
-			Description: "Language pairs observed within the same cluster (lag based on first appearance).",
+			Description: "Language pairs linked across clusters by embedding similarity (lag based on first appearance).",
 		}
 		if err := h.renderHTML(w, tmplTable, data); err != nil {
 			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
@@ -908,7 +945,7 @@ func (h *Handler) handleChannelQualitySummary(w http.ResponseWriter, r *http.Req
 		for _, entry := range entries {
 			name := entry.ChannelTitle
 			if entry.ChannelUsername != "" {
-				name = fmt.Sprintf("%s (@%s)", entry.ChannelTitle, entry.ChannelUsername)
+				name = fmt.Sprintf(fmtChannelLabel, entry.ChannelTitle, entry.ChannelUsername)
 			}
 
 			rows = append(rows, []string{
@@ -917,13 +954,17 @@ func (h *Handler) handleChannelQualitySummary(w http.ResponseWriter, r *http.Req
 				formatPercent(entry.NoiseRate),
 				fmt.Sprintf(fmtFloat2, entry.AvgImportance),
 				fmt.Sprintf(fmtFloat2, entry.AvgRelevance),
+				formatPercent(entry.DigestShare),
+				strconv.Itoa(entry.ItemsDigested),
+				fmt.Sprintf(fmtFloat2, entry.RelevanceStddev),
+				formatWeightSummary(entry),
 				entry.PeriodEnd.Format(researchQueryLayout),
 			})
 		}
 
 		data := TableViewData{
 			Title:       "Channel Quality (Latest)",
-			Headers:     []string{"Channel", "Inclusion", "Noise", "Avg Importance", "Avg Relevance", "Period End"},
+			Headers:     []string{"Channel", "Inclusion", "Noise", "Avg Importance", "Avg Relevance", "Digest Share", "Items Digested", "Relevance σ", "Weight", "Period End"},
 			Rows:        rows,
 			Description: "Latest channel quality snapshot (defaults to last 30 days).",
 		}
@@ -970,6 +1011,19 @@ func formatChannelTitle(baseTitle string, ref *db.ResearchChannelRef) string {
 	}
 
 	return fmt.Sprintf("%s (%s)", baseTitle, ref.Title)
+}
+
+func formatOverlapChannelLabel(id, title, username string) string {
+	switch {
+	case title != "" && username != "":
+		return fmt.Sprintf(fmtChannelLabel, title, username)
+	case title != "":
+		return title
+	case username != "":
+		return "@" + username
+	default:
+		return id
+	}
 }
 
 func (h *Handler) handleChannelBias(w http.ResponseWriter, r *http.Request) (int, int) {
@@ -1082,33 +1136,87 @@ func (h *Handler) handleChannelQuality(w http.ResponseWriter, r *http.Request, c
 	entries, err := h.db.GetChannelQualityHistory(r.Context(), channelID, from, to)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("get channel quality failed")
+
 		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load channel quality."), 0
 	}
 
 	if wantsHTML(r) {
-		rows := make([][]string, 0, len(entries))
-		for _, e := range entries {
-			rows = append(rows, []string{
-				e.PeriodStart.Format(researchQueryLayout),
-				e.PeriodEnd.Format(researchQueryLayout),
-				fmt.Sprintf(fmtFloat2, e.InclusionRate),
-				fmt.Sprintf(fmtFloat2, e.NoiseRate),
-			})
-		}
-
-		data := TableViewData{
-			Title:   "Channel Quality",
-			Headers: []string{"Start", "End", "Inclusion", "Noise"},
-			Rows:    rows,
-		}
-		if err := h.renderHTML(w, tmplTable, data); err != nil {
-			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
-		}
-
-		return http.StatusOK, len(rows)
+		return h.renderChannelQualityHTML(w, r, channelID, from, to, entries)
 	}
 
 	return h.writeJSON(w, http.StatusOK, entries), len(entries)
+}
+
+func (h *Handler) renderChannelQualityHTML(w http.ResponseWriter, r *http.Request, channelID string, from, to *time.Time, entries []db.ResearchChannelQualityEntry) (int, int) {
+	rows := buildChannelQualityRows(entries)
+	weightRows := h.buildWeightHistoryRows(r.Context(), channelID, from, to)
+
+	data := TableViewData{
+		Title:            "Channel Quality",
+		Headers:          []string{"Start", "End", "Inclusion", "Noise", "Avg Importance", "Avg Relevance"},
+		Rows:             rows,
+		SecondaryTitle:   "Weight History",
+		SecondaryHeaders: []string{"Updated", "Weight", "Mode", "Reason", "By"},
+		SecondaryRows:    weightRows,
+	}
+
+	if err := h.renderHTML(w, tmplTable, data); err != nil {
+		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
+	}
+
+	return http.StatusOK, len(rows)
+}
+
+func buildChannelQualityRows(entries []db.ResearchChannelQualityEntry) [][]string {
+	rows := make([][]string, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, []string{
+			e.PeriodStart.Format(researchQueryLayout),
+			e.PeriodEnd.Format(researchQueryLayout),
+			fmt.Sprintf(fmtFloat2, e.InclusionRate),
+			fmt.Sprintf(fmtFloat2, e.NoiseRate),
+			fmt.Sprintf(fmtFloat2, e.AvgImportance),
+			fmt.Sprintf(fmtFloat2, e.AvgRelevance),
+		})
+	}
+
+	return rows
+}
+
+func (h *Handler) buildWeightHistoryRows(ctx context.Context, channelID string, from, to *time.Time) [][]string {
+	history, err := h.db.GetChannelWeightHistory(ctx, channelID, from, to, weightHistoryLimit)
+	if err != nil {
+		return [][]string{}
+	}
+
+	rows := make([][]string, 0, len(history))
+	for _, entry := range history {
+		rows = append(rows, formatWeightHistoryRow(entry))
+	}
+
+	return rows
+}
+
+func formatWeightHistoryRow(entry db.ResearchChannelWeightEntry) []string {
+	mode := "manual"
+	if entry.WeightOverride {
+		mode = "override"
+	} else if entry.AutoWeightEnabled {
+		mode = "auto"
+	}
+
+	updatedBy := "-"
+	if entry.UpdatedBy != 0 {
+		updatedBy = strconv.FormatInt(entry.UpdatedBy, 10)
+	}
+
+	return []string{
+		entry.UpdatedAt.Format(researchQueryLayout),
+		fmt.Sprintf(fmtFloat2, entry.ImportanceWeight),
+		mode,
+		entry.Reason,
+		updatedBy,
+	}
 }
 
 func (h *Handler) handleChannelOriginStats(w http.ResponseWriter, r *http.Request, channelID string) (int, int) {
@@ -1126,11 +1234,26 @@ func (h *Handler) handleChannelOriginStats(w http.ResponseWriter, r *http.Reques
 	if wantsHTML(r) {
 		rows := [][]string{{stats.ChannelID, strconv.Itoa(stats.OriginCount), strconv.Itoa(stats.TotalCount), fmt.Sprintf(fmtFloat2, stats.OriginRate)}}
 
+		topicRows := [][]string{}
+		for _, entry := range stats.OriginTopics {
+			topicRows = append(topicRows, []string{"Origin", entry.Topic, strconv.Itoa(entry.Count)})
+		}
+
+		for _, entry := range stats.AmplifierTopics {
+			topicRows = append(topicRows, []string{"Amplifier", entry.Topic, strconv.Itoa(entry.Count)})
+		}
+
 		data := TableViewData{
 			Title:   "Origin vs Amplifier",
 			Headers: []string{"Channel", "Origin Count", "Total", "Origin Rate"},
 			Rows:    rows,
 		}
+		if len(topicRows) > 0 {
+			data.SecondaryTitle = "Top Topics"
+			data.SecondaryHeaders = []string{"Type", "Topic", "Count"}
+			data.SecondaryRows = topicRows
+		}
+
 		if err := h.renderHTML(w, tmplTable, data); err != nil {
 			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
 		}
@@ -1247,7 +1370,7 @@ func (h *Handler) handleWeeklyDiff(w http.ResponseWriter, r *http.Request) (int,
 			Headers:          []string{"Topic", "Delta"},
 			Rows:             rows,
 			SecondaryTitle:   "Weekly Diff (Channels)",
-			SecondaryHeaders: []string{"Channel", "Delta"},
+			SecondaryHeaders: []string{"Channel", "Delta", "Imp Δ", "Rel Δ"},
 			SecondaryRows:    buildChannelDiffRows(channels),
 		}
 		if err := h.renderHTML(w, tmplTable, data); err != nil {
@@ -1345,6 +1468,7 @@ func parseSearchParams(r *http.Request) (db.ResearchSearchParams, string, error)
 		Channel:      strings.TrimSpace(q.Get(queryParamChannel)),
 		Topic:        strings.TrimSpace(q.Get("topic")),
 		Lang:         strings.TrimSpace(q.Get("lang")),
+		Provider:     strings.TrimSpace(q.Get("provider")),
 		Limit:        parseLimit(r, defaultSearchLimit),
 		Offset:       parseOffset(r),
 		IncludeCount: parseBool(q.Get("include_count")),
@@ -1569,12 +1693,13 @@ func wantsHTML(r *http.Request) bool {
 }
 
 func hashSearchParams(params db.ResearchSearchParams, scope string) string {
-	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%d|%d|%t",
+	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t",
 		scope,
 		params.Query,
 		params.Channel,
 		params.Topic,
 		params.Lang,
+		params.Provider,
 		formatTimePtr(params.From),
 		formatTimePtr(params.To),
 		params.Limit,
@@ -1604,6 +1729,24 @@ func formatPercent(value float64) string {
 	}
 
 	return fmt.Sprintf("%.1f%%", value*percentMultiplier)
+}
+
+func formatWeightSummary(entry db.ResearchChannelQualitySummary) string {
+	if entry.ImportanceWeight == 0 {
+		return "-"
+	}
+
+	label := fmt.Sprintf(fmtFloat2, entry.ImportanceWeight)
+	switch {
+	case entry.WeightOverride:
+		label += " (override)"
+	case entry.AutoWeightEnabled:
+		label += " (auto)"
+	default:
+		label += " (manual)"
+	}
+
+	return label
 }
 
 type matchedClaim struct {
@@ -1675,7 +1818,12 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, status int,
 func buildChannelDiffRows(entries []db.ResearchWeeklyChannelDiff) [][]string {
 	rows := make([][]string, 0, len(entries))
 	for _, entry := range entries {
-		rows = append(rows, []string{entry.ChannelTitle, strconv.Itoa(entry.Delta)})
+		rows = append(rows, []string{
+			entry.ChannelTitle,
+			strconv.Itoa(entry.Delta),
+			fmt.Sprintf(fmtFloat2, entry.ImportanceDelta),
+			fmt.Sprintf(fmtFloat2, entry.RelevanceDelta),
+		})
 	}
 
 	return rows

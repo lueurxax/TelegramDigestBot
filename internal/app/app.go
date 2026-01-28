@@ -483,10 +483,7 @@ func (a *App) RunDigest(ctx context.Context, once bool) error {
 
 // newLLMClient creates a new LLM client with multi-provider fallback.
 func (a *App) newLLMClient(ctx context.Context) llm.Client {
-	// Set the global usage store for token usage persistence
-	llm.SetGlobalUsageStore(a.database)
-
-	return llm.New(ctx, a.cfg, a.database, a.logger)
+	return llm.New(ctx, a.cfg, a.database, a.database, a.logger)
 }
 
 // newEmbeddingClient creates a new embedding client with multi-provider support.

@@ -115,19 +115,21 @@ func buildCircuitConfig(cfg *config.Config) embeddings.CircuitBreakerConfig {
 
 // registerProviders registers all available LLM providers with the registry.
 func registerProviders(ctx context.Context, registry *Registry, cfg *config.Config, store PromptStore, logger *zerolog.Logger, circuitCfg embeddings.CircuitBreakerConfig) {
+	recorder := registry.UsageRecorder()
+
 	// Register OpenAI as primary provider
 	if cfg.LLMAPIKey != "" && cfg.LLMAPIKey != llmAPIKeyMock {
-		registry.Register(NewOpenAIProvider(cfg, store, logger), circuitCfg)
+		registry.Register(NewOpenAIProvider(cfg, store, recorder, logger), circuitCfg)
 	}
 
 	// Register Anthropic as first fallback
 	if cfg.AnthropicAPIKey != "" {
-		registry.Register(NewAnthropicProvider(cfg, store, logger), circuitCfg)
+		registry.Register(NewAnthropicProvider(cfg, store, recorder, logger), circuitCfg)
 	}
 
 	// Register Google as second fallback
 	if cfg.GoogleAPIKey != "" {
-		googleProvider, err := NewGoogleProvider(ctx, cfg, store, logger)
+		googleProvider, err := NewGoogleProvider(ctx, cfg, store, recorder, logger)
 		if err != nil {
 			logger.Warn().Err(err).Msg("failed to create Google LLM provider")
 		} else {
@@ -137,12 +139,12 @@ func registerProviders(ctx context.Context, registry *Registry, cfg *config.Conf
 
 	// Register Cohere as third fallback
 	if cfg.CohereAPIKey != "" {
-		registry.Register(NewCohereProvider(cfg, store, logger), circuitCfg)
+		registry.Register(NewCohereProvider(cfg, store, recorder, logger), circuitCfg)
 	}
 
 	// Register OpenRouter as fourth fallback
 	if cfg.OpenRouterAPIKey != "" {
-		registry.Register(NewOpenRouterProvider(cfg, store, logger), circuitCfg)
+		registry.Register(NewOpenRouterProvider(cfg, store, recorder, logger), circuitCfg)
 	}
 
 	// If no providers configured, use mock
@@ -154,13 +156,20 @@ func registerProviders(ctx context.Context, registry *Registry, cfg *config.Conf
 // New creates a new LLM client with multi-provider fallback support.
 // It registers providers in priority order: OpenAI (primary), Anthropic (fallback), Google (second fallback).
 // If no providers are configured, it returns a mock client.
-func New(ctx context.Context, cfg *config.Config, store PromptStore, logger *zerolog.Logger) Client {
+// The usageStore parameter is optional and allows persisting token usage to the database.
+func New(ctx context.Context, cfg *config.Config, store PromptStore, usageStore UsageStore, logger *zerolog.Logger) Client {
 	if logger == nil {
 		nopLogger := zerolog.Nop()
 		logger = &nopLogger
 	}
 
 	registry := NewRegistry(logger)
+
+	// Set the usage store if provided
+	if usageStore != nil {
+		registry.SetUsageStore(usageStore)
+	}
+
 	circuitCfg := buildCircuitConfig(cfg)
 	registerProviders(ctx, registry, cfg, store, logger, circuitCfg)
 

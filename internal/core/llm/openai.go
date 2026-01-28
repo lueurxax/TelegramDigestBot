@@ -22,11 +22,12 @@ import (
 )
 
 type openaiClient struct {
-	cfg         *config.Config
-	client      *openai.Client
-	logger      *zerolog.Logger
-	rateLimiter *rate.Limiter
-	promptStore PromptStore
+	cfg           *config.Config
+	client        *openai.Client
+	logger        *zerolog.Logger
+	rateLimiter   *rate.Limiter
+	promptStore   PromptStore
+	usageRecorder UsageRecorder
 
 	// Circuit breaker state
 	consecutiveFailures int
@@ -75,13 +76,14 @@ Rules:
 )
 
 // NewOpenAIProvider creates a new OpenAI LLM provider.
-func NewOpenAIProvider(cfg *config.Config, store PromptStore, logger *zerolog.Logger) *openaiClient {
+func NewOpenAIProvider(cfg *config.Config, store PromptStore, recorder UsageRecorder, logger *zerolog.Logger) *openaiClient {
 	return &openaiClient{
-		cfg:         cfg,
-		client:      openai.NewClient(cfg.LLMAPIKey),
-		logger:      logger,
-		rateLimiter: rate.NewLimiter(rate.Limit(float64(cfg.RateLimitRPS)), rateLimiterBurst), // User-defined RPS, burst 5
-		promptStore: store,
+		cfg:           cfg,
+		client:        openai.NewClient(cfg.LLMAPIKey),
+		logger:        logger,
+		rateLimiter:   rate.NewLimiter(rate.Limit(float64(cfg.RateLimitRPS)), rateLimiterBurst), // User-defined RPS, burst 5
+		promptStore:   store,
+		usageRecorder: recorder,
 	}
 }
 
@@ -213,14 +215,13 @@ func (c *openaiClient) ProcessBatch(ctx context.Context, messages []MessageInput
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskSummarize, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskSummarize, 0, 0, false)
 
 		return nil, fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskSummarize, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
-
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskSummarize, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 	content := resp.Choices[0].Message.Content
 	c.logger.Debug().Str("content", content).Msg("LLM response")
 
@@ -259,13 +260,13 @@ func (c *openaiClient) TranslateText(ctx context.Context, text string, targetLan
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskTranslate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskTranslate, 0, 0, false)
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskTranslate, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskTranslate, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
@@ -296,13 +297,13 @@ func (c *openaiClient) CompleteText(ctx context.Context, prompt string, model st
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskComplete, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskComplete, 0, 0, false)
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskComplete, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskComplete, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
@@ -680,13 +681,13 @@ func (c *openaiClient) GenerateNarrative(ctx context.Context, items []domain.Ite
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, 0, 0, false)
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 
 	return resp.Choices[0].Message.Content, nil
 }
@@ -735,13 +736,13 @@ func (c *openaiClient) GenerateNarrativeWithEvidence(ctx context.Context, items 
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, 0, 0, false)
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskNarrative, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 
 	return resp.Choices[0].Message.Content, nil
 }
@@ -793,13 +794,13 @@ func (c *openaiClient) SummarizeCluster(ctx context.Context, items []domain.Item
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, 0, 0, false)
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
@@ -867,13 +868,13 @@ func (c *openaiClient) executeClusterSummary(ctx context.Context, model, prompt 
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, 0, 0, false)
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskCluster, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
@@ -921,13 +922,13 @@ func (c *openaiClient) GenerateClusterTopic(ctx context.Context, items []domain.
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskTopic, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskTopic, 0, 0, false)
 
 		return "", fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskTopic, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskTopic, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 
 	return strings.TrimSpace(resp.Choices[0].Message.Content), nil
 }
@@ -959,14 +960,13 @@ func (c *openaiClient) RelevanceGate(ctx context.Context, text string, model str
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), model, TaskRelevanceGate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskRelevanceGate, 0, 0, false)
 
 		return RelevanceGateResult{}, fmt.Errorf(errOpenAIChatCompletion, err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), model, TaskRelevanceGate, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
-
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), model, TaskRelevanceGate, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 	content := resp.Choices[0].Message.Content
 
 	var result RelevanceGateResult
@@ -1077,13 +1077,13 @@ func (c *openaiClient) CompressSummariesForCover(ctx context.Context, summaries 
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), modelToUse, TaskCompress, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), modelToUse, TaskCompress, 0, 0, false)
 
 		return nil, fmt.Errorf("failed to compress summaries: %w", err)
 	}
 
 	c.recordSuccess()
-	RecordTokenUsage(string(ProviderOpenAI), modelToUse, TaskCompress, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true) //nolint:contextcheck // fire-and-forget
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), modelToUse, TaskCompress, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
 
 	if len(resp.Choices) == 0 {
 		return nil, ErrEmptyLLMResponse
@@ -1128,14 +1128,14 @@ func (c *openaiClient) GenerateDigestCover(ctx context.Context, topics []string,
 	})
 	if err != nil {
 		c.recordFailure()
-		RecordTokenUsage(string(ProviderOpenAI), imageModelGPTImage, TaskImageGen, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), imageModelGPTImage, TaskImageGen, 0, 0, false)
 
 		return nil, fmt.Errorf("failed to generate cover image: %w", err)
 	}
 
 	c.recordSuccess()
 	// Image generation doesn't have traditional token counts, record 0 for success tracking
-	RecordTokenUsage(string(ProviderOpenAI), imageModelGPTImage, TaskImageGen, 0, 0, true) //nolint:contextcheck // fire-and-forget
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), imageModelGPTImage, TaskImageGen, 0, 0, true)
 
 	if len(resp.Data) == 0 {
 		return nil, ErrEmptyDALLEResponse

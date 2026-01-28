@@ -38,15 +38,16 @@ const (
 
 // anthropicProvider implements the Provider interface for Anthropic Claude.
 type anthropicProvider struct {
-	cfg         *config.Config
-	client      anthropic.Client
-	logger      *zerolog.Logger
-	rateLimiter *rate.Limiter
-	promptStore PromptStore
+	cfg           *config.Config
+	client        anthropic.Client
+	logger        *zerolog.Logger
+	rateLimiter   *rate.Limiter
+	promptStore   PromptStore
+	usageRecorder UsageRecorder
 }
 
 // NewAnthropicProvider creates a new Anthropic LLM provider.
-func NewAnthropicProvider(cfg *config.Config, store PromptStore, logger *zerolog.Logger) *anthropicProvider {
+func NewAnthropicProvider(cfg *config.Config, store PromptStore, recorder UsageRecorder, logger *zerolog.Logger) *anthropicProvider {
 	client := anthropic.NewClient(option.WithAPIKey(cfg.AnthropicAPIKey))
 
 	rateLimit := cfg.RateLimitRPS
@@ -55,11 +56,12 @@ func NewAnthropicProvider(cfg *config.Config, store PromptStore, logger *zerolog
 	}
 
 	return &anthropicProvider{
-		cfg:         cfg,
-		client:      client,
-		logger:      logger,
-		rateLimiter: rate.NewLimiter(rate.Limit(float64(rateLimit)), anthropicRateLimiterBurst),
-		promptStore: store,
+		cfg:           cfg,
+		client:        client,
+		logger:        logger,
+		rateLimiter:   rate.NewLimiter(rate.Limit(float64(rateLimit)), anthropicRateLimiterBurst),
+		promptStore:   store,
+		usageRecorder: recorder,
 	}
 }
 
@@ -111,12 +113,12 @@ func (p *anthropicProvider) completeWithMetrics(ctx context.Context, prompt, mod
 		},
 	})
 	if err != nil {
-		RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), task, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), task, 0, 0, false)
 
-		return "", fmt.Errorf("%s: %w", errMsg, err)
+		return "", fmt.Errorf(errFmtContextWrap, errMsg, err)
 	}
 
-	RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), task, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), task, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true)
 
 	return strings.TrimSpace(extractTextFromResponse(resp)), nil
 }
@@ -157,12 +159,12 @@ func (p *anthropicProvider) ProcessBatch(ctx context.Context, messages []Message
 		},
 	})
 	if err != nil {
-		RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskSummarize, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskSummarize, 0, 0, false)
 
 		return nil, fmt.Errorf("anthropic chat completion: %w", err)
 	}
 
-	RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskSummarize, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskSummarize, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true)
 
 	if len(resp.Content) == 0 {
 		return nil, ErrEmptyLLMResponse
@@ -225,12 +227,12 @@ func (p *anthropicProvider) TranslateText(ctx context.Context, text, targetLangu
 		},
 	})
 	if err != nil {
-		RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskTranslate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskTranslate, 0, 0, false)
 
 		return "", fmt.Errorf("anthropic translation: %w", err)
 	}
 
-	RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskTranslate, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true) //nolint:contextcheck // fire-and-forget
+	p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskTranslate, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true)
 
 	return strings.TrimSpace(extractTextFromResponse(resp)), nil
 }
@@ -336,13 +338,12 @@ func (p *anthropicProvider) RelevanceGate(ctx context.Context, text, model, prom
 		},
 	})
 	if err != nil {
-		RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskRelevanceGate, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskRelevanceGate, 0, 0, false)
 
 		return RelevanceGateResult{}, fmt.Errorf("anthropic relevance gate: %w", err)
 	}
 
-	RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskRelevanceGate, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true) //nolint:contextcheck // fire-and-forget
-
+	p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskRelevanceGate, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true)
 	responseText := extractJSON(extractTextFromResponse(resp))
 
 	var result RelevanceGateResult
@@ -382,13 +383,12 @@ func (p *anthropicProvider) CompressSummariesForCover(ctx context.Context, summa
 		},
 	})
 	if err != nil {
-		RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskCompress, 0, 0, false) //nolint:contextcheck // fire-and-forget
+		p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskCompress, 0, 0, false)
 
 		return nil, fmt.Errorf("anthropic compress summaries: %w", err)
 	}
 
-	RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskCompress, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true) //nolint:contextcheck // fire-and-forget
-
+	p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskCompress, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true)
 	responseText := extractTextFromResponse(resp)
 	lines := strings.Split(strings.TrimSpace(responseText), "\n")
 

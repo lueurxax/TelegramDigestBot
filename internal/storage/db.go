@@ -22,14 +22,73 @@ type DB struct {
 	Queries *sqlc.Queries
 }
 
+// PoolOptions configures the database connection pool.
+type PoolOptions struct {
+	MaxConns          int32
+	MinConns          int32
+	MaxConnIdleTime   time.Duration
+	MaxConnLifetime   time.Duration
+	HealthCheckPeriod time.Duration
+}
+
+// DefaultPoolOptions returns sensible default pool configuration.
+func DefaultPoolOptions() PoolOptions {
+	return PoolOptions{
+		MaxConns:          defaultMaxConns,
+		MinConns:          defaultMinConns,
+		MaxConnIdleTime:   defaultMaxConnIdleTime,
+		MaxConnLifetime:   defaultMaxConnLifetime,
+		HealthCheckPeriod: defaultHealthCheckPeriod,
+	}
+}
+
+// New creates a new database connection with default pool options.
 func New(ctx context.Context, dsn string) (*DB, error) {
+	return NewWithOptions(ctx, dsn, DefaultPoolOptions())
+}
+
+// NewWithOptions creates a new database connection with custom pool options.
+func NewWithOptions(ctx context.Context, dsn string, opts PoolOptions) (*DB, error) {
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse db config: %w", err)
 	}
 
+	applyPoolOptions(config, opts)
+
+	return connectWithRetries(ctx, config)
+}
+
+// applyPoolOptions applies non-zero pool options to the config.
+func applyPoolOptions(config *pgxpool.Config, opts PoolOptions) {
+	if opts.MaxConns > 0 {
+		config.MaxConns = opts.MaxConns
+	}
+
+	if opts.MinConns > 0 {
+		config.MinConns = opts.MinConns
+	}
+
+	if opts.MaxConnIdleTime > 0 {
+		config.MaxConnIdleTime = opts.MaxConnIdleTime
+	}
+
+	if opts.MaxConnLifetime > 0 {
+		config.MaxConnLifetime = opts.MaxConnLifetime
+	}
+
+	if opts.HealthCheckPeriod > 0 {
+		config.HealthCheckPeriod = opts.HealthCheckPeriod
+	}
+}
+
+// connectWithRetries attempts to connect to the database with retries.
+func connectWithRetries(ctx context.Context, config *pgxpool.Config) (*DB, error) {
 	var pool *pgxpool.Pool
-	for i := 0; i < 10; i++ {
+
+	var err error
+
+	for i := 0; i < maxConnectionRetries; i++ {
 		pool, err = pgxpool.NewWithConfig(ctx, config)
 		if err == nil {
 			if err = pool.Ping(ctx); err == nil {

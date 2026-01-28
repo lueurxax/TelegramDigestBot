@@ -35,4 +35,15 @@ const (
 const (
 	// ConnectionRetrySleep is the sleep duration between connection retries
 	ConnectionRetrySleep = 2 * time.Second
+	// maxConnectionRetries is the number of retries for initial connection
+	maxConnectionRetries = 10
+)
+
+// Database pool default constants
+const (
+	defaultMaxConns          int32         = 25
+	defaultMinConns          int32         = 5
+	defaultMaxConnIdleTime   time.Duration = 30 * time.Minute
+	defaultMaxConnLifetime   time.Duration = time.Hour
+	defaultHealthCheckPeriod time.Duration = time.Minute
 )
