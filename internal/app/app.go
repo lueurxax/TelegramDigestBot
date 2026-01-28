@@ -227,9 +227,11 @@ func (a *App) refreshResearchOnce(ctx context.Context) {
 		a.logger.Warn().Err(err).Msg("research refresh lock failed")
 		return
 	}
+
 	if !acquired {
 		return
 	}
+
 	defer func() {
 		if err := a.database.ReleaseAdvisoryLock(refreshCtx, researchRefreshLockID); err != nil {
 			a.logger.Warn().Err(err).Msg("release research refresh lock failed")

@@ -13,11 +13,18 @@ import (
 
 // Sentinel errors for research queries.
 var (
-	ErrResearchClusterNotFound = errors.New("research cluster not found")
-	ErrResearchSessionNotFound = errors.New("research session not found")
+	ErrResearchClusterNotFound       = errors.New("research cluster not found")
+	ErrResearchSessionNotFound       = errors.New("research session not found")
+	ErrChannelRelevanceNotConfigured = errors.New("channel relevance not configured")
+	ErrRelevanceGateNotFound         = errors.New("relevance gate decision not found")
 )
 
 const (
+	// Time bucket constants for PostgreSQL date_trunc.
+	bucketWeek  = "week"
+	bucketDay   = "day"
+	bucketMonth = "month"
+
 	defaultSearchLimit  = 50
 	maxSearchLimit      = 200
 	recencyHalfLifeDays = 14.0
@@ -85,6 +92,18 @@ const (
 			LIMIT %d OFFSET %d
 		`
 )
+
+// normalizeTimelineBucket converts bucket aliases to valid PostgreSQL date_trunc units.
+func normalizeTimelineBucket(bucket string) string {
+	switch bucket {
+	case bucketDay, "daily":
+		return bucketDay
+	case bucketMonth, "monthly":
+		return bucketMonth
+	default:
+		return bucketWeek
+	}
+}
 
 // ResearchSearchParams defines filters for research search.
 type ResearchSearchParams struct {
@@ -753,6 +772,18 @@ type ResearchChannelOverlapEdge struct {
 	Jaccard  float64
 }
 
+type ResearchChannelOverlapSummary struct {
+	TotalClusters  int
+	SharedClusters int
+	TotalChannels  int
+}
+
+type ResearchClaimsSummary struct {
+	ClaimsCount         int
+	EvidenceClaimsCount int
+	EvidenceItemsCount  int
+}
+
 // GetChannelOverlap returns overlap edges, optionally filtered by time range.
 func (db *DB) GetChannelOverlap(ctx context.Context, from, to *time.Time, limit int) ([]ResearchChannelOverlapEdge, error) {
 	if limit <= 0 {
@@ -861,6 +892,68 @@ func (db *DB) GetChannelOverlap(ctx context.Context, from, to *time.Time, limit 
 	return results, nil
 }
 
+func (db *DB) GetChannelOverlapSummary(ctx context.Context) (ResearchChannelOverlapSummary, error) {
+	row := db.Pool.QueryRow(ctx, `
+		WITH channel_clusters AS (
+			SELECT ci.cluster_id, rm.channel_id
+			FROM cluster_items ci
+			JOIN items i ON ci.item_id = i.id
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			GROUP BY ci.cluster_id, rm.channel_id
+		),
+		cluster_counts AS (
+			SELECT cluster_id, COUNT(*) AS channel_count
+			FROM channel_clusters
+			GROUP BY cluster_id
+		)
+		SELECT
+			(SELECT COUNT(*) FROM cluster_counts) AS total_clusters,
+			(SELECT COUNT(*) FROM cluster_counts WHERE channel_count > 1) AS shared_clusters,
+			(SELECT COUNT(DISTINCT channel_id) FROM channel_clusters) AS total_channels
+	`)
+
+	var (
+		totalClusters  pgtype.Int8
+		sharedClusters pgtype.Int8
+		totalChannels  pgtype.Int8
+	)
+
+	if err := row.Scan(&totalClusters, &sharedClusters, &totalChannels); err != nil {
+		return ResearchChannelOverlapSummary{}, fmt.Errorf("get channel overlap summary: %w", err)
+	}
+
+	return ResearchChannelOverlapSummary{
+		TotalClusters:  int(totalClusters.Int64),
+		SharedClusters: int(sharedClusters.Int64),
+		TotalChannels:  int(totalChannels.Int64),
+	}, nil
+}
+
+func (db *DB) GetClaimsSummary(ctx context.Context) (ResearchClaimsSummary, error) {
+	row := db.Pool.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM claims) AS claims_count,
+			(SELECT COUNT(*) FROM evidence_claims) AS evidence_claims_count,
+			(SELECT COUNT(*) FROM item_evidence) AS evidence_items_count
+	`)
+
+	var (
+		claimsCount         pgtype.Int8
+		evidenceClaimsCount pgtype.Int8
+		evidenceItemsCount  pgtype.Int8
+	)
+
+	if err := row.Scan(&claimsCount, &evidenceClaimsCount, &evidenceItemsCount); err != nil {
+		return ResearchClaimsSummary{}, fmt.Errorf("get claims summary: %w", err)
+	}
+
+	return ResearchClaimsSummary{
+		ClaimsCount:         int(claimsCount.Int64),
+		EvidenceClaimsCount: int(evidenceClaimsCount.Int64),
+		EvidenceItemsCount:  int(evidenceItemsCount.Int64),
+	}, nil
+}
+
 // ResearchTopicTimelinePoint represents topic timeline buckets.
 type ResearchTopicTimelinePoint struct {
 	BucketDate    time.Time
@@ -889,9 +982,7 @@ func buildTimelineFilters(from, to *time.Time, args []any) ([]string, []any) {
 
 // GetTopicTimeline returns topic timeline data.
 func (db *DB) GetTopicTimeline(ctx context.Context, bucket string, from, to *time.Time, limit int) ([]ResearchTopicTimelinePoint, error) {
-	if bucket == "" {
-		bucket = "week"
-	}
+	bucket = normalizeTimelineBucket(bucket)
 
 	if limit <= 0 {
 		limit = 200
@@ -1479,6 +1570,7 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 	if _, err := db.Pool.Exec(ctx, "TRUNCATE cluster_first_appearance"); err != nil {
 		return fmt.Errorf("truncate cluster_first_appearance: %w", err)
 	}
+
 	if _, err := db.Pool.Exec(ctx, `
 		INSERT INTO cluster_first_appearance (cluster_id, channel_id, first_item_id, first_seen_at)
 		WITH ranked AS (
@@ -1501,6 +1593,7 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 	if _, err := db.Pool.Exec(ctx, "TRUNCATE cluster_topic_history"); err != nil {
 		return fmt.Errorf("truncate cluster_topic_history: %w", err)
 	}
+
 	if _, err := db.Pool.Exec(ctx, `
 		INSERT INTO cluster_topic_history (cluster_id, topic, window_start, window_end)
 		SELECT c.id,
@@ -1520,6 +1613,7 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 	if _, err := db.Pool.Exec(ctx, "TRUNCATE claims"); err != nil {
 		return fmt.Errorf("truncate claims: %w", err)
 	}
+
 	if _, err := db.Pool.Exec(ctx, `
 		INSERT INTO claims (claim_text, first_seen_at, origin_cluster_id, cluster_ids, contradicted_by)
 		SELECT claim_text,
@@ -1563,8 +1657,9 @@ func (db *DB) GetChannelRelevanceSettings(ctx context.Context, channelID string)
 
 	if err := row.Scan(&threshold, &auto, &delta); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
+			return nil, ErrChannelRelevanceNotConfigured
 		}
+
 		return nil, fmt.Errorf("get channel relevance settings: %w", err)
 	}
 
@@ -1594,8 +1689,9 @@ func (db *DB) GetRelevanceGateDecision(ctx context.Context, rawMessageID string)
 
 	if err := row.Scan(&decision, &confidence, &reason, &model, &version); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
+			return nil, ErrRelevanceGateNotFound
 		}
+
 		return nil, fmt.Errorf("get relevance gate decision: %w", err)
 	}
 

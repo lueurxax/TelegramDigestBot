@@ -101,7 +101,7 @@ type ClusterItemInfo struct {
 // GetClusterForItem returns the cluster containing the given item, along with all items in that cluster.
 func (db *DB) GetClusterForItem(ctx context.Context, itemID string) (*ClusterWithItems, []ClusterItemInfo, error) {
 	rows, err := db.Pool.Query(ctx, `
-		SELECT c.id, c.topic, ci2.item_id, i.summary, rm.text, ch.username, ch.tg_peer_id, rm.tg_msg_id
+		SELECT c.id, c.topic, ci2.item_id, i.summary, rm.text, ch.username, ch.tg_peer_id, rm.tg_message_id
 		FROM cluster_items ci
 		JOIN clusters c ON ci.cluster_id = c.id
 		JOIN cluster_items ci2 ON c.id = ci2.cluster_id
