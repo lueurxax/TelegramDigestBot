@@ -63,30 +63,23 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
 
-  build:
-    name: Build
+  docker:
+    name: Docker Build (${{ matrix.image }})
     runs-on: ubuntu-latest
     needs: [lint, test]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: true
-
-      - name: Build
-        run: go build -v ./...
-
-  docker:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: [build]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - image: main
+            dockerfile: Dockerfile
+            image_name: ghcr.io/${{ github.repository }}
+          - image: crawler
+            dockerfile: Dockerfile.crawler
+            image_name: ghcr.io/${{ github.repository }}/crawler
     steps:
       - uses: actions/checkout@v4
 
@@ -104,7 +97,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ matrix.image_name }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -113,35 +106,13 @@ jobs:
             type=sha,prefix=
             type=raw,value=latest
 
-      - name: Build and push main image
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Extract crawler metadata
-        id: crawler-meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}/crawler
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=
-            type=raw,value=latest
-
-      - name: Build and push crawler image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.crawler
-          push: true
-          tags: ${{ steps.crawler-meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -179,16 +150,19 @@ jobs:
           kubectl -n "${NAMESPACE}" set image deployment/digest-reader reader="${IMAGE}"
           kubectl -n "${NAMESPACE}" set image deployment/digest-worker worker="${IMAGE}"
           kubectl -n "${NAMESPACE}" set image deployment/digest-scheduler scheduler="${IMAGE}"
+          kubectl -n "${NAMESPACE}" set image deployment/digest-http http="${IMAGE}"
           kubectl -n "${NAMESPACE}" set image deployment/news-crawler crawler="${CRAWLER_IMAGE}" || true
 
           kubectl -n "${NAMESPACE}" annotate deployment/digest-bot deploy-sha="${SHORT_SHA}" --overwrite
           kubectl -n "${NAMESPACE}" annotate deployment/digest-reader deploy-sha="${SHORT_SHA}" --overwrite
           kubectl -n "${NAMESPACE}" annotate deployment/digest-worker deploy-sha="${SHORT_SHA}" --overwrite
           kubectl -n "${NAMESPACE}" annotate deployment/digest-scheduler deploy-sha="${SHORT_SHA}" --overwrite
+          kubectl -n "${NAMESPACE}" annotate deployment/digest-http deploy-sha="${SHORT_SHA}" --overwrite
           kubectl -n "${NAMESPACE}" annotate deployment/news-crawler deploy-sha="${SHORT_SHA}" --overwrite || true
 
           kubectl -n "${NAMESPACE}" rollout status deployment/digest-bot
           kubectl -n "${NAMESPACE}" rollout status deployment/digest-reader
           kubectl -n "${NAMESPACE}" rollout status deployment/digest-worker
           kubectl -n "${NAMESPACE}" rollout status deployment/digest-scheduler
+          kubectl -n "${NAMESPACE}" rollout status deployment/digest-http
           kubectl -n "${NAMESPACE}" rollout status deployment/news-crawler || true
