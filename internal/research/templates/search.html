@@ -66,6 +66,8 @@
             <th>Channel</th>
             <th>Date</th>
             <th>Score</th>
+            <th>Cluster</th>
+            <th>Evidence</th>
             <th>Link</th>
           </tr>
         </thead>
@@ -77,6 +79,20 @@
             <td>{{.ChannelTitle}} {{if .ChannelUsername}}(@{{.ChannelUsername}}){{end}}</td>
             <td>{{formatTime .TGDate}}</td>
             <td>{{formatFloat .Score}}</td>
+            <td>
+              {{if .ClusterID}}
+              <a href="/research/cluster/{{.ClusterID}}">View</a>
+              {{else}}
+              -
+              {{end}}
+            </td>
+            <td>
+              {{if gt .EvidenceCount 0}}
+              <a href="/research/evidence/{{.ID}}">View ({{.EvidenceCount}})</a>
+              {{else}}
+              -
+              {{end}}
+            </td>
             <td><a href="/research/item/{{.ID}}">View</a></td>
           </tr>
           {{end}}

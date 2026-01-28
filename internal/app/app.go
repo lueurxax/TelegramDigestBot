@@ -102,6 +102,14 @@ func (a *App) StartHealthServer(ctx context.Context) error {
 	return nil
 }
 
+// RunHTTP runs the HTTP-only mode for serving the research UI and expanded view.
+// This mode is designed for zero-downtime deployments with RollingUpdate strategy.
+func (a *App) RunHTTP(ctx context.Context) error {
+	a.logger.Info().Msg("Starting HTTP-only mode")
+
+	return a.StartHealthServer(ctx)
+}
+
 // RunBot runs the bot mode.
 func (a *App) RunBot(ctx context.Context) error {
 	a.logger.Info().Msg("Starting bot mode")
@@ -245,6 +253,20 @@ func (a *App) refreshResearchOnce(ctx context.Context) {
 
 	if err := a.database.DeleteExpiredResearchSessions(refreshCtx); err != nil {
 		a.logger.Warn().Err(err).Msg("cleanup research sessions failed")
+	}
+
+	retentionCounts, err := a.database.CleanupResearchRetention(refreshCtx)
+	if err != nil {
+		a.logger.Warn().Err(err).Msg("cleanup research retention failed")
+		return
+	}
+
+	if retentionCounts.ItemsDeleted > 0 || retentionCounts.EvidenceDeleted > 0 || retentionCounts.TranslationsDeleted > 0 {
+		a.logger.Info().
+			Int64("items_deleted", retentionCounts.ItemsDeleted).
+			Int64("evidence_deleted", retentionCounts.EvidenceDeleted).
+			Int64("translations_deleted", retentionCounts.TranslationsDeleted).
+			Msg("research retention cleanup")
 	}
 }
 

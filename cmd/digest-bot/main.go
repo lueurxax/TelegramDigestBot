@@ -17,6 +17,8 @@ import (
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
+const modeHTTP = "http"
+
 func main() {
 	mode := flag.String("mode", "", "Service mode (bot, reader, worker, digest)")
 	once := flag.Bool("once", false, "Run once and exit (for digest mode)")
@@ -53,12 +55,14 @@ func main() {
 
 	application := app.New(cfg, database, &logger)
 
-	// Start health server in background
-	go func() {
-		if err := application.StartHealthServer(ctx); err != nil {
-			logger.Error().Err(err).Msg("health check server error")
-		}
-	}()
+	// Start health server in background for all modes except http (which IS the health server)
+	if *mode != modeHTTP {
+		go func() {
+			if err := application.StartHealthServer(ctx); err != nil {
+				logger.Error().Err(err).Msg("health check server error")
+			}
+		}()
+	}
 
 	if err := runMode(ctx, application, *mode, *once); err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -88,8 +92,10 @@ func runMode(ctx context.Context, application *app.App, mode string, once bool) 
 		return application.RunWorker(ctx)
 	case "digest":
 		return application.RunDigest(ctx, once)
+	case modeHTTP:
+		return application.RunHTTP(ctx)
 	default:
-		log.Fatalf("Usage: %s --mode=[bot|reader|worker|digest]", os.Args[0])
+		log.Fatalf("Usage: %s --mode=[bot|reader|worker|digest|http]", os.Args[0])
 
 		return nil
 	}

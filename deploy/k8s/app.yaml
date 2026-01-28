@@ -246,3 +246,58 @@ spec:
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 10
+---
+# HTTP-only deployment for serving research UI and expanded view
+# Uses RollingUpdate strategy for zero-downtime deployments
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: digest-http
+  namespace: digest
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: digest-http
+  template:
+    metadata:
+      labels:
+        app: digest-http
+    spec:
+      serviceAccountName: digest-bot
+      containers:
+      - name: http
+        image: ghcr.io/lueurxax/telegramdigestbot:7a3853e
+        command: ["./telegram-digest-bot"]
+        args: ["--mode=http"]
+        envFrom:
+        - configMapRef:
+            name: digest-config
+        - secretRef:
+            name: digest-secrets
+        ports:
+        - containerPort: 8080
+        resources:
+          requests:
+            memory: "32Mi"
+            cpu: "10m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 5

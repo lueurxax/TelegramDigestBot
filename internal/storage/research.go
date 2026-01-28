@@ -55,6 +55,7 @@ const (
 	langLinkMinSimilarity  = 0.8
 	langLinkMaxLagSeconds  = 604800
 	originTopicLimit       = 5
+	retentionItemsMonths   = 18
 
 	// Slice preallocation capacity for timeline queries.
 	timelineArgsCapacity = 2
@@ -91,10 +92,23 @@ const (
 			       c.username,
 			       c.title,
 			       c.tg_peer_id,
+			       cl.cluster_id,
+			       ev.evidence_count,
 			       %s AS score
 			FROM items i
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
 			JOIN channels c ON rm.channel_id = c.id
+			LEFT JOIN LATERAL (
+				SELECT ci.cluster_id
+				FROM cluster_items ci
+				WHERE ci.item_id = i.id
+				LIMIT 1
+			) cl ON true
+			LEFT JOIN LATERAL (
+				SELECT COUNT(*) AS evidence_count
+				FROM item_evidence ie
+				WHERE ie.item_id = i.id
+			) ev ON true
 			WHERE %s
 			ORDER BY score DESC, rm.tg_date DESC
 			LIMIT %d OFFSET %d
@@ -166,6 +180,8 @@ type ResearchItemSearchResult struct {
 	ChannelUsername string
 	ChannelTitle    string
 	ChannelPeerID   int64
+	ClusterID       string
+	EvidenceCount   int
 	Score           float64
 }
 
@@ -317,12 +333,14 @@ func (db *DB) SearchResearchItems(ctx context.Context, params ResearchSearchPara
 
 	for rows.Next() {
 		var (
-			itemID  pgtype.UUID
-			summary pgtype.Text
-			topic   pgtype.Text
-			text    pgtype.Text
-			user    pgtype.Text
-			title   pgtype.Text
+			itemID        pgtype.UUID
+			summary       pgtype.Text
+			topic         pgtype.Text
+			text          pgtype.Text
+			user          pgtype.Text
+			title         pgtype.Text
+			clusterID     pgtype.UUID
+			evidenceCount int64
 		)
 
 		res := ResearchItemSearchResult{}
@@ -340,6 +358,8 @@ func (db *DB) SearchResearchItems(ctx context.Context, params ResearchSearchPara
 			&user,
 			&title,
 			&res.ChannelPeerID,
+			&clusterID,
+			&evidenceCount,
 			&res.Score,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan research item: %w", err)
@@ -351,6 +371,8 @@ func (db *DB) SearchResearchItems(ctx context.Context, params ResearchSearchPara
 		res.Text = text.String
 		res.ChannelUsername = user.String
 		res.ChannelTitle = title.String
+		res.ClusterID = fromUUID(clusterID)
+		res.EvidenceCount = int(evidenceCount)
 
 		results = append(results, res)
 	}
@@ -959,6 +981,19 @@ type ResearchChannelBiasEntry struct {
 	IndexRatio   float64
 }
 
+type ResearchAgendaSimilarityEdge struct {
+	ChannelA         string
+	ChannelATitle    string
+	ChannelAUser     string
+	ChannelB         string
+	ChannelBTitle    string
+	ChannelBUser     string
+	SharedTopics     int
+	TotalTopicsA     int
+	TotalTopicsB     int
+	AgendaSimilarity float64
+}
+
 type ResearchLanguageCoverageEntry struct {
 	FromLang     string
 	ToLang       string
@@ -1432,6 +1467,127 @@ func (db *DB) GetChannelBias(ctx context.Context, channelID string, from, to *ti
 	}
 
 	return results, nil
+}
+
+func (db *DB) GetChannelAgendaSimilarity(ctx context.Context, from, to *time.Time, limit int) ([]ResearchAgendaSimilarityEdge, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+
+	args, where := buildAgendaSimilarityFilters(from, to)
+	args = append(args, safeIntToInt32(maxOverlapChannels), safeIntToInt32(limit))
+
+	query := fmt.Sprintf(`
+		WITH channel_topics AS (
+			SELECT rm.channel_id, i.topic
+			FROM items i
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			WHERE %s AND i.topic IS NOT NULL AND i.topic <> ''
+			GROUP BY rm.channel_id, i.topic
+		),
+		topic_counts AS (
+			SELECT channel_id, COUNT(*) AS topic_count
+			FROM channel_topics
+			GROUP BY channel_id
+		),
+		top_channels AS (
+			SELECT channel_id
+			FROM topic_counts
+			ORDER BY topic_count DESC
+			LIMIT $%d
+		),
+		shared AS (
+			SELECT ct1.channel_id AS channel_a,
+			       ct2.channel_id AS channel_b,
+			       COUNT(*) AS shared_topics
+			FROM channel_topics ct1
+			JOIN channel_topics ct2
+			  ON ct1.topic = ct2.topic AND ct1.channel_id < ct2.channel_id
+			WHERE ct1.channel_id IN (SELECT channel_id FROM top_channels)
+			  AND ct2.channel_id IN (SELECT channel_id FROM top_channels)
+			GROUP BY ct1.channel_id, ct2.channel_id
+		)
+		SELECT s.channel_a,
+		       s.channel_b,
+		       s.shared_topics,
+		       tc1.topic_count AS total_a,
+		       tc2.topic_count AS total_b,
+		       (s.shared_topics::double precision / (tc1.topic_count + tc2.topic_count - s.shared_topics)) AS jaccard,
+		       ca.title,
+		       ca.username,
+		       cb.title,
+		       cb.username
+		FROM shared s
+		JOIN topic_counts tc1 ON s.channel_a = tc1.channel_id
+		JOIN topic_counts tc2 ON s.channel_b = tc2.channel_id
+		JOIN channels ca ON ca.id = s.channel_a
+		JOIN channels cb ON cb.id = s.channel_b
+		ORDER BY jaccard DESC
+		LIMIT $%d
+	`, strings.Join(where, sqlAndJoin), len(args)-1, len(args))
+
+	rows, err := db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get channel agenda similarity: %w", err)
+	}
+	defer rows.Close()
+
+	results := []ResearchAgendaSimilarityEdge{}
+
+	for rows.Next() {
+		var (
+			channelA pgtype.UUID
+			channelB pgtype.UUID
+			titleA   pgtype.Text
+			userA    pgtype.Text
+			titleB   pgtype.Text
+			userB    pgtype.Text
+			shared   int
+			totalA   int
+			totalB   int
+			jaccard  float64
+		)
+
+		if err := rows.Scan(&channelA, &channelB, &shared, &totalA, &totalB, &jaccard, &titleA, &userA, &titleB, &userB); err != nil {
+			return nil, fmt.Errorf("scan agenda similarity: %w", err)
+		}
+
+		results = append(results, ResearchAgendaSimilarityEdge{
+			ChannelA:         fromUUID(channelA),
+			ChannelATitle:    titleA.String,
+			ChannelAUser:     userA.String,
+			ChannelB:         fromUUID(channelB),
+			ChannelBTitle:    titleB.String,
+			ChannelBUser:     userB.String,
+			SharedTopics:     shared,
+			TotalTopicsA:     totalA,
+			TotalTopicsB:     totalB,
+			AgendaSimilarity: jaccard,
+		})
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate agenda similarity: %w", rows.Err())
+	}
+
+	return results, nil
+}
+
+func buildAgendaSimilarityFilters(from, to *time.Time) ([]any, []string) {
+	args := []any{}
+	where := []string{"1=1"}
+
+	if from != nil {
+		args = append(args, *from)
+		where = append(where, fmt.Sprintf(fmtDateFrom, len(args)))
+	}
+
+	if to != nil {
+		args = append(args, *to)
+		where = append(where, fmt.Sprintf(fmtDateTo, len(args)))
+	}
+
+	return args, where
 }
 
 func buildGlobalTopicFilter(from, to *time.Time) string {
@@ -2720,6 +2876,13 @@ type ResearchSession struct {
 	CreatedAt time.Time
 }
 
+// ResearchRetentionCounts tracks cleanup counts for retention.
+type ResearchRetentionCounts struct {
+	ItemsDeleted        int64
+	EvidenceDeleted     int64
+	TranslationsDeleted int64
+}
+
 // CreateResearchSession stores a new session.
 func (db *DB) CreateResearchSession(ctx context.Context, token string, userID int64, expiresAt time.Time) error {
 	_, err := db.Pool.Exec(ctx, `
@@ -2728,6 +2891,19 @@ func (db *DB) CreateResearchSession(ctx context.Context, token string, userID in
 	`, token, userID, expiresAt)
 	if err != nil {
 		return fmt.Errorf("create research session: %w", err)
+	}
+
+	return nil
+}
+
+// InsertResearchAuditLog stores a lightweight audit log entry.
+func (db *DB) InsertResearchAuditLog(ctx context.Context, userID int64, route string, status int, ip, queryHash string) error {
+	_, err := db.Pool.Exec(ctx, `
+		INSERT INTO research_audit_log (user_id, route, status_code, ip_address, query_hash)
+		VALUES ($1, $2, $3, $4, $5)
+	`, userID, route, status, ip, queryHash)
+	if err != nil {
+		return fmt.Errorf("insert research audit log: %w", err)
 	}
 
 	return nil
@@ -2782,6 +2958,51 @@ func (db *DB) DeleteExpiredResearchSessions(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// DeleteOldItems removes items older than the retention cutoff.
+func (db *DB) DeleteOldItems(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := db.Pool.Exec(ctx, `
+		DELETE FROM items i
+		USING raw_messages rm
+		WHERE i.raw_message_id = rm.id
+		  AND rm.tg_date < $1
+	`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete old items: %w", err)
+	}
+
+	return tag.RowsAffected(), nil
+}
+
+// CleanupResearchRetention removes expired research data.
+func (db *DB) CleanupResearchRetention(ctx context.Context) (ResearchRetentionCounts, error) {
+	var counts ResearchRetentionCounts
+
+	cutoff := time.Now().AddDate(0, -retentionItemsMonths, 0)
+
+	itemsDeleted, err := db.DeleteOldItems(ctx, cutoff)
+	if err != nil {
+		return counts, err
+	}
+
+	counts.ItemsDeleted = itemsDeleted
+
+	evidenceDeleted, err := db.DeleteExpiredEvidenceSources(ctx)
+	if err != nil {
+		return counts, err
+	}
+
+	counts.EvidenceDeleted = evidenceDeleted
+
+	translationsDeleted, err := db.CleanupExpiredTranslations(ctx)
+	if err != nil {
+		return counts, err
+	}
+
+	counts.TranslationsDeleted = translationsDeleted
+
+	return counts, nil
 }
 
 // RefreshResearchMaterializedViews refreshes research materialized views and derived caches.

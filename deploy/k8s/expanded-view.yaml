@@ -5,7 +5,7 @@ metadata:
   namespace: digest
 spec:
   selector:
-    app: digest-bot
+    app: digest-http  # Changed from digest-bot for dedicated HTTP deployment
   ports:
   - name: http
     port: 80

@@ -7,13 +7,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
+	"golang.org/x/time/rate"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
@@ -102,6 +105,10 @@ const (
 
 	// Format constants for percentage display.
 	percentMultiplier = 100
+
+	rateLimitRequests = 30
+	rateLimitBurst    = 60
+	rateLimitWindow   = time.Minute
 )
 
 // Static errors for err113 compliance.
@@ -118,6 +125,8 @@ type Handler struct {
 	tokenService *AuthTokenService
 	renderer     *Renderer
 	logger       *zerolog.Logger
+	limitersMu   sync.Mutex
+	limiters     map[string]*rate.Limiter
 }
 
 // NewHandler creates a new research handler.
@@ -133,6 +142,7 @@ func NewHandler(cfg *config.Config, dbConn *db.DB, tokenService *AuthTokenServic
 		tokenService: tokenService,
 		renderer:     renderer,
 		logger:       logger,
+		limiters:     make(map[string]*rate.Limiter),
 	}, nil
 }
 
@@ -142,10 +152,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	route, status, resultSize := h.dispatch(w, r)
 
 	h.recordMetrics(route, status, resultSize, start)
+	h.maybeAuditLog(r, route, status)
 }
 
 // dispatch handles route matching and dispatches to the appropriate handler.
 func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request) (route string, status int, resultSize int) {
+	if !h.allowRequest(getClientIP(r)) {
+		return "rate_limit", h.writeError(w, r, http.StatusTooManyRequests, "Too Many Requests", "Rate limit exceeded."), 0
+	}
+
 	path := strings.TrimPrefix(r.URL.Path, "/")
 	if path == "" {
 		return "index", h.handleIndex(w, r), 0
@@ -239,6 +254,17 @@ func (h *Handler) recordMetrics(route string, status, resultSize int, start time
 
 	if resultSize > 0 {
 		resultSizeGauge.WithLabelValues(route).Set(float64(resultSize))
+	}
+}
+
+func (h *Handler) maybeAuditLog(r *http.Request, route string, status int) {
+	userID, ok := h.getSessionUserID(r)
+	if !ok {
+		return
+	}
+
+	if err := h.db.InsertResearchAuditLog(r.Context(), userID, route, status, getClientIP(r), hashString(r.URL.RawQuery)); err != nil {
+		h.logger.Warn().Err(err).Msg("write research audit log failed")
 	}
 }
 
@@ -1033,7 +1059,22 @@ func (h *Handler) handleChannelBias(w http.ResponseWriter, r *http.Request) (int
 
 	channelParam := parseChannelParam(r)
 	if channelParam == "" {
-		return h.writeError(w, r, http.StatusBadRequest, errTitleBadRequest, "Channel parameter is required."), 0
+		from, to, err := parseRange(r)
+		if err != nil {
+			return h.writeError(w, r, http.StatusBadRequest, errTitleInvalidRange, err.Error()), 0
+		}
+
+		edges, err := h.db.GetChannelAgendaSimilarity(r.Context(), from, to, parseLimit(r, defaultSearchLimit))
+		if err != nil {
+			h.logger.Error().Err(err).Msg("get channel agenda similarity failed")
+			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load channel agenda similarity."), 0
+		}
+
+		if !wantsHTML(r) {
+			return h.writeJSON(w, http.StatusOK, edges), len(edges)
+		}
+
+		return h.renderChannelAgendaHTML(w, r, edges)
 	}
 
 	ref, status, ok := h.resolveChannelWithError(w, r, channelParam)
@@ -1078,6 +1119,33 @@ func (h *Handler) renderChannelBiasHTML(w http.ResponseWriter, r *http.Request, 
 		Headers:     []string{"Topic", "Channel Share", "Global Share", "Index", "Channel Count", "Global Count"},
 		Rows:        rows,
 		Description: "Topic over/under-indexing relative to the global distribution.",
+	}
+
+	if err := h.renderHTML(w, tmplTable, data); err != nil {
+		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
+	}
+
+	return http.StatusOK, len(rows)
+}
+
+func (h *Handler) renderChannelAgendaHTML(w http.ResponseWriter, r *http.Request, edges []db.ResearchAgendaSimilarityEdge) (int, int) {
+	rows := make([][]string, 0, len(edges))
+	for _, edge := range edges {
+		labelA := formatOverlapChannelLabel(edge.ChannelA, edge.ChannelATitle, edge.ChannelAUser)
+		labelB := formatOverlapChannelLabel(edge.ChannelB, edge.ChannelBTitle, edge.ChannelBUser)
+		rows = append(rows, []string{
+			labelA,
+			labelB,
+			strconv.Itoa(edge.SharedTopics),
+			fmt.Sprintf(fmtFloat2, edge.AgendaSimilarity),
+		})
+	}
+
+	data := TableViewData{
+		Title:       "Channel Agenda Similarity",
+		Headers:     []string{"Channel A", "Channel B", "Shared Topics", "Similarity"},
+		Rows:        rows,
+		Description: "Topic overlap across top channels. Provide ?channel=@name to view per-channel bias.",
 	}
 
 	if err := h.renderHTML(w, tmplTable, data); err != nil {
@@ -1439,6 +1507,28 @@ func (h *Handler) requireSession(w http.ResponseWriter, r *http.Request) (int64,
 	return session.UserID, true
 }
 
+func (h *Handler) getSessionUserID(r *http.Request) (int64, bool) {
+	cookie, err := r.Cookie(researchCookieName)
+	if err != nil || cookie.Value == "" {
+		return 0, false
+	}
+
+	session, err := h.db.GetResearchSession(r.Context(), cookie.Value)
+	if err != nil {
+		return 0, false
+	}
+
+	if time.Now().After(session.ExpiresAt) {
+		return 0, false
+	}
+
+	if !h.isAdmin(session.UserID) {
+		return 0, false
+	}
+
+	return session.UserID, true
+}
+
 func (h *Handler) isAdmin(userID int64) bool {
 	for _, adminID := range h.cfg.AdminIDs {
 		if adminID == userID {
@@ -1459,6 +1549,40 @@ func (h *Handler) setSessionCookie(w http.ResponseWriter, token string, expires 
 		Secure:   true,
 		Expires:  expires,
 	})
+}
+
+func (h *Handler) allowRequest(ip string) bool {
+	h.limitersMu.Lock()
+
+	limiter, ok := h.limiters[ip]
+	if !ok {
+		limiter = rate.NewLimiter(rate.Every(rateLimitWindow/rateLimitRequests), rateLimitBurst)
+		h.limiters[ip] = limiter
+	}
+
+	h.limitersMu.Unlock()
+
+	return limiter.Allow()
+}
+
+func getClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+
+	return r.RemoteAddr
 }
 
 func parseSearchParams(r *http.Request) (db.ResearchSearchParams, string, error) {
