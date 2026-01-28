@@ -1240,6 +1240,20 @@ type ResearchWeeklyChannelDiff struct {
 	Delta        int
 }
 
+type ChannelRelevanceSettings struct {
+	RelevanceThreshold      float32
+	AutoRelevanceEnabled    bool
+	RelevanceThresholdDelta float32
+}
+
+type RelevanceGateDecision struct {
+	Decision    string
+	Confidence  float32
+	Reason      string
+	Model       string
+	GateVersion string
+}
+
 // GetWeeklyDiff returns top topic deltas between two ranges.
 func (db *DB) GetWeeklyDiff(ctx context.Context, from, to time.Time, limit int) ([]ResearchWeeklyDiff, error) {
 	if limit <= 0 {
@@ -1440,13 +1454,18 @@ func (db *DB) DeleteExpiredResearchSessions(ctx context.Context) error {
 	return nil
 }
 
-// RefreshResearchMaterializedViews refreshes research materialized views.
+// RefreshResearchMaterializedViews refreshes research materialized views and derived caches.
 func (db *DB) RefreshResearchMaterializedViews(ctx context.Context) error {
 	views := []string{
 		"mv_topic_timeline",
 		"mv_channel_overlap",
 		"mv_cluster_stats",
 	}
+
+	if err := db.rebuildResearchDerivedTables(ctx); err != nil {
+		return err
+	}
+
 	for _, view := range views {
 		if _, err := db.Pool.Exec(ctx, fmt.Sprintf("REFRESH MATERIALIZED VIEW CONCURRENTLY %s", view)); err != nil {
 			return fmt.Errorf("refresh materialized view %s: %w", view, err)
@@ -1454,6 +1473,139 @@ func (db *DB) RefreshResearchMaterializedViews(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
+	if _, err := db.Pool.Exec(ctx, "TRUNCATE cluster_first_appearance"); err != nil {
+		return fmt.Errorf("truncate cluster_first_appearance: %w", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `
+		INSERT INTO cluster_first_appearance (cluster_id, channel_id, first_item_id, first_seen_at)
+		WITH ranked AS (
+			SELECT ci.cluster_id,
+			       rm.channel_id,
+			       i.id AS item_id,
+			       rm.tg_date,
+			       ROW_NUMBER() OVER (PARTITION BY ci.cluster_id ORDER BY rm.tg_date ASC) AS rn
+			FROM cluster_items ci
+			JOIN items i ON ci.item_id = i.id
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+		)
+		SELECT cluster_id, channel_id, item_id, tg_date
+		FROM ranked
+		WHERE rn = 1
+	`); err != nil {
+		return fmt.Errorf("populate cluster_first_appearance: %w", err)
+	}
+
+	if _, err := db.Pool.Exec(ctx, "TRUNCATE cluster_topic_history"); err != nil {
+		return fmt.Errorf("truncate cluster_topic_history: %w", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `
+		INSERT INTO cluster_topic_history (cluster_id, topic, window_start, window_end)
+		SELECT c.id,
+		       c.topic,
+		       MIN(rm.tg_date),
+		       MAX(rm.tg_date)
+		FROM clusters c
+		JOIN cluster_items ci ON c.id = ci.cluster_id
+		JOIN items i ON ci.item_id = i.id
+		JOIN raw_messages rm ON i.raw_message_id = rm.id
+		WHERE c.topic IS NOT NULL
+		GROUP BY c.id, c.topic
+	`); err != nil {
+		return fmt.Errorf("populate cluster_topic_history: %w", err)
+	}
+
+	if _, err := db.Pool.Exec(ctx, "TRUNCATE claims"); err != nil {
+		return fmt.Errorf("truncate claims: %w", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `
+		INSERT INTO claims (claim_text, first_seen_at, origin_cluster_id, cluster_ids, contradicted_by)
+		SELECT claim_text,
+		       first_seen_at,
+		       origin_cluster_id,
+		       cluster_ids,
+		       '{}'::uuid[]
+		FROM (
+			SELECT ec.claim_text AS claim_text,
+			       MIN(rm.tg_date) AS first_seen_at,
+			       (ARRAY_AGG(DISTINCT ci.cluster_id ORDER BY rm.tg_date ASC))[1] AS origin_cluster_id,
+			       ARRAY_AGG(DISTINCT ci.cluster_id) AS cluster_ids
+			FROM evidence_claims ec
+			JOIN item_evidence ie ON ie.evidence_id = ec.evidence_id
+			JOIN items i ON i.id = ie.item_id
+			JOIN raw_messages rm ON i.raw_message_id = rm.id
+			JOIN cluster_items ci ON ci.item_id = i.id
+			GROUP BY ec.claim_text
+		) AS grouped
+	`); err != nil {
+		return fmt.Errorf("populate claims: %w", err)
+	}
+
+	return nil
+}
+
+func (db *DB) GetChannelRelevanceSettings(ctx context.Context, channelID string) (*ChannelRelevanceSettings, error) {
+	row := db.Pool.QueryRow(ctx, `
+		SELECT relevance_threshold,
+		       auto_relevance_enabled,
+		       relevance_threshold_delta
+		FROM channels
+		WHERE id = $1
+	`, toUUID(channelID))
+
+	var (
+		threshold pgtype.Float4
+		auto      pgtype.Bool
+		delta     pgtype.Float4
+	)
+
+	if err := row.Scan(&threshold, &auto, &delta); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get channel relevance settings: %w", err)
+	}
+
+	return &ChannelRelevanceSettings{
+		RelevanceThreshold:      threshold.Float32,
+		AutoRelevanceEnabled:    auto.Bool,
+		RelevanceThresholdDelta: delta.Float32,
+	}, nil
+}
+
+func (db *DB) GetRelevanceGateDecision(ctx context.Context, rawMessageID string) (*RelevanceGateDecision, error) {
+	row := db.Pool.QueryRow(ctx, `
+		SELECT decision, confidence, reason, model, gate_version
+		FROM relevance_gate_log
+		WHERE raw_message_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, toUUID(rawMessageID))
+
+	var (
+		decision   pgtype.Text
+		confidence pgtype.Float4
+		reason     pgtype.Text
+		model      pgtype.Text
+		version    pgtype.Text
+	)
+
+	if err := row.Scan(&decision, &confidence, &reason, &model, &version); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get relevance gate decision: %w", err)
+	}
+
+	return &RelevanceGateDecision{
+		Decision:    decision.String,
+		Confidence:  confidence.Float32,
+		Reason:      reason.String,
+		Model:       model.String,
+		GateVersion: version.String,
+	}, nil
 }
 
 func uuidArrayToStrings(arr pgtype.Array[pgtype.UUID]) []string {

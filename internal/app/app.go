@@ -40,6 +40,9 @@ const (
 	msgEnrichmentWorkerStopped       = "enrichment worker stopped"
 	llmAPIKeyMock                    = "mock"
 	logFieldBaseURL                  = "base_url"
+	researchRefreshInterval          = time.Hour
+	researchRefreshLockID            = int64(94231)
+	researchRefreshTimeout           = 10 * time.Minute
 )
 
 // App holds the application dependencies and provides methods to run different modes.
@@ -157,6 +160,7 @@ func (a *App) RunWorker(ctx context.Context) error {
 	go a.runDiscoveryReconciliation(ctx)
 	go a.runFactCheckWorker(ctx)
 	go a.runEnrichmentWorker(ctx, embeddingClient)
+	go a.runResearchRefresh(ctx)
 
 	if err := p.Run(ctx); err != nil {
 		return fmt.Errorf("pipeline run: %w", err)
@@ -191,6 +195,54 @@ func (a *App) runEnrichmentWorker(ctx context.Context, embeddingClient embedding
 		}
 
 		a.logger.Warn().Err(err).Msg(msgEnrichmentWorkerStopped)
+	}
+}
+
+func (a *App) runResearchRefresh(ctx context.Context) {
+	if !a.cfg.ExpandedViewEnabled || a.cfg.ExpandedViewSigningSecret == "" {
+		return
+	}
+
+	a.refreshResearchOnce(ctx)
+
+	ticker := time.NewTicker(researchRefreshInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.refreshResearchOnce(ctx)
+		}
+	}
+}
+
+func (a *App) refreshResearchOnce(ctx context.Context) {
+	refreshCtx, cancel := context.WithTimeout(ctx, researchRefreshTimeout)
+	defer cancel()
+
+	acquired, err := a.database.TryAcquireAdvisoryLock(refreshCtx, researchRefreshLockID)
+	if err != nil {
+		a.logger.Warn().Err(err).Msg("research refresh lock failed")
+		return
+	}
+	if !acquired {
+		return
+	}
+	defer func() {
+		if err := a.database.ReleaseAdvisoryLock(refreshCtx, researchRefreshLockID); err != nil {
+			a.logger.Warn().Err(err).Msg("release research refresh lock failed")
+		}
+	}()
+
+	if err := a.database.RefreshResearchMaterializedViews(refreshCtx); err != nil {
+		a.logger.Warn().Err(err).Msg("research refresh failed")
+		return
+	}
+
+	if err := a.database.DeleteExpiredResearchSessions(refreshCtx); err != nil {
+		a.logger.Warn().Err(err).Msg("cleanup research sessions failed")
 	}
 }
 

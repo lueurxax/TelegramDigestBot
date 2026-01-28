@@ -1,6 +1,9 @@
 package research
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
@@ -24,6 +28,7 @@ const (
 	defaultSearchLimit     = 50
 	maxSearchLimit         = 200
 	defaultWeeklyDiffLimit = 10
+	slowQueryThreshold     = 2 * time.Second
 
 	// Route path constants.
 	routeLogin    = "login"
@@ -31,6 +36,7 @@ const (
 	routeItem     = "item/"
 	routeCluster  = "cluster/"
 	routeEvidence = "evidence/"
+	routeSettings = "settings"
 	routeChannels = "channels/"
 	routeClaims   = "claims"
 	routeRebuild  = "rebuild"
@@ -67,12 +73,19 @@ const (
 
 	// Format constants.
 	fmtFloat2 = "%.2f"
+
+	// Settings keys.
+	settingRelevanceThreshold  = "relevance_threshold"
+	settingImportanceThreshold = "importance_threshold"
+	settingDigestLanguage      = "digest_language"
+	settingDigestSchedule      = "digest_schedule"
 )
 
 // Static errors for err113 compliance.
 var (
 	errInvalidScope  = errors.New("invalid scope")
 	errRangeRequired = errors.New("from and to are required")
+	errInvalidBucket = errors.New("invalid bucket")
 )
 
 // Handler serves research API and HTML views.
@@ -132,6 +145,8 @@ func (h *Handler) dispatchPath(w http.ResponseWriter, r *http.Request, path stri
 		return "cluster", h.handleCluster(w, r, strings.TrimPrefix(path, "cluster/")), 0
 	case strings.HasPrefix(path, routeEvidence):
 		return scopeEvidence, h.handleEvidence(w, r, strings.TrimPrefix(path, routeEvidence)), 0
+	case strings.HasPrefix(path, routeSettings):
+		return "settings", h.handleSettings(w, r), 0
 	default:
 		return h.dispatchExtendedPath(w, r, path)
 	}
@@ -170,6 +185,28 @@ func (h *Handler) recordMetrics(route string, status, resultSize int, start time
 	if resultSize > 0 {
 		resultSizeGauge.WithLabelValues(route).Set(float64(resultSize))
 	}
+}
+
+func (h *Handler) logValidationError(route, rawQuery string, err error) {
+	h.logger.Warn().
+		Str("route", route).
+		Str("query_hash", hashString(rawQuery)).
+		Err(err).
+		Msg("research validation failed")
+}
+
+func (h *Handler) logSlowQuery(route, queryHash string, start time.Time, scope string) {
+	elapsed := time.Since(start)
+	if elapsed < slowQueryThreshold {
+		return
+	}
+
+	h.logger.Warn().
+		Str("route", route).
+		Str("scope", scope).
+		Str("query_hash", queryHash).
+		Dur("duration", elapsed).
+		Msg("research query slow")
 }
 
 func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) int {
@@ -242,10 +279,12 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) (int, int
 
 	params, scope, err := parseSearchParams(r)
 	if err != nil {
+		h.logValidationError(routeSearch, r.URL.RawQuery, err)
 		return h.writeError(w, r, http.StatusBadRequest, "Invalid Parameters", err.Error()), 0
 	}
 
-	items, itemCount, evidence, evCount, errStatus := h.executeSearch(r, params, scope)
+	queryHash := hashSearchParams(params, scope)
+	items, itemCount, evidence, evCount, errStatus := h.executeSearch(r, params, scope, queryHash)
 	if errStatus != 0 {
 		return errStatus, 0
 	}
@@ -254,7 +293,7 @@ func (h *Handler) handleSearch(w http.ResponseWriter, r *http.Request) (int, int
 }
 
 // executeSearch performs the actual search based on scope.
-func (h *Handler) executeSearch(r *http.Request, params db.ResearchSearchParams, scope string) (
+func (h *Handler) executeSearch(r *http.Request, params db.ResearchSearchParams, scope string, queryHash string) (
 	[]db.ResearchItemSearchResult, *db.ResearchSearchResultCount,
 	[]db.ResearchEvidenceSearchResult, *db.ResearchSearchResultCount, int,
 ) {
@@ -267,19 +306,23 @@ func (h *Handler) executeSearch(r *http.Request, params db.ResearchSearchParams,
 	)
 
 	if scope == scopeItems || scope == scopeAll {
+		start := time.Now()
 		items, itemCount, err = h.db.SearchResearchItems(r.Context(), params)
 		if err != nil {
 			h.logger.Error().Err(err).Msg("search research items failed")
 			return nil, nil, nil, nil, http.StatusInternalServerError
 		}
+		h.logSlowQuery(routeSearch, queryHash, start, scopeItems)
 	}
 
 	if scope == scopeEvidence || scope == scopeAll {
+		start := time.Now()
 		evidence, evCount, err = h.db.SearchResearchEvidence(r.Context(), params)
 		if err != nil {
 			h.logger.Error().Err(err).Msg("search research evidence failed")
 			return nil, nil, nil, nil, http.StatusInternalServerError
 		}
+		h.logSlowQuery(routeSearch, queryHash, start, scopeEvidence)
 	}
 
 	return items, itemCount, evidence, evCount, 0
@@ -349,6 +392,11 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request, itemID stri
 		h.logger.Error().Err(err).Msg("get cluster for item failed")
 	}
 
+	explain, err := h.buildItemExplain(r.Context(), item)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("build item explain failed")
+	}
+
 	if wantsHTML(r) {
 		data := ItemViewData{
 			Title:        "Item Details",
@@ -356,6 +404,7 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request, itemID stri
 			Evidence:     evidence,
 			Cluster:      cluster,
 			ClusterItems: clusterItems,
+			Explain:      explain,
 		}
 		if err := h.renderHTML(w, "item.html", data); err != nil {
 			h.logger.Error().Err(err).Msg("render item failed")
@@ -437,6 +486,97 @@ func (h *Handler) handleEvidence(w http.ResponseWriter, r *http.Request, itemID 
 	return h.writeJSON(w, http.StatusOK, evidence)
 }
 
+func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) int {
+	if _, ok := h.requireSession(w, r); !ok {
+		return http.StatusUnauthorized
+	}
+
+	settings, err := h.loadSettingsSnapshot(r.Context())
+	if err != nil {
+		h.logger.Error().Err(err).Msg("load settings failed")
+		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load settings.")
+	}
+
+	if wantsHTML(r) {
+		rows := make([][]string, 0, len(settings))
+		for _, entry := range settings {
+			rows = append(rows, []string{entry.Name, entry.Value, entry.Source})
+		}
+		data := TableViewData{
+			Title:       "Settings (Read-only)",
+			Headers:     []string{"Setting", "Value", "Source"},
+			Rows:        rows,
+			Description: "Snapshot of digest configuration used by the pipeline.",
+		}
+		if err := h.renderHTML(w, tmplTable, data); err != nil {
+			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable)
+		}
+		return http.StatusOK
+	}
+
+	return h.writeJSON(w, http.StatusOK, settings)
+}
+
+func (h *Handler) buildItemExplain(ctx context.Context, item *db.ItemDebugDetail) (ItemExplainData, error) {
+	relThreshold := h.cfg.RelevanceThreshold
+	if _, err := h.getSettingValue(ctx, settingRelevanceThreshold, &relThreshold); err != nil {
+		return ItemExplainData{}, err
+	}
+
+	channelSettings, err := h.db.GetChannelRelevanceSettings(ctx, item.ChannelID)
+	if err != nil {
+		return ItemExplainData{}, err
+	}
+
+	if channelSettings != nil {
+		if channelSettings.RelevanceThreshold > 0 {
+			relThreshold = channelSettings.RelevanceThreshold
+		}
+		if channelSettings.AutoRelevanceEnabled {
+			relThreshold += channelSettings.RelevanceThresholdDelta
+		}
+	}
+
+	if relThreshold < 0 {
+		relThreshold = 0
+	} else if relThreshold > 1 {
+		relThreshold = 1
+	}
+
+	impThreshold := h.cfg.ImportanceThreshold
+	if _, err := h.getSettingValue(ctx, settingImportanceThreshold, &impThreshold); err != nil {
+		return ItemExplainData{}, err
+	}
+
+	var gateInfo *RelevanceGateInfo
+	if item.RawMessageID != "" {
+		gate, err := h.db.GetRelevanceGateDecision(ctx, item.RawMessageID)
+		if err != nil {
+			return ItemExplainData{}, err
+		}
+		if gate != nil {
+			gateInfo = &RelevanceGateInfo{
+				Decision:    gate.Decision,
+				Confidence:  gate.Confidence,
+				Reason:      gate.Reason,
+				Model:       gate.Model,
+				GateVersion: gate.GateVersion,
+			}
+		}
+	}
+
+	return ItemExplainData{
+		Status:              item.Status,
+		RelevanceScore:      item.RelevanceScore,
+		RelevanceThreshold:  relThreshold,
+		RelevancePass:       item.RelevanceScore >= relThreshold,
+		ImportanceScore:     item.ImportanceScore,
+		ImportanceThreshold: impThreshold,
+		ImportancePass:      item.ImportanceScore >= impThreshold,
+		Gate:                gateInfo,
+	}, nil
+}
+
 func (h *Handler) handleChannelOverlap(w http.ResponseWriter, r *http.Request) (int, int) {
 	if _, ok := h.requireSession(w, r); !ok {
 		return http.StatusUnauthorized, 0
@@ -486,7 +626,10 @@ func (h *Handler) handleTopicTimeline(w http.ResponseWriter, r *http.Request) (i
 		return h.writeError(w, r, http.StatusBadRequest, errTitleInvalidRange, err.Error()), 0
 	}
 
-	bucket := r.URL.Query().Get("bucket")
+	bucket, err := normalizeTimelineBucket(r.URL.Query().Get("bucket"))
+	if err != nil {
+		return h.writeError(w, r, http.StatusBadRequest, "Invalid Bucket", "Use day, week, or month."), 0
+	}
 	limit := parseLimit(r, defaultSearchLimit)
 
 	points, err := h.db.GetTopicTimeline(r.Context(), bucket, from, to, limit)
@@ -514,6 +657,24 @@ func (h *Handler) handleTopicTimeline(w http.ResponseWriter, r *http.Request) (i
 	}
 
 	return h.writeJSON(w, http.StatusOK, points), len(points)
+}
+
+func normalizeTimelineBucket(raw string) (string, error) {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	if value == "" {
+		return "week", nil
+	}
+
+	switch value {
+	case "week", "weekly":
+		return "week", nil
+	case "day", "daily":
+		return "day", nil
+	case "month", "monthly":
+		return "month", nil
+	default:
+		return "", errInvalidBucket
+	}
 }
 
 func (h *Handler) handleChannelDetail(w http.ResponseWriter, r *http.Request, path string) (int, int) {
@@ -805,6 +966,84 @@ func parseSearchParams(r *http.Request) (db.ResearchSearchParams, string, error)
 	return params, scope, nil
 }
 
+func (h *Handler) loadSettingsSnapshot(ctx context.Context) ([]SettingEntry, error) {
+	entries := []SettingEntry{}
+
+	relThreshold := h.cfg.RelevanceThreshold
+	source := "env"
+	if ok, err := h.getSettingValue(ctx, settingRelevanceThreshold, &relThreshold); err != nil {
+		return nil, err
+	} else if ok {
+		source = "db"
+	}
+	entries = append(entries, SettingEntry{
+		Name:   settingRelevanceThreshold,
+		Value:  fmt.Sprintf(fmtFloat2, relThreshold),
+		Source: source,
+	})
+
+	impThreshold := h.cfg.ImportanceThreshold
+	source = "env"
+	if ok, err := h.getSettingValue(ctx, settingImportanceThreshold, &impThreshold); err != nil {
+		return nil, err
+	} else if ok {
+		source = "db"
+	}
+	entries = append(entries, SettingEntry{
+		Name:   settingImportanceThreshold,
+		Value:  fmt.Sprintf(fmtFloat2, impThreshold),
+		Source: source,
+	})
+
+	digestLang := ""
+	source = "db"
+	if ok, err := h.getSettingValue(ctx, settingDigestLanguage, &digestLang); err != nil {
+		return nil, err
+	} else if !ok {
+		source = "unset"
+	}
+	entries = append(entries, SettingEntry{
+		Name:   settingDigestLanguage,
+		Value:  digestLang,
+		Source: source,
+	})
+
+	var scheduleRaw json.RawMessage
+	source = "db"
+	if ok, err := h.getSettingValue(ctx, settingDigestSchedule, &scheduleRaw); err != nil {
+		return nil, err
+	} else if !ok {
+		source = "env"
+	}
+	scheduleValue := strings.TrimSpace(string(scheduleRaw))
+	if scheduleValue == "" {
+		scheduleValue = fmt.Sprintf("digest_window=%s", h.cfg.DigestWindow)
+	}
+	entries = append(entries, SettingEntry{
+		Name:   settingDigestSchedule,
+		Value:  scheduleValue,
+		Source: source,
+	})
+
+	return entries, nil
+}
+
+func (h *Handler) getSettingValue(ctx context.Context, key string, target any) (bool, error) {
+	raw, err := h.db.Queries.GetSetting(ctx, key)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("get setting %s: %w", key, err)
+	}
+
+	if err := json.Unmarshal(raw, target); err != nil {
+		return false, fmt.Errorf("decode setting %s: %w", key, err)
+	}
+
+	return true, nil
+}
+
 func parseRange(r *http.Request) (*time.Time, *time.Time, error) {
 	q := r.URL.Query()
 	fromStr := strings.TrimSpace(q.Get("from"))
@@ -912,6 +1151,34 @@ func wantsHTML(r *http.Request) bool {
 	return strings.ToLower(r.URL.Query().Get("format")) == "html"
 }
 
+func hashSearchParams(params db.ResearchSearchParams, scope string) string {
+	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%d|%d|%t",
+		scope,
+		params.Query,
+		params.Channel,
+		params.Topic,
+		params.Lang,
+		formatTimePtr(params.From),
+		formatTimePtr(params.To),
+		params.Limit,
+		params.Offset,
+		params.IncludeCount,
+	)
+	return hashString(payload)
+}
+
+func hashString(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:6])
+}
+
+func formatTimePtr(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, payload any) int {
 	w.Header().Set(contentTypeHeader, contentTypeJSON)
 	w.WriteHeader(status)
@@ -1000,6 +1267,7 @@ type ItemViewData struct {
 	Evidence     []db.ItemEvidenceWithSource
 	Cluster      *db.ClusterWithItems
 	ClusterItems []db.ClusterItemInfo
+	Explain      ItemExplainData
 }
 
 type ClusterViewData struct {
@@ -1021,6 +1289,31 @@ type TableViewData struct {
 	SecondaryHeaders []string
 	SecondaryRows    [][]string
 	Description      string
+}
+
+type SettingEntry struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Source string `json:"source"`
+}
+
+type ItemExplainData struct {
+	Status              string
+	RelevanceScore      float32
+	RelevanceThreshold  float32
+	RelevancePass       bool
+	ImportanceScore     float32
+	ImportanceThreshold float32
+	ImportancePass      bool
+	Gate                *RelevanceGateInfo
+}
+
+type RelevanceGateInfo struct {
+	Decision    string
+	Confidence  float32
+	Reason      string
+	Model       string
+	GateVersion string
 }
 
 type ErrorViewData struct {

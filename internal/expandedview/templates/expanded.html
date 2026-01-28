@@ -189,7 +189,7 @@
 
         <div class="card">
             <h2>Summary</h2>
-            <p class="summary">{{if .AllowSafeHTML}}{{.Item.Summary | safeHTML}}{{else}}{{.Item.Summary}}{{end}}</p>
+            <p class="summary">{{if .AllowSafeHTML}}{{.Item.Summary | safeHTML}}{{else}}{{.Item.Summary | stripHTML}}{{end}}</p>
         </div>
 
         <div class="card">
@@ -236,7 +236,7 @@
             <h2>Related Items in Cluster</h2>
             {{range .ClusterItems}}
             <div class="cluster-item">
-                <div>{{.Summary}}</div>
+                <div>{{.Summary | stripHTML}}</div>
                 <div class="cluster-channel">
                     {{if .ChannelUsername}}
                     via <a href="https://t.me/{{.ChannelUsername}}/{{.MessageID}}" target="_blank" rel="noopener">@{{.ChannelUsername}}</a>

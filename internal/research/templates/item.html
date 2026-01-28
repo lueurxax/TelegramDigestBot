@@ -20,9 +20,10 @@
     <header>
       <a href="/research/">Home</a>
       <a href="/research/search">Search</a>
+      <a href="/research/settings">Settings</a>
       <a href="/research/claims">Claims</a>
       <a href="/research/channels/overlap">Channel Overlap</a>
-      <a href="/research/topics/timeline?bucket=weekly">Topic Timeline</a>
+      <a href="/research/topics/timeline?bucket=week">Topic Timeline</a>
       <a href="/research/diff/weekly">Weekly Diff</a>
     </header>
     <main>
@@ -44,6 +45,18 @@
         <tr><th>Channel</th><td>{{.Item.ChannelTitle}} {{if .Item.ChannelUsername}}(@{{.Item.ChannelUsername}}){{end}}</td></tr>
         <tr><th>Message</th><td>{{.Item.MessageID}}</td></tr>
       </table>
+
+      <h2>Why included / suppressed</h2>
+      <div class="block">
+        <div><strong>Status:</strong> {{.Explain.Status}}</div>
+        <div><strong>Relevance:</strong> {{formatFloat32 .Explain.RelevanceScore}} / {{formatFloat32 .Explain.RelevanceThreshold}} ({{if .Explain.RelevancePass}}pass{{else}}fail{{end}})</div>
+        <div><strong>Importance:</strong> {{formatFloat32 .Explain.ImportanceScore}} / {{formatFloat32 .Explain.ImportanceThreshold}} ({{if .Explain.ImportancePass}}pass{{else}}below threshold{{end}})</div>
+        {{if .Explain.Gate}}
+        <div><strong>Relevance gate:</strong> {{.Explain.Gate.Decision}} ({{formatFloat32 .Explain.Gate.Confidence}})</div>
+        {{if .Explain.Gate.Reason}}<div><strong>Gate reason:</strong> {{.Explain.Gate.Reason}}</div>{{end}}
+        {{if .Explain.Gate.Model}}<div><strong>Gate model:</strong> {{.Explain.Gate.Model}} {{.Explain.Gate.GateVersion}}</div>{{end}}
+        {{end}}
+      </div>
 
       <h2>Text</h2>
       <div class="block">{{.Item.Text}}</div>

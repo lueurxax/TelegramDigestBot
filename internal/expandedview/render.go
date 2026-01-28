@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/links/linkextract"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -37,6 +38,8 @@ var templateFuncs = template.FuncMap{
 	"safeHTML": func(s string) template.HTML {
 		return template.HTML(s) //nolint:gosec // summaries are LLM-generated, admin-only page
 	},
+	// stripHTML removes all HTML tags from text, keeping only the content
+	"stripHTML": htmlutils.StripHTMLTags,
 	// escapeHTML escapes HTML special characters for safe display
 	"escapeHTML": html.EscapeString,
 	// isImageMedia checks if the binary data is a valid image that can be displayed
