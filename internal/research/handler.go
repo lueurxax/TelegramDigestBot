@@ -31,6 +31,7 @@ const (
 	defaultSearchLimit     = 50
 	maxSearchLimit         = 200
 	defaultWeeklyDiffLimit = 10
+	defaultWeeklyDiffDays  = 7
 	slowQueryThreshold     = 2 * time.Second
 	weightHistoryLimit     = 50
 	fmtChannelLabel        = "%s (@%s)"
@@ -114,7 +115,6 @@ const (
 // Static errors for err113 compliance.
 var (
 	errInvalidScope  = errors.New("invalid scope")
-	errRangeRequired = errors.New("from and to are required")
 	errInvalidBucket = errors.New("invalid bucket")
 )
 
@@ -1408,7 +1408,7 @@ func (h *Handler) handleWeeklyDiff(w http.ResponseWriter, r *http.Request) (int,
 		return http.StatusUnauthorized, 0
 	}
 
-	from, to, err := parseRangeRequired(r)
+	from, to, err := parseRangeWithDefault(r, defaultWeeklyDiffDays)
 	if err != nil {
 		return h.writeError(w, r, http.StatusBadRequest, errTitleInvalidRange, err.Error()), 0
 	}
@@ -1745,14 +1745,21 @@ func parseRange(r *http.Request) (*time.Time, *time.Time, error) {
 	return from, to, nil
 }
 
-func parseRangeRequired(r *http.Request) (time.Time, time.Time, error) {
+func parseRangeWithDefault(r *http.Request, defaultDays int) (time.Time, time.Time, error) {
 	from, to, err := parseRange(r)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
 
-	if from == nil || to == nil {
-		return time.Time{}, time.Time{}, errRangeRequired
+	now := time.Now().UTC()
+
+	if to == nil {
+		to = &now
+	}
+
+	if from == nil {
+		defaultFrom := to.AddDate(0, 0, -defaultDays)
+		from = &defaultFrom
 	}
 
 	return *from, *to, nil

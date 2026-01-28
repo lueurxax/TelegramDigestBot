@@ -1725,11 +1725,12 @@ func (db *DB) GetTopicDrift(ctx context.Context, from, to *time.Time, limit int)
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
 		),
 		first_last AS (
-			SELECT cluster_id,
-			       MAX(CASE WHEN rn_first = 1 THEN item_id END) AS first_item_id,
-			       MAX(CASE WHEN rn_last = 1 THEN item_id END) AS last_item_id
-			FROM ranked_items
-			GROUP BY cluster_id
+			SELECT r1.cluster_id,
+			       r1.item_id AS first_item_id,
+			       r2.item_id AS last_item_id
+			FROM ranked_items r1
+			JOIN ranked_items r2 ON r1.cluster_id = r2.cluster_id
+			WHERE r1.rn_first = 1 AND r2.rn_last = 1
 		),
 		embedding_similarity AS (
 			SELECT fl.cluster_id,
