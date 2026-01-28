@@ -776,3 +776,168 @@ FROM enrichment_queue
 WHERE status = 'error'
 ORDER BY created_at DESC
 LIMIT $1;
+
+-- Cluster Summary Cache queries
+
+-- name: GetClusterSummaryCache :many
+SELECT cluster_fingerprint,
+       item_ids,
+       summary,
+       updated_at
+FROM cluster_summary_cache
+WHERE digest_language = $1
+  AND updated_at >= $2;
+
+-- name: UpsertClusterSummaryCache :exec
+INSERT INTO cluster_summary_cache (
+    digest_language,
+    cluster_fingerprint,
+    item_ids,
+    summary,
+    created_at,
+    updated_at
+) VALUES ($1, $2, $3, $4, now(), now())
+ON CONFLICT (digest_language, cluster_fingerprint) DO UPDATE SET
+    item_ids = EXCLUDED.item_ids,
+    summary = EXCLUDED.summary,
+    updated_at = now();
+
+-- name: GetClusterSummaryCacheEntry :one
+SELECT cluster_fingerprint,
+       item_ids,
+       summary,
+       updated_at
+FROM cluster_summary_cache
+WHERE digest_language = $1 AND cluster_fingerprint = $2;
+
+-- Summary Cache queries
+
+-- name: GetSummaryCache :one
+SELECT canonical_hash,
+       digest_language,
+       summary,
+       topic,
+       language,
+       relevance_score,
+       importance_score,
+       updated_at
+FROM summary_cache
+WHERE canonical_hash = $1 AND digest_language = $2;
+
+-- name: UpsertSummaryCache :exec
+INSERT INTO summary_cache (
+    canonical_hash,
+    digest_language,
+    summary,
+    topic,
+    language,
+    relevance_score,
+    importance_score,
+    created_at,
+    updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
+ON CONFLICT (canonical_hash, digest_language) DO UPDATE SET
+    summary = EXCLUDED.summary,
+    topic = EXCLUDED.topic,
+    language = EXCLUDED.language,
+    relevance_score = EXCLUDED.relevance_score,
+    importance_score = EXCLUDED.importance_score,
+    updated_at = now();
+
+-- Drop Log queries
+
+-- name: SaveRawMessageDropLog :exec
+INSERT INTO raw_message_drop_log (raw_message_id, reason, detail)
+VALUES ($1, $2, $3)
+ON CONFLICT (raw_message_id) DO UPDATE SET
+    reason = EXCLUDED.reason,
+    detail = EXCLUDED.detail,
+    updated_at = NOW();
+
+-- name: GetDropReasonStats :many
+SELECT d.reason, COUNT(*)::int as count
+FROM raw_message_drop_log d
+JOIN raw_messages rm ON d.raw_message_id = rm.id
+WHERE rm.tg_date >= $1
+GROUP BY d.reason
+ORDER BY COUNT(*) DESC
+LIMIT $2;
+
+-- Relevance Gate Log queries
+
+-- name: SaveRelevanceGateLog :exec
+INSERT INTO relevance_gate_log (raw_message_id, decision, confidence, reason, model, gate_version)
+VALUES ($1, $2, $3, $4, $5, $6);
+
+-- Channel Rating Stats queries
+
+-- name: UpsertChannelRatingStats :exec
+INSERT INTO channel_rating_stats (
+    channel_id,
+    period_start,
+    period_end,
+    weighted_good,
+    weighted_bad,
+    weighted_irrelevant,
+    weighted_total,
+    rating_count
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (channel_id, period_start, period_end) DO UPDATE SET
+    weighted_good = EXCLUDED.weighted_good,
+    weighted_bad = EXCLUDED.weighted_bad,
+    weighted_irrelevant = EXCLUDED.weighted_irrelevant,
+    weighted_total = EXCLUDED.weighted_total,
+    rating_count = EXCLUDED.rating_count,
+    updated_at = NOW();
+
+-- name: UpsertGlobalRatingStats :exec
+INSERT INTO global_rating_stats (
+    period_start,
+    period_end,
+    weighted_good,
+    weighted_bad,
+    weighted_irrelevant,
+    weighted_total,
+    rating_count
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (period_start, period_end) DO UPDATE SET
+    weighted_good = EXCLUDED.weighted_good,
+    weighted_bad = EXCLUDED.weighted_bad,
+    weighted_irrelevant = EXCLUDED.weighted_irrelevant,
+    weighted_total = EXCLUDED.weighted_total,
+    rating_count = EXCLUDED.rating_count,
+    updated_at = NOW();
+
+-- name: GetLatestChannelRatingStats :many
+WITH latest AS (
+    SELECT MAX(period_end) AS period_end FROM channel_rating_stats
+)
+SELECT crs.channel_id,
+       c.username,
+       c.title,
+       crs.period_start,
+       crs.period_end,
+       crs.weighted_good,
+       crs.weighted_bad,
+       crs.weighted_irrelevant,
+       crs.weighted_total,
+       crs.rating_count
+FROM channel_rating_stats crs
+JOIN latest l ON crs.period_end = l.period_end
+JOIN channels c ON c.id = crs.channel_id
+ORDER BY crs.weighted_total DESC
+LIMIT $1;
+
+-- name: GetLatestGlobalRatingStats :one
+SELECT period_start,
+       period_end,
+       weighted_good,
+       weighted_bad,
+       weighted_irrelevant,
+       weighted_total,
+       rating_count
+FROM global_rating_stats
+ORDER BY period_end DESC
+LIMIT 1;

@@ -89,6 +89,17 @@ type ChannelStat struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Claim struct {
+	ID              pgtype.UUID        `json:"id"`
+	ClaimText       string             `json:"claim_text"`
+	FirstSeenAt     pgtype.Timestamptz `json:"first_seen_at"`
+	OriginClusterID pgtype.UUID        `json:"origin_cluster_id"`
+	ClusterIds      []pgtype.UUID      `json:"cluster_ids"`
+	ContradictedBy  []pgtype.UUID      `json:"contradicted_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Cluster struct {
 	ID          pgtype.UUID        `json:"id"`
 	WindowStart pgtype.Timestamptz `json:"window_start"`
@@ -97,9 +108,24 @@ type Cluster struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ClusterFirstAppearance struct {
+	ClusterID   pgtype.UUID        `json:"cluster_id"`
+	ChannelID   pgtype.UUID        `json:"channel_id"`
+	FirstItemID pgtype.UUID        `json:"first_item_id"`
+	FirstSeenAt pgtype.Timestamptz `json:"first_seen_at"`
+}
+
 type ClusterItem struct {
 	ClusterID pgtype.UUID `json:"cluster_id"`
 	ItemID    pgtype.UUID `json:"item_id"`
+}
+
+type ClusterLanguageLink struct {
+	ClusterID       pgtype.UUID        `json:"cluster_id"`
+	Language        string             `json:"language"`
+	LinkedClusterID pgtype.UUID        `json:"linked_cluster_id"`
+	Confidence      float32            `json:"confidence"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type ClusterSummaryCache struct {
@@ -109,6 +135,14 @@ type ClusterSummaryCache struct {
 	Summary            string             `json:"summary"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ClusterTopicHistory struct {
+	ID          pgtype.UUID        `json:"id"`
+	ClusterID   pgtype.UUID        `json:"cluster_id"`
+	Topic       string             `json:"topic"`
+	WindowStart pgtype.Timestamptz `json:"window_start"`
+	WindowEnd   pgtype.Timestamptz `json:"window_end"`
 }
 
 type Digest struct {
@@ -218,6 +252,7 @@ type EvidenceSource struct {
 	FetchedAt        pgtype.Timestamptz `json:"fetched_at"`
 	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
 	ExtractionFailed bool               `json:"extraction_failed"`
+	SearchVector     interface{}        `json:"search_vector"`
 }
 
 type FactCheckCache struct {
@@ -278,6 +313,7 @@ type Item struct {
 	FactCheckNotes  pgtype.Text        `json:"fact_check_notes"`
 	LanguageSource  pgtype.Text        `json:"language_source"`
 	FirstSeenAt     pgtype.Timestamptz `json:"first_seen_at"`
+	SearchVector    interface{}        `json:"search_vector"`
 }
 
 type ItemEvidence struct {
@@ -358,6 +394,32 @@ type MessageLink struct {
 	Position     pgtype.Int4 `json:"position"`
 }
 
+type MvChannelOverlap struct {
+	ChannelA       pgtype.UUID `json:"channel_a"`
+	ChannelB       pgtype.UUID `json:"channel_b"`
+	SharedClusters int64       `json:"shared_clusters"`
+	TotalA         int64       `json:"total_a"`
+	TotalB         int64       `json:"total_b"`
+	Jaccard        int32       `json:"jaccard"`
+}
+
+type MvClusterStat struct {
+	ClusterID      pgtype.UUID `json:"cluster_id"`
+	Topic          pgtype.Text `json:"topic"`
+	FirstSeenAt    interface{} `json:"first_seen_at"`
+	LastSeenAt     interface{} `json:"last_seen_at"`
+	ItemCount      int64       `json:"item_count"`
+	UniqueChannels int64       `json:"unique_channels"`
+}
+
+type MvTopicTimeline struct {
+	BucketDate    pgtype.Date `json:"bucket_date"`
+	Topic         pgtype.Text `json:"topic"`
+	ItemCount     int64       `json:"item_count"`
+	AvgImportance float64     `json:"avg_importance"`
+	AvgRelevance  float64     `json:"avg_relevance"`
+}
+
 type RawMessage struct {
 	ID                   pgtype.UUID        `json:"id"`
 	ChannelID            pgtype.UUID        `json:"channel_id"`
@@ -394,6 +456,13 @@ type RelevanceGateLog struct {
 	Model        pgtype.Text        `json:"model"`
 	GateVersion  pgtype.Text        `json:"gate_version"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type ResearchSession struct {
+	Token     string             `json:"token"`
+	UserID    int64              `json:"user_id"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type Setting struct {

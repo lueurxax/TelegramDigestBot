@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
 
 func (db *DB) SaveRelevanceGateLog(ctx context.Context, rawMsgID string, decision string, confidence *float32, reason, model, gateVersion string) error {
@@ -13,10 +15,14 @@ func (db *DB) SaveRelevanceGateLog(ctx context.Context, rawMsgID string, decisio
 		conf = pgtype.Float4{Float32: *confidence, Valid: true}
 	}
 
-	_, err := db.Pool.Exec(ctx, `
-		INSERT INTO relevance_gate_log (raw_message_id, decision, confidence, reason, model, gate_version)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`, toUUID(rawMsgID), SanitizeUTF8(decision), conf, toText(reason), toText(model), toText(gateVersion))
+	err := db.Queries.SaveRelevanceGateLog(ctx, sqlc.SaveRelevanceGateLogParams{
+		RawMessageID: toUUID(rawMsgID),
+		Decision:     SanitizeUTF8(decision),
+		Confidence:   conf,
+		Reason:       toText(reason),
+		Model:        toText(model),
+		GateVersion:  toText(gateVersion),
+	})
 	if err != nil {
 		return fmt.Errorf("save relevance gate log: %w", err)
 	}

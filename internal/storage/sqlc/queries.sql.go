@@ -824,6 +824,88 @@ func (q *Queries) GetChannelsForAutoWeight(ctx context.Context) ([]GetChannelsFo
 	return items, nil
 }
 
+const getClusterSummaryCache = `-- name: GetClusterSummaryCache :many
+
+SELECT cluster_fingerprint,
+       item_ids,
+       summary,
+       updated_at
+FROM cluster_summary_cache
+WHERE digest_language = $1
+  AND updated_at >= $2
+`
+
+type GetClusterSummaryCacheParams struct {
+	DigestLanguage string             `json:"digest_language"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type GetClusterSummaryCacheRow struct {
+	ClusterFingerprint string             `json:"cluster_fingerprint"`
+	ItemIds            []byte             `json:"item_ids"`
+	Summary            string             `json:"summary"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Cluster Summary Cache queries
+func (q *Queries) GetClusterSummaryCache(ctx context.Context, arg GetClusterSummaryCacheParams) ([]GetClusterSummaryCacheRow, error) {
+	rows, err := q.db.Query(ctx, getClusterSummaryCache, arg.DigestLanguage, arg.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetClusterSummaryCacheRow
+	for rows.Next() {
+		var i GetClusterSummaryCacheRow
+		if err := rows.Scan(
+			&i.ClusterFingerprint,
+			&i.ItemIds,
+			&i.Summary,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getClusterSummaryCacheEntry = `-- name: GetClusterSummaryCacheEntry :one
+SELECT cluster_fingerprint,
+       item_ids,
+       summary,
+       updated_at
+FROM cluster_summary_cache
+WHERE digest_language = $1 AND cluster_fingerprint = $2
+`
+
+type GetClusterSummaryCacheEntryParams struct {
+	DigestLanguage     string `json:"digest_language"`
+	ClusterFingerprint string `json:"cluster_fingerprint"`
+}
+
+type GetClusterSummaryCacheEntryRow struct {
+	ClusterFingerprint string             `json:"cluster_fingerprint"`
+	ItemIds            []byte             `json:"item_ids"`
+	Summary            string             `json:"summary"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetClusterSummaryCacheEntry(ctx context.Context, arg GetClusterSummaryCacheEntryParams) (GetClusterSummaryCacheEntryRow, error) {
+	row := q.db.QueryRow(ctx, getClusterSummaryCacheEntry, arg.DigestLanguage, arg.ClusterFingerprint)
+	var i GetClusterSummaryCacheEntryRow
+	err := row.Scan(
+		&i.ClusterFingerprint,
+		&i.ItemIds,
+		&i.Summary,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getClustersForWindow = `-- name: GetClustersForWindow :many
 SELECT c.id as cluster_id, c.topic as cluster_topic, i.id as item_id, i.summary as item_summary, ch.username as channel_username, ch.tg_peer_id as channel_peer_id, rm.tg_message_id as rm_msg_id
 FROM clusters c
@@ -1079,6 +1161,46 @@ func (q *Queries) GetDiscoveryStats(ctx context.Context) (GetDiscoveryStatsRow, 
 		&i.TotalDiscoveries,
 	)
 	return i, err
+}
+
+const getDropReasonStats = `-- name: GetDropReasonStats :many
+SELECT d.reason, COUNT(*)::int as count
+FROM raw_message_drop_log d
+JOIN raw_messages rm ON d.raw_message_id = rm.id
+WHERE rm.tg_date >= $1
+GROUP BY d.reason
+ORDER BY COUNT(*) DESC
+LIMIT $2
+`
+
+type GetDropReasonStatsParams struct {
+	TgDate pgtype.Timestamptz `json:"tg_date"`
+	Limit  int32              `json:"limit"`
+}
+
+type GetDropReasonStatsRow struct {
+	Reason string `json:"reason"`
+	Count  int32  `json:"count"`
+}
+
+func (q *Queries) GetDropReasonStats(ctx context.Context, arg GetDropReasonStatsParams) ([]GetDropReasonStatsRow, error) {
+	rows, err := q.db.Query(ctx, getDropReasonStats, arg.TgDate, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDropReasonStatsRow
+	for rows.Next() {
+		var i GetDropReasonStatsRow
+		if err := rows.Scan(&i.Reason, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getEnrichmentErrors = `-- name: GetEnrichmentErrors :many
@@ -1450,6 +1572,109 @@ func (q *Queries) GetLastPostedDigest(ctx context.Context) (GetLastPostedDigestR
 	row := q.db.QueryRow(ctx, getLastPostedDigest)
 	var i GetLastPostedDigestRow
 	err := row.Scan(&i.WindowStart, &i.WindowEnd, &i.PostedAt)
+	return i, err
+}
+
+const getLatestChannelRatingStats = `-- name: GetLatestChannelRatingStats :many
+WITH latest AS (
+    SELECT MAX(period_end) AS period_end FROM channel_rating_stats
+)
+SELECT crs.channel_id,
+       c.username,
+       c.title,
+       crs.period_start,
+       crs.period_end,
+       crs.weighted_good,
+       crs.weighted_bad,
+       crs.weighted_irrelevant,
+       crs.weighted_total,
+       crs.rating_count
+FROM channel_rating_stats crs
+JOIN latest l ON crs.period_end = l.period_end
+JOIN channels c ON c.id = crs.channel_id
+ORDER BY crs.weighted_total DESC
+LIMIT $1
+`
+
+type GetLatestChannelRatingStatsRow struct {
+	ChannelID          pgtype.UUID `json:"channel_id"`
+	Username           pgtype.Text `json:"username"`
+	Title              pgtype.Text `json:"title"`
+	PeriodStart        pgtype.Date `json:"period_start"`
+	PeriodEnd          pgtype.Date `json:"period_end"`
+	WeightedGood       float64     `json:"weighted_good"`
+	WeightedBad        float64     `json:"weighted_bad"`
+	WeightedIrrelevant float64     `json:"weighted_irrelevant"`
+	WeightedTotal      float64     `json:"weighted_total"`
+	RatingCount        int32       `json:"rating_count"`
+}
+
+func (q *Queries) GetLatestChannelRatingStats(ctx context.Context, limit int32) ([]GetLatestChannelRatingStatsRow, error) {
+	rows, err := q.db.Query(ctx, getLatestChannelRatingStats, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLatestChannelRatingStatsRow
+	for rows.Next() {
+		var i GetLatestChannelRatingStatsRow
+		if err := rows.Scan(
+			&i.ChannelID,
+			&i.Username,
+			&i.Title,
+			&i.PeriodStart,
+			&i.PeriodEnd,
+			&i.WeightedGood,
+			&i.WeightedBad,
+			&i.WeightedIrrelevant,
+			&i.WeightedTotal,
+			&i.RatingCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getLatestGlobalRatingStats = `-- name: GetLatestGlobalRatingStats :one
+SELECT period_start,
+       period_end,
+       weighted_good,
+       weighted_bad,
+       weighted_irrelevant,
+       weighted_total,
+       rating_count
+FROM global_rating_stats
+ORDER BY period_end DESC
+LIMIT 1
+`
+
+type GetLatestGlobalRatingStatsRow struct {
+	PeriodStart        pgtype.Date `json:"period_start"`
+	PeriodEnd          pgtype.Date `json:"period_end"`
+	WeightedGood       float64     `json:"weighted_good"`
+	WeightedBad        float64     `json:"weighted_bad"`
+	WeightedIrrelevant float64     `json:"weighted_irrelevant"`
+	WeightedTotal      float64     `json:"weighted_total"`
+	RatingCount        int32       `json:"rating_count"`
+}
+
+func (q *Queries) GetLatestGlobalRatingStats(ctx context.Context) (GetLatestGlobalRatingStatsRow, error) {
+	row := q.db.QueryRow(ctx, getLatestGlobalRatingStats)
+	var i GetLatestGlobalRatingStatsRow
+	err := row.Scan(
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.WeightedGood,
+		&i.WeightedBad,
+		&i.WeightedIrrelevant,
+		&i.WeightedTotal,
+		&i.RatingCount,
+	)
 	return i, err
 }
 
@@ -1906,6 +2131,53 @@ func (q *Queries) GetSetting(ctx context.Context, key string) ([]byte, error) {
 	var value []byte
 	err := row.Scan(&value)
 	return value, err
+}
+
+const getSummaryCache = `-- name: GetSummaryCache :one
+
+SELECT canonical_hash,
+       digest_language,
+       summary,
+       topic,
+       language,
+       relevance_score,
+       importance_score,
+       updated_at
+FROM summary_cache
+WHERE canonical_hash = $1 AND digest_language = $2
+`
+
+type GetSummaryCacheParams struct {
+	CanonicalHash  string `json:"canonical_hash"`
+	DigestLanguage string `json:"digest_language"`
+}
+
+type GetSummaryCacheRow struct {
+	CanonicalHash   string             `json:"canonical_hash"`
+	DigestLanguage  string             `json:"digest_language"`
+	Summary         string             `json:"summary"`
+	Topic           pgtype.Text        `json:"topic"`
+	Language        pgtype.Text        `json:"language"`
+	RelevanceScore  float32            `json:"relevance_score"`
+	ImportanceScore float32            `json:"importance_score"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Summary Cache queries
+func (q *Queries) GetSummaryCache(ctx context.Context, arg GetSummaryCacheParams) (GetSummaryCacheRow, error) {
+	row := q.db.QueryRow(ctx, getSummaryCache, arg.CanonicalHash, arg.DigestLanguage)
+	var i GetSummaryCacheRow
+	err := row.Scan(
+		&i.CanonicalHash,
+		&i.DigestLanguage,
+		&i.Summary,
+		&i.Topic,
+		&i.Language,
+		&i.RelevanceScore,
+		&i.ImportanceScore,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getUnprocessedMessages = `-- name: GetUnprocessedMessages :many
@@ -2532,6 +2804,56 @@ func (q *Queries) SaveRawMessage(ctx context.Context, arg SaveRawMessageParams) 
 	return err
 }
 
+const saveRawMessageDropLog = `-- name: SaveRawMessageDropLog :exec
+
+INSERT INTO raw_message_drop_log (raw_message_id, reason, detail)
+VALUES ($1, $2, $3)
+ON CONFLICT (raw_message_id) DO UPDATE SET
+    reason = EXCLUDED.reason,
+    detail = EXCLUDED.detail,
+    updated_at = NOW()
+`
+
+type SaveRawMessageDropLogParams struct {
+	RawMessageID pgtype.UUID `json:"raw_message_id"`
+	Reason       string      `json:"reason"`
+	Detail       pgtype.Text `json:"detail"`
+}
+
+// Drop Log queries
+func (q *Queries) SaveRawMessageDropLog(ctx context.Context, arg SaveRawMessageDropLogParams) error {
+	_, err := q.db.Exec(ctx, saveRawMessageDropLog, arg.RawMessageID, arg.Reason, arg.Detail)
+	return err
+}
+
+const saveRelevanceGateLog = `-- name: SaveRelevanceGateLog :exec
+
+INSERT INTO relevance_gate_log (raw_message_id, decision, confidence, reason, model, gate_version)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type SaveRelevanceGateLogParams struct {
+	RawMessageID pgtype.UUID   `json:"raw_message_id"`
+	Decision     string        `json:"decision"`
+	Confidence   pgtype.Float4 `json:"confidence"`
+	Reason       pgtype.Text   `json:"reason"`
+	Model        pgtype.Text   `json:"model"`
+	GateVersion  pgtype.Text   `json:"gate_version"`
+}
+
+// Relevance Gate Log queries
+func (q *Queries) SaveRelevanceGateLog(ctx context.Context, arg SaveRelevanceGateLogParams) error {
+	_, err := q.db.Exec(ctx, saveRelevanceGateLog,
+		arg.RawMessageID,
+		arg.Decision,
+		arg.Confidence,
+		arg.Reason,
+		arg.Model,
+		arg.GateVersion,
+	)
+	return err
+}
+
 const saveSetting = `-- name: SaveSetting :exec
 INSERT INTO settings (key, value)
 VALUES ($1, $2)
@@ -2865,6 +3187,54 @@ func (q *Queries) UpsertChannelQualityHistory(ctx context.Context, arg UpsertCha
 	return err
 }
 
+const upsertChannelRatingStats = `-- name: UpsertChannelRatingStats :exec
+
+INSERT INTO channel_rating_stats (
+    channel_id,
+    period_start,
+    period_end,
+    weighted_good,
+    weighted_bad,
+    weighted_irrelevant,
+    weighted_total,
+    rating_count
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (channel_id, period_start, period_end) DO UPDATE SET
+    weighted_good = EXCLUDED.weighted_good,
+    weighted_bad = EXCLUDED.weighted_bad,
+    weighted_irrelevant = EXCLUDED.weighted_irrelevant,
+    weighted_total = EXCLUDED.weighted_total,
+    rating_count = EXCLUDED.rating_count,
+    updated_at = NOW()
+`
+
+type UpsertChannelRatingStatsParams struct {
+	ChannelID          pgtype.UUID `json:"channel_id"`
+	PeriodStart        pgtype.Date `json:"period_start"`
+	PeriodEnd          pgtype.Date `json:"period_end"`
+	WeightedGood       float64     `json:"weighted_good"`
+	WeightedBad        float64     `json:"weighted_bad"`
+	WeightedIrrelevant float64     `json:"weighted_irrelevant"`
+	WeightedTotal      float64     `json:"weighted_total"`
+	RatingCount        int32       `json:"rating_count"`
+}
+
+// Channel Rating Stats queries
+func (q *Queries) UpsertChannelRatingStats(ctx context.Context, arg UpsertChannelRatingStatsParams) error {
+	_, err := q.db.Exec(ctx, upsertChannelRatingStats,
+		arg.ChannelID,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.WeightedGood,
+		arg.WeightedBad,
+		arg.WeightedIrrelevant,
+		arg.WeightedTotal,
+		arg.RatingCount,
+	)
+	return err
+}
+
 const upsertChannelStats = `-- name: UpsertChannelStats :exec
 
 INSERT INTO channel_stats (channel_id, period_start, period_end, messages_received, items_created, items_digested, avg_importance, avg_relevance)
@@ -2900,6 +3270,38 @@ func (q *Queries) UpsertChannelStats(ctx context.Context, arg UpsertChannelStats
 		arg.ItemsDigested,
 		arg.AvgImportance,
 		arg.AvgRelevance,
+	)
+	return err
+}
+
+const upsertClusterSummaryCache = `-- name: UpsertClusterSummaryCache :exec
+INSERT INTO cluster_summary_cache (
+    digest_language,
+    cluster_fingerprint,
+    item_ids,
+    summary,
+    created_at,
+    updated_at
+) VALUES ($1, $2, $3, $4, now(), now())
+ON CONFLICT (digest_language, cluster_fingerprint) DO UPDATE SET
+    item_ids = EXCLUDED.item_ids,
+    summary = EXCLUDED.summary,
+    updated_at = now()
+`
+
+type UpsertClusterSummaryCacheParams struct {
+	DigestLanguage     string `json:"digest_language"`
+	ClusterFingerprint string `json:"cluster_fingerprint"`
+	ItemIds            []byte `json:"item_ids"`
+	Summary            string `json:"summary"`
+}
+
+func (q *Queries) UpsertClusterSummaryCache(ctx context.Context, arg UpsertClusterSummaryCacheParams) error {
+	_, err := q.db.Exec(ctx, upsertClusterSummaryCache,
+		arg.DigestLanguage,
+		arg.ClusterFingerprint,
+		arg.ItemIds,
+		arg.Summary,
 	)
 	return err
 }
@@ -3010,6 +3412,93 @@ func (q *Queries) UpsertDiscoveredChannelByUsername(ctx context.Context, arg Ups
 		arg.DiscoveredFromChannelID,
 		arg.MaxViews,
 		arg.MaxForwards,
+	)
+	return err
+}
+
+const upsertGlobalRatingStats = `-- name: UpsertGlobalRatingStats :exec
+INSERT INTO global_rating_stats (
+    period_start,
+    period_end,
+    weighted_good,
+    weighted_bad,
+    weighted_irrelevant,
+    weighted_total,
+    rating_count
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (period_start, period_end) DO UPDATE SET
+    weighted_good = EXCLUDED.weighted_good,
+    weighted_bad = EXCLUDED.weighted_bad,
+    weighted_irrelevant = EXCLUDED.weighted_irrelevant,
+    weighted_total = EXCLUDED.weighted_total,
+    rating_count = EXCLUDED.rating_count,
+    updated_at = NOW()
+`
+
+type UpsertGlobalRatingStatsParams struct {
+	PeriodStart        pgtype.Date `json:"period_start"`
+	PeriodEnd          pgtype.Date `json:"period_end"`
+	WeightedGood       float64     `json:"weighted_good"`
+	WeightedBad        float64     `json:"weighted_bad"`
+	WeightedIrrelevant float64     `json:"weighted_irrelevant"`
+	WeightedTotal      float64     `json:"weighted_total"`
+	RatingCount        int32       `json:"rating_count"`
+}
+
+func (q *Queries) UpsertGlobalRatingStats(ctx context.Context, arg UpsertGlobalRatingStatsParams) error {
+	_, err := q.db.Exec(ctx, upsertGlobalRatingStats,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.WeightedGood,
+		arg.WeightedBad,
+		arg.WeightedIrrelevant,
+		arg.WeightedTotal,
+		arg.RatingCount,
+	)
+	return err
+}
+
+const upsertSummaryCache = `-- name: UpsertSummaryCache :exec
+INSERT INTO summary_cache (
+    canonical_hash,
+    digest_language,
+    summary,
+    topic,
+    language,
+    relevance_score,
+    importance_score,
+    created_at,
+    updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
+ON CONFLICT (canonical_hash, digest_language) DO UPDATE SET
+    summary = EXCLUDED.summary,
+    topic = EXCLUDED.topic,
+    language = EXCLUDED.language,
+    relevance_score = EXCLUDED.relevance_score,
+    importance_score = EXCLUDED.importance_score,
+    updated_at = now()
+`
+
+type UpsertSummaryCacheParams struct {
+	CanonicalHash   string      `json:"canonical_hash"`
+	DigestLanguage  string      `json:"digest_language"`
+	Summary         string      `json:"summary"`
+	Topic           pgtype.Text `json:"topic"`
+	Language        pgtype.Text `json:"language"`
+	RelevanceScore  float32     `json:"relevance_score"`
+	ImportanceScore float32     `json:"importance_score"`
+}
+
+func (q *Queries) UpsertSummaryCache(ctx context.Context, arg UpsertSummaryCacheParams) error {
+	_, err := q.db.Exec(ctx, upsertSummaryCache,
+		arg.CanonicalHash,
+		arg.DigestLanguage,
+		arg.Summary,
+		arg.Topic,
+		arg.Language,
+		arg.RelevanceScore,
+		arg.ImportanceScore,
 	)
 	return err
 }

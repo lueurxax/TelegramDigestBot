@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
 
 // ErrClusterSummaryCacheNotFound is returned when a cluster summary cache entry does not exist.
@@ -23,52 +25,31 @@ type ClusterSummaryCacheEntry struct {
 }
 
 func (db *DB) GetClusterSummaryCache(ctx context.Context, digestLanguage string, since time.Time) ([]ClusterSummaryCacheEntry, error) {
-	rows, err := db.Pool.Query(ctx, `
-		SELECT cluster_fingerprint,
-		       item_ids,
-		       summary,
-		       updated_at
-		FROM cluster_summary_cache
-		WHERE digest_language = $1
-		  AND updated_at >= $2
-	`, digestLanguage, since)
+	rows, err := db.Queries.GetClusterSummaryCache(ctx, sqlc.GetClusterSummaryCacheParams{
+		DigestLanguage: digestLanguage,
+		UpdatedAt:      pgtype.Timestamptz{Time: since, Valid: true},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get cluster summary cache: %w", err)
 	}
-	defer rows.Close()
 
-	var entries []ClusterSummaryCacheEntry
+	entries := make([]ClusterSummaryCacheEntry, 0, len(rows))
 
-	for rows.Next() {
-		var (
-			fingerprint string
-			itemIDsRaw  []byte
-			summary     string
-			updated     pgtype.Timestamptz
-		)
-
-		if err := rows.Scan(&fingerprint, &itemIDsRaw, &summary, &updated); err != nil {
-			return nil, fmt.Errorf("scan cluster summary cache: %w", err)
-		}
-
+	for _, row := range rows {
 		var itemIDs []string
-		if len(itemIDsRaw) > 0 {
-			if err := json.Unmarshal(itemIDsRaw, &itemIDs); err != nil {
+		if len(row.ItemIds) > 0 {
+			if err := json.Unmarshal(row.ItemIds, &itemIDs); err != nil {
 				return nil, fmt.Errorf("unmarshal cluster summary cache items: %w", err)
 			}
 		}
 
 		entries = append(entries, ClusterSummaryCacheEntry{
 			DigestLanguage:     digestLanguage,
-			ClusterFingerprint: fingerprint,
+			ClusterFingerprint: row.ClusterFingerprint,
 			ItemIDs:            itemIDs,
-			Summary:            summary,
-			UpdatedAt:          updated.Time,
+			Summary:            row.Summary,
+			UpdatedAt:          row.UpdatedAt.Time,
 		})
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate cluster summary cache: %w", err)
 	}
 
 	return entries, nil
@@ -82,20 +63,12 @@ func (db *DB) UpsertClusterSummaryCache(ctx context.Context, entry *ClusterSumma
 	// json.Marshal on []string is always safe and cannot fail
 	payload, _ := json.Marshal(entry.ItemIDs)
 
-	_, err := db.Pool.Exec(ctx, `
-		INSERT INTO cluster_summary_cache (
-			digest_language,
-			cluster_fingerprint,
-			item_ids,
-			summary,
-			created_at,
-			updated_at
-		) VALUES ($1, $2, $3, $4, now(), now())
-		ON CONFLICT (digest_language, cluster_fingerprint) DO UPDATE SET
-			item_ids = EXCLUDED.item_ids,
-			summary = EXCLUDED.summary,
-			updated_at = now()
-	`, entry.DigestLanguage, entry.ClusterFingerprint, payload, SanitizeUTF8(entry.Summary))
+	err := db.Queries.UpsertClusterSummaryCache(ctx, sqlc.UpsertClusterSummaryCacheParams{
+		DigestLanguage:     entry.DigestLanguage,
+		ClusterFingerprint: entry.ClusterFingerprint,
+		ItemIds:            payload,
+		Summary:            SanitizeUTF8(entry.Summary),
+	})
 	if err != nil {
 		return fmt.Errorf("upsert cluster summary cache: %w", err)
 	}
@@ -104,22 +77,11 @@ func (db *DB) UpsertClusterSummaryCache(ctx context.Context, entry *ClusterSumma
 }
 
 func (db *DB) GetClusterSummaryCacheEntry(ctx context.Context, digestLanguage, fingerprint string) (*ClusterSummaryCacheEntry, error) {
-	row := db.Pool.QueryRow(ctx, `
-		SELECT cluster_fingerprint,
-		       item_ids,
-		       summary,
-		       updated_at
-		FROM cluster_summary_cache
-		WHERE digest_language = $1 AND cluster_fingerprint = $2
-	`, digestLanguage, fingerprint)
-
-	var (
-		itemIDsRaw []byte
-		summary    string
-		updated    pgtype.Timestamptz
-	)
-
-	if err := row.Scan(&fingerprint, &itemIDsRaw, &summary, &updated); err != nil {
+	row, err := db.Queries.GetClusterSummaryCacheEntry(ctx, sqlc.GetClusterSummaryCacheEntryParams{
+		DigestLanguage:     digestLanguage,
+		ClusterFingerprint: fingerprint,
+	})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrClusterSummaryCacheNotFound
 		}
@@ -128,17 +90,17 @@ func (db *DB) GetClusterSummaryCacheEntry(ctx context.Context, digestLanguage, f
 	}
 
 	var itemIDs []string
-	if len(itemIDsRaw) > 0 {
-		if err := json.Unmarshal(itemIDsRaw, &itemIDs); err != nil {
+	if len(row.ItemIds) > 0 {
+		if err := json.Unmarshal(row.ItemIds, &itemIDs); err != nil {
 			return nil, fmt.Errorf("unmarshal cluster summary cache entry items: %w", err)
 		}
 	}
 
 	return &ClusterSummaryCacheEntry{
 		DigestLanguage:     digestLanguage,
-		ClusterFingerprint: fingerprint,
+		ClusterFingerprint: row.ClusterFingerprint,
 		ItemIDs:            itemIDs,
-		Summary:            summary,
-		UpdatedAt:          updated.Time,
+		Summary:            row.Summary,
+		UpdatedAt:          row.UpdatedAt.Time,
 	}, nil
 }

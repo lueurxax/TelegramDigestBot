@@ -4,6 +4,10 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
 
 type DropReasonStat struct {
@@ -12,14 +16,11 @@ type DropReasonStat struct {
 }
 
 func (db *DB) SaveRawMessageDropLog(ctx context.Context, rawMsgID, reason, detail string) error {
-	_, err := db.Pool.Exec(ctx, `
-		INSERT INTO raw_message_drop_log (raw_message_id, reason, detail)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (raw_message_id) DO UPDATE SET
-			reason = EXCLUDED.reason,
-			detail = EXCLUDED.detail,
-			updated_at = NOW()
-	`, toUUID(rawMsgID), SanitizeUTF8(reason), toText(detail))
+	err := db.Queries.SaveRawMessageDropLog(ctx, sqlc.SaveRawMessageDropLogParams{
+		RawMessageID: toUUID(rawMsgID),
+		Reason:       SanitizeUTF8(reason),
+		Detail:       toText(detail),
+	})
 	if err != nil {
 		return fmt.Errorf("save raw message drop log: %w", err)
 	}
@@ -28,33 +29,20 @@ func (db *DB) SaveRawMessageDropLog(ctx context.Context, rawMsgID, reason, detai
 }
 
 func (db *DB) GetDropReasonStats(ctx context.Context, since time.Time, limit int) ([]DropReasonStat, error) {
-	rows, err := db.Pool.Query(ctx, `
-		SELECT d.reason, COUNT(*)::int
-		FROM raw_message_drop_log d
-		JOIN raw_messages rm ON d.raw_message_id = rm.id
-		WHERE rm.tg_date >= $1
-		GROUP BY d.reason
-		ORDER BY COUNT(*) DESC
-		LIMIT $2
-	`, since, limit)
+	rows, err := db.Queries.GetDropReasonStats(ctx, sqlc.GetDropReasonStatsParams{
+		TgDate: pgtype.Timestamptz{Time: since, Valid: true},
+		Limit:  safeIntToInt32(limit),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("query drop reason stats: %w", err)
 	}
-	defer rows.Close()
 
-	stats := make([]DropReasonStat, 0, limit)
-
-	for rows.Next() {
-		var entry DropReasonStat
-		if err := rows.Scan(&entry.Reason, &entry.Count); err != nil {
-			return nil, fmt.Errorf("scan drop reason stat row: %w", err)
-		}
-
-		stats = append(stats, entry)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate drop reason stats rows: %w", err)
+	stats := make([]DropReasonStat, 0, len(rows))
+	for _, row := range rows {
+		stats = append(stats, DropReasonStat{
+			Reason: row.Reason,
+			Count:  int(row.Count),
+		})
 	}
 
 	return stats, nil

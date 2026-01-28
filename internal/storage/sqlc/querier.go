@@ -46,12 +46,16 @@ type Querier interface {
 	GetChannelStatsRolling(ctx context.Context, arg GetChannelStatsRollingParams) (GetChannelStatsRollingRow, error)
 	GetChannelWeight(ctx context.Context, username pgtype.Text) (GetChannelWeightRow, error)
 	GetChannelsForAutoWeight(ctx context.Context) ([]GetChannelsForAutoWeightRow, error)
+	// Cluster Summary Cache queries
+	GetClusterSummaryCache(ctx context.Context, arg GetClusterSummaryCacheParams) ([]GetClusterSummaryCacheRow, error)
+	GetClusterSummaryCacheEntry(ctx context.Context, arg GetClusterSummaryCacheEntryParams) (GetClusterSummaryCacheEntryRow, error)
 	GetClustersForWindow(ctx context.Context, arg GetClustersForWindowParams) ([]GetClustersForWindowRow, error)
 	GetDigestCoverImage(ctx context.Context, arg GetDigestCoverImageParams) ([]byte, error)
 	GetDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetDiscoveriesNeedingResolutionRow, error)
 	GetDiscoveryByUsername(ctx context.Context, lower string) (GetDiscoveryByUsernameRow, error)
 	GetDiscoveryFilterStats(ctx context.Context, arg GetDiscoveryFilterStatsParams) (GetDiscoveryFilterStatsRow, error)
 	GetDiscoveryStats(ctx context.Context) (GetDiscoveryStatsRow, error)
+	GetDropReasonStats(ctx context.Context, arg GetDropReasonStatsParams) ([]GetDropReasonStatsRow, error)
 	GetEnrichmentErrors(ctx context.Context, limit int32) ([]GetEnrichmentErrorsRow, error)
 	GetEnrichmentQueueStats(ctx context.Context) ([]GetEnrichmentQueueStatsRow, error)
 	GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetInviteLinkDiscoveriesNeedingResolutionRow, error)
@@ -61,6 +65,8 @@ type Querier interface {
 	GetItemsForWindow(ctx context.Context, arg GetItemsForWindowParams) ([]GetItemsForWindowRow, error)
 	GetItemsForWindowWithMedia(ctx context.Context, arg GetItemsForWindowWithMediaParams) ([]GetItemsForWindowWithMediaRow, error)
 	GetLastPostedDigest(ctx context.Context) (GetLastPostedDigestRow, error)
+	GetLatestChannelRatingStats(ctx context.Context, limit int32) ([]GetLatestChannelRatingStatsRow, error)
+	GetLatestGlobalRatingStats(ctx context.Context) (GetLatestGlobalRatingStatsRow, error)
 	GetLinkCache(ctx context.Context, url string) (LinkCache, error)
 	GetLinksForMessage(ctx context.Context, rawMessageID pgtype.UUID) ([]LinkCache, error)
 	// Only return actionable discoveries (with username for approve/reject)
@@ -73,6 +79,8 @@ type Querier interface {
 	GetRecentSettingHistory(ctx context.Context, limit int32) ([]GetRecentSettingHistoryRow, error)
 	GetRejectedDiscoveries(ctx context.Context, limit int32) ([]GetRejectedDiscoveriesRow, error)
 	GetSetting(ctx context.Context, key string) ([]byte, error)
+	// Summary Cache queries
+	GetSummaryCache(ctx context.Context, arg GetSummaryCacheParams) (GetSummaryCacheRow, error)
 	// Uses FOR UPDATE SKIP LOCKED to prevent multiple workers from claiming the same messages.
 	// Atomically claims messages by setting processing_started_at.
 	GetUnprocessedMessages(ctx context.Context, limit int32) ([]GetUnprocessedMessagesRow, error)
@@ -102,6 +110,10 @@ type Querier interface {
 	SaveLinkCache(ctx context.Context, arg SaveLinkCacheParams) (pgtype.UUID, error)
 	SaveRating(ctx context.Context, arg SaveRatingParams) error
 	SaveRawMessage(ctx context.Context, arg SaveRawMessageParams) error
+	// Drop Log queries
+	SaveRawMessageDropLog(ctx context.Context, arg SaveRawMessageDropLogParams) error
+	// Relevance Gate Log queries
+	SaveRelevanceGateLog(ctx context.Context, arg SaveRelevanceGateLogParams) error
 	SaveSetting(ctx context.Context, arg SaveSettingParams) error
 	TryAcquireAdvisoryLock(ctx context.Context, pgTryAdvisoryLock int64) (bool, error)
 	UpdateChannel(ctx context.Context, arg UpdateChannelParams) error
@@ -119,12 +131,17 @@ type Querier interface {
 	// This prevents the same channel from reappearing via different discovery paths
 	UpdateDiscoveryStatusByUsername(ctx context.Context, arg UpdateDiscoveryStatusByUsernameParams) error
 	UpsertChannelQualityHistory(ctx context.Context, arg UpsertChannelQualityHistoryParams) error
+	// Channel Rating Stats queries
+	UpsertChannelRatingStats(ctx context.Context, arg UpsertChannelRatingStatsParams) error
 	// Channel stats queries
 	UpsertChannelStats(ctx context.Context, arg UpsertChannelStatsParams) error
+	UpsertClusterSummaryCache(ctx context.Context, arg UpsertClusterSummaryCacheParams) error
 	UpsertDiscoveredChannelByInvite(ctx context.Context, arg UpsertDiscoveredChannelByInviteParams) error
 	UpsertDiscoveredChannelByPeerID(ctx context.Context, arg UpsertDiscoveredChannelByPeerIDParams) error
 	// Channel Discovery queries
 	UpsertDiscoveredChannelByUsername(ctx context.Context, arg UpsertDiscoveredChannelByUsernameParams) error
+	UpsertGlobalRatingStats(ctx context.Context, arg UpsertGlobalRatingStatsParams) error
+	UpsertSummaryCache(ctx context.Context, arg UpsertSummaryCacheParams) error
 }
 
 var _ Querier = (*Queries)(nil)
