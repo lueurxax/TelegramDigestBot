@@ -207,10 +207,9 @@ func (a *App) runEnrichmentWorker(ctx context.Context, embeddingClient embedding
 }
 
 func (a *App) runResearchRefresh(ctx context.Context) {
-	if !a.cfg.ExpandedViewEnabled || a.cfg.ExpandedViewSigningSecret == "" {
-		return
-	}
-
+	// Research refresh runs unconditionally to keep analytics tables populated.
+	// These tables (claims, cluster_first_appearance, etc.) are used by the
+	// research UI and provide useful analytics even without expanded view feature.
 	a.refreshResearchOnce(ctx)
 
 	ticker := time.NewTicker(researchRefreshInterval)

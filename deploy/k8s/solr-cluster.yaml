@@ -100,7 +100,7 @@ spec:
               - 'echo ruok | nc localhost 2181 | grep imok'
           initialDelaySeconds: 30
           periodSeconds: 15
-          timeoutSeconds: 5
+          timeoutSeconds: 10
           failureThreshold: 5
         readinessProbe:
           exec:
@@ -110,7 +110,7 @@ spec:
               - 'echo stat | nc localhost 2181 | grep Mode'
           initialDelaySeconds: 10
           periodSeconds: 15
-          timeoutSeconds: 5
+          timeoutSeconds: 10
           failureThreshold: 3
   volumeClaimTemplates:
   - metadata:

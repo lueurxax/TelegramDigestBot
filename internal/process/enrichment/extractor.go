@@ -50,6 +50,13 @@ const (
 	llmRetryDelay       = 2 * time.Second
 	llmRetryBackoffMult = 2
 	llmRetryJitterRatio = 0.3 // Add up to 30% random jitter to prevent thundering herd
+
+	// Control character codes for JSON sanitization
+	asciiControlMax       = 32     // ASCII control characters are 0x00-0x1F
+	asciiDEL              = 0x7F   // DEL character
+	unicodeReplacementChr = 0xFFFD // Unicode replacement character (encoding error indicator)
+	c1ControlMin          = 0x80   // C1 control characters start
+	c1ControlMax          = 0x9F   // C1 control characters end
 )
 
 var (
@@ -339,6 +346,9 @@ func (e *Extractor) parseLLMClaims(res string) ([]ExtractedClaim, error) {
 	// Strip markdown code blocks if present (common LLM response format)
 	res = stripMarkdownCodeBlocks(res)
 
+	// Sanitize JSON to handle malformed LLM responses
+	res = sanitizeJSONResponse(res)
+
 	var (
 		lastErr         error
 		foundValidArray bool
@@ -350,7 +360,9 @@ func (e *Extractor) parseLLMClaims(res string) ([]ExtractedClaim, error) {
 		for end := strings.LastIndex(res, "]"); end > start; end = strings.LastIndex(res[:end], "]") {
 			var currentClaims []ExtractedClaim
 
-			err := json.Unmarshal([]byte(res[start:end+1]), &currentClaims)
+			jsonStr := sanitizeJSONString(res[start : end+1])
+
+			err := json.Unmarshal([]byte(jsonStr), &currentClaims)
 			if err == nil {
 				if len(currentClaims) > 0 {
 					return currentClaims, nil
@@ -880,3 +892,50 @@ func stripMarkdownCodeBlocks(s string) string {
 
 	return strings.TrimSpace(s)
 }
+
+// sanitizeJSONResponse cleans up common LLM response issues before JSON parsing.
+// Handles control characters, BOM, and other encoding artifacts.
+func sanitizeJSONResponse(s string) string {
+	// Remove UTF-8 BOM if present
+	s = strings.TrimPrefix(s, "\xef\xbb\xbf")
+
+	// Build result without problematic characters
+	var result strings.Builder
+	result.Grow(len(s))
+
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			// Keep standard whitespace
+			result.WriteRune(r)
+		case r < asciiControlMax:
+			// Skip other control characters (0x00-0x1F except newline/tab/cr)
+			continue
+		case r == asciiDEL:
+			// Skip DEL character
+			continue
+		case r == unicodeReplacementChr:
+			// Skip Unicode replacement character (indicates encoding error)
+			continue
+		case r >= c1ControlMin && r <= c1ControlMax:
+			// Skip C1 control characters
+			continue
+		default:
+			result.WriteRune(r)
+		}
+	}
+
+	return result.String()
+}
+
+// sanitizeJSONString performs additional JSON-specific sanitization on the extracted array.
+// Fixes trailing commas and other common JSON syntax issues from LLM output.
+func sanitizeJSONString(s string) string {
+	// Fix trailing commas before closing brackets (common LLM error)
+	// e.g., [{"text": "foo"},] -> [{"text": "foo"}]
+	s = trailingCommaPattern.ReplaceAllString(s, "$1")
+
+	return s
+}
+
+var trailingCommaPattern = regexp.MustCompile(`,\s*([\]\}])`)
