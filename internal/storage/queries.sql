@@ -289,6 +289,29 @@ SELECT pg_try_advisory_lock($1);
 -- name: ReleaseAdvisoryLock :exec
 SELECT pg_advisory_unlock($1);
 
+-- name: TryAcquireSchedulerLock :one
+-- Tries to acquire a row-based lock. Returns true if acquired.
+-- Automatically expires stale locks older than the specified duration.
+INSERT INTO scheduler_locks (lock_name, holder_id, acquired_at, expires_at)
+VALUES ($1, $2, NOW(), NOW() + $3::interval)
+ON CONFLICT (lock_name) DO UPDATE
+SET holder_id = EXCLUDED.holder_id,
+    acquired_at = NOW(),
+    expires_at = NOW() + $3::interval
+WHERE scheduler_locks.expires_at < NOW()
+RETURNING TRUE;
+
+-- name: ExtendSchedulerLock :exec
+-- Extends the lock expiry time (heartbeat)
+UPDATE scheduler_locks
+SET expires_at = NOW() + $3::interval
+WHERE lock_name = $1 AND holder_id = $2;
+
+-- name: ReleaseSchedulerLock :exec
+-- Releases the lock if held by the specified holder
+DELETE FROM scheduler_locks
+WHERE lock_name = $1 AND holder_id = $2;
+
 -- name: GetRecentMessagesForChannel :many
 SELECT text, tg_date FROM raw_messages
 WHERE channel_id = $1 AND processed_at IS NOT NULL AND tg_date < $2

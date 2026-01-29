@@ -89,6 +89,17 @@ type ChannelStat struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ChannelWeightHistory struct {
+	ID                pgtype.UUID        `json:"id"`
+	ChannelID         pgtype.UUID        `json:"channel_id"`
+	ImportanceWeight  float32            `json:"importance_weight"`
+	AutoWeightEnabled bool               `json:"auto_weight_enabled"`
+	WeightOverride    bool               `json:"weight_override"`
+	Reason            pgtype.Text        `json:"reason"`
+	UpdatedBy         pgtype.Int8        `json:"updated_by"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Claim struct {
 	ID              pgtype.UUID        `json:"id"`
 	ClaimText       string             `json:"claim_text"`
@@ -316,6 +327,21 @@ type Item struct {
 	SearchVector    interface{}        `json:"search_vector"`
 }
 
+type ItemBullet struct {
+	ID              pgtype.UUID        `json:"id"`
+	ItemID          pgtype.UUID        `json:"item_id"`
+	BulletIndex     int32              `json:"bullet_index"`
+	Text            string             `json:"text"`
+	Topic           pgtype.Text        `json:"topic"`
+	RelevanceScore  pgtype.Float4      `json:"relevance_score"`
+	ImportanceScore pgtype.Float4      `json:"importance_score"`
+	Embedding       pgvector.Vector    `json:"embedding"`
+	BulletHash      pgtype.Text        `json:"bullet_hash"`
+	BulletClusterID pgtype.UUID        `json:"bullet_cluster_id"`
+	Status          pgtype.Text        `json:"status"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type ItemEvidence struct {
 	ID                pgtype.UUID        `json:"id"`
 	ItemID            pgtype.UUID        `json:"item_id"`
@@ -458,11 +484,28 @@ type RelevanceGateLog struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type ResearchAuditLog struct {
+	ID         pgtype.UUID        `json:"id"`
+	UserID     int64              `json:"user_id"`
+	Route      string             `json:"route"`
+	StatusCode int32              `json:"status_code"`
+	IpAddress  pgtype.Text        `json:"ip_address"`
+	QueryHash  pgtype.Text        `json:"query_hash"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type ResearchSession struct {
 	Token     string             `json:"token"`
 	UserID    int64              `json:"user_id"`
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type SchedulerLock struct {
+	LockName   string             `json:"lock_name"`
+	HolderID   string             `json:"holder_id"`
+	AcquiredAt pgtype.Timestamptz `json:"acquired_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
 }
 
 type Setting struct {

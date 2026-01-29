@@ -319,6 +319,24 @@ func (q *Queries) DigestExists(ctx context.Context, arg DigestExistsParams) (boo
 	return exists, err
 }
 
+const extendSchedulerLock = `-- name: ExtendSchedulerLock :exec
+UPDATE scheduler_locks
+SET expires_at = NOW() + $3::interval
+WHERE lock_name = $1 AND holder_id = $2
+`
+
+type ExtendSchedulerLockParams struct {
+	LockName string          `json:"lock_name"`
+	HolderID string          `json:"holder_id"`
+	Column3  pgtype.Interval `json:"column_3"`
+}
+
+// Extends the lock expiry time (heartbeat)
+func (q *Queries) ExtendSchedulerLock(ctx context.Context, arg ExtendSchedulerLockParams) error {
+	_, err := q.db.Exec(ctx, extendSchedulerLock, arg.LockName, arg.HolderID, arg.Column3)
+	return err
+}
+
 const findSimilarItem = `-- name: FindSimilarItem :one
 SELECT item_id FROM embeddings
 WHERE (embedding <=> $1::vector) < $2::float8
@@ -2446,6 +2464,22 @@ func (q *Queries) ReleaseClaimedMessage(ctx context.Context, id pgtype.UUID) err
 	return err
 }
 
+const releaseSchedulerLock = `-- name: ReleaseSchedulerLock :exec
+DELETE FROM scheduler_locks
+WHERE lock_name = $1 AND holder_id = $2
+`
+
+type ReleaseSchedulerLockParams struct {
+	LockName string `json:"lock_name"`
+	HolderID string `json:"holder_id"`
+}
+
+// Releases the lock if held by the specified holder
+func (q *Queries) ReleaseSchedulerLock(ctx context.Context, arg ReleaseSchedulerLockParams) error {
+	_, err := q.db.Exec(ctx, releaseSchedulerLock, arg.LockName, arg.HolderID)
+	return err
+}
+
 const retryFailedEnrichmentItems = `-- name: RetryFailedEnrichmentItems :exec
 UPDATE enrichment_queue
 SET status = 'pending', error_message = NULL, attempt_count = 0, next_retry_at = NULL
@@ -2879,6 +2913,32 @@ func (q *Queries) TryAcquireAdvisoryLock(ctx context.Context, pgTryAdvisoryLock 
 	var pg_try_advisory_lock bool
 	err := row.Scan(&pg_try_advisory_lock)
 	return pg_try_advisory_lock, err
+}
+
+const tryAcquireSchedulerLock = `-- name: TryAcquireSchedulerLock :one
+INSERT INTO scheduler_locks (lock_name, holder_id, acquired_at, expires_at)
+VALUES ($1, $2, NOW(), NOW() + $3::interval)
+ON CONFLICT (lock_name) DO UPDATE
+SET holder_id = EXCLUDED.holder_id,
+    acquired_at = NOW(),
+    expires_at = NOW() + $3::interval
+WHERE scheduler_locks.expires_at < NOW()
+RETURNING TRUE
+`
+
+type TryAcquireSchedulerLockParams struct {
+	LockName string          `json:"lock_name"`
+	HolderID string          `json:"holder_id"`
+	Column3  pgtype.Interval `json:"column_3"`
+}
+
+// Tries to acquire a row-based lock. Returns true if acquired.
+// Automatically expires stale locks older than the specified duration.
+func (q *Queries) TryAcquireSchedulerLock(ctx context.Context, arg TryAcquireSchedulerLockParams) (bool, error) {
+	row := q.db.QueryRow(ctx, tryAcquireSchedulerLock, arg.LockName, arg.HolderID, arg.Column3)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const updateChannel = `-- name: UpdateChannel :exec

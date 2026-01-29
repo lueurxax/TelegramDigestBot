@@ -133,6 +133,7 @@ const (
 const (
 	DefaultTickIntervalMinutes = 10
 	DefaultCatchupWindowHours  = 24
+	LockTTLMultiplier          = 2 // Lock expires after 2 tick intervals
 )
 
 // Digest pool and threshold constants

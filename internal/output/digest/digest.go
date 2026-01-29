@@ -55,6 +55,7 @@ type Scheduler struct {
 	llmClient           llm.Client
 	expandLinkGenerator ExpandLinkGenerator
 	logger              *zerolog.Logger
+	holderID            string // Unique ID for row-based lock ownership
 }
 
 func New(cfg *config.Config, database Repository, bot DigestPoster, llmClient llm.Client, logger *zerolog.Logger) *Scheduler {
@@ -64,6 +65,7 @@ func New(cfg *config.Config, database Repository, bot DigestPoster, llmClient ll
 		bot:       bot,
 		llmClient: llmClient,
 		logger:    logger,
+		holderID:  uuid.New().String(),
 	}
 }
 
@@ -72,15 +74,8 @@ func (s *Scheduler) SetExpandLinkGenerator(gen ExpandLinkGenerator) {
 	s.expandLinkGenerator = gen
 }
 
-func (s *Scheduler) getLockID() int64 {
-	// Simple hash of the lease name to an int64 for Postgres advisory lock
-	var h int64
-
-	for _, c := range s.cfg.LeaderElectionLeaseName {
-		h = HashMultiplier*h + int64(c)
-	}
-
-	return h
+func (s *Scheduler) getLockName() string {
+	return s.cfg.LeaderElectionLeaseName
 }
 
 func (s *Scheduler) Run(ctx context.Context) error {
@@ -232,11 +227,13 @@ func (s *Scheduler) runOnceWithLock(ctx context.Context) {
 		return
 	}
 
-	lockID := s.getLockID()
+	lockName := s.getLockName()
+	lockTTL := DefaultTickIntervalMinutes * time.Minute * LockTTLMultiplier
 
-	acquired, err := s.database.TryAcquireAdvisoryLock(ctx, lockID)
+	acquired, err := s.database.TryAcquireSchedulerLock(ctx, lockName, s.holderID, lockTTL)
 	if err != nil {
 		logger.Error().Err(err).Msg("failed to acquire lock")
+
 		return
 	}
 
@@ -247,7 +244,7 @@ func (s *Scheduler) runOnceWithLock(ctx context.Context) {
 	}
 
 	defer func() {
-		if err := s.database.ReleaseAdvisoryLock(ctx, lockID); err != nil {
+		if err := s.database.ReleaseSchedulerLock(ctx, lockName, s.holderID); err != nil {
 			logger.Error().Err(err).Msg("failed to release lock")
 		}
 	}()
@@ -266,21 +263,23 @@ func (s *Scheduler) RunOnce(ctx context.Context) error {
 		return s.processDigest(ctx, &logger)
 	}
 
-	lockID := s.getLockID()
+	lockName := s.getLockName()
+	lockTTL := DefaultTickIntervalMinutes * time.Minute * LockTTLMultiplier
 
-	acquired, err := s.database.TryAcquireAdvisoryLock(ctx, lockID)
+	acquired, err := s.database.TryAcquireSchedulerLock(ctx, lockName, s.holderID, lockTTL)
 	if err != nil {
 		return fmt.Errorf("failed to acquire lock: %w", err)
 	}
 
 	if !acquired {
 		logger.Info().Msg("did not acquire lock, another instance is probably running. Skipping RunOnce.")
+
 		return nil
 	}
 
 	defer func() {
-		if err := s.database.ReleaseAdvisoryLock(ctx, lockID); err != nil {
-			logger.Warn().Err(err).Msg("failed to release advisory lock")
+		if err := s.database.ReleaseSchedulerLock(ctx, lockName, s.holderID); err != nil {
+			logger.Warn().Err(err).Msg("failed to release scheduler lock")
 		}
 	}()
 

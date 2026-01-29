@@ -33,6 +33,8 @@ type Querier interface {
 	DeleteClustersForWindow(ctx context.Context, arg DeleteClustersForWindowParams) error
 	DeleteSetting(ctx context.Context, key string) error
 	DigestExists(ctx context.Context, arg DigestExistsParams) (bool, error)
+	// Extends the lock expiry time (heartbeat)
+	ExtendSchedulerLock(ctx context.Context, arg ExtendSchedulerLockParams) error
 	FindSimilarItem(ctx context.Context, arg FindSimilarItemParams) (pgtype.UUID, error)
 	GetActiveChannels(ctx context.Context) ([]GetActiveChannelsRow, error)
 	GetActiveFilters(ctx context.Context) ([]GetActiveFiltersRow, error)
@@ -97,6 +99,8 @@ type Querier interface {
 	ReleaseAdvisoryLock(ctx context.Context, pgAdvisoryUnlock int64) error
 	// Releases a claimed message so it can be picked up by another worker (used on error)
 	ReleaseClaimedMessage(ctx context.Context, id pgtype.UUID) error
+	// Releases the lock if held by the specified holder
+	ReleaseSchedulerLock(ctx context.Context, arg ReleaseSchedulerLockParams) error
 	RetryFailedEnrichmentItems(ctx context.Context) error
 	RetryFailedItems(ctx context.Context) error
 	RetryItem(ctx context.Context, id pgtype.UUID) error
@@ -116,6 +120,9 @@ type Querier interface {
 	SaveRelevanceGateLog(ctx context.Context, arg SaveRelevanceGateLogParams) error
 	SaveSetting(ctx context.Context, arg SaveSettingParams) error
 	TryAcquireAdvisoryLock(ctx context.Context, pgTryAdvisoryLock int64) (bool, error)
+	// Tries to acquire a row-based lock. Returns true if acquired.
+	// Automatically expires stale locks older than the specified duration.
+	TryAcquireSchedulerLock(ctx context.Context, arg TryAcquireSchedulerLockParams) (bool, error)
 	UpdateChannel(ctx context.Context, arg UpdateChannelParams) error
 	UpdateChannelAutoWeight(ctx context.Context, arg UpdateChannelAutoWeightParams) error
 	UpdateChannelContext(ctx context.Context, arg UpdateChannelContextParams) error

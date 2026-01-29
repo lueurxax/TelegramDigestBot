@@ -1960,43 +1960,43 @@ func TestSchedulerNew(t *testing.T) {
 	require.Equal(t, cfg, s.cfg, "config not set correctly")
 }
 
-func TestGetLockIDConsistency(t *testing.T) {
+func TestGetLockNameConsistency(t *testing.T) {
 	s := &Scheduler{
 		cfg: &config.Config{LeaderElectionLeaseName: "test-consistent-lease"},
 	}
 
-	// Get ID multiple times
+	// Get name multiple times
 
-	ids := make([]int64, 10)
+	names := make([]string, 10)
 
-	for i := range ids {
-		ids[i] = s.getLockID()
+	for i := range names {
+		names[i] = s.getLockName()
 	}
 
 	// All should be the same
 
-	for i := 1; i < len(ids); i++ {
-		if ids[i] != ids[0] {
-			t.Errorf("getLockID() not consistent: %d != %d", ids[i], ids[0])
+	for i := 1; i < len(names); i++ {
+		if names[i] != names[0] {
+			t.Errorf("getLockName() not consistent: %s != %s", names[i], names[0])
 		}
 	}
 }
 
-func TestGetLockIDDifferentLeases(t *testing.T) {
+func TestGetLockNameDifferentLeases(t *testing.T) {
 	leases := []string{"lease-a", "lease-b", "lease-c", "production", "staging"}
 
-	ids := make(map[int64]string)
+	names := make(map[string]string)
 
 	for _, lease := range leases {
 		s := &Scheduler{cfg: &config.Config{LeaderElectionLeaseName: lease}}
 
-		id := s.getLockID()
+		name := s.getLockName()
 
-		if existing, ok := ids[id]; ok {
-			t.Errorf("collision: %q and %q both produce ID %d", lease, existing, id)
+		if existing, ok := names[name]; ok {
+			t.Errorf("collision: %q and %q both produce name %s", lease, existing, name)
 		}
 
-		ids[id] = lease
+		names[name] = lease
 	}
 }
 
@@ -2474,18 +2474,18 @@ func TestDigestRenderContextBuildMetadataSectionTopicsDisabled(t *testing.T) {
 	}
 }
 
-func TestSchedulerGetLockID(t *testing.T) {
+func TestSchedulerGetLockName(t *testing.T) {
 	t.Run("deterministic for same name", func(t *testing.T) {
 		s := &Scheduler{
 			cfg: &config.Config{LeaderElectionLeaseName: "test-lease"},
 		}
 
-		id1 := s.getLockID()
+		name1 := s.getLockName()
 
-		id2 := s.getLockID()
+		name2 := s.getLockName()
 
-		if id1 != id2 {
-			t.Errorf("getLockID() should be deterministic: %d != %d", id1, id2)
+		if name1 != name2 {
+			t.Errorf("getLockName() should be deterministic: %s != %s", name1, name2)
 		}
 	})
 
@@ -2494,22 +2494,22 @@ func TestSchedulerGetLockID(t *testing.T) {
 
 		s2 := &Scheduler{cfg: &config.Config{LeaderElectionLeaseName: "lease-2"}}
 
-		id1 := s1.getLockID()
+		name1 := s1.getLockName()
 
-		id2 := s2.getLockID()
+		name2 := s2.getLockName()
 
-		if id1 == id2 {
-			t.Errorf("getLockID() should be different for different names: %d == %d", id1, id2)
+		if name1 == name2 {
+			t.Errorf("getLockName() should be different for different names: %s == %s", name1, name2)
 		}
 	})
 
-	t.Run("empty name produces zero", func(t *testing.T) {
+	t.Run("empty name returns empty", func(t *testing.T) {
 		s := &Scheduler{cfg: &config.Config{LeaderElectionLeaseName: ""}}
 
-		id := s.getLockID()
+		name := s.getLockName()
 
-		if id != 0 {
-			t.Errorf("getLockID() with empty name = %d, want 0", id)
+		if name != "" {
+			t.Errorf("getLockName() with empty lease name = %s, want empty", name)
 		}
 	})
 }

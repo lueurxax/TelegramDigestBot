@@ -14,9 +14,10 @@ type Repository interface {
 	GetSetting(ctx context.Context, key string, target interface{}) error
 	SaveSetting(ctx context.Context, key string, value interface{}) error
 
-	// Advisory lock operations
-	TryAcquireAdvisoryLock(ctx context.Context, lockID int64) (bool, error)
-	ReleaseAdvisoryLock(ctx context.Context, lockID int64) error
+	// Scheduler lock operations (row-based, works with connection pooling)
+	TryAcquireSchedulerLock(ctx context.Context, lockName, holderID string, ttl time.Duration) (bool, error)
+	ExtendSchedulerLock(ctx context.Context, lockName, holderID string, ttl time.Duration) error
+	ReleaseSchedulerLock(ctx context.Context, lockName, holderID string) error
 
 	// Digest operations
 	DigestExists(ctx context.Context, start, end time.Time) (bool, error)
