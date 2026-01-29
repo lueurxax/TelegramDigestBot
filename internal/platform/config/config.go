@@ -105,7 +105,7 @@ type Config struct {
 	EnrichmentMaxResults          int           `env:"ENRICHMENT_MAX_RESULTS" envDefault:"5"`
 	EnrichmentCacheTTLHours       int           `env:"ENRICHMENT_CACHE_TTL_HOURS" envDefault:"168"`
 	EnrichmentQueueMax            int           `env:"ENRICHMENT_QUEUE_MAX" envDefault:"5000"`
-	EnrichmentMinAgreement        float32       `env:"ENRICHMENT_MIN_AGREEMENT" envDefault:"0.15"`
+	EnrichmentMinAgreement        float32       `env:"ENRICHMENT_MIN_AGREEMENT" envDefault:"0.05"`
 	EnrichmentMaxEvidenceItem     int           `env:"ENRICHMENT_MAX_EVIDENCE_PER_ITEM" envDefault:"5"`
 	EnrichmentAllowlistDomains    string        `env:"ENRICHMENT_ALLOWLIST_DOMAINS" envDefault:""`
 	EnrichmentDenylistDomains     string        `env:"ENRICHMENT_DENYLIST_DOMAINS" envDefault:""`
