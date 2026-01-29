@@ -15,6 +15,7 @@ This directory contains all documentation for the Telegram Digest Bot project.
 | Document | Description |
 |----------|-------------|
 | [Content Quality](features/content-quality.md) | Relevance gates, feedback loops, clustering, topic balance |
+| [Semantic Clustering](features/clustering.md) | Deduplication, coherence validation, and topic generation |
 | [Digest Schedule](features/digest-schedule.md) | Timezone-aware scheduling and window configuration |
 | [Channel Discovery](features/discovery.md) | Automatic channel discovery, keyword filters, admin review |
 | [Channel Importance](features/channel-importance-weight.md) | Per-channel importance weighting |

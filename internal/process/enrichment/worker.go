@@ -649,8 +649,68 @@ func normalizeLLMQuery(query string) string {
 	query = strings.Join(strings.Fields(query), " ")
 	query = strings.Trim(query, ".,;:")
 
+	// Filter out LLM refusals and garbage responses
+	if isLLMQueryRefusal(query) {
+		return ""
+	}
+
 	return TruncateQuery(query)
 }
+
+// isLLMQueryRefusal detects if the query is an LLM refusal or garbage.
+func isLLMQueryRefusal(query string) bool {
+	if query == "" {
+		return true
+	}
+
+	lower := strings.ToLower(query)
+
+	// Common LLM refusal patterns
+	refusalPatterns := []string{
+		"i am not able to",
+		"i'm not able to",
+		"i cannot",
+		"i can't",
+		"i'm sorry",
+		"i am sorry",
+		"sorry, i",
+		"unable to provide",
+		"cannot provide",
+		"not able to provide",
+		"i don't have",
+		"i do not have",
+		"as an ai",
+		"as a language model",
+		"i'm an ai",
+		"i am an ai",
+		"please provide",
+		"could you please",
+		"i need more",
+		"the text appears",
+		"this text appears",
+		"it seems like",
+		"it appears that",
+		"here are",
+		"here is",
+		"based on the",
+		"the following",
+	}
+
+	for _, pattern := range refusalPatterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+
+	// If query is very long, it's likely an explanation not a search query
+	if len(query) > maxLLMQueryLength {
+		return true
+	}
+
+	return false
+}
+
+const maxLLMQueryLength = 200
 
 func (w *Worker) filterLinksForQueries(item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []domain.ResolvedLink {
 	if len(links) == 0 {
