@@ -201,16 +201,19 @@ func (e *Extractor) extractClaimsWithLLM(ctx context.Context, content string) ([
 }
 
 func (e *Extractor) buildClaimExtractionPrompt(content string) string {
-	return `Extract factual claims from the text below. Return ONLY a valid JSON array, no other text.
+	return `Extract key factual statements from the text below. Return ONLY a valid JSON array, no other text.
 
-Each claim object must have exactly these fields:
-- "text": string (the claim as a single sentence)
-- "entities": array of {"text": string, "type": string} where type is one of: PERSON, ORG, LOC, MONEY, PERCENT
+Each object must have:
+- "text": string (a factual statement from the article, 1-2 sentences)
+- "entities": array of {"text": string, "type": string} - extract any names, organizations, locations, numbers, dates mentioned. Use types: PERSON, ORG, LOC, MONEY, PERCENT, DATE, NUMBER. Empty array [] is OK if no entities.
 
-Example output:
-[{"text": "Company X reported $5 million in revenue", "entities": [{"text": "Company X", "type": "ORG"}, {"text": "$5 million", "type": "MONEY"}]}]
+Example:
+[{"text": "The project launched in March 2024", "entities": [{"text": "March 2024", "type": "DATE"}]},
+{"text": "Traffic increased significantly after the update", "entities": []}]
 
-Return empty array [] if no factual claims found. Do not include any explanation or markdown formatting.
+Extract 3-10 key facts. Focus on: events, statistics, announcements, changes, outcomes.
+Skip: navigation text, ads, cookie notices, author bios.
+Return [] only if the text has no factual content (e.g., error page, login form).
 
 Text:
 ` + truncateText(content, llmInputLimit)
