@@ -1018,7 +1018,12 @@ func (w *Worker) handleNoResults(itemID string, lastErr error) error {
 	return nil
 }
 
-var errNoEvidenceExtracted = errors.New("no evidence extracted from search results")
+var (
+	errNoEvidenceExtracted       = errors.New("no evidence extracted from search results")
+	errTranslationLangMismatch   = errors.New("translation result language does not match target")
+	errTranslationEmpty          = errors.New("translation result is empty")
+	errTranslationSameAsOriginal = errors.New("translation result is same as original")
+)
 
 func (w *Worker) processSearchResults(ctx context.Context, item *db.EnrichmentQueueItem, results []SearchResult, provider ProviderName) error {
 	params := w.buildResultProcessingParams(ctx, item, provider)
@@ -1348,7 +1353,16 @@ func (w *Worker) detectEvidenceLanguage(evidence *ExtractedEvidence) string {
 func (w *Worker) translateSummaryForScoring(ctx context.Context, summary, targetLang string) (string, error) {
 	// Check cache first
 	if cached, err := w.db.GetTranslation(ctx, summary, targetLang); err == nil && cached != "" {
-		return cached, nil
+		// Validate cached translation language
+		if err := w.validateTranslation(cached, summary, targetLang); err != nil {
+			w.logger.Warn().Err(err).
+				Str(logKeyTargetLang, targetLang).
+				Str(logKeyTranslatedLang, linkscore.DetectLanguage(cached)).
+				Msg("cached translation invalid, will re-translate")
+			// Continue to re-translate
+		} else {
+			return cached, nil
+		}
 	}
 
 	// Translate
@@ -1357,12 +1371,58 @@ func (w *Worker) translateSummaryForScoring(ctx context.Context, summary, target
 		return "", fmt.Errorf(fmtErrTranslateForScore, targetLang, err)
 	}
 
-	// Cache the translation
+	// Validate translation result
+	if err := w.validateTranslation(translated, summary, targetLang); err != nil {
+		translatedLang := linkscore.DetectLanguage(translated)
+		w.logger.Warn().Err(err).
+			Str(logKeyTargetLang, targetLang).
+			Str(logKeyTranslatedLang, translatedLang).
+			Int("translated_len", len(translated)).
+			Str(logKeyTranslated, truncateLogClaim(translated)).
+			Msg("translation validation failed")
+
+		return "", fmt.Errorf(fmtErrLangMismatch, errTranslationLangMismatch, translatedLang, targetLang)
+	}
+
+	w.logger.Debug().
+		Str(logKeyTargetLang, targetLang).
+		Str(logKeyTranslated, truncateLogClaim(translated)).
+		Msg("translation successful and validated")
+
+	// Cache the valid translation
 	if err := w.db.SaveTranslation(ctx, summary, targetLang, translated, defaultTranslationCacheTTL); err != nil {
 		w.logger.Warn().Err(err).Msg("failed to cache summary translation")
 	}
 
 	return translated, nil
+}
+
+// validateTranslation checks that a translation result is valid and in the target language.
+func (w *Worker) validateTranslation(translated, original, targetLang string) error {
+	// Check for empty translation
+	if strings.TrimSpace(translated) == "" {
+		return errTranslationEmpty
+	}
+
+	// Check if translation is same as original (no translation happened)
+	if strings.TrimSpace(translated) == strings.TrimSpace(original) {
+		return errTranslationSameAsOriginal
+	}
+
+	// Detect language of translated text
+	translatedLang := linkscore.DetectLanguage(translated)
+
+	// If we can't detect the language, accept it (might be mixed or transliterated)
+	if translatedLang == "" {
+		return nil
+	}
+
+	// Check if translated language matches target
+	if !languageMatches(translatedLang, targetLang) {
+		return fmt.Errorf(fmtErrLangMismatch, errTranslationLangMismatch, translatedLang, targetLang)
+	}
+
+	return nil
 }
 
 func (w *Worker) logScoringResult(item *db.EnrichmentQueueItem, result SearchResult, evidence *ExtractedEvidence, scoringResult ScoringResult, minAgreement float32, claimLang string) {

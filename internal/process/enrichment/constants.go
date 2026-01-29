@@ -19,6 +19,9 @@ const (
 	errWrapFmtWithCode      = "%w: %d"
 	fmtErrTranslateTo       = "translate text to %s: %w"
 	fmtErrTranslateForScore = "translate summary for scoring to %s: %w"
+	fmtErrLangMismatch      = "%w: got %s, want %s"
+	logKeyTranslated        = "translated"
+	logKeyTranslatedLang    = "translated_lang"
 	secondsPerMinute        = 60.0
 	statusError             = "error"
 	statusSuccess           = "success"
