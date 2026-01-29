@@ -121,7 +121,8 @@ type Worker struct {
 	queryGenerator    *QueryGenerator
 	languageRouter    *LanguageRouter
 	domainFilter      *DomainFilter
-	filterMu          sync.RWMutex // protects domainFilter and languageRouter
+	urlFilter         *URLFilter
+	filterMu          sync.RWMutex // protects domainFilter, languageRouter, and urlFilter
 	lastDomainReload  time.Time
 	lastPolicyReload  time.Time
 	logger            *zerolog.Logger
@@ -147,6 +148,7 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 		queryGenerator:  NewQueryGenerator(),
 		languageRouter:  NewLanguageRouter(domain.LanguageRoutingPolicy{Default: []string{"en"}}, database),
 		domainFilter:    NewDomainFilter(cfg.EnrichmentAllowlistDomains, cfg.EnrichmentDenylistDomains),
+		urlFilter:       NewURLFilter(cfg.EnrichmentSkipNavigationPages),
 		logger:          logger,
 	}
 
@@ -817,6 +819,16 @@ func (w *Worker) collectResults(results []SearchResult, language string, state *
 
 		if !w.isDomainAllowed(result.Domain) {
 			w.logger.Debug().Str("domain", result.Domain).Msg("domain filtered out")
+
+			continue
+		}
+
+		// Filter navigation/index pages that won't have useful content
+		if reason := w.urlFilter.IsNavigationURL(result.URL); reason != "" {
+			w.logger.Debug().
+				Str(logKeyURL, result.URL).
+				Str(logKeyReason, reason).
+				Msg("URL filtered as navigation page")
 
 			continue
 		}

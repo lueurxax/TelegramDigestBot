@@ -107,32 +107,33 @@ type Config struct {
 	LinkDenylistDomains    string        `env:"LINK_DENYLIST_DOMAINS" envDefault:""`
 
 	// Source enrichment (Phase 2)
-	EnrichmentEnabled           bool          `env:"ENRICHMENT_ENABLED" envDefault:"false"`
-	EnrichmentMaxResults        int           `env:"ENRICHMENT_MAX_RESULTS" envDefault:"5"`
-	EnrichmentCacheTTLHours     int           `env:"ENRICHMENT_CACHE_TTL_HOURS" envDefault:"168"`
-	EnrichmentQueueMax          int           `env:"ENRICHMENT_QUEUE_MAX" envDefault:"5000"`
-	EnrichmentMinAgreement      float32       `env:"ENRICHMENT_MIN_AGREEMENT" envDefault:"0.15"`
-	EnrichmentMaxEvidenceItem   int           `env:"ENRICHMENT_MAX_EVIDENCE_PER_ITEM" envDefault:"5"`
-	EnrichmentAllowlistDomains  string        `env:"ENRICHMENT_ALLOWLIST_DOMAINS" envDefault:""`
-	EnrichmentDenylistDomains   string        `env:"ENRICHMENT_DENYLIST_DOMAINS" envDefault:""`
-	EnrichmentDedupSimilarity   float32       `env:"ENRICHMENT_DEDUP_SIMILARITY" envDefault:"0.98"`
-	EnrichmentMaxSeconds        int           `env:"ENRICHMENT_MAX_SECONDS" envDefault:"180"`
-	EnrichmentProviders         string        `env:"ENRICHMENT_PROVIDERS" envDefault:""`
-	EnrichmentProviderCooldown  time.Duration `env:"ENRICHMENT_PROVIDER_COOLDOWN" envDefault:"10m"`
-	EnrichmentProviderGrace     time.Duration `env:"ENRICHMENT_PROVIDER_GRACE" envDefault:"0s"`
-	EnrichmentQueryTranslate    bool          `env:"ENRICHMENT_QUERY_TRANSLATE" envDefault:"true"`
-	EnrichmentQueryLLM          bool          `env:"ENRICHMENT_QUERY_LLM" envDefault:"false"`
-	EnrichmentQueryLLMModel     string        `env:"ENRICHMENT_QUERY_LLM_MODEL" envDefault:""`
-	EnrichmentMaxQueriesPerItem int           `env:"ENRICHMENT_MAX_QUERIES_PER_ITEM" envDefault:"5"`
-	EnrichmentLanguagePolicy    string        `env:"ENRICHMENT_LANGUAGE_POLICY" envDefault:""`
-	EnrichmentLLMTimeout        time.Duration `env:"ENRICHMENT_LLM_TIMEOUT" envDefault:"45s"`
-	TranslationModel            string        `env:"TRANSLATION_MODEL"`
-	EnrichmentDailyBudgetUSD    float64       `env:"ENRICHMENT_DAILY_BUDGET_USD" envDefault:"0"`
-	EnrichmentMonthlyCapUSD     float64       `env:"ENRICHMENT_MONTHLY_CAP_USD" envDefault:"0"`
-	EnrichmentEventRegistryRPM  int           `env:"ENRICHMENT_EVENTREGISTRY_RPM" envDefault:"0"`
-	EnrichmentNewsAPIRPM        int           `env:"ENRICHMENT_NEWSAPI_RPM" envDefault:"0"`
-	EnrichmentDailyLimit        int           `env:"ENRICHMENT_DAILY_LIMIT" envDefault:"0"`
-	EnrichmentMonthlyLimit      int           `env:"ENRICHMENT_MONTHLY_LIMIT" envDefault:"0"`
+	EnrichmentEnabled             bool          `env:"ENRICHMENT_ENABLED" envDefault:"false"`
+	EnrichmentMaxResults          int           `env:"ENRICHMENT_MAX_RESULTS" envDefault:"5"`
+	EnrichmentCacheTTLHours       int           `env:"ENRICHMENT_CACHE_TTL_HOURS" envDefault:"168"`
+	EnrichmentQueueMax            int           `env:"ENRICHMENT_QUEUE_MAX" envDefault:"5000"`
+	EnrichmentMinAgreement        float32       `env:"ENRICHMENT_MIN_AGREEMENT" envDefault:"0.15"`
+	EnrichmentMaxEvidenceItem     int           `env:"ENRICHMENT_MAX_EVIDENCE_PER_ITEM" envDefault:"5"`
+	EnrichmentAllowlistDomains    string        `env:"ENRICHMENT_ALLOWLIST_DOMAINS" envDefault:""`
+	EnrichmentDenylistDomains     string        `env:"ENRICHMENT_DENYLIST_DOMAINS" envDefault:""`
+	EnrichmentSkipNavigationPages bool          `env:"ENRICHMENT_SKIP_NAVIGATION_PAGES" envDefault:"true"`
+	EnrichmentDedupSimilarity     float32       `env:"ENRICHMENT_DEDUP_SIMILARITY" envDefault:"0.98"`
+	EnrichmentMaxSeconds          int           `env:"ENRICHMENT_MAX_SECONDS" envDefault:"180"`
+	EnrichmentProviders           string        `env:"ENRICHMENT_PROVIDERS" envDefault:""`
+	EnrichmentProviderCooldown    time.Duration `env:"ENRICHMENT_PROVIDER_COOLDOWN" envDefault:"10m"`
+	EnrichmentProviderGrace       time.Duration `env:"ENRICHMENT_PROVIDER_GRACE" envDefault:"0s"`
+	EnrichmentQueryTranslate      bool          `env:"ENRICHMENT_QUERY_TRANSLATE" envDefault:"true"`
+	EnrichmentQueryLLM            bool          `env:"ENRICHMENT_QUERY_LLM" envDefault:"false"`
+	EnrichmentQueryLLMModel       string        `env:"ENRICHMENT_QUERY_LLM_MODEL" envDefault:""`
+	EnrichmentMaxQueriesPerItem   int           `env:"ENRICHMENT_MAX_QUERIES_PER_ITEM" envDefault:"5"`
+	EnrichmentLanguagePolicy      string        `env:"ENRICHMENT_LANGUAGE_POLICY" envDefault:""`
+	EnrichmentLLMTimeout          time.Duration `env:"ENRICHMENT_LLM_TIMEOUT" envDefault:"45s"`
+	TranslationModel              string        `env:"TRANSLATION_MODEL"`
+	EnrichmentDailyBudgetUSD      float64       `env:"ENRICHMENT_DAILY_BUDGET_USD" envDefault:"0"`
+	EnrichmentMonthlyCapUSD       float64       `env:"ENRICHMENT_MONTHLY_CAP_USD" envDefault:"0"`
+	EnrichmentEventRegistryRPM    int           `env:"ENRICHMENT_EVENTREGISTRY_RPM" envDefault:"0"`
+	EnrichmentNewsAPIRPM          int           `env:"ENRICHMENT_NEWSAPI_RPM" envDefault:"0"`
+	EnrichmentDailyLimit          int           `env:"ENRICHMENT_DAILY_LIMIT" envDefault:"0"`
+	EnrichmentMonthlyLimit        int           `env:"ENRICHMENT_MONTHLY_LIMIT" envDefault:"0"`
 
 	// YaCy provider
 	YaCyEnabled    bool          `env:"YACY_ENABLED" envDefault:"false"`
