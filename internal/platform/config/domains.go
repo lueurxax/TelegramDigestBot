@@ -144,17 +144,6 @@ type CrawlerConfig struct {
 	QueueMaxPending int           `env:"CRAWLER_QUEUE_MAX_PENDING" envDefault:"10000"`
 }
 
-// ProviderYaCyConfig holds YaCy search provider settings.
-type ProviderYaCyConfig struct {
-	Enabled    bool          `env:"YACY_ENABLED" envDefault:"false"`
-	BaseURL    string        `env:"YACY_BASE_URL" envDefault:"http://localhost:8090"`
-	Timeout    time.Duration `env:"YACY_TIMEOUT" envDefault:"30s"`
-	User       string        `env:"YACY_USER"`
-	Password   string        `env:"YACY_PASSWORD"`
-	Resource   string        `env:"YACY_RESOURCE" envDefault:"local"`
-	MaxResults int           `env:"ENRICHMENT_YACY_MAX_RESULTS" envDefault:"10"`
-}
-
 // ProviderSolrConfig holds Solr search provider settings.
 type ProviderSolrConfig struct {
 	Enabled    bool          `env:"SOLR_ENABLED" envDefault:"false"`
@@ -313,19 +302,6 @@ func (c *Config) CrawlerCfg() CrawlerConfig {
 		UserAgent:       c.CrawlUserAgent,
 		SeedsFile:       c.CrawlSeedsFile,
 		QueueMaxPending: c.CrawlerQueueMaxPending,
-	}
-}
-
-// YaCyCfg returns the YaCy provider configuration.
-func (c *Config) YaCyCfg() ProviderYaCyConfig {
-	return ProviderYaCyConfig{
-		Enabled:    c.YaCyEnabled,
-		BaseURL:    c.YaCyBaseURL,
-		Timeout:    c.YaCyTimeout,
-		User:       c.YaCyUser,
-		Password:   c.YaCyPassword,
-		Resource:   c.YaCyResource,
-		MaxResults: c.YaCyMaxResults,
 	}
 }
 

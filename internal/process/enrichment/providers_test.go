@@ -38,7 +38,7 @@ func (m *mockProvider) Priority() int {
 func TestProviderRegistry_Register(t *testing.T) {
 	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 
-	mock := &mockProvider{name: ProviderYaCy, available: true}
+	mock := &mockProvider{name: ProviderSolr, available: true}
 	registry.Register(mock)
 
 	if len(registry.providers) != 1 {
@@ -49,19 +49,19 @@ func TestProviderRegistry_Register(t *testing.T) {
 		t.Errorf("order count: got %d, want 1", len(registry.order))
 	}
 
-	if registry.circuitBreakers[ProviderYaCy] == nil {
+	if registry.circuitBreakers[ProviderSolr] == nil {
 		t.Error("circuit breaker not created")
 	}
 }
 
 func TestProviderRegistry_Get(t *testing.T) {
 	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
-	mock := &mockProvider{name: ProviderYaCy, available: true}
+	mock := &mockProvider{name: ProviderSolr, available: true}
 	registry.Register(mock)
 
-	p, err := registry.Get(ProviderYaCy)
+	p, err := registry.Get(ProviderSolr)
 	if err != nil {
-		t.Fatalf("Get(YaCy): %v", err)
+		t.Fatalf("Get(Solr): %v", err)
 	}
 
 	if p == nil {
@@ -78,7 +78,7 @@ func TestProviderRegistry_SearchWithFallback_FirstProvider(t *testing.T) {
 	ctx := context.Background()
 	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 	mock := &mockProvider{
-		name:      ProviderYaCy,
+		name:      ProviderSolr,
 		available: true,
 		results:   []SearchResult{{URL: "http://example.com", Title: "Test"}},
 	}
@@ -89,8 +89,8 @@ func TestProviderRegistry_SearchWithFallback_FirstProvider(t *testing.T) {
 		t.Fatalf("first provider search failed: %v", err)
 	}
 
-	if provider != ProviderYaCy {
-		t.Errorf("provider: got %v, want YaCy", provider)
+	if provider != ProviderSolr {
+		t.Errorf("provider: got %v, want Solr", provider)
 	}
 
 	if len(results) != 1 {
@@ -103,7 +103,7 @@ func TestProviderRegistry_SearchWithFallback_Fallback(t *testing.T) {
 	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 
 	failing := &mockProvider{
-		name:      ProviderYaCy,
+		name:      ProviderSolr,
 		available: true,
 		err:       errTestProvider,
 	}
@@ -135,7 +135,7 @@ func TestProviderRegistry_SearchWithFallback_SkipsUnavailable(t *testing.T) {
 	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 
 	unavailable := &mockProvider{
-		name:      ProviderYaCy,
+		name:      ProviderSolr,
 		available: false,
 	}
 	registry.Register(unavailable)
@@ -186,7 +186,7 @@ func TestProviderRegistry_SearchWithFallback_UsesLanguageProvider(t *testing.T) 
 	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 	mock := &mockLanguageProvider{
 		mockProvider: mockProvider{
-			name:      ProviderYaCy,
+			name:      ProviderSolr,
 			available: true,
 			results:   []SearchResult{{URL: "http://example.com"}},
 		},
@@ -207,7 +207,7 @@ func TestProviderRegistry_SearchWithFallback_UsesLanguageProvider(t *testing.T) 
 func TestProviderRegistry_AvailableProviders(t *testing.T) {
 	registry := NewProviderRegistry(defaultCircuitBreakerResetAfter)
 
-	available := &mockProvider{name: ProviderYaCy, available: true}
+	available := &mockProvider{name: ProviderSolr, available: true}
 	unavailable := &mockProvider{name: ProviderGDELT, available: false}
 
 	registry.Register(available)
@@ -218,8 +218,8 @@ func TestProviderRegistry_AvailableProviders(t *testing.T) {
 		t.Errorf("available count: got %d, want 1", len(providers))
 	}
 
-	if providers[0] != ProviderYaCy {
-		t.Errorf("provider[0]: got %v, want YaCy", providers[0])
+	if providers[0] != ProviderSolr {
+		t.Errorf("provider[0]: got %v, want Solr", providers[0])
 	}
 }
 
@@ -297,7 +297,7 @@ func TestCircuitBreaker_recordSuccess(t *testing.T) {
 func TestCircuitBreaker_recordFailure(t *testing.T) {
 	t.Run("increments failure count", func(t *testing.T) {
 		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
-		cb.recordFailure(ProviderYaCy)
+		cb.recordFailure(ProviderSolr)
 
 		if cb.failures != 1 {
 			t.Errorf("failures: got %d, want 1", cb.failures)
@@ -308,7 +308,7 @@ func TestCircuitBreaker_recordFailure(t *testing.T) {
 		cb := newCircuitBreaker(defaultCircuitBreakerResetAfter)
 
 		for i := 0; i < circuitBreakerThreshold; i++ {
-			cb.recordFailure(ProviderYaCy)
+			cb.recordFailure(ProviderSolr)
 		}
 
 		if cb.state != circuitOpen {

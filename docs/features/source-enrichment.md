@@ -1,6 +1,6 @@
 # Source Enrichment
 
-Source enrichment extends the corroboration system by searching external sources to find evidence that supports or relates to digest items. It queries multiple providers (YaCy, GDELT, NewsAPI, SearxNG, OpenSearch) and scores how well external sources agree with item content.
+Source enrichment extends the corroboration system by searching external sources to find evidence that supports or relates to digest items. It queries multiple providers (Solr, GDELT, NewsAPI, SearxNG, OpenSearch) and scores how well external sources agree with item content.
 
 > **Status:** Implemented. Only USD-based budget caps remain unimplemented (count-based limits work).
 > See [proposals/source-enrichment-fact-checking.md](../proposals/source-enrichment-fact-checking.md) for the original proposal.
@@ -30,11 +30,12 @@ ENRICHMENT_ENABLED=true
 
 At least one provider must be enabled:
 
-**YaCy (self-hosted, recommended):**
+**Solr (self-hosted, recommended):**
 ```env
-YACY_ENABLED=true
-YACY_BASE_URL=http://yacy:8090
-YACY_TIMEOUT=10s
+SOLR_ENABLED=true
+SOLR_URL=http://solr:8983/solr/news
+SOLR_TIMEOUT=10s
+SOLR_MAX_RESULTS=10
 ```
 
 **GDELT:**
@@ -175,7 +176,7 @@ EVIDENCE_CLUSTERING_MIN_SCORE=0.5   # Min agreement to apply boost
 
 Providers are queried in this order until results are found:
 
-1. **YaCy** - Self-hosted, no cost/rate limits
+1. **Solr** - Self-hosted, no cost/rate limits
 2. **GDELT** - Free news API
 3. **Event Registry** - Commercial, global coverage
 4. **NewsAPI** - News aggregation
@@ -359,36 +360,11 @@ See [proposals/source-enrichment-fact-checking.md](../proposals/source-enrichmen
 
 ---
 
-## YaCy Setup
+## Solr Setup
 
-YaCy is the recommended primary provider (self-hosted, no API costs).
+Solr is the recommended primary provider (self-hosted, no API costs).
 
-### Docker Deployment
-
-```yaml
-services:
-  yacy:
-    image: yacy/yacy_search_server:latest
-    ports:
-      - "8090:8090"
-    volumes:
-      - yacy-data:/opt/yacy_search_server/DATA
-    environment:
-      - JAVA_TOOL_OPTIONS=-Xms512m -Xmx1536m
-```
-
-### Seed Crawling
-
-Configure YaCy to crawl trusted news domains:
-
-```
-# Recommended seed domains
-reuters.com, apnews.com, bbc.com, aljazeera.com, dw.com
-nature.com, sciencemag.org, arxiv.org, wired.com
-who.int, un.org, europa.eu
-```
-
-See `deploy/k8s/enrichment-services.yaml` for Kubernetes deployment with automated seed crawling.
+See `deploy/k8s/` for Kubernetes deployment with SolrCloud.
 
 ---
 

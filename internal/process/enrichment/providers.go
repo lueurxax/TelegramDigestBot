@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,7 +16,6 @@ type ProviderName string
 
 const (
 	ProviderSolr          ProviderName = "solr"
-	ProviderYaCy          ProviderName = "yacy"
 	ProviderGDELT         ProviderName = "gdelt"
 	ProviderSearxNG       ProviderName = "searxng"
 	ProviderEventRegistry ProviderName = "eventregistry"
@@ -373,4 +374,18 @@ func (cb *circuitBreaker) recordFailure(name ProviderName) {
 
 		cb.state = circuitOpen
 	}
+}
+
+// extractDomain extracts the domain from a URL.
+func extractDomain(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+
+	host := parsed.Hostname()
+	host = strings.ToLower(host)
+	host = strings.TrimPrefix(host, wwwPrefix)
+
+	return host
 }

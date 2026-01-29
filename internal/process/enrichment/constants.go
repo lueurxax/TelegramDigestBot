@@ -25,6 +25,7 @@ const (
 	secondsPerMinute        = 60.0
 	statusError             = "error"
 	statusSuccess           = "success"
+	wwwPrefix               = "www."
 
 	// Settings keys for domain lists
 	settingEnrichmentAllowDomains   = "enrichment_allow_domains"

@@ -144,7 +144,6 @@ func (b *Bot) fetchEnrichmentProviderHealth(ctx context.Context) []providerHealt
 	selection := parseProviderSelection(b.cfg.EnrichmentProviders)
 
 	results := []providerHealth{
-		b.checkYaCyHealth(ctx, selection),
 		b.checkSearxNGHealth(ctx, selection),
 		b.checkGDELTHealth(ctx, selection),
 		b.checkEventRegistryHealth(ctx, selection),
@@ -153,36 +152,6 @@ func (b *Bot) fetchEnrichmentProviderHealth(ctx context.Context) []providerHealt
 	}
 
 	return results
-}
-
-func (b *Bot) checkYaCyHealth(ctx context.Context, selection map[string]bool) providerHealth {
-	selected := isProviderSelected(selection, string(enrichment.ProviderYaCy))
-	if !selected {
-		return providerHealth{name: "YaCy", status: "skipped", emoji: "⚪", detail: "not in ENRICHMENT_PROVIDERS"}
-	}
-
-	if !b.cfg.YaCyEnabled {
-		return providerHealth{name: "YaCy", status: "disabled", emoji: "⚪"}
-	}
-
-	if b.cfg.YaCyBaseURL == "" {
-		return providerHealth{name: "YaCy", status: "misconfigured", emoji: "⚠️", detail: "missing base URL"}
-	}
-
-	provider := enrichment.NewYaCyProvider(enrichment.YaCyConfig{
-		Enabled:  true,
-		BaseURL:  b.cfg.YaCyBaseURL,
-		Timeout:  b.cfg.YaCyTimeout,
-		Username: b.cfg.YaCyUser,
-		Password: b.cfg.YaCyPassword,
-		Resource: b.cfg.YaCyResource,
-	})
-
-	if provider.IsAvailable(ctx) {
-		return providerHealth{name: "YaCy", status: "ok", emoji: "✅", detail: b.cfg.YaCyBaseURL}
-	}
-
-	return providerHealth{name: "YaCy", status: "unreachable", emoji: "❌", detail: b.cfg.YaCyBaseURL}
 }
 
 func (b *Bot) checkSearxNGHealth(ctx context.Context, selection map[string]bool) providerHealth {
@@ -622,13 +591,6 @@ func (b *Bot) renderBudgetUsage(sb *strings.Builder, stats *enrichmentStats) {
 
 func (b *Bot) renderEnrichmentProviders(sb *strings.Builder) {
 	sb.WriteString("\nProviders:\n")
-
-	yacyStatus := StatusDisabled
-	if b.cfg.YaCyEnabled && b.cfg.YaCyBaseURL != "" {
-		yacyStatus = StatusEnabled
-	}
-
-	fmt.Fprintf(sb, "  YaCy: %s\n", yacyStatus)
 
 	gdeltStatus := StatusDisabled
 	if b.cfg.GDELTEnabled {

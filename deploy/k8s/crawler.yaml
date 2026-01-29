@@ -1,5 +1,5 @@
 ---
-# Crawler Seeds ConfigMap (migrated from yacy-seeds)
+# Crawler Seeds ConfigMap
 apiVersion: v1
 kind: ConfigMap
 metadata:

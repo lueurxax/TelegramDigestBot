@@ -39,7 +39,7 @@ See [docs/index.md](docs/index.md) for the complete documentation index.
 ### Feature Highlights
 
 - [Content Quality](docs/features/content-quality.md) - Relevance gates, feedback loops, clustering, topic balance
-- [Source Enrichment](docs/features/source-enrichment.md) - Multi-provider evidence retrieval (YaCy, GDELT, NewsAPI, SearxNG)
+- [Source Enrichment](docs/features/source-enrichment.md) - Multi-provider evidence retrieval (Solr, GDELT, NewsAPI, SearxNG)
 - [Corroboration](docs/features/corroboration.md) - Channel corroboration and Google Fact Check API integration
 - [Editor Mode](docs/features/editor-mode.md) - Narrative rendering, tiered importance, consolidated clusters
 - [Channel Discovery](docs/features/discovery.md) - Automatic channel discovery with keyword filters
@@ -61,12 +61,12 @@ FACTCHECK_GOOGLE_RPM=60
 See [Corroboration](docs/features/corroboration.md) for full configuration.
 
 ### Source Enrichment (Phase 2)
-Search external sources (YaCy, GDELT, NewsAPI, SearxNG) for evidence that supports or contradicts digest items.
+Search external sources (Solr, GDELT, NewsAPI, SearxNG) for evidence that supports or contradicts digest items.
 
 ```env
 ENRICHMENT_ENABLED=true
-YACY_ENABLED=true
-YACY_BASE_URL=http://yacy:8090
+SOLR_ENABLED=true
+SOLR_URL=http://solr:8983/solr/news
 ```
 
 See [Source Enrichment](docs/features/source-enrichment.md) for provider configuration and deployment.

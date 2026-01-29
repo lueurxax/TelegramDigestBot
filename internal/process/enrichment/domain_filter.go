@@ -205,7 +205,7 @@ func normalizeDomain(domain string) string {
 	domain = strings.TrimSuffix(domain, "/")
 
 	// Remove www. prefix
-	domain = strings.TrimPrefix(domain, "www.")
+	domain = strings.TrimPrefix(domain, wwwPrefix)
 
 	return domain
 }

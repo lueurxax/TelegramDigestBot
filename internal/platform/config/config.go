@@ -136,15 +136,6 @@ type Config struct {
 	EnrichmentDailyLimit          int           `env:"ENRICHMENT_DAILY_LIMIT" envDefault:"0"`
 	EnrichmentMonthlyLimit        int           `env:"ENRICHMENT_MONTHLY_LIMIT" envDefault:"0"`
 
-	// YaCy provider
-	YaCyEnabled    bool          `env:"YACY_ENABLED" envDefault:"false"`
-	YaCyBaseURL    string        `env:"YACY_BASE_URL" envDefault:"http://localhost:8090"`
-	YaCyTimeout    time.Duration `env:"YACY_TIMEOUT" envDefault:"30s"`
-	YaCyUser       string        `env:"YACY_USER"`
-	YaCyPassword   string        `env:"YACY_PASSWORD"`
-	YaCyResource   string        `env:"YACY_RESOURCE" envDefault:"local"`
-	YaCyMaxResults int           `env:"ENRICHMENT_YACY_MAX_RESULTS" envDefault:"10"`
-
 	// GDELT provider
 	GDELTEnabled        bool          `env:"GDELT_ENABLED" envDefault:"false"`
 	GDELTRequestsPerMin int           `env:"GDELT_RPM" envDefault:"60"`
@@ -250,7 +241,6 @@ func Load() (*Config, error) {
 
 func applyEnrichmentAliases(cfg *Config) {
 	applyGeneralEnrichmentAliases(cfg)
-	applyYaCyAliases(cfg)
 	applyGDELTAliases(cfg)
 	applySearxNGAliases(cfg)
 }
@@ -270,37 +260,6 @@ func applyGeneralEnrichmentAliases(cfg *Config) {
 
 	if !hasEnv("ENRICHMENT_MAX_EVIDENCE_PER_ITEM") {
 		setIntFromEnv("ENRICHMENT_EVIDENCE_MAX_PER_ITEM", &cfg.EnrichmentMaxEvidenceItem)
-	}
-}
-
-func applyYaCyAliases(cfg *Config) {
-	if !hasEnv("YACY_ENABLED") {
-		setBoolFromEnv("ENRICHMENT_YACY_ENABLED", &cfg.YaCyEnabled)
-	}
-
-	if !hasEnv("YACY_BASE_URL") {
-		setStringFromEnv("ENRICHMENT_YACY_URL", &cfg.YaCyBaseURL)
-	}
-
-	if !hasEnv("YACY_TIMEOUT") {
-		setDurationFromEnv("ENRICHMENT_YACY_TIMEOUT", &cfg.YaCyTimeout)
-	}
-
-	if !hasEnv("YACY_USER") {
-		setStringFromEnv("ENRICHMENT_YACY_USER", &cfg.YaCyUser)
-	}
-
-	if !hasEnv("YACY_PASSWORD") {
-		setStringFromEnv("ENRICHMENT_YACY_PASSWORD", &cfg.YaCyPassword)
-	}
-
-	if !hasEnv("YACY_RESOURCE") {
-		setStringFromEnv("ENRICHMENT_YACY_RESOURCE", &cfg.YaCyResource)
-	}
-
-	const yacyMaxResultsKey = "ENRICHMENT_YACY_MAX_RESULTS"
-	if !hasEnv(yacyMaxResultsKey) {
-		setIntFromEnv(yacyMaxResultsKey, &cfg.YaCyMaxResults)
 	}
 }
 

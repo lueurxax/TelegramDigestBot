@@ -849,8 +849,6 @@ func registerProvider(cfg *config.Config, registry *ProviderRegistry, name Provi
 	switch name {
 	case ProviderSolr:
 		registerSolr(cfg, registry)
-	case ProviderYaCy:
-		registerYaCy(cfg, registry)
 	case ProviderGDELT:
 		registerGDELT(cfg, registry)
 	case ProviderSearxNG:
@@ -873,20 +871,6 @@ func registerSolr(cfg *config.Config, registry *ProviderRegistry) {
 			MaxResults: cfg.SolrMaxResults,
 		})
 		registry.Register(solrProvider)
-	}
-}
-
-func registerYaCy(cfg *config.Config, registry *ProviderRegistry) {
-	if cfg.YaCyEnabled && cfg.YaCyBaseURL != "" {
-		yacy := NewYaCyProvider(YaCyConfig{
-			Enabled:    true,
-			BaseURL:    cfg.YaCyBaseURL,
-			Timeout:    cfg.YaCyTimeout,
-			Username:   cfg.YaCyUser,
-			Password:   cfg.YaCyPassword,
-			MaxResults: cfg.YaCyMaxResults,
-		})
-		registry.Register(yacy)
 	}
 }
 
@@ -951,10 +935,9 @@ func registerOpenSearch(cfg *config.Config, registry *ProviderRegistry) {
 }
 
 // defaultProviderOrder is the fallback order per the proposal:
-// Solr → YaCy → GDELT → Event Registry → NewsAPI → SearxNG → OpenSearch
+// Solr → GDELT → Event Registry → NewsAPI → SearxNG → OpenSearch
 var defaultProviderOrder = []ProviderName{
 	ProviderSolr,
-	ProviderYaCy,
 	ProviderGDELT,
 	ProviderEventRegistry,
 	ProviderNewsAPI,
@@ -977,7 +960,7 @@ func providerOrder(raw string) []ProviderName {
 		}
 
 		switch name {
-		case ProviderSolr, ProviderYaCy, ProviderGDELT, ProviderSearxNG, ProviderEventRegistry, ProviderNewsAPI, ProviderOpenSearch:
+		case ProviderSolr, ProviderGDELT, ProviderSearxNG, ProviderEventRegistry, ProviderNewsAPI, ProviderOpenSearch:
 			if seen[name] {
 				continue
 			}
