@@ -52,6 +52,7 @@ func TestWorker_ExecuteQueries_Parallelism(t *testing.T) {
 		db:           repo,
 		logger:       &logger,
 		domainFilter: NewDomainFilter("", ""),
+		urlFilter:    NewURLFilter(false), // Disable navigation filtering for test
 	}
 
 	queries := []GeneratedQuery{
