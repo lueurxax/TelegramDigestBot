@@ -1346,13 +1346,42 @@ func (h *Handler) getClaimsEmptyDescription(ctx context.Context) string {
 		return ""
 	}
 
+	// Build diagnostic message showing the full data pipeline
+	// Claims require: evidence_claims + item_evidence + cluster_items (intersection)
 	switch {
 	case summary.EvidenceClaimsCount == 0:
 		return "No claims extracted yet. Claim ledger is built from LLM-extracted evidence claims."
+	case summary.EvidenceItemsCount == 0:
+		return fmt.Sprintf(
+			"No items linked to evidence. Evidence claims: %d, Items with evidence: 0, Clustered items: %d. "+
+				"Items need to go through enrichment pipeline to be linked to evidence.",
+			summary.EvidenceClaimsCount,
+			summary.ClusterItemsCount,
+		)
+	case summary.ClusterItemsCount == 0:
+		return fmt.Sprintf(
+			"No items in clusters. Evidence claims: %d, Items with evidence: %d, Clustered items: 0. "+
+				"Items need to be part of a digest to be clustered.",
+			summary.EvidenceClaimsCount,
+			summary.EvidenceItemsCount,
+		)
+	case summary.ClusteredWithEvCount == 0:
+		return fmt.Sprintf(
+			"No overlap between clustered items and items with evidence. "+
+				"Evidence claims: %d, Items with evidence: %d, Clustered items: %d, Overlap: 0. "+
+				"The items that have evidence are not in any clusters, or vice versa.",
+			summary.EvidenceClaimsCount,
+			summary.EvidenceItemsCount,
+			summary.ClusterItemsCount,
+		)
 	case summary.ClaimsCount == 0:
 		return fmt.Sprintf(
-			"Claims table empty but evidence claims exist (%d). Run /research/rebuild to populate claims.",
+			"Data exists but claims table is empty. Evidence claims: %d, Items with evidence: %d, "+
+				"Clustered items: %d, Overlap: %d. Click 'Rebuild Analytics' to populate.",
 			summary.EvidenceClaimsCount,
+			summary.EvidenceItemsCount,
+			summary.ClusterItemsCount,
+			summary.ClusteredWithEvCount,
 		)
 	default:
 		return fmt.Sprintf("No claims returned. Evidence claims: %d.", summary.EvidenceClaimsCount)

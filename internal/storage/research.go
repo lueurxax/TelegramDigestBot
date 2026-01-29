@@ -1011,9 +1011,11 @@ type ResearchTopicDriftEntry struct {
 }
 
 type ResearchClaimsSummary struct {
-	ClaimsCount         int
-	EvidenceClaimsCount int
-	EvidenceItemsCount  int
+	ClaimsCount          int
+	EvidenceClaimsCount  int
+	EvidenceItemsCount   int
+	ClusterItemsCount    int
+	ClusteredWithEvCount int // items in BOTH cluster_items AND item_evidence
 }
 
 // GetChannelOverlap returns overlap edges, optionally filtered by time range.
@@ -1921,23 +1923,31 @@ func (db *DB) GetClaimsSummary(ctx context.Context) (ResearchClaimsSummary, erro
 		SELECT
 			(SELECT COUNT(*) FROM claims) AS claims_count,
 			(SELECT COUNT(*) FROM evidence_claims) AS evidence_claims_count,
-			(SELECT COUNT(*) FROM item_evidence) AS evidence_items_count
+			(SELECT COUNT(DISTINCT item_id) FROM item_evidence) AS evidence_items_count,
+			(SELECT COUNT(DISTINCT item_id) FROM cluster_items) AS cluster_items_count,
+			(SELECT COUNT(DISTINCT ie.item_id)
+			 FROM item_evidence ie
+			 JOIN cluster_items ci ON ci.item_id = ie.item_id) AS clustered_with_evidence
 	`)
 
 	var (
-		claimsCount         pgtype.Int8
-		evidenceClaimsCount pgtype.Int8
-		evidenceItemsCount  pgtype.Int8
+		claimsCount          pgtype.Int8
+		evidenceClaimsCount  pgtype.Int8
+		evidenceItemsCount   pgtype.Int8
+		clusterItemsCount    pgtype.Int8
+		clusteredWithEvCount pgtype.Int8
 	)
 
-	if err := row.Scan(&claimsCount, &evidenceClaimsCount, &evidenceItemsCount); err != nil {
+	if err := row.Scan(&claimsCount, &evidenceClaimsCount, &evidenceItemsCount, &clusterItemsCount, &clusteredWithEvCount); err != nil {
 		return ResearchClaimsSummary{}, fmt.Errorf("get claims summary: %w", err)
 	}
 
 	return ResearchClaimsSummary{
-		ClaimsCount:         int(claimsCount.Int64),
-		EvidenceClaimsCount: int(evidenceClaimsCount.Int64),
-		EvidenceItemsCount:  int(evidenceItemsCount.Int64),
+		ClaimsCount:          int(claimsCount.Int64),
+		EvidenceClaimsCount:  int(evidenceClaimsCount.Int64),
+		EvidenceItemsCount:   int(evidenceItemsCount.Int64),
+		ClusterItemsCount:    int(clusterItemsCount.Int64),
+		ClusteredWithEvCount: int(clusteredWithEvCount.Int64),
 	}, nil
 }
 
