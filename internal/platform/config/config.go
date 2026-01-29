@@ -116,6 +116,7 @@ type Config struct {
 	EnrichmentAllowlistDomains    string        `env:"ENRICHMENT_ALLOWLIST_DOMAINS" envDefault:""`
 	EnrichmentDenylistDomains     string        `env:"ENRICHMENT_DENYLIST_DOMAINS" envDefault:""`
 	EnrichmentSkipNavigationPages bool          `env:"ENRICHMENT_SKIP_NAVIGATION_PAGES" envDefault:"true"`
+	EnrichmentSkipSocialMedia     bool          `env:"ENRICHMENT_SKIP_SOCIAL_MEDIA" envDefault:"true"`
 	EnrichmentDedupSimilarity     float32       `env:"ENRICHMENT_DEDUP_SIMILARITY" envDefault:"0.98"`
 	EnrichmentMaxSeconds          int           `env:"ENRICHMENT_MAX_SECONDS" envDefault:"180"`
 	EnrichmentProviders           string        `env:"ENRICHMENT_PROVIDERS" envDefault:""`

@@ -178,3 +178,105 @@ func TestParseDomainList(t *testing.T) {
 		})
 	}
 }
+
+func TestDomainFilter_SocialMediaFiltering(t *testing.T) {
+	// Social media domains that should be blocked by default
+	socialMediaDomainsList := []string{
+		// Twitter/X
+		"twitter.com",
+		"x.com",
+		"t.co",
+		"mobile.twitter.com",
+		// Facebook/Meta
+		"facebook.com",
+		"fb.com",
+		"instagram.com",
+		"threads.net",
+		"m.facebook.com",
+		// Video platforms
+		"youtube.com",
+		"youtu.be",
+		"tiktok.com",
+		"www.youtube.com",
+		// Professional/Business
+		"linkedin.com",
+		// Messaging
+		"telegram.org",
+		"t.me",
+		"discord.com",
+		"discord.gg",
+		// Other social
+		"reddit.com",
+		"old.reddit.com",
+		"pinterest.com",
+		// URL shorteners
+		"bit.ly",
+		"goo.gl",
+		"tinyurl.com",
+	}
+
+	// Test with social media filtering enabled (default)
+	t.Run("social media blocked by default", func(t *testing.T) {
+		f := NewDomainFilter("", "")
+
+		for _, domain := range socialMediaDomainsList {
+			if f.IsAllowed(domain) {
+				t.Errorf("expected social media domain %q to be blocked", domain)
+			}
+		}
+	})
+
+	// Test with social media filtering disabled
+	t.Run("social media allowed when disabled", func(t *testing.T) {
+		f := NewDomainFilterWithOptions("", "", false)
+
+		for _, domain := range socialMediaDomainsList {
+			if !f.IsAllowed(domain) {
+				t.Errorf("expected social media domain %q to be allowed when filtering disabled", domain)
+			}
+		}
+	})
+
+	// Test that non-social media domains are not affected
+	t.Run("news domains still allowed", func(t *testing.T) {
+		f := NewDomainFilter("", "")
+
+		newsDomains := []string{
+			"reuters.com",
+			"bbc.com",
+			"cnn.com",
+			"nytimes.com",
+			"washingtonpost.com",
+			"theguardian.com",
+		}
+
+		for _, domain := range newsDomains {
+			if !f.IsAllowed(domain) {
+				t.Errorf("expected news domain %q to be allowed", domain)
+			}
+		}
+	})
+
+	// Test that allowlist can override social media blocking
+	t.Run("allowlist overrides social media blocking", func(t *testing.T) {
+		const testAllowedDomain = "allowed-news.com"
+
+		// When using allowlist mode, only allowlist domains matter
+		f := NewDomainFilterWithOptions(testAllowedDomain, "", true)
+
+		// Allowlisted domain should be allowed
+		if !f.IsAllowed(testAllowedDomain) {
+			t.Error("expected allowlisted domain to be allowed")
+		}
+
+		// Social media should still be blocked (checked before allowlist mode)
+		if f.IsAllowed("twitter.com") {
+			t.Error("expected social media to be blocked even with allowlist")
+		}
+
+		// Non-allowlisted, non-social media should be blocked in allowlist mode
+		if f.IsAllowed("cnn.com") {
+			t.Error("expected non-allowlisted domain to be blocked")
+		}
+	})
+}

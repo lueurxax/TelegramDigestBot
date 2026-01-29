@@ -147,7 +147,7 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 		scorer:          NewScorer(),
 		queryGenerator:  NewQueryGenerator(),
 		languageRouter:  NewLanguageRouter(domain.LanguageRoutingPolicy{Default: []string{"en"}}, database),
-		domainFilter:    NewDomainFilter(cfg.EnrichmentAllowlistDomains, cfg.EnrichmentDenylistDomains),
+		domainFilter:    NewDomainFilterWithOptions(cfg.EnrichmentAllowlistDomains, cfg.EnrichmentDenylistDomains, cfg.EnrichmentSkipSocialMedia),
 		urlFilter:       NewURLFilter(cfg.EnrichmentSkipNavigationPages),
 		logger:          logger,
 	}
