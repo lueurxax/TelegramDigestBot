@@ -216,7 +216,7 @@ func (p *anthropicProvider) TranslateText(ctx context.Context, text, targetLangu
 		return "", fmt.Errorf(errRateLimiterSimple, err)
 	}
 
-	prompt := fmt.Sprintf(translatePromptFmt, targetLanguage, text)
+	prompt := fmt.Sprintf(translatePromptFmt, targetLanguage, targetLanguage, text)
 	resolvedModel := anthropic.Model(p.resolveModel(model))
 
 	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{

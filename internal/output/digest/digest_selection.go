@@ -56,7 +56,7 @@ func (s *Scheduler) deduplicateItems(items []db.Item, logger *zerolog.Logger) []
 			}
 
 			similarity := dedup.CosineSimilarity(item.Embedding, kept.Embedding)
-			if similarity > s.cfg.SimilarityThreshold {
+			if similarity > s.cfg.ClusterSimilarityThreshold {
 				logger.Debug().
 					Str("skipped_id", item.ID).
 					Str("duplicate_of", kept.ID).

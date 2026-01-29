@@ -463,7 +463,7 @@ func (p *Pipeline) prepareCandidates(ctx context.Context, logger zerolog.Logger,
 
 	var deduplicator dedup.Deduplicator
 	if s.dedupMode == DedupModeSemantic {
-		deduplicator = dedup.NewSemantic(p.database, p.cfg.SimilarityThreshold, s.dedupWindow)
+		deduplicator = dedup.NewSemantic(p.database, p.cfg.ClusterSimilarityThreshold, s.dedupWindow)
 	} else {
 		deduplicator = dedup.NewStrict(p.database)
 	}
@@ -696,7 +696,7 @@ func (p *Pipeline) checkBatchDuplicate(ctx context.Context, logger zerolog.Logge
 	}
 
 	for _, cand := range candidates {
-		if dedup.CosineSimilarity(embeddings[cand.ID], emb) > p.cfg.SimilarityThreshold {
+		if dedup.CosineSimilarity(embeddings[cand.ID], emb) > p.cfg.ClusterSimilarityThreshold {
 			logger.Info().Str(LogFieldMsgID, m.ID).Str(LogFieldDuplicateID, cand.ID).Msg("skipping semantic duplicate in batch")
 			p.recordDrop(ctx, logger, m.ID, dropReasonDedupSemanticBatch, cand.ID)
 			p.markProcessed(ctx, logger, m.ID)
@@ -722,7 +722,7 @@ func (p *Pipeline) checkSameChannelDuplicate(ctx context.Context, logger zerolog
 		minCreatedAt = m.TGDate.Add(-s.dedupSameChannelWindow)
 	}
 
-	threshold := p.cfg.SimilarityThreshold
+	threshold := p.cfg.ClusterSimilarityThreshold
 	if threshold < 0.85 {
 		threshold = 0.85
 	}

@@ -199,7 +199,7 @@ func (s *Scheduler) loadClusteringConfigFromDB(ctx context.Context, logger *zero
 
 func (s *Scheduler) applyClusteringDefaults(cfg *clusteringConfig) {
 	if cfg.similarityThreshold <= 0 {
-		cfg.similarityThreshold = float64(s.cfg.SimilarityThreshold)
+		cfg.similarityThreshold = float64(s.cfg.ClusterSimilarityThreshold)
 	}
 
 	if cfg.crossTopicThreshold <= 0 {

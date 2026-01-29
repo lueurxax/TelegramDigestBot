@@ -335,7 +335,7 @@ func (p *googleProvider) TranslateText(ctx context.Context, text, targetLanguage
 		return "", fmt.Errorf(errRateLimiterSimple, err)
 	}
 
-	prompt := fmt.Sprintf(translatePromptFmt, targetLanguage, text)
+	prompt := fmt.Sprintf(translatePromptFmt, targetLanguage, targetLanguage, text)
 	resolvedModel := p.resolveModel(model)
 
 	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(prompt)))

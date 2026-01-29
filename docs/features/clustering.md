@@ -6,6 +6,31 @@ The clustering system groups semantically similar items (messages/articles) to r
 
 The clustering process runs during the digest generation phase (in the Scheduler) and consists of several steps:
 
+```mermaid
+flowchart TD
+    A[Telegram Channels] -->|Ingest| B(Raw Messages)
+    B -->|Worker Process| C(Items + Embeddings)
+    C -->|Fetch for Window| D{Clustering Engine}
+    
+    subgraph "Clustering Logic"
+        D -->|Compare Embeddings| E[Calculate Similarity]
+        E -->|Check Evidence| F[Apply Evidence Boost]
+        F -->|Threshold Check| G{Similarity > Threshold?}
+        G -- Yes --> H[Form Candidate Cluster]
+        G -- No --> I[Keep Separate]
+        
+        H -->|Validation| J{Coherence > Threshold?}
+        J -- Yes --> K[Finalize Cluster]
+        J -- No --> L[Split/Reject]
+        
+        K -->|LLM| M[Generate Topic]
+    end
+    
+    M -->|Save| N[(Clusters Table)]
+    I -->|Save| N
+    N -->|Render| O[Digest Output]
+```
+
 1.  **Embedding Comparison**: The system uses vector embeddings (generated during ingestion) to calculate the cosine similarity between items.
 2.  **Grouping**: Items that exceed the `CLUSTER_SIMILARITY_THRESHOLD` are grouped together.
 3.  **Coherence Validation**: To prevent "chaining" unrelated items (A is like B, B is like C, but A is not like C), the system checks the average pairwise similarity of the proposed cluster. If it falls below `CLUSTER_COHERENCE_THRESHOLD`, the cluster is rejected or split.

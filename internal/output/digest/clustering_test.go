@@ -538,7 +538,7 @@ func TestShouldAddToCluster(t *testing.T) {
 func TestApplyClusteringDefaults(t *testing.T) {
 	s := &Scheduler{
 		cfg: &config.Config{
-			SimilarityThreshold: 0.85,
+			ClusterSimilarityThreshold: 0.85,
 		},
 	}
 
@@ -1039,7 +1039,7 @@ func TestShouldAddToClusterTimeWindow(t *testing.T) {
 func TestApplyClusteringDefaultsPartial(t *testing.T) {
 	s := &Scheduler{
 		cfg: &config.Config{
-			SimilarityThreshold: 0.85,
+			ClusterSimilarityThreshold: 0.85,
 		},
 	}
 

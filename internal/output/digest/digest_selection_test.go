@@ -110,7 +110,7 @@ func TestApplySmartSelection(t *testing.T) {
 }
 
 func TestDeduplicateItems(t *testing.T) {
-	s := &Scheduler{cfg: &config.Config{SimilarityThreshold: 0.9}}
+	s := &Scheduler{cfg: &config.Config{ClusterSimilarityThreshold: 0.9}}
 	logger := zerolog.Nop()
 
 	t.Run("keeps items without embeddings", func(t *testing.T) {
@@ -306,7 +306,7 @@ func TestDeduplicateItemsSimilarityThresholds(t *testing.T) {
 	logger := zerolog.Nop()
 
 	t.Run("high threshold keeps different items", func(t *testing.T) {
-		s := &Scheduler{cfg: &config.Config{SimilarityThreshold: 0.99}}
+		s := &Scheduler{cfg: &config.Config{ClusterSimilarityThreshold: 0.99}}
 		// Vectors with lower similarity (around 0.7)
 		items := []db.Item{
 			{ID: "1", Embedding: []float32{1, 0, 0, 0}},
@@ -320,7 +320,7 @@ func TestDeduplicateItemsSimilarityThresholds(t *testing.T) {
 	})
 
 	t.Run("low threshold removes similar items", func(t *testing.T) {
-		s := &Scheduler{cfg: &config.Config{SimilarityThreshold: 0.5}}
+		s := &Scheduler{cfg: &config.Config{ClusterSimilarityThreshold: 0.5}}
 		items := []db.Item{
 			{ID: "1", Embedding: []float32{1, 0, 0, 0}},
 			{ID: "2", Embedding: []float32{0.9, 0.1, 0, 0}}, // Similar
@@ -374,7 +374,7 @@ func TestApplySmartSelectionWithDecay(t *testing.T) {
 }
 
 func TestDeduplicateItemsPreservesOrder(t *testing.T) {
-	s := &Scheduler{cfg: &config.Config{SimilarityThreshold: 0.9}}
+	s := &Scheduler{cfg: &config.Config{ClusterSimilarityThreshold: 0.9}}
 	logger := zerolog.Nop()
 
 	items := []db.Item{

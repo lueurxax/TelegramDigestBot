@@ -2,16 +2,11 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v11"
 	"github.com/joho/godotenv"
 )
-
-const hoursPerDay = 24
 
 type Config struct {
 	AppEnv                        string        `env:"APP_ENV" envDefault:"local"`
@@ -36,7 +31,6 @@ type Config struct {
 	DigestTopN                    int           `env:"DIGEST_TOP_N" envDefault:"20"`
 	RelevanceThreshold            float32       `env:"RELEVANCE_THRESHOLD" envDefault:"0.5"`
 	ImportanceThreshold           float32       `env:"IMPORTANCE_THRESHOLD" envDefault:"0.3"`
-	SimilarityThreshold           float32       `env:"SIMILARITY_THRESHOLD" envDefault:"0.65"`
 	RateLimitRPS                  int           `env:"RATE_LIMIT_RPS" envDefault:"1"`
 	HealthPort                    int           `env:"HEALTH_PORT" envDefault:"8080"`
 	LeaderElectionEnabled         bool          `env:"LEADER_ELECTION_ENABLED" envDefault:"true"`
@@ -234,148 +228,5 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("parsing environment config: %w", err)
 	}
 
-	applyEnrichmentAliases(cfg)
-
 	return cfg, nil
-}
-
-func applyEnrichmentAliases(cfg *Config) {
-	applyGeneralEnrichmentAliases(cfg)
-	applyGDELTAliases(cfg)
-	applySearxNGAliases(cfg)
-}
-
-func applyGeneralEnrichmentAliases(cfg *Config) {
-	if !hasEnv("ENRICHMENT_MAX_RESULTS") {
-		setIntFromEnv("ENRICHMENT_MAX_SOURCES", &cfg.EnrichmentMaxResults)
-	}
-
-	if !hasEnv("ENRICHMENT_CACHE_TTL_HOURS") {
-		setDaysAsHours("ENRICHMENT_EVIDENCE_TTL_DAYS", &cfg.EnrichmentCacheTTLHours)
-	}
-
-	if !hasEnv("ENRICHMENT_DEDUP_SIMILARITY") {
-		setFloat32FromEnv("ENRICHMENT_EVIDENCE_DEDUP_SIM", &cfg.EnrichmentDedupSimilarity)
-	}
-
-	if !hasEnv("ENRICHMENT_MAX_EVIDENCE_PER_ITEM") {
-		setIntFromEnv("ENRICHMENT_EVIDENCE_MAX_PER_ITEM", &cfg.EnrichmentMaxEvidenceItem)
-	}
-}
-
-func applyGDELTAliases(cfg *Config) {
-	if !hasEnv("GDELT_RPM") {
-		setIntFromEnv("ENRICHMENT_GDELT_RPM", &cfg.GDELTRequestsPerMin)
-	}
-
-	if !hasEnv("GDELT_TIMEOUT") {
-		setDurationFromEnv("ENRICHMENT_GDELT_TIMEOUT", &cfg.GDELTTimeout)
-	}
-}
-
-func applySearxNGAliases(cfg *Config) {
-	if !hasEnv("SEARXNG_ENABLED") {
-		setBoolFromEnv("ENRICHMENT_SEARXNG_ENABLED", &cfg.SearxNGEnabled)
-	}
-
-	if !hasEnv("SEARXNG_BASE_URL") {
-		setStringFromEnv("ENRICHMENT_SEARXNG_URL", &cfg.SearxNGBaseURL)
-	}
-
-	if !hasEnv("SEARXNG_TIMEOUT") {
-		setDurationFromEnv("ENRICHMENT_SEARXNG_TIMEOUT", &cfg.SearxNGTimeout)
-	}
-
-	if !hasEnv("SEARXNG_ENGINES") {
-		setStringFromEnv("ENRICHMENT_SEARXNG_ENGINES", &cfg.SearxNGEngines)
-	}
-}
-
-func hasEnv(key string) bool {
-	_, ok := os.LookupEnv(key)
-	return ok
-}
-
-func setStringFromEnv(key string, target *string) {
-	val, ok := os.LookupEnv(key)
-	if !ok {
-		return
-	}
-
-	val = strings.TrimSpace(val)
-	if val == "" {
-		return
-	}
-
-	*target = val
-}
-
-func setBoolFromEnv(key string, target *bool) {
-	val, ok := os.LookupEnv(key)
-	if !ok {
-		return
-	}
-
-	parsed, err := strconv.ParseBool(strings.TrimSpace(val))
-	if err != nil {
-		return
-	}
-
-	*target = parsed
-}
-
-func setIntFromEnv(key string, target *int) {
-	val, ok := os.LookupEnv(key)
-	if !ok {
-		return
-	}
-
-	parsed, err := strconv.Atoi(strings.TrimSpace(val))
-	if err != nil {
-		return
-	}
-
-	*target = parsed
-}
-
-func setFloat32FromEnv(key string, target *float32) {
-	val, ok := os.LookupEnv(key)
-	if !ok {
-		return
-	}
-
-	parsed, err := strconv.ParseFloat(strings.TrimSpace(val), 32)
-	if err != nil {
-		return
-	}
-
-	*target = float32(parsed)
-}
-
-func setDurationFromEnv(key string, target *time.Duration) {
-	val, ok := os.LookupEnv(key)
-	if !ok {
-		return
-	}
-
-	parsed, err := time.ParseDuration(strings.TrimSpace(val))
-	if err != nil {
-		return
-	}
-
-	*target = parsed
-}
-
-func setDaysAsHours(key string, target *int) {
-	val, ok := os.LookupEnv(key)
-	if !ok {
-		return
-	}
-
-	parsed, err := strconv.Atoi(strings.TrimSpace(val))
-	if err != nil || parsed <= 0 {
-		return
-	}
-
-	*target = parsed * hoursPerDay
 }

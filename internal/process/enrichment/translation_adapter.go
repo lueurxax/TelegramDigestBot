@@ -9,7 +9,10 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 )
 
-var errTranslationRefused = errors.New("LLM refused to translate")
+var (
+	errTranslationRefused       = errors.New("LLM refused to translate")
+	errTranslationWrongLanguage = errors.New("translation in wrong language")
+)
 
 type translationAdapter struct {
 	llmClient llm.Client
@@ -36,6 +39,11 @@ func (a *translationAdapter) Translate(ctx context.Context, text string, targetL
 	// Validate the translation isn't a refusal or garbage
 	if isLLMRefusal(cleaned) {
 		return "", errTranslationRefused
+	}
+
+	// Validate the translation is in the expected language
+	if !isLikelyTargetLanguage(cleaned, targetLanguage) {
+		return "", errTranslationWrongLanguage
 	}
 
 	return cleaned, nil
@@ -129,3 +137,96 @@ func isLLMRefusal(text string) bool {
 }
 
 const maxRefusalLength = 300
+
+// scriptCounts holds character counts for different scripts.
+type scriptCounts struct {
+	latin, cyrillic, greek, total int
+}
+
+// countScripts counts characters by script type in the text.
+func countScripts(text string) scriptCounts {
+	var counts scriptCounts
+
+	for _, r := range text {
+		if !isLetter(r) {
+			continue
+		}
+
+		counts.total++
+
+		switch {
+		case isGreekChar(r):
+			counts.greek++
+		case isCyrillicChar(r):
+			counts.cyrillic++
+		case isLatinChar(r):
+			counts.latin++
+		}
+	}
+
+	return counts
+}
+
+// expectedScript maps language codes to their expected script type.
+var expectedScript = map[string]string{
+	"el": "greek", "greek": "greek",
+	"ru": "cyrillic", "russian": "cyrillic", "uk": "cyrillic", "ukrainian": "cyrillic",
+	"en": "latin", "english": "latin", "de": "latin", "german": "latin",
+	"fr": "latin", "french": "latin", "es": "latin", "spanish": "latin",
+	"it": "latin", "italian": "latin", "pt": "latin", "portuguese": "latin",
+}
+
+// isLikelyTargetLanguage checks if the text appears to be in the target language.
+// Uses simple script detection for languages with distinct scripts.
+func isLikelyTargetLanguage(text, targetLang string) bool {
+	if text == "" {
+		return false
+	}
+
+	counts := countScripts(text)
+	if counts.total == 0 {
+		return true // Can't determine, assume OK
+	}
+
+	script, known := expectedScript[targetLang]
+	if !known {
+		return true // Unknown language, assume OK
+	}
+
+	return hasExpectedScript(counts, script)
+}
+
+// hasExpectedScript checks if the script ratio meets the minimum threshold.
+func hasExpectedScript(counts scriptCounts, script string) bool {
+	var scriptCount int
+
+	switch script {
+	case "greek":
+		scriptCount = counts.greek
+	case "cyrillic":
+		scriptCount = counts.cyrillic
+	case "latin":
+		scriptCount = counts.latin
+	}
+
+	return float64(scriptCount)/float64(counts.total) >= minScriptRatio
+}
+
+const minScriptRatio = 0.3 // At least 30% of characters should be in expected script
+
+func isLetter(r rune) bool {
+	return isLatinChar(r) || isGreekChar(r) || isCyrillicChar(r)
+}
+
+func isGreekChar(r rune) bool {
+	return (r >= 0x0370 && r <= 0x03FF) || (r >= 0x1F00 && r <= 0x1FFF)
+}
+
+func isCyrillicChar(r rune) bool {
+	return r >= 0x0400 && r <= 0x052F
+}
+
+func isLatinChar(r rune) bool {
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
+		(r >= 0x00C0 && r <= 0x024F)
+}

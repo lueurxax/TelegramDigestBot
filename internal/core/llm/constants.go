@@ -32,7 +32,7 @@ const (
 const (
 	indexedPrefixFormat = "[%d] "
 	sourceChannelFormat = "(Source: %s) "
-	translatePromptFmt  = "Translate the following text to %s. Return only the translated text, no explanations.\n\nText: %s"
+	translatePromptFmt  = "Translate to %s. Output ONLY the translation, nothing else. The output must be in %s language.\n\n%s"
 	relevanceGateFormat = "%s\n\nText to evaluate:\n%s\n\nRespond in JSON format with fields: decision (relevant/irrelevant), confidence (0-1), reason"
 )
 

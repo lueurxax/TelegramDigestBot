@@ -308,7 +308,7 @@ func (p *cohereProvider) TranslateText(ctx context.Context, text, targetLanguage
 		return "", fmt.Errorf(errRateLimiterSimple, err)
 	}
 
-	prompt := fmt.Sprintf(translatePromptFmt, targetLanguage, text)
+	prompt := fmt.Sprintf(translatePromptFmt, targetLanguage, targetLanguage, text)
 	resolvedModel := p.resolveModel(model)
 
 	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensShort)
