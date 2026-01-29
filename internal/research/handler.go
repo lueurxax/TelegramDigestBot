@@ -604,10 +604,18 @@ func (h *Handler) handleSettings(w http.ResponseWriter, r *http.Request) int {
 		}
 
 		data := TableViewData{
-			Title:       "Settings (Read-only)",
+			Title:       "Settings",
 			Headers:     []string{"Setting", "Value", "Source"},
 			Rows:        rows,
 			Description: "Snapshot of digest configuration used by the pipeline.",
+			Actions: []TableAction{
+				{
+					Label:  "Rebuild Analytics",
+					URL:    "/research/rebuild",
+					Method: "POST",
+					Style:  "primary",
+				},
+			},
 		}
 		if err := h.renderHTML(w, tmplTable, data); err != nil {
 			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable)
@@ -2026,6 +2034,15 @@ type TableViewData struct {
 	SecondaryHeaders []string
 	SecondaryRows    [][]string
 	Description      string
+	Actions          []TableAction
+}
+
+// TableAction defines an action button for table views.
+type TableAction struct {
+	Label  string // Button text
+	URL    string // POST endpoint URL
+	Method string // HTTP method (POST)
+	Style  string // primary, secondary, danger
 }
 
 type SettingEntry struct {

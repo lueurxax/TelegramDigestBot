@@ -285,10 +285,95 @@
       }
 
       .empty-state {
-        padding: var(--space-8);
+        padding: var(--space-8) var(--space-6);
         text-align: center;
         color: var(--color-text-muted);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--space-4);
       }
+      .empty-state-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: var(--color-bg-tertiary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .empty-state-icon svg {
+        width: 24px;
+        height: 24px;
+        color: var(--color-text-muted);
+      }
+      .empty-state-text {
+        max-width: 400px;
+        line-height: 1.6;
+      }
+
+      .actions-bar {
+        display: flex;
+        gap: var(--space-3);
+        flex-wrap: wrap;
+        margin-top: var(--space-6);
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        padding: var(--space-3) var(--space-5);
+        font-size: 0.875rem;
+        font-weight: 600;
+        border: none;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        font-family: inherit;
+        transition: background 0.15s, transform 0.1s;
+      }
+      .btn:active { transform: scale(0.98); }
+      .btn--primary {
+        background: var(--color-accent-primary);
+        color: white;
+      }
+      .btn--primary:hover { background: var(--color-accent-hover); }
+      .btn--secondary {
+        background: var(--color-bg-tertiary);
+        color: var(--color-text-primary);
+        border: 1px solid var(--color-border-default);
+      }
+      .btn--secondary:hover { background: var(--color-border-subtle); }
+      .btn--loading {
+        opacity: 0.7;
+        pointer-events: none;
+      }
+      .btn--loading::after {
+        content: '';
+        width: 14px;
+        height: 14px;
+        border: 2px solid currentColor;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.6s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .toast {
+        position: fixed;
+        bottom: var(--space-6);
+        left: 50%;
+        transform: translateX(-50%);
+        padding: var(--space-3) var(--space-5);
+        background: var(--color-text-primary);
+        color: white;
+        border-radius: var(--radius-md);
+        font-size: 0.875rem;
+        box-shadow: var(--shadow-lg);
+        opacity: 0;
+        transition: opacity 0.2s;
+        z-index: 1000;
+      }
+      .toast.show { opacity: 1; }
 
       :focus-visible {
         outline: 2px solid var(--color-accent-primary);
@@ -338,7 +423,7 @@
     </header>
     <main id="main-content">
       <h1>{{.Title}}</h1>
-      {{if .Description}}<p class="hint">{{.Description}}</p>{{end}}
+      {{if and .Description .Rows}}<p class="hint">{{.Description}}</p>{{end}}
 
       {{if .Rows}}
       <div class="data-table-wrapper">
@@ -358,11 +443,11 @@
         </table>
       </div>
       {{else}}
-      {{if not .Description}}
       <div class="data-table-wrapper">
-        <div class="empty-state">No data available.</div>
+        <div class="empty-state">
+          {{if .Description}}{{.Description}}{{else}}No data available.{{end}}
+        </div>
       </div>
-      {{end}}
       {{end}}
 
       {{if .SecondaryRows}}
@@ -384,6 +469,47 @@
         </table>
       </div>
       {{end}}
+
+      {{if .Actions}}
+      <div class="actions-bar">
+        {{range .Actions}}
+        <button type="button" class="btn btn--{{.Style}}" data-action-url="{{.URL}}" data-action-method="{{.Method}}">
+          {{.Label}}
+        </button>
+        {{end}}
+      </div>
+      {{end}}
     </main>
+    <div id="toast" class="toast"></div>
+    <script>
+      document.querySelectorAll('[data-action-url]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var url = btn.dataset.actionUrl;
+          var method = btn.dataset.actionMethod || 'POST';
+          btn.classList.add('btn--loading');
+          btn.disabled = true;
+          fetch(url, { method: method, credentials: 'same-origin' })
+            .then(function(res) {
+              if (!res.ok) throw new Error('Request failed');
+              return res.json();
+            })
+            .then(function() {
+              showToast('Done! Refreshing...');
+              setTimeout(function() { location.reload(); }, 1000);
+            })
+            .catch(function(err) {
+              showToast('Error: ' + err.message);
+              btn.classList.remove('btn--loading');
+              btn.disabled = false;
+            });
+        });
+      });
+      function showToast(msg) {
+        var toast = document.getElementById('toast');
+        toast.textContent = msg;
+        toast.classList.add('show');
+        setTimeout(function() { toast.classList.remove('show'); }, 3000);
+      }
+    </script>
   </body>
 </html>
