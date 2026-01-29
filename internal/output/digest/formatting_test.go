@@ -1460,15 +1460,10 @@ func TestScheduleWindowStruct(t *testing.T) {
 
 func TestDigestProcessConfigStruct(t *testing.T) {
 	cfg := digestProcessConfig{
-		window:                      time.Hour,
 		targetChatID:                12345,
 		importanceThreshold:         0.5,
 		catchupWindow:               24 * time.Hour,
 		anomalyNotificationsEnabled: true,
-	}
-
-	if cfg.window != time.Hour {
-		t.Errorf("window = %v, want 1h", cfg.window)
 	}
 
 	if cfg.targetChatID != 12345 {

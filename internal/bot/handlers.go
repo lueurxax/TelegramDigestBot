@@ -529,7 +529,7 @@ func (b *Bot) handleScheduleClear(ctx context.Context, msg *tgbotapi.Message) {
 		b.logger.Debug().Err(err).Msg("failed to clear digest_schedule_anchor")
 	}
 
-	b.reply(msg, "✅ Digest schedule cleared. Scheduler uses <code>digest_window</code>.")
+	b.reply(msg, "✅ Digest schedule cleared. Configure a new schedule with <code>/schedule set</code>.")
 }
 
 func (b *Bot) handleSchedulePreview(ctx context.Context, msg *tgbotapi.Message, args []string) {
@@ -687,7 +687,7 @@ func (b *Bot) formatDigestSchedule(ctx context.Context) string {
 	}
 
 	if sched.IsEmpty() {
-		return fmt.Sprintf("ℹ️ No digest schedule configured. Scheduler uses <code>digest_window</code>. (Timezone: <code>%s</code>)", html.EscapeString(timezone))
+		return fmt.Sprintf("ℹ️ No digest schedule configured. Use <code>/schedule set</code> to configure. (Timezone: <code>%s</code>)", html.EscapeString(timezone))
 	}
 
 	var sb strings.Builder
@@ -2402,7 +2402,7 @@ func (b *Bot) handleSetup(ctx context.Context, msg *tgbotapi.Message) {
 	sb.WriteString("• <code>/window 60m</code> - Set fallback digest interval\n")
 	sb.WriteString("• <code>/schedule show</code> - View digest schedule\n")
 	sb.WriteString("• <code>/schedule preview [count]</code> - Preview upcoming digest times\n")
-	sb.WriteString("• <code>/schedule clear</code> - Clear schedule and use digest_window\n")
+	sb.WriteString("• <code>/schedule clear</code> - Clear current schedule\n")
 	sb.WriteString("• <code>/language ru</code> - Set digest language\n\n")
 
 	sb.WriteString("💡 <i>Tip: Use /settings to see all current values.</i>")

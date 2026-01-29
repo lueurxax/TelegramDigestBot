@@ -299,7 +299,6 @@ type anomalyInfo struct {
 }
 
 type digestProcessConfig struct {
-	window                      time.Duration
 	targetChatID                int64
 	importanceThreshold         float32
 	catchupWindow               time.Duration
@@ -310,30 +309,10 @@ type digestProcessConfig struct {
 
 func (s *Scheduler) loadDigestProcessConfig(ctx context.Context, logger *zerolog.Logger) digestProcessConfig {
 	cfg := digestProcessConfig{
-		window:                      time.Hour,
 		targetChatID:                s.cfg.TargetChatID,
 		importanceThreshold:         s.cfg.ImportanceThreshold,
 		catchupWindow:               DefaultCatchupWindowHours * time.Hour,
 		anomalyNotificationsEnabled: true,
-	}
-
-	s.loadWindowConfig(ctx, &cfg, logger)
-	s.loadThresholdConfig(ctx, &cfg, logger)
-	s.loadScheduleConfig(ctx, &cfg, logger)
-
-	return cfg
-}
-
-func (s *Scheduler) loadWindowConfig(ctx context.Context, cfg *digestProcessConfig, logger *zerolog.Logger) {
-	windowStr := s.cfg.DigestWindow
-	if err := s.database.GetSetting(ctx, "digest_window", &windowStr); err != nil {
-		logger.Debug().Err(err).Msg("could not get digest_window from DB, using default")
-	}
-
-	if w, err := time.ParseDuration(windowStr); err == nil {
-		cfg.window = w
-	} else {
-		logger.Error().Err(err).Str(LogFieldWindow, windowStr).Msg("invalid digest window duration, using 1h")
 	}
 
 	if cw, err := time.ParseDuration(s.cfg.SchedulerCatchupWindow); err == nil {
@@ -341,6 +320,11 @@ func (s *Scheduler) loadWindowConfig(ctx context.Context, cfg *digestProcessConf
 	} else {
 		logger.Error().Err(err).Str(LogFieldWindow, s.cfg.SchedulerCatchupWindow).Msg("invalid scheduler catchup window, using 24h")
 	}
+
+	s.loadThresholdConfig(ctx, &cfg, logger)
+	s.loadScheduleConfig(ctx, &cfg, logger)
+
+	return cfg
 }
 
 func (s *Scheduler) loadThresholdConfig(ctx context.Context, cfg *digestProcessConfig, logger *zerolog.Logger) {
@@ -370,7 +354,7 @@ func (s *Scheduler) loadScheduleConfig(ctx context.Context, cfg *digestProcessCo
 	}
 
 	if err := sched.Validate(); err != nil {
-		logger.Warn().Err(err).Msg("invalid digest schedule, falling back to digest_window")
+		logger.Warn().Err(err).Msg("invalid digest schedule")
 
 		return
 	}
@@ -384,18 +368,16 @@ func (s *Scheduler) loadScheduleConfig(ctx context.Context, cfg *digestProcessCo
 
 func (s *Scheduler) processDigest(ctx context.Context, logger *zerolog.Logger) error {
 	cfg := s.loadDigestProcessConfig(ctx, logger)
-	now := time.Now()
 
-	var anomalies []anomalyInfo
+	if cfg.schedule == nil {
+		logger.Warn().Msg("no digest schedule configured, use /schedule set to configure")
 
-	var err error
-
-	if cfg.schedule != nil {
-		anomalies, err = s.processScheduledDigest(ctx, cfg, now, logger)
-	} else {
-		anomalies, err = s.processLegacyDigest(ctx, cfg, now, logger)
+		return nil
 	}
 
+	now := time.Now()
+
+	anomalies, err := s.processScheduledDigest(ctx, cfg, now, logger)
 	if err != nil {
 		return err
 	}
@@ -428,32 +410,6 @@ func (s *Scheduler) processScheduledDigest(ctx context.Context, cfg digestProces
 		}
 
 		s.updateScheduleAnchor(ctx, window.end, logger)
-
-		if anomaly != nil {
-			anomalies = append(anomalies, *anomaly)
-		}
-	}
-
-	return anomalies, nil
-}
-
-func (s *Scheduler) processLegacyDigest(ctx context.Context, cfg digestProcessConfig, now time.Time, logger *zerolog.Logger) ([]anomalyInfo, error) {
-	now = now.Truncate(cfg.window)
-
-	var anomalies []anomalyInfo
-
-	for t := now.Add(-cfg.catchupWindow); !t.After(now.Add(-cfg.window)); t = t.Add(cfg.window) {
-		start := t
-		end := t.Add(cfg.window)
-
-		anomaly, err := s.processWindow(ctx, start, end, cfg.targetChatID, cfg.importanceThreshold, logger)
-		if err != nil {
-			logger.Error().Err(err).
-				Time(LogFieldStart, start).
-				Time(LogFieldEnd, end).
-				Int64(SettingTargetChatID, cfg.targetChatID).
-				Msg(msgFailedToProcessWindow)
-		}
 
 		if anomaly != nil {
 			anomalies = append(anomalies, *anomaly)
