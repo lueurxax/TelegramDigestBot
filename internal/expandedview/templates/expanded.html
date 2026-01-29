@@ -7,153 +7,318 @@
     <title>{{.Item.Topic}} - Digest Item</title>
     <style>
         :root {
-            --bg: #f5f5f5;
-            --card-bg: #ffffff;
-            --text: #333333;
-            --text-muted: #666666;
-            --border: #e0e0e0;
-            --primary: #2563eb;
-            --success: #16a34a;
-            --warning: #d97706;
+            --color-bg-primary: #f8f9fa;
+            --color-bg-secondary: #ffffff;
+            --color-bg-tertiary: #f1f3f5;
+            --color-text-primary: #1a1a2e;
+            --color-text-secondary: #4a5568;
+            --color-text-muted: #6b7280;
+            --color-accent-primary: #2563eb;
+            --color-accent-hover: #1d4ed8;
+            --color-success: #059669;
+            --color-warning: #d97706;
+            --color-error: #dc2626;
+            --color-border-subtle: #e2e8f0;
+            --color-border-default: #cbd5e1;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+            --radius-sm: 4px;
+            --radius-md: 6px;
+            --radius-lg: 8px;
+            --space-1: 0.25rem;
+            --space-2: 0.5rem;
+            --space-3: 0.75rem;
+            --space-4: 1rem;
+            --space-5: 1.25rem;
+            --space-6: 1.5rem;
+            --space-8: 2rem;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+            background: var(--color-bg-primary);
+            color: var(--color-text-primary);
             line-height: 1.6;
-            padding: 1rem;
+            padding: var(--space-4);
         }
+        a { color: var(--color-accent-primary); text-decoration: none; }
+        a:hover { color: var(--color-accent-hover); text-decoration: underline; }
+
         .container { max-width: 800px; margin: 0 auto; }
+
         .card {
-            background: var(--card-bg);
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            background: var(--color-bg-secondary);
+            border: 1px solid var(--color-border-subtle);
+            border-radius: var(--radius-lg);
+            padding: var(--space-5);
+            margin-bottom: var(--space-4);
+            box-shadow: var(--shadow-sm);
         }
-        h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
-        h2 { font-size: 1.1rem; color: var(--text-muted); margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
-        .meta { font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem; }
-        .meta a { color: var(--primary); text-decoration: none; }
-        .meta a:hover { text-decoration: underline; }
-        .scores { display: flex; gap: 2rem; flex-wrap: wrap; margin-bottom: 1rem; }
-        .score-item { text-align: center; }
-        .score-value { font-size: 1.5rem; font-weight: bold; color: var(--primary); }
-        .score-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
-        .summary { font-size: 1.1rem; margin-bottom: 1rem; }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: var(--space-2);
+            color: var(--color-text-primary);
+        }
+        h2 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--color-text-muted);
+            margin-bottom: var(--space-4);
+            padding-bottom: var(--space-3);
+            border-bottom: 1px solid var(--color-border-subtle);
+        }
+
+        .meta {
+            font-size: 0.875rem;
+            color: var(--color-text-muted);
+            margin-bottom: var(--space-4);
+        }
+        .meta a { color: var(--color-accent-primary); }
+
+        /* Score bars */
+        .score-row {
+            display: flex;
+            gap: var(--space-6);
+            margin: var(--space-4) 0;
+            flex-wrap: wrap;
+        }
+        .score-item { flex: 1; min-width: 140px; max-width: 200px; }
+        .score-bar {
+            height: 6px;
+            background: var(--color-border-subtle);
+            border-radius: 9999px;
+            overflow: hidden;
+        }
+        .score-fill {
+            height: 100%;
+            background: var(--color-accent-primary);
+            border-radius: 9999px;
+            transition: width 0.3s ease;
+        }
+        .score-fill--success { background: var(--color-success); }
+        .score-fill--warning { background: var(--color-warning); }
+        .score-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-top: var(--space-1);
+        }
+        .score-value {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--color-text-primary);
+            font-variant-numeric: tabular-nums;
+        }
+        .score-label {
+            font-size: 0.75rem;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
         .media-container {
-            margin-top: 1rem;
+            margin-top: var(--space-4);
             text-align: center;
         }
         .media-image {
             max-width: 100%;
             max-height: 400px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
         }
+
+        .summary {
+            font-size: 1.0625rem;
+            line-height: 1.7;
+            color: var(--color-text-primary);
+        }
+
         .original-text {
-            background: #f8f9fa;
-            border-left: 3px solid var(--primary);
-            padding: 1rem;
+            background: var(--color-bg-tertiary);
+            border-left: 3px solid var(--color-accent-primary);
+            padding: var(--space-4);
             font-size: 0.9rem;
             white-space: pre-wrap;
             word-break: break-word;
             max-height: 400px;
             overflow-y: auto;
+            border-radius: 0 var(--radius-md) var(--radius-md) 0;
         }
-        .evidence-item {
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 1rem;
-            margin-bottom: 0.75rem;
+
+        /* Evidence cards */
+        .evidence-card {
+            border: 1px solid var(--color-border-subtle);
+            border-radius: var(--radius-md);
+            padding: var(--space-4);
+            margin-bottom: var(--space-3);
+            transition: border-color 0.15s;
         }
-        .evidence-item h3 {
-            font-size: 1rem;
-            margin-bottom: 0.25rem;
+        .evidence-card:hover { border-color: var(--color-border-default); }
+        .evidence-card:last-child { margin-bottom: 0; }
+        .evidence-card--contradicts {
+            border-left: 3px solid var(--color-error);
         }
-        .evidence-item h3 a { color: var(--primary); text-decoration: none; }
-        .evidence-item h3 a:hover { text-decoration: underline; }
-        .evidence-meta { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; }
-        .agreement-high { color: var(--success); }
-        .agreement-medium { color: var(--warning); }
-        .evidence-desc { font-size: 0.9rem; }
+        .evidence-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: var(--space-3);
+            margin-bottom: var(--space-2);
+        }
+        .evidence-title {
+            font-size: 0.9375rem;
+            font-weight: 500;
+            color: var(--color-text-primary);
+            margin: 0;
+        }
+        .evidence-title a { color: inherit; text-decoration: none; }
+        .evidence-title a:hover { color: var(--color-accent-primary); }
+        .evidence-agreement {
+            flex-shrink: 0;
+            padding: var(--space-1) var(--space-2);
+            font-size: 0.75rem;
+            font-weight: 600;
+            border-radius: var(--radius-sm);
+            font-variant-numeric: tabular-nums;
+        }
+        .evidence-agreement--high { background: rgba(5, 150, 105, 0.1); color: var(--color-success); }
+        .evidence-agreement--medium { background: rgba(217, 119, 6, 0.1); color: var(--color-warning); }
+        .evidence-domain {
+            font-size: 0.75rem;
+            color: var(--color-text-muted);
+            margin-bottom: var(--space-2);
+        }
+        .evidence-description {
+            font-size: 0.875rem;
+            color: var(--color-text-secondary);
+            line-height: 1.6;
+        }
         .matched-claims {
-            margin-top: 0.5rem;
-            padding: 0.5rem;
-            background: #f8f9fa;
-            border-radius: 4px;
-            font-size: 0.85rem;
+            margin-top: var(--space-3);
+            padding: var(--space-3);
+            background: var(--color-bg-tertiary);
+            border-radius: var(--radius-sm);
         }
         .matched-claim {
-            margin-bottom: 0.25rem;
-            padding-left: 0.5rem;
-            border-left: 2px solid var(--primary);
+            margin-bottom: var(--space-2);
+            padding-left: var(--space-3);
+            border-left: 2px solid var(--color-accent-primary);
+            font-size: 0.8125rem;
         }
-        .matched-claim-label { color: var(--text-muted); font-size: 0.75rem; }
+        .matched-claim:last-child { margin-bottom: 0; }
+        .matched-claim-label {
+            font-size: 0.6875rem;
+            font-weight: 600;
+            color: var(--color-text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: var(--space-2);
+        }
+
+        /* Cluster items */
         .cluster-item {
-            padding: 0.5rem 0;
-            border-bottom: 1px solid var(--border);
+            padding: var(--space-3) 0;
+            border-bottom: 1px solid var(--color-border-subtle);
         }
         .cluster-item:last-child { border-bottom: none; }
-        .cluster-channel { font-size: 0.8rem; color: var(--text-muted); }
+        .cluster-summary {
+            font-size: 0.875rem;
+            color: var(--color-text-primary);
+            margin-bottom: var(--space-1);
+        }
+        .cluster-channel {
+            font-size: 0.75rem;
+            color: var(--color-text-muted);
+        }
+
+        /* Buttons */
         .btn {
-            display: inline-block;
-            background: var(--primary);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: var(--space-3) var(--space-5);
+            font-size: 0.9375rem;
+            font-weight: 600;
             color: white;
-            padding: 0.75rem 1.5rem;
-            border-radius: 6px;
-            text-decoration: none;
-            font-weight: 500;
+            background: var(--color-accent-primary);
             border: none;
+            border-radius: var(--radius-md);
             cursor: pointer;
-            font-size: 1rem;
+            font-family: inherit;
+            text-decoration: none;
+            transition: background 0.15s;
         }
-        .btn:hover { opacity: 0.9; }
-        .prompt-container {
-            margin-top: 1rem;
+        .btn:hover { background: var(--color-accent-hover); text-decoration: none; }
+        .btn--success { background: var(--color-success); }
+        .btn--success:hover { background: #047857; }
+
+        .shortcut-section {
+            margin-bottom: var(--space-4);
+            padding-bottom: var(--space-4);
+            border-bottom: 1px solid var(--color-border-subtle);
         }
+        .shortcut-help {
+            margin-top: var(--space-2);
+            font-size: 0.8125rem;
+            color: var(--color-text-muted);
+        }
+
+        /* Collapsible prompt */
+        details {
+            margin-top: var(--space-4);
+        }
+        details summary {
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--color-accent-primary);
+            list-style: none;
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+        }
+        details summary::-webkit-details-marker { display: none; }
+        details[open] summary .chevron { transform: rotate(180deg); }
+        .chevron { transition: transform 0.15s; }
         .prompt-text {
-            background: #f8f9fa;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 1rem;
-            font-size: 0.85rem;
+            margin-top: var(--space-3);
+            background: var(--color-bg-tertiary);
+            border: 1px solid var(--color-border-subtle);
+            border-radius: var(--radius-md);
+            padding: var(--space-4);
+            font-size: 0.8125rem;
             white-space: pre-wrap;
             word-break: break-word;
             max-height: 300px;
             overflow-y: auto;
-            font-family: monospace;
-            margin-top: 0.5rem;
+            font-family: "SF Mono", "Fira Code", "Consolas", monospace;
         }
-        details {
-            margin-top: 1rem;
+
+        .empty-state {
+            color: var(--color-text-muted);
+            font-style: italic;
+            font-size: 0.875rem;
         }
-        details summary {
-            cursor: pointer;
-            color: var(--primary);
-            font-size: 0.9rem;
+
+        .footer {
+            text-align: center;
+            font-size: 0.75rem;
+            color: var(--color-text-muted);
+            margin-top: var(--space-8);
+            padding-top: var(--space-4);
+            border-top: 1px solid var(--color-border-subtle);
         }
-        .shortcut-section {
-            margin-bottom: 1rem;
-            padding-bottom: 1rem;
-            border-bottom: 1px solid var(--border);
+
+        :focus-visible {
+            outline: 2px solid var(--color-accent-primary);
+            outline-offset: 2px;
         }
-        .shortcut-section .btn-primary {
-            background: #10b981;
-            font-size: 1.1rem;
-            padding: 1rem 2rem;
+
+        @media (prefers-reduced-motion: reduce) {
+            * { animation: none !important; transition: none !important; }
         }
-        .shortcut-help {
-            margin-top: 0.5rem;
-            font-size: 0.8rem;
-            color: var(--text-muted);
-        }
-        .shortcut-help a {
-            color: var(--primary);
-        }
-        .empty { color: var(--text-muted); font-style: italic; }
-        .footer { text-align: center; font-size: 0.75rem; color: var(--text-muted); margin-top: 2rem; }
     </style>
 </head>
 <body>
@@ -170,14 +335,24 @@
                 &bull; {{.Item.TGDate.Format "Jan 2, 2006 15:04"}}
                 &bull; <a href="{{.OriginalMsgLink}}" target="_blank" rel="noopener">View original</a>
             </div>
-            <div class="scores">
+            <div class="score-row">
                 <div class="score-item">
-                    <div class="score-value">{{printf "%.0f" (mul .Item.RelevanceScore 100)}}%</div>
-                    <div class="score-label">Relevance</div>
+                    <div class="score-bar">
+                        <div class="score-fill {{if ge .Item.RelevanceScore 0.7}}score-fill--success{{else if ge .Item.RelevanceScore 0.4}}score-fill--warning{{end}}" style="width: {{printf "%.0f" (mul .Item.RelevanceScore 100)}}%"></div>
+                    </div>
+                    <div class="score-meta">
+                        <span class="score-value">{{printf "%.0f" (mul .Item.RelevanceScore 100)}}%</span>
+                        <span class="score-label">Relevance</span>
+                    </div>
                 </div>
                 <div class="score-item">
-                    <div class="score-value">{{printf "%.0f" (mul .Item.ImportanceScore 100)}}%</div>
-                    <div class="score-label">Importance</div>
+                    <div class="score-bar">
+                        <div class="score-fill {{if ge .Item.ImportanceScore 0.7}}score-fill--success{{else if ge .Item.ImportanceScore 0.4}}score-fill--warning{{end}}" style="width: {{printf "%.0f" (mul .Item.ImportanceScore 100)}}%"></div>
+                    </div>
+                    <div class="score-meta">
+                        <span class="score-value">{{printf "%.0f" (mul .Item.ImportanceScore 100)}}%</span>
+                        <span class="score-label">Importance</span>
+                    </div>
                 </div>
             </div>
             {{if .Item.MediaData | isImageMedia}}
@@ -201,18 +376,20 @@
         <div class="card">
             <h2>Evidence Sources ({{len .Evidence}})</h2>
             {{range .Evidence}}
-            <div class="evidence-item">
-                <h3><a href="{{.Source.URL}}" target="_blank" rel="noopener">{{if .Source.Title}}{{.Source.Title}}{{else}}{{.Source.URL}}{{end}}</a></h3>
-                <div class="evidence-meta">
-                    {{.Source.Domain}} &bull;
-                    Agreement: <span class="{{if ge .AgreementScore 0.7}}agreement-high{{else}}agreement-medium{{end}}">{{printf "%.0f" (mul .AgreementScore 100)}}%</span>
-                    {{if .IsContradiction}}&bull; <strong>Contradicts</strong>{{end}}
+            <div class="evidence-card {{if .IsContradiction}}evidence-card--contradicts{{end}}">
+                <div class="evidence-header">
+                    <h3 class="evidence-title"><a href="{{.Source.URL}}" target="_blank" rel="noopener">{{if .Source.Title}}{{.Source.Title}}{{else}}{{.Source.URL}}{{end}}</a></h3>
+                    <span class="evidence-agreement {{if ge .AgreementScore 0.7}}evidence-agreement--high{{else}}evidence-agreement--medium{{end}}">{{printf "%.0f" (mul .AgreementScore 100)}}%</span>
                 </div>
-                {{if .Source.Description}}<p class="evidence-desc">{{.Source.Description}}</p>{{end}}
+                <div class="evidence-domain">
+                    {{.Source.Domain}}
+                    {{if .IsContradiction}}&bull; <strong style="color: var(--color-error);">Contradicts</strong>{{end}}
+                </div>
+                {{if .Source.Description}}<p class="evidence-description">{{.Source.Description}}</p>{{end}}
                 {{$claims := .MatchedClaimsJSON | parseMatchedClaims}}
                 {{if $claims}}
                 <div class="matched-claims">
-                    <div class="matched-claim-label">Matched Claims:</div>
+                    <div class="matched-claim-label">Matched Claims</div>
                     {{range $claims}}
                     <div class="matched-claim">
                         <div><strong>Item:</strong> {{.ItemClaim}}</div>
@@ -227,7 +404,7 @@
         {{else}}
         <div class="card">
             <h2>Evidence Sources</h2>
-            <p class="empty">No evidence available for this item.</p>
+            <p class="empty-state">No evidence available for this item.</p>
         </div>
         {{end}}
 
@@ -236,7 +413,7 @@
             <h2>Related Items in Cluster</h2>
             {{range .ClusterItems}}
             <div class="cluster-item">
-                <div>{{.Summary | stripHTML}}</div>
+                <div class="cluster-summary">{{.Summary | stripHTML}}</div>
                 <div class="cluster-channel">
                     {{if .ChannelUsername}}
                     via <a href="https://t.me/{{.ChannelUsername}}/{{.MessageID}}" target="_blank" rel="noopener">@{{.ChannelUsername}}</a>
@@ -252,11 +429,11 @@
         {{if .ShortcutEnabled}}
         <div class="card">
             <h2>Deep Dive with ChatGPT</h2>
-            <p>Tap below to explore this topic further with ChatGPT.</p>
+            <p style="margin-bottom: var(--space-4); color: var(--color-text-secondary);">Tap below to explore this topic further with ChatGPT.</p>
 
             <div class="shortcut-section">
-                <a href="{{.ShortcutURL | safeURL}}" class="btn btn-primary">
-                    📱 Ask on iPhone/Mac
+                <a href="{{.ShortcutURL | safeURL}}" class="btn btn--success">
+                    Ask on iPhone/Mac
                 </a>
                 <div class="shortcut-help">
                     Requires <a href="{{.ShortcutICloudURL}}" target="_blank" rel="noopener">one-time shortcut installation</a>
@@ -264,10 +441,13 @@
             </div>
 
             <details>
-                <summary>View prompt</summary>
-                <div class="prompt-container">
-                    <div class="prompt-text">{{.ChatGPTPrompt}}</div>
-                </div>
+                <summary>
+                    <span>View prompt</span>
+                    <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                </summary>
+                <div class="prompt-text">{{.ChatGPTPrompt}}</div>
             </details>
         </div>
         {{end}}
@@ -276,6 +456,5 @@
             Generated {{.GeneratedAt.Format "Jan 2, 2006 15:04:05 MST"}}
         </div>
     </div>
-
 </body>
 </html>

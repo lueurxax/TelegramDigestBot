@@ -5,130 +5,655 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{.Title}}</title>
     <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; color: #111827; background: #f8fafc; }
-      header { background: #111827; color: #f9fafb; padding: 12px 20px; }
-      header a { color: #f9fafb; text-decoration: none; margin-right: 12px; }
-      main { padding: 20px; max-width: 1200px; margin: 0 auto; }
-      table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
-      th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; vertical-align: top; }
-      th { background: #f3f4f6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
-      form input, form select { padding: 6px 8px; margin-right: 6px; }
-      .btn { background: #2563eb; color: #fff; border: none; padding: 7px 12px; border-radius: 6px; cursor: pointer; }
-      .hint { color: #6b7280; font-size: 13px; }
+      :root {
+        --color-bg-primary: #f8f9fa;
+        --color-bg-secondary: #ffffff;
+        --color-bg-tertiary: #f1f3f5;
+        --color-text-primary: #1a1a2e;
+        --color-text-secondary: #4a5568;
+        --color-text-muted: #6b7280;
+        --color-accent-primary: #2563eb;
+        --color-accent-hover: #1d4ed8;
+        --color-success: #059669;
+        --color-warning: #d97706;
+        --color-error: #dc2626;
+        --color-border-subtle: #e2e8f0;
+        --color-border-default: #cbd5e1;
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+        --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+        --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+        --radius-sm: 4px;
+        --radius-md: 6px;
+        --radius-lg: 8px;
+        --space-1: 0.25rem;
+        --space-2: 0.5rem;
+        --space-3: 0.75rem;
+        --space-4: 1rem;
+        --space-5: 1.25rem;
+        --space-6: 1.5rem;
+        --space-8: 2rem;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+        color: var(--color-text-primary);
+        background: var(--color-bg-primary);
+        min-height: 100vh;
+        line-height: 1.5;
+      }
+      a { color: var(--color-accent-primary); text-decoration: none; }
+      a:hover { color: var(--color-accent-hover); }
+
+      .skip-link {
+        position: absolute;
+        top: -100%;
+        left: var(--space-4);
+        padding: var(--space-3) var(--space-4);
+        background: var(--color-accent-primary);
+        color: white;
+        border-radius: var(--radius-md);
+        z-index: 1000;
+      }
+      .skip-link:focus { top: var(--space-4); }
+
+      /* Header */
+      .site-header {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background: var(--color-bg-secondary);
+        border-bottom: 1px solid var(--color-border-subtle);
+      }
+      .header-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: var(--space-3) var(--space-5);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-4);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: var(--color-text-primary);
+        text-decoration: none;
+      }
+      .brand-mark {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--color-accent-primary);
+      }
+      .main-nav {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        flex-wrap: wrap;
+      }
+      .nav-link {
+        padding: var(--space-2) var(--space-3);
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        border-radius: var(--radius-md);
+        transition: color 0.15s, background 0.15s;
+      }
+      .nav-link:hover {
+        color: var(--color-text-primary);
+        background: var(--color-bg-tertiary);
+      }
+      .nav-link--active {
+        color: var(--color-accent-primary);
+        background: rgba(37, 99, 235, 0.08);
+      }
+      .nav-dropdown { position: relative; }
+      .nav-dropdown-trigger {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        padding: var(--space-2) var(--space-3);
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        background: none;
+        border: none;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .nav-dropdown-trigger:hover {
+        color: var(--color-text-primary);
+        background: var(--color-bg-tertiary);
+      }
+      .dropdown-icon { transition: transform 0.15s; }
+      .nav-dropdown-menu {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: var(--space-1);
+        min-width: 200px;
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+        padding: var(--space-2);
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-8px);
+        transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+      }
+      .nav-dropdown:hover .nav-dropdown-menu,
+      .nav-dropdown:focus-within .nav-dropdown-menu {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+      }
+      .nav-dropdown:hover .dropdown-icon { transform: rotate(180deg); }
+      .nav-dropdown-menu a {
+        display: block;
+        padding: var(--space-2) var(--space-3);
+        font-size: 0.875rem;
+        color: var(--color-text-secondary);
+        border-radius: var(--radius-sm);
+      }
+      .nav-dropdown-menu a:hover {
+        background: var(--color-bg-tertiary);
+        color: var(--color-text-primary);
+      }
+      .mobile-menu-toggle {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        background: none;
+        border: none;
+        cursor: pointer;
+      }
+      .hamburger {
+        width: 18px;
+        height: 2px;
+        background: var(--color-text-primary);
+        position: relative;
+      }
+      .hamburger::before, .hamburger::after {
+        content: '';
+        position: absolute;
+        width: 100%;
+        height: 2px;
+        background: inherit;
+        left: 0;
+      }
+      .hamburger::before { top: -6px; }
+      .hamburger::after { bottom: -6px; }
+
+      @media (max-width: 900px) {
+        .main-nav { display: none; }
+        .main-nav.is-open {
+          display: flex;
+          flex-direction: column;
+          position: absolute;
+          top: 100%;
+          left: 0;
+          right: 0;
+          background: var(--color-bg-secondary);
+          border-bottom: 1px solid var(--color-border-subtle);
+          padding: var(--space-4);
+          box-shadow: var(--shadow-lg);
+          align-items: stretch;
+        }
+        .main-nav.is-open .nav-dropdown-menu {
+          position: static;
+          opacity: 1;
+          visibility: visible;
+          transform: none;
+          box-shadow: none;
+          border: none;
+          padding-left: var(--space-4);
+        }
+        .mobile-menu-toggle { display: flex; }
+      }
+
+      /* Main content */
+      main {
+        padding: var(--space-8) var(--space-5);
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.875rem;
+        font-weight: 700;
+        margin-bottom: var(--space-6);
+      }
+      h2 {
+        font-size: 1.125rem;
+        font-weight: 600;
+        margin: var(--space-6) 0 var(--space-3);
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .hint {
+        color: var(--color-text-muted);
+        font-size: 0.875rem;
+      }
+
+      /* Search form card */
+      .search-card {
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        padding: var(--space-5);
+        margin-bottom: var(--space-6);
+        box-shadow: var(--shadow-sm);
+      }
+      .search-primary {
+        display: flex;
+        gap: var(--space-3);
+        align-items: stretch;
+        flex-wrap: wrap;
+      }
+      .search-input-wrapper {
+        flex: 1;
+        min-width: 200px;
+        position: relative;
+      }
+      .search-input {
+        width: 100%;
+        padding: var(--space-3);
+        padding-left: 2.5rem;
+        font-size: 1rem;
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-md);
+        background: var(--color-bg-secondary);
+      }
+      .search-input:focus {
+        outline: none;
+        border-color: var(--color-accent-primary);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      }
+      .search-icon {
+        position: absolute;
+        left: var(--space-3);
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--color-text-muted);
+        pointer-events: none;
+      }
+      .scope-select {
+        padding: var(--space-3);
+        font-size: 0.875rem;
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-md);
+        background: var(--color-bg-secondary);
+        min-width: 120px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-3) var(--space-5);
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: white;
+        background: var(--color-accent-primary);
+        border: none;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        font-family: inherit;
+        transition: background 0.15s;
+      }
+      .btn:hover { background: var(--color-accent-hover); }
+
+      /* Advanced filters */
+      .search-advanced {
+        margin-top: var(--space-4);
+        border-top: 1px solid var(--color-border-subtle);
+        padding-top: var(--space-4);
+      }
+      .search-advanced summary {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        list-style: none;
+      }
+      .search-advanced summary::-webkit-details-marker { display: none; }
+      .search-advanced[open] .chevron { transform: rotate(180deg); }
+      .chevron { transition: transform 0.15s; }
+      .search-filters {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: var(--space-4);
+        margin-top: var(--space-4);
+      }
+      .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+      }
+      .filter-label {
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--color-text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .filter-group input,
+      .filter-group select {
+        padding: var(--space-2) var(--space-3);
+        font-size: 0.875rem;
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-md);
+        background: var(--color-bg-secondary);
+      }
+      .filter-group input:focus,
+      .filter-group select:focus {
+        outline: none;
+        border-color: var(--color-accent-primary);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      }
+      .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: 0.875rem;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+      }
+      .checkbox-label input { width: auto; }
+
+      /* Data tables */
+      .data-table-wrapper {
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+      }
+      .data-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .data-table th {
+        background: var(--color-bg-tertiary);
+        padding: var(--space-3) var(--space-4);
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-text-muted);
+        text-align: left;
+        border-bottom: 1px solid var(--color-border-subtle);
+        white-space: nowrap;
+      }
+      .data-table td {
+        padding: var(--space-3) var(--space-4);
+        font-size: 0.875rem;
+        color: var(--color-text-secondary);
+        border-bottom: 1px solid var(--color-border-subtle);
+        vertical-align: top;
+      }
+      .data-table tbody tr:last-child td { border-bottom: none; }
+      .data-table tbody tr:hover td { background: var(--color-bg-tertiary); }
+      .col-summary { max-width: 350px; color: var(--color-text-primary); }
+      .col-score {
+        font-variant-numeric: tabular-nums;
+        text-align: center;
+      }
+      .col-date { white-space: nowrap; color: var(--color-text-muted); font-size: 0.8rem; }
+      .col-actions { white-space: nowrap; }
+      .score-badge {
+        display: inline-flex;
+        padding: var(--space-1) var(--space-2);
+        font-size: 0.75rem;
+        font-weight: 500;
+        border-radius: var(--radius-sm);
+        font-variant-numeric: tabular-nums;
+      }
+      .score-badge--high { background: rgba(5, 150, 105, 0.1); color: var(--color-success); }
+      .score-badge--medium { background: rgba(217, 119, 6, 0.1); color: var(--color-warning); }
+      .score-badge--low { background: rgba(220, 38, 38, 0.1); color: var(--color-error); }
+
+      /* Mobile table cards */
+      @media (max-width: 768px) {
+        .data-table thead { display: none; }
+        .data-table tbody { display: flex; flex-direction: column; gap: var(--space-3); }
+        .data-table-wrapper { background: transparent; border: none; box-shadow: none; overflow: visible; }
+        .data-table tr {
+          display: flex;
+          flex-direction: column;
+          background: var(--color-bg-secondary);
+          border: 1px solid var(--color-border-subtle);
+          border-radius: var(--radius-lg);
+          padding: var(--space-4);
+        }
+        .data-table td {
+          display: flex;
+          justify-content: space-between;
+          padding: var(--space-2) 0;
+          border-bottom: 1px solid var(--color-border-subtle);
+        }
+        .data-table td:last-child { border-bottom: none; }
+        .data-table td::before {
+          content: attr(data-label);
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: var(--color-text-muted);
+          text-transform: uppercase;
+          flex-shrink: 0;
+          margin-right: var(--space-3);
+        }
+        .col-summary { max-width: none; }
+      }
+
+      .empty-state {
+        padding: var(--space-8);
+        text-align: center;
+        color: var(--color-text-muted);
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--color-accent-primary);
+        outline-offset: 2px;
+      }
+      input:focus-visible, select:focus-visible, button:focus-visible { outline: none; }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { animation: none !important; transition: none !important; }
+      }
     </style>
   </head>
   <body>
-    <header>
-      <a href="/research/">Home</a>
-      <a href="/research/search">Search</a>
-      <a href="/research/settings">Settings</a>
-      <a href="/research/claims">Claims</a>
-      <a href="/research/channels/overlap">Channel Overlap</a>
-      <a href="/research/topics/timeline?bucket=week">Topic Timeline</a>
-      <a href="/research/topics/drift">Topic Drift</a>
-      <a href="/research/languages/coverage">Cross-Language</a>
-      <a href="/research/channels/quality">Channel Quality</a>
-      <a href="/research/channels/bias?channel=@example">Channel Bias</a>
-      <a href="/research/diff/weekly">Weekly Diff</a>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <header class="site-header">
+      <div class="header-container">
+        <a href="/research/" class="brand">
+          <span class="brand-mark"></span>
+          <span>IDigest Research</span>
+        </a>
+        <nav class="main-nav" id="main-nav" aria-label="Main navigation">
+          <a class="nav-link" href="/research/">Home</a>
+          <a class="nav-link nav-link--active" href="/research/search">Search</a>
+          <a class="nav-link" href="/research/claims">Claims</a>
+          <a class="nav-link" href="/research/settings">Settings</a>
+          <div class="nav-dropdown">
+            <button class="nav-dropdown-trigger" aria-expanded="false" aria-haspopup="true">
+              Analytics
+              <svg class="dropdown-icon" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <div class="nav-dropdown-menu" role="menu">
+              <a href="/research/channels/overlap" role="menuitem">Channel Overlap</a>
+              <a href="/research/topics/timeline?bucket=week" role="menuitem">Topic Timeline</a>
+              <a href="/research/topics/drift" role="menuitem">Topic Drift</a>
+              <a href="/research/languages/coverage" role="menuitem">Cross-Language</a>
+              <a href="/research/channels/quality" role="menuitem">Channel Quality</a>
+              <a href="/research/channels/bias" role="menuitem">Channel Bias</a>
+              <a href="/research/diff/weekly" role="menuitem">Weekly Diff</a>
+            </div>
+          </div>
+        </nav>
+        <button class="mobile-menu-toggle" aria-label="Toggle menu" onclick="document.getElementById('main-nav').classList.toggle('is-open')">
+          <span class="hamburger"></span>
+        </button>
+      </div>
     </header>
-    <main>
+    <main id="main-content">
       <h1>{{.Title}}</h1>
-      <form action="/research/search" method="get">
-        <input type="text" name="q" placeholder="Query" value="{{.Params.Query}}" />
-        <input type="text" name="channel" placeholder="@channel" value="{{.Params.Channel}}" />
-        <input type="text" name="topic" placeholder="Topic" value="{{.Params.Topic}}" />
-        <input type="text" name="lang" placeholder="Language" value="{{.Params.Lang}}" />
-        <input type="text" name="provider" placeholder="Provider" value="{{.Params.Provider}}" />
-        <input type="text" name="from" placeholder="From (YYYY-MM-DD)" value="{{formatDatePtr .Params.From}}" />
-        <input type="text" name="to" placeholder="To (YYYY-MM-DD)" value="{{formatDatePtr .Params.To}}" />
-        <input type="number" name="limit" min="1" max="200" value="{{.Params.Limit}}" />
-        <input type="number" name="offset" min="0" value="{{.Params.Offset}}" />
-        <select name="scope">
-          <option value="items" {{if eq .Scope "items"}}selected{{end}}>Items</option>
-          <option value="evidence" {{if eq .Scope "evidence"}}selected{{end}}>Evidence</option>
-          <option value="all" {{if eq .Scope "all"}}selected{{end}}>All</option>
-        </select>
-        <label>
-          <input type="checkbox" name="include_count" value="true" {{if .Params.IncludeCount}}checked{{end}} />
-          Include counts
-        </label>
-        <button class="btn" type="submit">Search</button>
-      </form>
 
-      <h2>Items</h2>
-      {{if .ItemCount}}<p class="hint">Total items: {{.ItemCount.Total}}</p>{{end}}
+      <div class="search-card">
+        <form action="/research/search" method="get">
+          <div class="search-primary">
+            <div class="search-input-wrapper">
+              <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input type="text" name="q" class="search-input" placeholder="Search items and evidence..." value="{{.Params.Query}}" />
+            </div>
+            <select name="scope" class="scope-select">
+              <option value="items" {{if eq .Scope "items"}}selected{{end}}>Items</option>
+              <option value="evidence" {{if eq .Scope "evidence"}}selected{{end}}>Evidence</option>
+              <option value="all" {{if eq .Scope "all"}}selected{{end}}>All</option>
+            </select>
+            <button class="btn" type="submit">Search</button>
+          </div>
+
+          <details class="search-advanced" {{if or .Params.Channel .Params.Topic .Params.Lang .Params.Provider .Params.From .Params.To}}open{{end}}>
+            <summary>
+              <span>Advanced filters</span>
+              <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </summary>
+            <div class="search-filters">
+              <div class="filter-group">
+                <label class="filter-label" for="filter-channel">Channel</label>
+                <input type="text" id="filter-channel" name="channel" placeholder="@channel" value="{{.Params.Channel}}" />
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-topic">Topic</label>
+                <input type="text" id="filter-topic" name="topic" placeholder="Topic" value="{{.Params.Topic}}" />
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-lang">Language</label>
+                <input type="text" id="filter-lang" name="lang" placeholder="en, ru, etc." value="{{.Params.Lang}}" />
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-provider">Provider</label>
+                <input type="text" id="filter-provider" name="provider" placeholder="Provider" value="{{.Params.Provider}}" />
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-from">From</label>
+                <input type="date" id="filter-from" name="from" value="{{formatDatePtr .Params.From}}" />
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-to">To</label>
+                <input type="date" id="filter-to" name="to" value="{{formatDatePtr .Params.To}}" />
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-limit">Limit</label>
+                <input type="number" id="filter-limit" name="limit" min="1" max="200" value="{{.Params.Limit}}" />
+              </div>
+              <div class="filter-group">
+                <label class="filter-label" for="filter-offset">Offset</label>
+                <input type="number" id="filter-offset" name="offset" min="0" value="{{.Params.Offset}}" />
+              </div>
+              <div class="filter-group" style="justify-content: flex-end;">
+                <label class="checkbox-label">
+                  <input type="checkbox" name="include_count" value="true" {{if .Params.IncludeCount}}checked{{end}} />
+                  <span>Include counts</span>
+                </label>
+              </div>
+            </div>
+          </details>
+        </form>
+      </div>
+
+      <h2>Items {{if .ItemCount}}<span class="hint">({{.ItemCount.Total}} total)</span>{{end}}</h2>
       {{if .Items}}
-      <table>
-        <thead>
-          <tr>
-            <th>Summary</th>
-            <th>Topic</th>
-            <th>Channel</th>
-            <th>Date</th>
-            <th>Score</th>
-            <th>Cluster</th>
-            <th>Evidence</th>
-            <th>Link</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Items}}
-          <tr>
-            <td>{{truncate .Summary 160}}</td>
-            <td>{{.Topic}}</td>
-            <td>{{.ChannelTitle}} {{if .ChannelUsername}}(@{{.ChannelUsername}}){{end}}</td>
-            <td>{{formatTime .TGDate}}</td>
-            <td>{{formatFloat .Score}}</td>
-            <td>
-              {{if .ClusterID}}
-              <a href="/research/cluster/{{.ClusterID}}">View</a>
-              {{else}}
-              -
-              {{end}}
-            </td>
-            <td>
-              {{if gt .EvidenceCount 0}}
-              <a href="/research/evidence/{{.ID}}">View ({{.EvidenceCount}})</a>
-              {{else}}
-              -
-              {{end}}
-            </td>
-            <td><a href="/research/item/{{.ID}}">View</a></td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Summary</th>
+              <th>Topic</th>
+              <th>Channel</th>
+              <th>Date</th>
+              <th>Score</th>
+              <th>Cluster</th>
+              <th>Evidence</th>
+              <th>Link</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Items}}
+            <tr>
+              <td class="col-summary" data-label="Summary">{{truncate .Summary 140}}</td>
+              <td data-label="Topic">{{.Topic}}</td>
+              <td data-label="Channel">{{.ChannelTitle}}{{if .ChannelUsername}} (@{{.ChannelUsername}}){{end}}</td>
+              <td class="col-date" data-label="Date">{{formatTime .TGDate}}</td>
+              <td class="col-score" data-label="Score">
+                <span class="score-badge {{if ge .Score 0.7}}score-badge--high{{else if ge .Score 0.4}}score-badge--medium{{else}}score-badge--low{{end}}">{{formatFloat .Score}}</span>
+              </td>
+              <td class="col-actions" data-label="Cluster">
+                {{if .ClusterID}}<a href="/research/cluster/{{.ClusterID}}">View</a>{{else}}-{{end}}
+              </td>
+              <td class="col-actions" data-label="Evidence">
+                {{if gt .EvidenceCount 0}}<a href="/research/evidence/{{.ID}}">{{.EvidenceCount}}</a>{{else}}-{{end}}
+              </td>
+              <td class="col-actions" data-label="Link"><a href="/research/item/{{.ID}}">View</a></td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
       {{else}}
-      <p class="hint">No items matched.</p>
+      <div class="data-table-wrapper">
+        <div class="empty-state">No items matched your search.</div>
+      </div>
       {{end}}
 
-      <h2>Evidence</h2>
-      {{if .EvidenceCount}}<p class="hint">Total evidence: {{.EvidenceCount.Total}}</p>{{end}}
+      <h2>Evidence {{if .EvidenceCount}}<span class="hint">({{.EvidenceCount.Total}} total)</span>{{end}}</h2>
       {{if .Evidence}}
-      <table>
-        <thead>
-          <tr>
-            <th>Title</th>
-            <th>Domain</th>
-            <th>Agreement</th>
-            <th>Provider</th>
-            <th>Item</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Evidence}}
-          <tr>
-            <td><a href="{{.URL}}">{{truncate .Title 120}}</a></td>
-            <td>{{.Domain}}</td>
-            <td>{{formatFloat32 .AgreementScore}}</td>
-            <td>{{.Provider}}</td>
-            <td><a href="/research/item/{{.ItemID}}">{{truncate .ItemSummary 80}}</a></td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Domain</th>
+              <th>Agreement</th>
+              <th>Provider</th>
+              <th>Item</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Evidence}}
+            <tr>
+              <td class="col-summary" data-label="Title"><a href="{{.URL}}" target="_blank" rel="noopener">{{truncate .Title 100}}</a></td>
+              <td data-label="Domain">{{.Domain}}</td>
+              <td class="col-score" data-label="Agreement">
+                <span class="score-badge {{if ge .AgreementScore 0.7}}score-badge--high{{else if ge .AgreementScore 0.4}}score-badge--medium{{else}}score-badge--low{{end}}">{{formatFloat32 .AgreementScore}}</span>
+              </td>
+              <td data-label="Provider">{{.Provider}}</td>
+              <td class="col-actions" data-label="Item"><a href="/research/item/{{.ItemID}}">{{truncate .ItemSummary 60}}</a></td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
       {{else}}
-      <p class="hint">No evidence matched.</p>
+      <div class="data-table-wrapper">
+        <div class="empty-state">No evidence matched your search.</div>
+      </div>
       {{end}}
     </main>
   </body>

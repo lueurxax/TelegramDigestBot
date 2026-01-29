@@ -5,192 +5,384 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{.Title}}</title>
     <style>
-      @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap");
       :root {
-        --bg: #f7f1e7;
-        --bg-2: #ecf7f4;
-        --card: #fffaf4;
-        --ink: #0f172a;
-        --ink-2: #334155;
-        --muted: #64748b;
-        --border: rgba(15, 23, 42, 0.08);
-        --accent: #f05d5e;
-        --accent-2: #2f8c9f;
-        --shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
-        --font-body: "IBM Plex Sans", "Noto Sans", sans-serif;
-        --font-display: "Space Grotesk", "IBM Plex Sans", sans-serif;
+        --color-bg-primary: #f8f9fa;
+        --color-bg-secondary: #ffffff;
+        --color-bg-tertiary: #f1f3f5;
+        --color-text-primary: #1a1a2e;
+        --color-text-secondary: #4a5568;
+        --color-text-muted: #6b7280;
+        --color-accent-primary: #2563eb;
+        --color-accent-hover: #1d4ed8;
+        --color-border-subtle: #e2e8f0;
+        --color-border-default: #cbd5e1;
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+        --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
+        --radius-sm: 4px;
+        --radius-md: 6px;
+        --radius-lg: 8px;
+        --space-1: 0.25rem;
+        --space-2: 0.5rem;
+        --space-3: 0.75rem;
+        --space-4: 1rem;
+        --space-5: 1.25rem;
+        --space-6: 1.5rem;
+        --space-8: 2rem;
       }
-      * { box-sizing: border-box; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
       body {
-        margin: 0;
-        font-family: var(--font-body);
-        color: var(--ink);
-        background:
-          radial-gradient(900px 400px at 8% -10%, rgba(240, 93, 94, 0.18), transparent 60%),
-          radial-gradient(800px 380px at 92% 0%, rgba(47, 140, 159, 0.16), transparent 55%),
-          linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+        color: var(--color-text-primary);
+        background: var(--color-bg-primary);
         min-height: 100vh;
+        line-height: 1.5;
       }
-      a { color: var(--accent-2); text-decoration: none; }
-      a:hover { color: var(--accent); }
-      header {
+      a { color: var(--color-accent-primary); text-decoration: none; }
+      a:hover { color: var(--color-accent-hover); }
+
+      .skip-link {
+        position: absolute;
+        top: -100%;
+        left: var(--space-4);
+        padding: var(--space-3) var(--space-4);
+        background: var(--color-accent-primary);
+        color: white;
+        border-radius: var(--radius-md);
+        z-index: 1000;
+      }
+      .skip-link:focus { top: var(--space-4); }
+
+      .site-header {
         position: sticky;
         top: 0;
-        z-index: 10;
-        background: rgba(15, 23, 42, 0.94);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        backdrop-filter: blur(10px);
+        z-index: 100;
+        background: var(--color-bg-secondary);
+        border-bottom: 1px solid var(--color-border-subtle);
       }
-      .nav {
+      .header-container {
         max-width: 1200px;
         margin: 0 auto;
-        padding: 12px 20px;
+        padding: var(--space-3) var(--space-5);
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 16px;
-        flex-wrap: wrap;
+        gap: var(--space-4);
       }
       .brand {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-        font-family: var(--font-display);
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        font-size: 0.8rem;
-        color: #f8fafc;
-      }
-      .brand-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: var(--accent);
-        box-shadow: 0 0 0 4px rgba(240, 93, 94, 0.2);
-      }
-      .nav-links {
         display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: var(--color-text-primary);
+        text-decoration: none;
+      }
+      .brand-mark {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--color-accent-primary);
+      }
+      .main-nav {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
         flex-wrap: wrap;
-        gap: 8px;
       }
       .nav-link {
-        color: #e2e8f0;
-        background: rgba(148, 163, 184, 0.15);
-        border: 1px solid rgba(148, 163, 184, 0.25);
-        padding: 6px 12px;
-        border-radius: 999px;
-        font-size: 0.85rem;
+        padding: var(--space-2) var(--space-3);
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        border-radius: var(--radius-md);
+        transition: color 0.15s, background 0.15s;
       }
       .nav-link:hover {
-        color: #fff;
-        border-color: rgba(240, 93, 94, 0.6);
-        background: rgba(240, 93, 94, 0.25);
+        color: var(--color-text-primary);
+        background: var(--color-bg-tertiary);
       }
+      .nav-dropdown { position: relative; }
+      .nav-dropdown-trigger {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        padding: var(--space-2) var(--space-3);
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        background: none;
+        border: none;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .nav-dropdown-trigger:hover {
+        color: var(--color-text-primary);
+        background: var(--color-bg-tertiary);
+      }
+      .dropdown-icon { transition: transform 0.15s; }
+      .nav-dropdown-menu {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: var(--space-1);
+        min-width: 200px;
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+        padding: var(--space-2);
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-8px);
+        transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+      }
+      .nav-dropdown:hover .nav-dropdown-menu,
+      .nav-dropdown:focus-within .nav-dropdown-menu {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+      }
+      .nav-dropdown:hover .dropdown-icon { transform: rotate(180deg); }
+      .nav-dropdown-menu a {
+        display: block;
+        padding: var(--space-2) var(--space-3);
+        font-size: 0.875rem;
+        color: var(--color-text-secondary);
+        border-radius: var(--radius-sm);
+      }
+      .nav-dropdown-menu a:hover {
+        background: var(--color-bg-tertiary);
+        color: var(--color-text-primary);
+      }
+      .mobile-menu-toggle {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        background: none;
+        border: none;
+        cursor: pointer;
+      }
+      .hamburger {
+        width: 18px;
+        height: 2px;
+        background: var(--color-text-primary);
+        position: relative;
+      }
+      .hamburger::before, .hamburger::after {
+        content: '';
+        position: absolute;
+        width: 100%;
+        height: 2px;
+        background: inherit;
+        left: 0;
+      }
+      .hamburger::before { top: -6px; }
+      .hamburger::after { bottom: -6px; }
+
+      @media (max-width: 900px) {
+        .main-nav { display: none; }
+        .main-nav.is-open {
+          display: flex;
+          flex-direction: column;
+          position: absolute;
+          top: 100%;
+          left: 0;
+          right: 0;
+          background: var(--color-bg-secondary);
+          border-bottom: 1px solid var(--color-border-subtle);
+          padding: var(--space-4);
+          box-shadow: var(--shadow-lg);
+          align-items: stretch;
+        }
+        .main-nav.is-open .nav-dropdown-menu {
+          position: static;
+          opacity: 1;
+          visibility: visible;
+          transform: none;
+          box-shadow: none;
+          border: none;
+          padding-left: var(--space-4);
+        }
+        .mobile-menu-toggle { display: flex; }
+      }
+
       main {
-        padding: 32px 20px 80px;
+        padding: var(--space-8) var(--space-5);
         max-width: 1200px;
         margin: 0 auto;
       }
-      h1, h2 {
-        font-family: var(--font-display);
-        color: var(--ink);
+      h1 {
+        font-size: 1.875rem;
+        font-weight: 700;
+        margin-bottom: var(--space-2);
       }
-      h1 { font-size: clamp(2rem, 3vw, 3rem); margin: 0 0 8px; }
-      h2 { font-size: clamp(1.2rem, 2vw, 1.6rem); margin: 24px 0 12px; }
-      .hint { color: var(--muted); font-size: 0.95rem; margin: 6px 0 18px; }
-      table {
+      h2 {
+        font-size: 1.125rem;
+        font-weight: 600;
+        margin: var(--space-6) 0 var(--space-3);
+      }
+      .hint {
+        color: var(--color-text-muted);
+        font-size: 0.875rem;
+        margin-bottom: var(--space-6);
+      }
+
+      .data-table-wrapper {
+        background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+        margin-bottom: var(--space-6);
+      }
+      .data-table {
         width: 100%;
         border-collapse: collapse;
-        background: var(--card);
-        border-radius: 16px;
-        overflow: hidden;
-        box-shadow: var(--shadow);
-        margin-bottom: 20px;
       }
-      th, td {
-        border-bottom: 1px solid var(--border);
-        padding: 12px 14px;
+      .data-table th {
+        background: var(--color-bg-tertiary);
+        padding: var(--space-3) var(--space-4);
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--color-text-muted);
         text-align: left;
+        border-bottom: 1px solid var(--color-border-subtle);
+      }
+      .data-table td {
+        padding: var(--space-3) var(--space-4);
+        font-size: 0.875rem;
+        color: var(--color-text-secondary);
+        border-bottom: 1px solid var(--color-border-subtle);
         vertical-align: top;
       }
-      th {
-        background: rgba(15, 23, 42, 0.05);
-        font-size: 0.72rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--ink-2);
+      .data-table tbody tr:last-child td { border-bottom: none; }
+      .data-table tbody tr:hover td { background: var(--color-bg-tertiary); }
+
+      @media (max-width: 768px) {
+        .data-table thead { display: none; }
+        .data-table tbody { display: flex; flex-direction: column; gap: var(--space-3); }
+        .data-table-wrapper { background: transparent; border: none; box-shadow: none; overflow: visible; }
+        .data-table tr {
+          display: flex;
+          flex-direction: column;
+          background: var(--color-bg-secondary);
+          border: 1px solid var(--color-border-subtle);
+          border-radius: var(--radius-lg);
+          padding: var(--space-4);
+        }
+        .data-table td {
+          display: flex;
+          justify-content: space-between;
+          padding: var(--space-2) 0;
+          border-bottom: 1px solid var(--color-border-subtle);
+        }
+        .data-table td:last-child { border-bottom: none; }
       }
-      tbody tr:hover td { background: rgba(240, 93, 94, 0.08); }
-      tbody tr:last-child td { border-bottom: none; }
-      @keyframes fadeUp {
-        from { opacity: 0; transform: translateY(8px); }
-        to { opacity: 1; transform: translateY(0); }
+
+      .empty-state {
+        padding: var(--space-8);
+        text-align: center;
+        color: var(--color-text-muted);
       }
-      main > * { animation: fadeUp 0.6s ease both; }
+
+      :focus-visible {
+        outline: 2px solid var(--color-accent-primary);
+        outline-offset: 2px;
+      }
+
       @media (prefers-reduced-motion: reduce) {
         * { animation: none !important; transition: none !important; }
       }
     </style>
   </head>
   <body>
-    <header>
-      <div class="nav">
-        <div class="brand"><span class="brand-dot"></span>IDigest Research</div>
-        <nav class="nav-links">
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <header class="site-header">
+      <div class="header-container">
+        <a href="/research/" class="brand">
+          <span class="brand-mark"></span>
+          <span>IDigest Research</span>
+        </a>
+        <nav class="main-nav" id="main-nav" aria-label="Main navigation">
           <a class="nav-link" href="/research/">Home</a>
           <a class="nav-link" href="/research/search">Search</a>
-          <a class="nav-link" href="/research/settings">Settings</a>
           <a class="nav-link" href="/research/claims">Claims</a>
-          <a class="nav-link" href="/research/channels/overlap">Overlap</a>
-          <a class="nav-link" href="/research/topics/timeline?bucket=week">Timeline</a>
-          <a class="nav-link" href="/research/topics/drift">Drift</a>
-          <a class="nav-link" href="/research/languages/coverage">Cross-Lang</a>
-          <a class="nav-link" href="/research/channels/quality">Quality</a>
-          <a class="nav-link" href="/research/channels/bias">Bias</a>
-          <a class="nav-link" href="/research/diff/weekly">Weekly Diff</a>
+          <a class="nav-link" href="/research/settings">Settings</a>
+          <div class="nav-dropdown">
+            <button class="nav-dropdown-trigger" aria-expanded="false" aria-haspopup="true">
+              Analytics
+              <svg class="dropdown-icon" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <div class="nav-dropdown-menu" role="menu">
+              <a href="/research/channels/overlap" role="menuitem">Channel Overlap</a>
+              <a href="/research/topics/timeline?bucket=week" role="menuitem">Topic Timeline</a>
+              <a href="/research/topics/drift" role="menuitem">Topic Drift</a>
+              <a href="/research/languages/coverage" role="menuitem">Cross-Language</a>
+              <a href="/research/channels/quality" role="menuitem">Channel Quality</a>
+              <a href="/research/channels/bias" role="menuitem">Channel Bias</a>
+              <a href="/research/diff/weekly" role="menuitem">Weekly Diff</a>
+            </div>
+          </div>
         </nav>
+        <button class="mobile-menu-toggle" aria-label="Toggle menu" onclick="document.getElementById('main-nav').classList.toggle('is-open')">
+          <span class="hamburger"></span>
+        </button>
       </div>
     </header>
-    <main>
+    <main id="main-content">
       <h1>{{.Title}}</h1>
       {{if .Description}}<p class="hint">{{.Description}}</p>{{end}}
 
       {{if .Rows}}
-      <table>
-        <thead>
-          <tr>
-            {{range .Headers}}<th>{{.}}</th>{{end}}
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Rows}}
-          <tr>
-            {{range .}}<td>{{.}}</td>{{end}}
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              {{range .Headers}}<th>{{.}}</th>{{end}}
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Rows}}
+            <tr>
+              {{range .}}<td>{{.}}</td>{{end}}
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
       {{else}}
-      {{if not .Description}}<p class="hint">No data available.</p>{{end}}
+      {{if not .Description}}
+      <div class="data-table-wrapper">
+        <div class="empty-state">No data available.</div>
+      </div>
+      {{end}}
       {{end}}
 
       {{if .SecondaryRows}}
       <h2>{{.SecondaryTitle}}</h2>
-      <table>
-        <thead>
-          <tr>
-            {{range .SecondaryHeaders}}<th>{{.}}</th>{{end}}
-          </tr>
-        </thead>
-        <tbody>
-          {{range .SecondaryRows}}
-          <tr>
-            {{range .}}<td>{{.}}</td>{{end}}
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              {{range .SecondaryHeaders}}<th>{{.}}</th>{{end}}
+            </tr>
+          </thead>
+          <tbody>
+            {{range .SecondaryRows}}
+            <tr>
+              {{range .}}<td>{{.}}</td>{{end}}
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
       {{end}}
     </main>
   </body>
