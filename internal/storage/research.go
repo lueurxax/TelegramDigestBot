@@ -9,7 +9,9 @@ import (
 	"unicode"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
 
 // Sentinel errors for research queries.
@@ -3250,4 +3252,224 @@ func uuidArrayToStrings(arr pgtype.Array[pgtype.UUID]) []string {
 	}
 
 	return results
+}
+
+// ItemForHeuristicClaim represents an item that needs heuristic claim extraction.
+type ItemForHeuristicClaim struct {
+	ItemID    string
+	Summary   string
+	ClusterID string
+	TgDate    time.Time
+}
+
+// GetItemsWithoutEvidenceClaims returns items that are in clusters but have no evidence claims.
+// These items need heuristic claim extraction.
+func (db *DB) GetItemsWithoutEvidenceClaims(ctx context.Context, limit int) ([]ItemForHeuristicClaim, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	rows, err := db.Pool.Query(ctx, `
+		SELECT DISTINCT ON (ci.cluster_id)
+		       i.id AS item_id,
+		       i.summary,
+		       ci.cluster_id,
+		       rm.tg_date
+		FROM cluster_items ci
+		JOIN items i ON ci.item_id = i.id
+		JOIN raw_messages rm ON i.raw_message_id = rm.id
+		LEFT JOIN item_evidence ie ON ie.item_id = i.id
+		WHERE ie.id IS NULL
+		  AND i.summary IS NOT NULL
+		  AND LENGTH(i.summary) > 30
+		ORDER BY ci.cluster_id, rm.tg_date ASC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query items without evidence: %w", err)
+	}
+	defer rows.Close()
+
+	var items []ItemForHeuristicClaim
+
+	for rows.Next() {
+		var item ItemForHeuristicClaim
+
+		var itemID, clusterID pgtype.UUID
+
+		if err := rows.Scan(&itemID, &item.Summary, &clusterID, &item.TgDate); err != nil {
+			return nil, fmt.Errorf("scan item: %w", err)
+		}
+
+		item.ItemID = fromUUID(itemID)
+		item.ClusterID = fromUUID(clusterID)
+		items = append(items, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate items: %w", err)
+	}
+
+	return items, nil
+}
+
+// HeuristicClaimInput represents a heuristic claim to be inserted.
+type HeuristicClaimInput struct {
+	ClaimText       string
+	NormalizedHash  string
+	FirstSeenAt     time.Time
+	OriginClusterID string
+	ClusterIDs      []string
+	Embedding       []float32 // Optional embedding for semantic similarity
+}
+
+// SimilarClaim represents a claim found by embedding similarity search.
+type SimilarClaim struct {
+	ID         int64
+	ClaimText  string
+	Similarity float64
+}
+
+// InsertHeuristicClaims inserts claims extracted using heuristic methods.
+// It deduplicates by normalized_hash and merges cluster_ids for existing claims.
+func (db *DB) InsertHeuristicClaims(ctx context.Context, claims []HeuristicClaimInput) (int64, error) {
+	if len(claims) == 0 {
+		return 0, nil
+	}
+
+	var inserted int64
+
+	for _, claim := range claims {
+		clusterIDs := make([]pgtype.UUID, len(claim.ClusterIDs))
+		for i, id := range claim.ClusterIDs {
+			clusterIDs[i] = toUUID(id)
+		}
+
+		var (
+			result pgconn.CommandTag
+			err    error
+		)
+
+		if len(claim.Embedding) > 0 {
+			result, err = db.Pool.Exec(ctx, `
+				INSERT INTO claims (claim_text, first_seen_at, origin_cluster_id, cluster_ids, contradicted_by, normalized_hash, embedding)
+				VALUES ($1, $2, $3, $4, '{}', $5, $6)
+				ON CONFLICT (normalized_hash) DO UPDATE SET
+					cluster_ids = (
+						SELECT ARRAY(SELECT DISTINCT unnest(claims.cluster_ids || EXCLUDED.cluster_ids))
+					),
+					first_seen_at = LEAST(claims.first_seen_at, EXCLUDED.first_seen_at),
+					embedding = COALESCE(EXCLUDED.embedding, claims.embedding),
+					updated_at = NOW()
+			`, claim.ClaimText, claim.FirstSeenAt, toUUID(claim.OriginClusterID), clusterIDs, claim.NormalizedHash, pgvector.NewVector(claim.Embedding))
+		} else {
+			result, err = db.Pool.Exec(ctx, `
+				INSERT INTO claims (claim_text, first_seen_at, origin_cluster_id, cluster_ids, contradicted_by, normalized_hash)
+				VALUES ($1, $2, $3, $4, '{}', $5)
+				ON CONFLICT (normalized_hash) DO UPDATE SET
+					cluster_ids = (
+						SELECT ARRAY(SELECT DISTINCT unnest(claims.cluster_ids || EXCLUDED.cluster_ids))
+					),
+					first_seen_at = LEAST(claims.first_seen_at, EXCLUDED.first_seen_at),
+					updated_at = NOW()
+			`, claim.ClaimText, claim.FirstSeenAt, toUUID(claim.OriginClusterID), clusterIDs, claim.NormalizedHash)
+		}
+
+		if err != nil {
+			return inserted, fmt.Errorf("insert heuristic claim: %w", err)
+		}
+
+		inserted += result.RowsAffected()
+	}
+
+	return inserted, nil
+}
+
+// CountEvidenceBasedClaims returns the number of claims populated from evidence.
+func (db *DB) CountEvidenceBasedClaims(ctx context.Context) (int64, error) {
+	var count int64
+
+	err := db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM claims WHERE normalized_hash IS NULL`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count evidence claims: %w", err)
+	}
+
+	return count, nil
+}
+
+// CountHeuristicClaims returns the number of claims populated from heuristic extraction.
+func (db *DB) CountHeuristicClaims(ctx context.Context) (int64, error) {
+	var count int64
+
+	err := db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM claims WHERE normalized_hash IS NOT NULL`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count heuristic claims: %w", err)
+	}
+
+	return count, nil
+}
+
+// FindSimilarClaimsByEmbedding finds claims with embedding similarity above the threshold.
+// Uses pgvector cosine distance operator (<=>). Returns claims ordered by similarity (descending).
+// The threshold parameter should be 0-1 where 1 is identical; we convert to distance.
+func (db *DB) FindSimilarClaimsByEmbedding(ctx context.Context, embedding []float32, limit int, threshold float64) ([]SimilarClaim, error) {
+	if len(embedding) == 0 {
+		return nil, nil
+	}
+
+	// Convert similarity threshold to distance (cosine distance = 1 - similarity)
+	distanceThreshold := 1.0 - threshold
+
+	rows, err := db.Pool.Query(ctx, `
+		SELECT id, claim_text, 1.0 - (embedding <=> $1::vector) as similarity
+		FROM claims
+		WHERE embedding IS NOT NULL
+		  AND (embedding <=> $1::vector) < $2
+		ORDER BY embedding <=> $1::vector
+		LIMIT $3
+	`, pgvector.NewVector(embedding), distanceThreshold, limit)
+	if err != nil {
+		return nil, fmt.Errorf("find similar claims: %w", err)
+	}
+	defer rows.Close()
+
+	var claims []SimilarClaim
+
+	for rows.Next() {
+		var claim SimilarClaim
+
+		if err := rows.Scan(&claim.ID, &claim.ClaimText, &claim.Similarity); err != nil {
+			return nil, fmt.Errorf("scan similar claim: %w", err)
+		}
+
+		claims = append(claims, claim)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate similar claims: %w", err)
+	}
+
+	return claims, nil
+}
+
+// UpdateClaimClusters adds cluster IDs to an existing claim.
+func (db *DB) UpdateClaimClusters(ctx context.Context, claimID int64, clusterIDs []string) error {
+	clusterUUIDs := make([]pgtype.UUID, len(clusterIDs))
+	for i, id := range clusterIDs {
+		clusterUUIDs[i] = toUUID(id)
+	}
+
+	_, err := db.Pool.Exec(ctx, `
+		UPDATE claims
+		SET cluster_ids = (
+			SELECT ARRAY(SELECT DISTINCT unnest(cluster_ids || $2::uuid[]))
+		),
+		updated_at = NOW()
+		WHERE id = $1
+	`, claimID, clusterUUIDs)
+	if err != nil {
+		return fmt.Errorf("update claim clusters: %w", err)
+	}
+
+	return nil
 }

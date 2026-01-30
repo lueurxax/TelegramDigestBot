@@ -250,6 +250,9 @@ func (a *App) refreshResearchOnce(ctx context.Context) {
 		return
 	}
 
+	// Populate heuristic claims for items without evidence
+	a.populateHeuristicClaims(refreshCtx)
+
 	if err := a.database.DeleteExpiredResearchSessions(refreshCtx); err != nil {
 		a.logger.Warn().Err(err).Msg("cleanup research sessions failed")
 	}
@@ -266,6 +269,26 @@ func (a *App) refreshResearchOnce(ctx context.Context) {
 			Int64("evidence_deleted", retentionCounts.EvidenceDeleted).
 			Int64("translations_deleted", retentionCounts.TranslationsDeleted).
 			Msg("research retention cleanup")
+	}
+}
+
+func (a *App) populateHeuristicClaims(ctx context.Context) {
+	populator := research.NewHeuristicClaimPopulator(a.database, a.logger)
+
+	// Enable semantic deduplication if embedding provider is configured
+	if a.hasConfiguredEmbeddingProvider() {
+		embeddingClient := a.newEmbeddingClient(ctx)
+		populator.SetEmbeddingClient(embeddingClient)
+	}
+
+	inserted, err := populator.PopulateHeuristicClaims(ctx)
+	if err != nil {
+		a.logger.Warn().Err(err).Msg("heuristic claims population failed")
+		return
+	}
+
+	if inserted > 0 {
+		a.logger.Info().Int64("claims_inserted", inserted).Msg("heuristic claims populated")
 	}
 }
 
@@ -307,6 +330,25 @@ func (a *App) hasConfiguredLLMProvider() bool {
 	}
 
 	if a.cfg.OpenRouterAPIKey != "" {
+		return true
+	}
+
+	return false
+}
+
+func (a *App) hasConfiguredEmbeddingProvider() bool {
+	// OpenAI embedding (uses LLMAPIKey)
+	if a.cfg.LLMAPIKey != "" && a.cfg.LLMAPIKey != llmAPIKeyMock {
+		return true
+	}
+
+	// Cohere embedding
+	if a.cfg.CohereAPIKey != "" {
+		return true
+	}
+
+	// Google embedding
+	if a.cfg.GoogleAPIKey != "" {
 		return true
 	}
 

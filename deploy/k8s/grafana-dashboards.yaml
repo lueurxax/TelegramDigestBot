@@ -3161,6 +3161,190 @@ data:
           ],
           "title": "Time to Digest (p50/p90)",
           "type": "timeseries"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 18},
+          "id": 7,
+          "panels": [],
+          "title": "Research Analytics (Postgres)",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 19},
+          "id": 8,
+          "targets": [
+            {
+              "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+              "format": "time_series",
+              "rawQuery": true,
+              "rawSql": "SELECT bucket_date as time, topic, item_count FROM mv_topic_timeline WHERE bucket_date >= NOW() - INTERVAL '30 days' ORDER BY bucket_date, item_count DESC",
+              "refId": "A"
+            }
+          ],
+          "title": "Topic Trends (Weekly)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 19},
+          "id": 9,
+          "targets": [
+            {
+              "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "SELECT channel_a, channel_b, jaccard, shared_clusters FROM mv_channel_overlap WHERE jaccard > 0.1 ORDER BY jaccard DESC LIMIT 20",
+              "refId": "A"
+            }
+          ],
+          "title": "Channel Overlap (Top 20)",
+          "type": "table"
+        },
+        {
+          "collapsed": false,
+          "gridPos": {"h": 1, "w": 24, "x": 0, "y": 27},
+          "id": 10,
+          "panels": [],
+          "title": "Claims Analytics",
+          "type": "row"
+        },
+        {
+          "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 28},
+          "id": 11,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "SELECT COUNT(*) as value FROM claims WHERE normalized_hash IS NULL",
+              "refId": "A"
+            }
+          ],
+          "title": "Evidence-Based Claims",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 28},
+          "id": 12,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "SELECT COUNT(*) as value FROM claims WHERE normalized_hash IS NOT NULL",
+              "refId": "A"
+            }
+          ],
+          "title": "Heuristic Claims",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 28},
+          "id": 13,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "SELECT COUNT(*) as value FROM claims WHERE embedding IS NOT NULL",
+              "refId": "A"
+            }
+          ],
+          "title": "Claims with Embeddings",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 28},
+          "id": 14,
+          "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "auto",
+            "orientation": "auto",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "SELECT COUNT(DISTINCT origin_cluster_id) as value FROM claims",
+              "refId": "A"
+            }
+          ],
+          "title": "Unique Claim Origins",
+          "type": "stat"
+        },
+        {
+          "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+          "id": 15,
+          "targets": [
+            {
+              "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+              "format": "time_series",
+              "rawQuery": true,
+              "rawSql": "SELECT date_trunc('day', first_seen_at) as time, COUNT(*) as claims_count FROM claims WHERE first_seen_at > NOW() - INTERVAL '30 days' GROUP BY date_trunc('day', first_seen_at) ORDER BY time",
+              "refId": "A"
+            }
+          ],
+          "title": "Claims Created (Daily)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+          "id": 16,
+          "targets": [
+            {
+              "datasource": {"type": "postgres", "uid": "${postgres_datasource}"},
+              "format": "table",
+              "rawQuery": true,
+              "rawSql": "SELECT claim_text, array_length(cluster_ids, 1) as cluster_count, first_seen_at FROM claims WHERE array_length(cluster_ids, 1) > 1 ORDER BY cluster_count DESC LIMIT 10",
+              "refId": "A"
+            }
+          ],
+          "title": "Top Claims by Cluster Count",
+          "type": "table"
         }
       ],
       "refresh": "30s",
@@ -3174,6 +3358,15 @@ data:
             "label": "datasource",
             "name": "datasource",
             "query": "prometheus",
+            "refresh": 1,
+            "type": "datasource"
+          },
+          {
+            "current": {"selected": false, "text": "PostgreSQL", "value": "PostgreSQL"},
+            "hide": 0,
+            "label": "postgres_datasource",
+            "name": "postgres_datasource",
+            "query": "postgres",
             "refresh": 1,
             "type": "datasource"
           }
