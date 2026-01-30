@@ -245,19 +245,39 @@ func (a *App) refreshResearchOnce(ctx context.Context) {
 		}
 	}()
 
-	if err := a.database.RefreshResearchMaterializedViews(refreshCtx); err != nil {
+	a.runResearchAnalytics(refreshCtx)
+	a.runResearchMaintenance(refreshCtx)
+}
+
+func (a *App) runResearchAnalytics(ctx context.Context) {
+	// Log pipeline health
+	readyCount, err := a.database.CountReadyItems(ctx)
+	if err != nil {
+		a.logger.Debug().Err(err).Msg("failed to count ready items")
+	}
+
+	backlog, err := a.database.GetBacklogCount(ctx)
+	if err != nil {
+		a.logger.Debug().Err(err).Msg("failed to get backlog count")
+	}
+
+	a.logger.Info().Int("ready_items", readyCount).Int("backlog", backlog).Msg("Starting research refresh")
+
+	if err := a.database.RefreshResearchMaterializedViews(ctx); err != nil {
 		a.logger.Warn().Err(err).Msg("research refresh failed")
-		return
+		// Continue to heuristic claims population even if views fail
 	}
 
 	// Populate heuristic claims for items without evidence
-	a.populateHeuristicClaims(refreshCtx)
+	a.populateHeuristicClaims(ctx)
+}
 
-	if err := a.database.DeleteExpiredResearchSessions(refreshCtx); err != nil {
+func (a *App) runResearchMaintenance(ctx context.Context) {
+	if err := a.database.DeleteExpiredResearchSessions(ctx); err != nil {
 		a.logger.Warn().Err(err).Msg("cleanup research sessions failed")
 	}
 
-	retentionCounts, err := a.database.CleanupResearchRetention(refreshCtx)
+	retentionCounts, err := a.database.CleanupResearchRetention(ctx)
 	if err != nil {
 		a.logger.Warn().Err(err).Msg("cleanup research retention failed")
 		return

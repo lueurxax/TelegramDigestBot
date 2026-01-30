@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 	"unicode"
@@ -3027,12 +3028,20 @@ func (db *DB) RefreshResearchMaterializedViews(ctx context.Context) error {
 	}
 
 	if err := db.rebuildResearchDerivedTables(ctx); err != nil {
-		return err
+		// Log the error but continue to refresh views if possible,
+		// as views don't depend on the derived tables.
+		log.Printf("research derived tables rebuild failed: %v", err)
 	}
 
 	for _, view := range views {
+		log.Printf("refreshing materialized view: %s", view)
+
 		if _, err := db.Pool.Exec(ctx, fmt.Sprintf("REFRESH MATERIALIZED VIEW CONCURRENTLY %s", view)); err != nil {
-			return fmt.Errorf("refresh materialized view %s: %w", view, err)
+			log.Printf("failed to refresh materialized view %s concurrently: %v (trying non-concurrently)", view, err)
+			// Fallback to non-concurrent refresh if concurrent fails (e.g. if it was never populated)
+			if _, err := db.Pool.Exec(ctx, fmt.Sprintf("REFRESH MATERIALIZED VIEW %s", view)); err != nil {
+				log.Printf("failed to refresh materialized view %s: %v", view, err)
+			}
 		}
 	}
 
@@ -3040,11 +3049,48 @@ func (db *DB) RefreshResearchMaterializedViews(ctx context.Context) error {
 }
 
 func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
-	if _, err := db.Pool.Exec(ctx, "TRUNCATE cluster_first_appearance"); err != nil {
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	defer func() {
+		_ = tx.Rollback(ctx) //nolint:errcheck
+	}()
+
+	if err := db.rebuildClusterFirstAppearance(ctx, tx); err != nil {
+		return err
+	}
+
+	if err := db.rebuildClusterTopicHistory(ctx, tx); err != nil {
+		return err
+	}
+
+	if err := db.rebuildEvidenceClaims(ctx, tx); err != nil {
+		return err
+	}
+
+	if err := db.rebuildClusterLanguageLinks(ctx, tx); err != nil {
+		return err
+	}
+
+	log.Printf("committing research derived tables transaction...")
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit research derived tables: %w", err)
+	}
+
+	return nil
+}
+
+func (db *DB) rebuildClusterFirstAppearance(ctx context.Context, tx pgx.Tx) error {
+	log.Printf("rebuilding cluster_first_appearance...")
+
+	if _, err := tx.Exec(ctx, "TRUNCATE cluster_first_appearance"); err != nil {
 		return fmt.Errorf("truncate cluster_first_appearance: %w", err)
 	}
 
-	if _, err := db.Pool.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO cluster_first_appearance (cluster_id, channel_id, first_item_id, first_seen_at)
 		WITH ranked AS (
 			SELECT ci.cluster_id,
@@ -3063,11 +3109,17 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 		return fmt.Errorf("populate cluster_first_appearance: %w", err)
 	}
 
-	if _, err := db.Pool.Exec(ctx, "TRUNCATE cluster_topic_history"); err != nil {
+	return nil
+}
+
+func (db *DB) rebuildClusterTopicHistory(ctx context.Context, tx pgx.Tx) error {
+	log.Printf("rebuilding cluster_topic_history...")
+
+	if _, err := tx.Exec(ctx, "TRUNCATE cluster_topic_history"); err != nil {
 		return fmt.Errorf("truncate cluster_topic_history: %w", err)
 	}
 
-	if _, err := db.Pool.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO cluster_topic_history (cluster_id, topic, window_start, window_end)
 		SELECT ci.cluster_id,
 		       i.topic,
@@ -3082,47 +3134,62 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 		return fmt.Errorf("populate cluster_topic_history: %w", err)
 	}
 
-	if _, err := db.Pool.Exec(ctx, "TRUNCATE claims"); err != nil {
-		return fmt.Errorf("truncate claims: %w", err)
+	return nil
+}
+
+func (db *DB) rebuildEvidenceClaims(ctx context.Context, tx pgx.Tx) error {
+	log.Printf("rebuilding claims (evidence-based)...")
+
+	if _, err := tx.Exec(ctx, "DELETE FROM claims WHERE normalized_hash IS NULL"); err != nil {
+		return fmt.Errorf("delete old evidence claims: %w", err)
 	}
 
-	if _, err := db.Pool.Exec(ctx, `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO claims (claim_text, first_seen_at, origin_cluster_id, cluster_ids, contradicted_by)
-		SELECT claim_text,
-		       first_seen_at,
-		       origin_cluster_id,
-		       cluster_ids,
-		       COALESCE(contradicted_by, '{}'::uuid[])
-		FROM (
-			SELECT ec.claim_text AS claim_text,
-			       MIN(rm.tg_date) AS first_seen_at,
-			       (SELECT ci2.cluster_id
-			        FROM evidence_claims ec2
-			        JOIN item_evidence ie2 ON ie2.evidence_id = ec2.evidence_id
-			        JOIN items i2 ON i2.id = ie2.item_id
-			        JOIN raw_messages rm2 ON i2.raw_message_id = rm2.id
-			        JOIN cluster_items ci2 ON ci2.item_id = i2.id
-			        WHERE ec2.claim_text = ec.claim_text
-			        ORDER BY rm2.tg_date ASC
-			        LIMIT 1) AS origin_cluster_id,
-			       ARRAY_AGG(DISTINCT ci.cluster_id) AS cluster_ids,
-			       ARRAY_AGG(DISTINCT ie.evidence_id) FILTER (WHERE ie.is_contradiction) AS contradicted_by
+		WITH claim_data AS (
+			-- Gather all raw claim occurrences from evidence
+			SELECT ec.claim_text,
+			       rm.tg_date,
+			       ci.cluster_id,
+			       ie.evidence_id,
+			       ie.is_contradiction
 			FROM evidence_claims ec
 			JOIN item_evidence ie ON ie.evidence_id = ec.evidence_id
 			JOIN items i ON i.id = ie.item_id
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
-			JOIN cluster_items ci ON ci.item_id = i.id
-			GROUP BY ec.claim_text
-		) AS grouped
+			LEFT JOIN cluster_items ci ON ci.item_id = i.id
+		),
+		claim_origin AS (
+			-- Identify the first occurrence (with or without cluster)
+			SELECT DISTINCT ON (claim_text)
+			       claim_text,
+			       cluster_id
+			FROM claim_data
+			ORDER BY claim_text, tg_date ASC
+		)
+		SELECT d.claim_text,
+		       MIN(d.tg_date) AS first_seen_at,
+		       o.cluster_id AS origin_cluster_id,
+		       array_remove(ARRAY_AGG(DISTINCT d.cluster_id), NULL) AS cluster_ids,
+		       COALESCE(ARRAY_AGG(DISTINCT d.evidence_id) FILTER (WHERE d.is_contradiction), '{}'::uuid[]) AS contradicted_by
+		FROM claim_data d
+		JOIN claim_origin o ON d.claim_text = o.claim_text
+		GROUP BY d.claim_text, o.cluster_id
 	`); err != nil {
-		return fmt.Errorf("populate claims: %w", err)
+		return fmt.Errorf("populate evidence claims: %w", err)
 	}
 
-	if _, err := db.Pool.Exec(ctx, "TRUNCATE cluster_language_links"); err != nil {
+	return nil
+}
+
+func (db *DB) rebuildClusterLanguageLinks(ctx context.Context, tx pgx.Tx) error {
+	log.Printf("rebuilding cluster_language_links...")
+
+	if _, err := tx.Exec(ctx, "TRUNCATE cluster_language_links"); err != nil {
 		return fmt.Errorf("truncate cluster_language_links: %w", err)
 	}
 
-	if _, err := db.Pool.Exec(ctx, fmt.Sprintf(`
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`
 		WITH cluster_rep AS (
 			SELECT ci.cluster_id,
 			       i.language,

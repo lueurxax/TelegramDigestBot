@@ -81,6 +81,15 @@ func TestLoad_ValidConfig(t *testing.T) {
 func TestLoad_Defaults(t *testing.T) {
 	setRequiredEnvVars(t)
 
+	// Explicitly unset variables that might be in .env to test actual defaults
+	os.Unsetenv("APP_ENV")
+	os.Unsetenv("LLM_MODEL")
+	os.Unsetenv("DIGEST_WINDOW")
+	os.Unsetenv("DIGEST_TOP_N")
+	os.Unsetenv("HEALTH_PORT")
+	os.Unsetenv("LEADER_ELECTION_ENABLED")
+	os.Unsetenv("TG_SESSION_PATH")
+
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf(testErrLoad, err)
