@@ -221,11 +221,11 @@ type Config struct {
 
 	// Bulletized output settings
 	BulletExtractionEnabled  bool    `env:"BULLET_EXTRACTION_ENABLED" envDefault:"false"`
-	BulletBatchSize          int     `env:"BULLET_BATCH_SIZE" envDefault:"5"`
-	BulletDedupThreshold     float64 `env:"BULLET_DEDUP_THRESHOLD" envDefault:"0.92"`
+	BulletBatchSize          int     `env:"BULLET_BATCH_SIZE" envDefault:"3"`
+	BulletDedupThreshold     float64 `env:"BULLET_DEDUP_THRESHOLD" envDefault:"0.88"`
 	BulletSourceAttribution  bool    `env:"BULLET_SOURCE_ATTRIBUTION" envDefault:"true"`
 	BulletSourceFormat       string  `env:"BULLET_SOURCE_FORMAT" envDefault:"compact"`
-	BulletMaxPerCluster      int     `env:"BULLET_MAX_PER_CLUSTER" envDefault:"5"`
+	BulletMaxPerCluster      int     `env:"BULLET_MAX_PER_CLUSTER" envDefault:"2"`
 	BulletMinImportance      float32 `env:"BULLET_MIN_IMPORTANCE" envDefault:"0.6"`
 	BulletDedupIntervalMins  int     `env:"BULLET_DEDUP_INTERVAL_MINS" envDefault:"5"`
 	BulletDedupLookbackHours int     `env:"BULLET_DEDUP_LOOKBACK_HOURS" envDefault:"48"`

@@ -18,7 +18,7 @@ type bulletGroup struct {
 
 // Bullet rendering limits
 const (
-	defaultMaxBulletsPerItem  = 3  // Max bullets from a single item/cluster
+	defaultMaxBulletsPerItem  = 2  // Max bullets from a single item/cluster
 	defaultMaxBulletsPerTopic = 20 // Max bullets per topic section
 )
 
@@ -158,7 +158,7 @@ func (rc *digestRenderContext) formatBulletGroup(sb *strings.Builder, g bulletGr
 	sb.WriteString("\n")
 }
 
-// formatSingleBullet formats a single bullet point.
+// formatSingleBullet formats a single bullet point with optional expanded view link.
 func (rc *digestRenderContext) formatSingleBullet(sb *strings.Builder, b db.BulletForDigest) {
 	prefix := getImportancePrefix(b.ImportanceScore)
 	sanitizedText := htmlutils.SanitizeHTML(b.Text)
@@ -176,7 +176,24 @@ func (rc *digestRenderContext) formatSingleBullet(sb *strings.Builder, b db.Bull
 		sb.WriteString(rc.formatBulletSource(b))
 	}
 
+	// Add expanded view link if enabled
+	rc.appendBulletExpandLink(sb, b.ItemID)
+
 	sb.WriteString("\n")
+}
+
+// appendBulletExpandLink adds an expanded view link for a bullet's source item.
+func (rc *digestRenderContext) appendBulletExpandLink(sb *strings.Builder, itemID string) {
+	if !rc.expandLinksEnabled || itemID == "" {
+		return
+	}
+
+	token, err := rc.scheduler.expandLinkGenerator.Generate(itemID, ExpandedViewSystemUserID)
+	if err != nil {
+		return
+	}
+
+	fmt.Fprintf(sb, " <a href=\"%s/i/%s\">📖</a>", rc.expandBaseURL, token)
 }
 
 // formatBulletSource formats the source attribution for a bullet.
