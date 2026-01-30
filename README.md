@@ -65,7 +65,6 @@ Search external sources (Solr, GDELT, NewsAPI, SearxNG) for evidence that suppor
 
 ```env
 ENRICHMENT_ENABLED=true
-SOLR_ENABLED=true
 SOLR_URL=http://solr:8983/solr/news
 ```
 

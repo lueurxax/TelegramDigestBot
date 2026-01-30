@@ -463,19 +463,36 @@ func buildLangInstructionSimple(targetLanguage, tone string) string {
 }
 
 // ExtractBullets extracts key bullet points from a message.
-// This is a stub implementation - actual bullet extraction logic will be added later.
-func (p *anthropicProvider) ExtractBullets(_ context.Context, input BulletExtractionInput, _, _ string) (BulletExtractionResult, error) {
-	// Stub: return the input text as a single bullet with default scores
-	return BulletExtractionResult{
-		Bullets: []ExtractedBullet{
-			{
-				Text:            input.Summary,
-				RelevanceScore:  fallbackBulletScore,
-				ImportanceScore: fallbackBulletScore,
-				Topic:           "",
-			},
+func (p *anthropicProvider) ExtractBullets(ctx context.Context, input BulletExtractionInput, targetLanguage, model string) (BulletExtractionResult, error) {
+	if err := p.rateLimiter.Wait(ctx); err != nil {
+		return BulletExtractionResult{}, fmt.Errorf(errRateLimiterSimple, err)
+	}
+
+	prompt := buildBulletExtractionPrompt(input, targetLanguage)
+	resolvedModel := anthropic.Model(p.resolveModel(model))
+
+	resp, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
+		Model:     resolvedModel,
+		MaxTokens: anthropicMaxTokensTiny,
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
 		},
-	}, nil
+	})
+	if err != nil {
+		p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskBulletExtract, 0, 0, false)
+		return BulletExtractionResult{}, fmt.Errorf("anthropic bullet extraction: %w", err)
+	}
+
+	p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), TaskBulletExtract, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true)
+	responseText := extractTextFromResponse(resp)
+
+	bullets, err := parseBulletResponse(responseText)
+	if err != nil {
+		p.logger.Warn().Err(err).Str(logKeyResponse, responseText).Msg(logMsgBulletParseError)
+		return makeBulletFallback(input), nil
+	}
+
+	return BulletExtractionResult{Bullets: bullets}, nil
 }
 
 // Ensure anthropicProvider implements Provider interface.

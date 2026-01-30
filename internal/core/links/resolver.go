@@ -174,7 +174,7 @@ func (r *Resolver) handleResolutionError(ctx context.Context, link linkextract.L
 		return
 	}
 
-	if errors.Is(err, ErrUnsupportedLinkType) {
+	if errors.Is(err, ErrUnsupportedLinkType) || errors.Is(err, ErrUnsupportedTelegramLinkType) {
 		return
 	}
 

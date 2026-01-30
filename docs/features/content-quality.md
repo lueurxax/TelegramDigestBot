@@ -97,9 +97,10 @@ net = (weighted_good - (weighted_bad + weighted_irrelevant)) / weighted_total
 
 ### Configuration
 
+Automatic threshold tuning is enabled by default. It can be disabled via the `auto_threshold_tuning_enabled` database setting.
+
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `AUTO_THRESHOLD_TUNING_ENABLED` | bool | `false` | Enable automatic threshold tuning |
 | `THRESHOLD_TUNING_STEP` | float32 | `0.05` | Amount to adjust thresholds per update |
 | `THRESHOLD_TUNING_MIN` | float32 | `0.10` | Minimum allowed threshold value |
 | `THRESHOLD_TUNING_MAX` | float32 | `0.90` | Maximum allowed threshold value |
@@ -344,7 +345,6 @@ Track these metrics to measure quality improvements:
 | `RELEVANCE_GATE_ENABLED` | `false` | Relevance Gate |
 | `RELEVANCE_GATE_MODE` | `heuristic` | Relevance Gate |
 | `RELEVANCE_GATE_MODEL` | (empty) | Relevance Gate |
-| `AUTO_THRESHOLD_TUNING_ENABLED` | `false` | Threshold Tuning |
 | `THRESHOLD_TUNING_STEP` | `0.05` | Threshold Tuning |
 | `THRESHOLD_TUNING_MIN` | `0.10` | Threshold Tuning |
 | `THRESHOLD_TUNING_MAX` | `0.90` | Threshold Tuning |

@@ -12,19 +12,9 @@ import (
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
-// extractAndStoreBullets extracts bullets from the message and stores them.
+// extractBullets extracts bullet candidates from a message for scoring.
 // This is a non-fatal operation - failures are logged but don't block the pipeline.
-// Only extracts bullets for items above the importance threshold to reduce LLM costs.
-func (p *Pipeline) extractAndStoreBullets(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, item *db.Item, digestLanguage string) {
-	if item.Status != StatusReady {
-		return
-	}
-
-	// Only extract bullets for high-importance items to reduce LLM costs
-	if item.ImportanceScore < p.cfg.BulletMinImportance {
-		return
-	}
-
+func (p *Pipeline) extractBullets(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, summary, digestLanguage string) []llm.ExtractedBullet {
 	maxBullets := p.cfg.BulletBatchSize
 	if maxBullets <= 0 {
 		maxBullets = defaultMaxBullets
@@ -33,23 +23,23 @@ func (p *Pipeline) extractAndStoreBullets(ctx context.Context, logger zerolog.Lo
 	input := llm.BulletExtractionInput{
 		Text:        c.Text,
 		PreviewText: c.PreviewText,
-		Summary:     item.Summary,
+		Summary:     summary,
 		MaxBullets:  maxBullets,
 	}
 
 	extracted, err := p.llmClient.ExtractBullets(ctx, input, digestLanguage, "")
 	if err != nil {
-		logger.Warn().Err(err).Str(LogFieldItemID, item.ID).Msg("bullet extraction failed")
-
-		return
+		logger.Warn().Err(err).Str(LogFieldMsgID, c.ID).Msg("bullet extraction failed")
+		return nil
 	}
 
 	if len(extracted.Bullets) == 0 {
-		return
+		return nil
 	}
 
-	p.storeBullets(ctx, logger, extracted.Bullets, item)
-	logger.Debug().Str(LogFieldItemID, item.ID).Int(LogFieldCount, len(extracted.Bullets)).Msg("bullets extracted and stored")
+	logger.Debug().Str(LogFieldMsgID, c.ID).Int(LogFieldCount, len(extracted.Bullets)).Msg("bullets extracted")
+
+	return extracted.Bullets
 }
 
 // storeBullets saves extracted bullets to the database and generates embeddings.
@@ -126,3 +116,29 @@ func generateBulletHash(text string) string {
 
 // defaultMaxBullets is the default number of bullets to extract per message.
 const defaultMaxBullets = 3
+
+type bulletScoreSummary struct {
+	maxImportance float32
+	maxRelevance  float32
+	includedCount int
+}
+
+func summarizeBullets(bullets []llm.ExtractedBullet, minImportance float32) bulletScoreSummary {
+	summary := bulletScoreSummary{}
+
+	for _, b := range bullets {
+		if b.ImportanceScore > summary.maxImportance {
+			summary.maxImportance = b.ImportanceScore
+		}
+
+		if b.RelevanceScore > summary.maxRelevance {
+			summary.maxRelevance = b.RelevanceScore
+		}
+
+		if b.ImportanceScore >= minImportance {
+			summary.includedCount++
+		}
+	}
+
+	return summary
+}

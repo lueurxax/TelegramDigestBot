@@ -167,7 +167,7 @@ func cosineSimilarity(a, b []float32) float64 {
 
 // Bullet deduplication constants.
 const (
-	defaultBulletDedupThreshold = 0.88 // Default similarity threshold for bullet deduplication
+	defaultBulletDedupThreshold = 0.92 // Default similarity threshold for bullet deduplication
 	defaultDedupLookbackHours   = 48   // Default lookback window for global dedup pool
 	BulletStatusPending         = "pending"
 	BulletStatusReady           = "ready"

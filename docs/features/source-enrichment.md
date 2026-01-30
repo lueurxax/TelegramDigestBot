@@ -28,11 +28,11 @@ ENRICHMENT_ENABLED=true
 
 ### Provider Configuration
 
-At least one provider must be enabled:
+At least one provider must be configured:
 
 **Solr (self-hosted, recommended):**
+Solr is automatically enabled when `SOLR_URL` is configured.
 ```env
-SOLR_ENABLED=true
 SOLR_URL=http://solr:8983/solr/news
 SOLR_TIMEOUT=10s
 SOLR_MAX_RESULTS=10
@@ -162,10 +162,9 @@ See [proposals/enrichment-language-routing.md](../proposals/enrichment-language-
 
 ### Evidence-Enhanced Clustering
 
-When items share evidence sources, their clustering similarity gets boosted:
+When items share evidence sources, their clustering similarity gets boosted. This is enabled by default.
 
 ```env
-EVIDENCE_CLUSTERING_ENABLED=true
 EVIDENCE_CLUSTERING_BOOST=0.15      # Max boost amount
 EVIDENCE_CLUSTERING_MIN_SCORE=0.5   # Min agreement to apply boost
 ```

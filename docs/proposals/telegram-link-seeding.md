@@ -70,11 +70,12 @@ Idempotency:
 Note: Doc ID is hash of `url_canonical` (via `solr.WebDocID()`), so no separate `url_hash` field is needed.
 
 ## Configuration
-- `TELEGRAM_LINK_SEEDING_ENABLED` (default: false)
 - `MAX_LINKS_PER_MESSAGE` (existing)
 - `CRAWLER_QUEUE_MAX_PENDING` (optional)
 - `DOMAIN_ALLOWLIST`, `DOMAIN_DENYLIST` (optional)
 - `LINK_SEED_EXT_DENYLIST` (optional, comma-separated)
+
+Note: Link seeding is automatically enabled when `SOLR_URL` is configured.
 
 ## Success Criteria
 - 50%+ of external links appear in the queue within 1 hour.
@@ -91,8 +92,8 @@ Note: Doc ID is hash of `url_canonical` (via `solr.WebDocID()`), so no separate 
 - Integration: seed a known link and verify queue insertion in Solr.
 
 ## Rollout
-- Ship behind `TELEGRAM_LINK_SEEDING_ENABLED=false`.
-- Enable for a small subset of channels (if supported), then expand.
+- Feature is automatically enabled when Solr is configured.
+- Monitor metrics and adjust `MAX_LINKS_PER_MESSAGE` if needed.
 
 ## Decisions
 | Question | Answer |

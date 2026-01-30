@@ -464,7 +464,7 @@ func (p *openRouterProvider) GenerateClusterTopic(ctx context.Context, items []d
 
 // RelevanceGate implements Provider interface.
 //
-//nolint:dupl // Provider implementations share similar structure
+
 func (p *openRouterProvider) RelevanceGate(ctx context.Context, text, model, prompt string) (RelevanceGateResult, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
 		return RelevanceGateResult{}, fmt.Errorf(errRateLimiterSimple, err)
@@ -473,28 +473,17 @@ func (p *openRouterProvider) RelevanceGate(ctx context.Context, text, model, pro
 	fullPrompt := fmt.Sprintf(relevanceGateFormat, prompt, text)
 	resolvedModel := p.resolveModel(model)
 
-	apiResult, err := p.callOpenRouterAPI(ctx, fullPrompt, model, openRouterMaxTokensMicro)
-	if err != nil {
-		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskRelevanceGate, 0, 0, false)
-
-		return RelevanceGateResult{}, err
+	helper := &relevanceGateHelper{
+		providerName:      ProviderOpenRouter,
+		usageRecorder:     p.usageRecorder,
+		logger:            p.logger,
+		defaultConfidence: openRouterDefaultConfidence,
 	}
 
-	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskRelevanceGate, apiResult.PromptTokens, apiResult.CompletionTokens, true)
-	responseText := extractJSON(apiResult.Text)
-
-	var result RelevanceGateResult
-	if unmarshalErr := json.Unmarshal([]byte(responseText), &result); unmarshalErr != nil {
-		p.logger.Warn().Err(unmarshalErr).Str(logKeyResponse, responseText).Msg(logMsgParseRelevanceGateFail)
-
-		return RelevanceGateResult{
-			Decision:   "relevant",
-			Confidence: openRouterDefaultConfidence,
-			Reason:     "failed to parse response",
-		}, nil
-	}
-
-	return result, nil
+	return helper.executeRelevanceGate(resolvedModel, func() (apiCallResult, error) {
+		result, err := p.callOpenRouterAPI(ctx, fullPrompt, model, openRouterMaxTokensMicro)
+		return apiCallResult(result), err
+	})
 }
 
 // CompressSummariesForCover implements Provider interface.
@@ -510,26 +499,15 @@ func (p *openRouterProvider) CompressSummariesForCover(ctx context.Context, summ
 	prompt := buildCompressSummariesPrompt(summaries)
 	resolvedModel := p.resolveModel(model)
 
-	result, err := p.callOpenRouterAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, model, openRouterMaxTokensTiny)
-	if err != nil {
-		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCompress, 0, 0, false)
-
-		return nil, err
+	helper := &compressHelper{
+		providerName:  ProviderOpenRouter,
+		usageRecorder: p.usageRecorder,
 	}
 
-	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCompress, result.PromptTokens, result.CompletionTokens, true)
-	lines := strings.Split(strings.TrimSpace(result.Text), "\n")
-
-	var compressed []string
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			compressed = append(compressed, trimmed)
-		}
-	}
-
-	return compressed, nil
+	return helper.executeCompress(resolvedModel, func() (apiCallResult, error) {
+		result, err := p.callOpenRouterAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, model, openRouterMaxTokensTiny)
+		return apiCallResult(result), err
+	})
 }
 
 // GenerateDigestCover returns an error as OpenRouter doesn't support image generation.
@@ -538,19 +516,24 @@ func (p *openRouterProvider) GenerateDigestCover(_ context.Context, _ []string, 
 }
 
 // ExtractBullets extracts key bullet points from a message.
-// This is a stub implementation - actual bullet extraction logic will be added later.
-func (p *openRouterProvider) ExtractBullets(_ context.Context, input BulletExtractionInput, _, _ string) (BulletExtractionResult, error) {
-	// Stub: return the input text as a single bullet with default scores
-	return BulletExtractionResult{
-		Bullets: []ExtractedBullet{
-			{
-				Text:            input.Summary,
-				RelevanceScore:  fallbackBulletScore,
-				ImportanceScore: fallbackBulletScore,
-				Topic:           "",
-			},
-		},
-	}, nil
+func (p *openRouterProvider) ExtractBullets(ctx context.Context, input BulletExtractionInput, targetLanguage, model string) (BulletExtractionResult, error) {
+	if err := p.rateLimiter.Wait(ctx); err != nil {
+		return BulletExtractionResult{}, fmt.Errorf(errRateLimiterSimple, err)
+	}
+
+	prompt := buildBulletExtractionPrompt(input, targetLanguage)
+	resolvedModel := p.resolveModel(model)
+
+	helper := &bulletExtractionHelper{
+		providerName:  ProviderOpenRouter,
+		usageRecorder: p.usageRecorder,
+		logger:        p.logger,
+	}
+
+	return helper.extractBullets(ctx, input, targetLanguage, resolvedModel, func() (apiCallResult, error) {
+		result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensTiny)
+		return apiCallResult(result), err
+	})
 }
 
 // Ensure openRouterProvider implements Provider interface.

@@ -137,6 +137,8 @@ type pipelineSettings struct {
 	linkSnippetMaxChars        int
 	linkEmbeddingMaxMsgLen     int
 	summaryCachePromptVersion  string
+	bulletModeEnabled          bool
+	bulletMinImportance        float32
 }
 
 const (
@@ -147,6 +149,7 @@ const (
 	dropReasonDedupSemanticSame   = "dedup_semantic_same_channel"
 	dropReasonDedupSemanticGlobal = "dedup_semantic_global"
 	dropReasonDedupStrictGlobal   = "dedup_strict_global"
+	bulletLLMBatchSizeLimit       = 5
 
 	defaultPromptVersion   = "v1"
 	summaryCacheMaxAgeDays = 30
@@ -340,6 +343,8 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 		linkSnippetMaxChars:       p.cfg.LinkSnippetMaxChars,
 		linkEmbeddingMaxMsgLen:    p.cfg.LinkEmbeddingMaxMsgLen,
 		summaryCachePromptVersion: defaultPromptVersion,
+		bulletModeEnabled:         true,
+		bulletMinImportance:       p.cfg.BulletMinImportance,
 		filtersMode:               FilterModeMixed,
 		dedupMode:                 DedupModeSemantic,
 		dedupWindow:               time.Duration(p.cfg.ClusterTimeWindowHours) * time.Hour,
@@ -363,54 +368,17 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 	}
 
 	p.getSetting(ctx, "worker_batch_size", &s.batchSize, logger)
-
-	filterList, err := p.database.GetActiveFilters(ctx)
-	if err != nil {
-		logger.Warn().Err(err).Msg("failed to get active filters")
-	}
-
-	s.filterList = filterList
-
-	p.getSetting(ctx, "filters_ads", &s.adsFilterEnabled, logger)
-	p.getSetting(ctx, "filters_min_length", &s.minLengthDefault, logger)
-	p.getSetting(ctx, "filters_ads_keywords", &s.adsKeywords, logger)
-	p.getSetting(ctx, "filters_skip_forwards", &s.skipForwards, logger)
-	p.getSetting(ctx, "filters_mode", &s.filtersMode, logger)
-	p.getSetting(ctx, "dedup_mode", &s.dedupMode, logger)
-	p.getSetting(ctx, "topics_enabled", &s.topicsEnabled, logger)
-	p.getSetting(ctx, "relevance_threshold", &s.relevanceThreshold, logger)
-	p.getSetting(ctx, "digest_language", &s.digestLanguage, logger)
-	p.getSetting(ctx, "vision_routing_enabled", &s.visionRoutingEnabled, logger)
-	p.getSetting(ctx, "tiered_importance_enabled", &s.tieredImportanceEnabled, logger)
-	p.getSetting(ctx, "digest_tone", &s.digestTone, logger)
-	p.getSetting(ctx, "normalize_scores", &s.normalizeScores, logger)
-	p.getSetting(ctx, "relevance_gate_enabled", &s.relevanceGateEnabled, logger)
-	p.getSetting(ctx, "relevance_gate_mode", &s.relevanceGateMode, logger)
-	p.getSetting(ctx, "relevance_gate_model", &s.relevanceGateModel, logger)
-
-	if s.normalizeScores {
-		var err error
-
-		s.channelStats, err = p.database.GetChannelStats(ctx)
-		if err != nil {
-			logger.Warn().Err(err).Msg("failed to fetch channel stats for normalization")
-
-			s.normalizeScores = false
-		}
-	}
-
-	p.getSetting(ctx, "link_enrichment_enabled", &s.linkEnrichmentEnabled, logger)
-	p.getSetting(ctx, "link_enrichment_scope", &s.linkEnrichmentScope, logger)
-	p.getSetting(ctx, "link_min_words", &s.linkMinWords, logger)
-	p.getSetting(ctx, "link_snippet_max_chars", &s.linkSnippetMaxChars, logger)
-	p.getSetting(ctx, "link_embedding_max_msg_len", &s.linkEmbeddingMaxMsgLen, logger)
-	p.getSetting(ctx, "max_links_per_message", &s.maxLinks, logger)
-	s.linkCacheTTL = p.getDurationSetting(ctx, "link_cache_ttl", p.cfg.LinkCacheTTL, logger)
-	s.tgLinkCacheTTL = p.getDurationSetting(ctx, "tg_link_cache_ttl", p.cfg.TelegramLinkCacheTTL, logger)
+	p.loadFilterSettings(ctx, s, logger)
+	p.loadCoreSettings(ctx, s, logger)
+	p.loadLinkSettings(ctx, s, logger)
 
 	s.normalizeMinLengthSettings()
 	s.normalizeSummarySettings()
 	s.normalizeDedupWindows()
+
+	if s.bulletModeEnabled && s.batchSize > bulletLLMBatchSizeLimit {
+		s.batchSize = bulletLLMBatchSizeLimit
+	}
 
 	return s, nil
 }
@@ -430,6 +398,59 @@ func (p *Pipeline) getDurationSetting(ctx context.Context, key string, defaultVa
 	}
 
 	return defaultVal
+}
+
+func (p *Pipeline) loadFilterSettings(ctx context.Context, s *pipelineSettings, logger zerolog.Logger) {
+	filterList, err := p.database.GetActiveFilters(ctx)
+	if err != nil {
+		logger.Warn().Err(err).Msg("failed to get active filters")
+	}
+
+	s.filterList = filterList
+
+	p.getSetting(ctx, "filters_ads", &s.adsFilterEnabled, logger)
+	p.getSetting(ctx, "filters_min_length", &s.minLengthDefault, logger)
+	p.getSetting(ctx, "filters_ads_keywords", &s.adsKeywords, logger)
+	p.getSetting(ctx, "filters_skip_forwards", &s.skipForwards, logger)
+	p.getSetting(ctx, "filters_mode", &s.filtersMode, logger)
+	p.getSetting(ctx, "dedup_mode", &s.dedupMode, logger)
+}
+
+func (p *Pipeline) loadCoreSettings(ctx context.Context, s *pipelineSettings, logger zerolog.Logger) {
+	p.getSetting(ctx, "topics_enabled", &s.topicsEnabled, logger)
+	p.getSetting(ctx, "relevance_threshold", &s.relevanceThreshold, logger)
+	p.getSetting(ctx, "digest_language", &s.digestLanguage, logger)
+	p.getSetting(ctx, "vision_routing_enabled", &s.visionRoutingEnabled, logger)
+	p.getSetting(ctx, "tiered_importance_enabled", &s.tieredImportanceEnabled, logger)
+	p.getSetting(ctx, "digest_tone", &s.digestTone, logger)
+	p.getSetting(ctx, "normalize_scores", &s.normalizeScores, logger)
+	p.getSetting(ctx, "relevance_gate_enabled", &s.relevanceGateEnabled, logger)
+	p.getSetting(ctx, "relevance_gate_mode", &s.relevanceGateMode, logger)
+	p.getSetting(ctx, "relevance_gate_model", &s.relevanceGateModel, logger)
+	p.getSetting(ctx, "bullet_mode_enabled", &s.bulletModeEnabled, logger)
+	p.getSetting(ctx, "bullet_min_importance", &s.bulletMinImportance, logger)
+
+	if s.normalizeScores {
+		var err error
+
+		s.channelStats, err = p.database.GetChannelStats(ctx)
+		if err != nil {
+			logger.Warn().Err(err).Msg("failed to fetch channel stats for normalization")
+
+			s.normalizeScores = false
+		}
+	}
+}
+
+func (p *Pipeline) loadLinkSettings(ctx context.Context, s *pipelineSettings, logger zerolog.Logger) {
+	p.getSetting(ctx, "link_enrichment_enabled", &s.linkEnrichmentEnabled, logger)
+	p.getSetting(ctx, "link_enrichment_scope", &s.linkEnrichmentScope, logger)
+	p.getSetting(ctx, "link_min_words", &s.linkMinWords, logger)
+	p.getSetting(ctx, "link_snippet_max_chars", &s.linkSnippetMaxChars, logger)
+	p.getSetting(ctx, "link_embedding_max_msg_len", &s.linkEmbeddingMaxMsgLen, logger)
+	p.getSetting(ctx, "max_links_per_message", &s.maxLinks, logger)
+	s.linkCacheTTL = p.getDurationSetting(ctx, "link_cache_ttl", p.cfg.LinkCacheTTL, logger)
+	s.tgLinkCacheTTL = p.getDurationSetting(ctx, "tg_link_cache_ttl", p.cfg.TelegramLinkCacheTTL, logger)
 }
 
 func (p *Pipeline) markProcessed(ctx context.Context, logger zerolog.Logger, msgID string) {
@@ -1032,13 +1053,7 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 		stripPhrases := s.summaryStripPhrasesFor(lang)
 
 		res.Summary = postProcessSummary(res.Summary, s.summaryMaxChars, stripPhrases)
-
-		if res.Summary == "" || isWeakSummary(res.Summary) {
-			lead := selectLeadSentence(candidates[i].Text)
-			if lead != "" && !isMostlySymbols(lead) {
-				res.Summary = postProcessSummary(lead, s.summaryMaxChars, stripPhrases)
-			}
-		}
+		res.Summary = p.tryFallbackSummary(res.Summary, candidates[i].Text, s.summaryMaxChars, stripPhrases)
 
 		if res.Summary == "" {
 			p.handleEmptySummary(ctx, logger, candidates[i].ID, i)
@@ -1046,29 +1061,87 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 			continue
 		}
 
+		extractedBullets, bulletSummary := p.processBullets(ctx, logger, candidates[i], &res, s)
+
 		item := p.createItem(logger, candidates[i], res, s)
 		item.Language = lang
 		item.LanguageSource = langSource
+		p.applyBulletMetadata(item, extractedBullets, bulletSummary)
 
 		if item.Status == StatusReady {
-			detectedLang := detectSummaryLanguage(item.Summary, item.Language)
-			item.Summary = p.translateSummaryIfNeeded(ctx, logger, candidates[i].ID, item.Summary, detectedLang, s)
-			targetLang := normalizeLanguage(s.digestLanguage)
-			item.Summary = postProcessSummary(item.Summary, s.summaryMaxChars, s.summaryStripPhrasesFor(targetLang))
+			p.finalizeReadyItem(ctx, logger, candidates[i].ID, item, s)
 		}
 
-		if p.saveAndMarkProcessed(ctx, logger, candidates[i], item, embeddings, s.digestLanguage, s.summaryCachePromptVersion) {
-			if item.Status == StatusReady {
-				readyCount++
-			} else {
-				rejectedCount++
-			}
-		}
+		ready, rejected := p.storeAndCount(ctx, logger, candidates[i], item, embeddings, extractedBullets, s)
+		readyCount += ready
+		rejectedCount += rejected
 	}
 
 	logger.Info().Int("ready", readyCount).Int("rejected", rejectedCount).Msg("Batch results stored")
 
 	return nil
+}
+
+func (p *Pipeline) tryFallbackSummary(summary, text string, maxChars int, stripPhrases []string) string {
+	if summary != "" && !isWeakSummary(summary) {
+		return summary
+	}
+
+	lead := selectLeadSentence(text)
+	if lead != "" && !isMostlySymbols(lead) {
+		return postProcessSummary(lead, maxChars, stripPhrases)
+	}
+
+	return summary
+}
+
+func (p *Pipeline) processBullets(ctx context.Context, logger zerolog.Logger, candidate llm.MessageInput, res *llm.BatchResult, s *pipelineSettings) ([]llm.ExtractedBullet, bulletScoreSummary) {
+	if !s.bulletModeEnabled {
+		return nil, bulletScoreSummary{}
+	}
+
+	extractedBullets := p.extractBullets(ctx, logger, candidate, res.Summary, s.digestLanguage)
+	if len(extractedBullets) == 0 {
+		return nil, bulletScoreSummary{}
+	}
+
+	bulletSummary := summarizeBullets(extractedBullets, s.bulletMinImportance)
+	res.RelevanceScore = bulletSummary.maxRelevance
+	res.ImportanceScore = bulletSummary.maxImportance
+
+	return extractedBullets, bulletSummary
+}
+
+func (p *Pipeline) applyBulletMetadata(item *db.Item, extractedBullets []llm.ExtractedBullet, bulletSummary bulletScoreSummary) {
+	if len(extractedBullets) == 0 {
+		return
+	}
+
+	if bulletSummary.includedCount == 0 {
+		item.Status = StatusRejected
+	}
+
+	item.BulletTotalCount = len(extractedBullets)
+	item.BulletIncludedCount = bulletSummary.includedCount
+}
+
+func (p *Pipeline) finalizeReadyItem(ctx context.Context, logger zerolog.Logger, msgID string, item *db.Item, s *pipelineSettings) {
+	detectedLang := detectSummaryLanguage(item.Summary, item.Language)
+	item.Summary = p.translateSummaryIfNeeded(ctx, logger, msgID, item.Summary, detectedLang, s)
+	targetLang := normalizeLanguage(s.digestLanguage)
+	item.Summary = postProcessSummary(item.Summary, s.summaryMaxChars, s.summaryStripPhrasesFor(targetLang))
+}
+
+func (p *Pipeline) storeAndCount(ctx context.Context, logger zerolog.Logger, candidate llm.MessageInput, item *db.Item, embeddings map[string][]float32, extractedBullets []llm.ExtractedBullet, s *pipelineSettings) (ready, rejected int) {
+	if !p.saveAndMarkProcessed(ctx, logger, candidate, item, embeddings, extractedBullets, s.digestLanguage, s.summaryCachePromptVersion) {
+		return 0, 0
+	}
+
+	if item.Status == StatusReady {
+		return 1, 0
+	}
+
+	return 0, 1
 }
 
 func (p *Pipeline) normalizeResults(candidates []llm.MessageInput, results []llm.BatchResult, s *pipelineSettings) {
@@ -1212,7 +1285,7 @@ func (p *Pipeline) determineStatus(c llm.MessageInput, relevanceScore float32, s
 	return StatusReady
 }
 
-func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, item *db.Item, embeddings map[string][]float32, digestLanguage, promptVersion string) bool {
+func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, item *db.Item, embeddings map[string][]float32, extractedBullets []llm.ExtractedBullet, digestLanguage, promptVersion string) bool {
 	if err := p.database.SaveItem(ctx, item); err != nil {
 		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg("failed to save item")
 		observability.PipelineProcessed.WithLabelValues(StatusError).Inc()
@@ -1233,8 +1306,10 @@ func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logg
 		}
 	}
 
-	// Extract and store bullets (non-fatal)
-	p.extractAndStoreBullets(ctx, logger, c, item, digestLanguage)
+	if item.Status == StatusReady && len(extractedBullets) > 0 {
+		p.storeBullets(ctx, logger, extractedBullets, item)
+		logger.Debug().Str(LogFieldItemID, item.ID).Int(LogFieldCount, len(extractedBullets)).Msg("bullets stored")
+	}
 
 	if err := p.database.MarkAsProcessed(ctx, c.ID); err != nil {
 		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg(LogMsgFailedToMarkProcessed)

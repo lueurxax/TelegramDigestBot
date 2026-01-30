@@ -348,7 +348,7 @@ func (c *Crawler) updateWithContent(ctx context.Context, docID string, result *E
 		fields["content_el"] = result.Content
 	}
 
-	if err := c.client.AtomicUpdate(ctx, docID, fields); err != nil {
+	if err := c.client.AtomicUpdateWithRetry(ctx, docID, fields, solr.DefaultRetryConfig()); err != nil {
 		return fmt.Errorf("update document content: %w", err)
 	}
 
@@ -393,7 +393,7 @@ func (c *Crawler) handleExtractionError(ctx context.Context, doc *solr.Document,
 		"crawl_claimed_by": nil,
 	}
 
-	if err := c.client.AtomicUpdate(ctx, doc.ID, fields); err != nil {
+	if err := c.client.AtomicUpdateWithRetry(ctx, doc.ID, fields, solr.DefaultRetryConfig()); err != nil {
 		c.logger.Warn().Err(err).Str(fieldDocID, doc.ID).Msg("Failed to update retry count")
 	}
 }
@@ -410,7 +410,7 @@ func (c *Crawler) markError(ctx context.Context, docID, errMsg string) {
 		"crawled_at":   time.Now().UTC().Format(time.RFC3339),
 	}
 
-	if err := c.client.AtomicUpdate(ctx, docID, fields); err != nil {
+	if err := c.client.AtomicUpdateWithRetry(ctx, docID, fields, solr.DefaultRetryConfig()); err != nil {
 		c.logger.Warn().Err(err).Str("doc_id", docID).Msg("Failed to mark document as error")
 	}
 }

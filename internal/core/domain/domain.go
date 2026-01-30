@@ -31,24 +31,26 @@ type RawMessage struct {
 
 // Item represents a processed digest item.
 type Item struct {
-	ID                 string
-	RawMessageID       string
-	RelevanceScore     float32
-	ImportanceScore    float32
-	Topic              string
-	Summary            string
-	Language           string
-	LanguageSource     string
-	Status             string
-	ErrorJSON          []byte
-	CreatedAt          time.Time
-	FirstSeenAt        time.Time
-	TGDate             time.Time
-	SourceChannel      string
-	SourceChannelTitle string
-	SourceChannelID    int64
-	SourceMsgID        int64
-	Embedding          []float32
+	ID                  string
+	RawMessageID        string
+	RelevanceScore      float32
+	ImportanceScore     float32
+	Topic               string
+	Summary             string
+	Language            string
+	LanguageSource      string
+	Status              string
+	ErrorJSON           []byte
+	CreatedAt           time.Time
+	FirstSeenAt         time.Time
+	TGDate              time.Time
+	SourceChannel       string
+	SourceChannelTitle  string
+	SourceChannelID     int64
+	SourceMsgID         int64
+	Embedding           []float32
+	BulletTotalCount    int
+	BulletIncludedCount int
 }
 
 // ResolvedLink represents a resolved external or Telegram link.

@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 
 	"github.com/rs/zerolog"
 
@@ -195,4 +197,111 @@ func applyModelOverrides(registry *Registry, cfg *config.Config) {
 	registry.SetTaskModelOverride(TaskTypeComplete, cfg.LLMCompleteModel)
 	registry.SetTaskModelOverride(TaskTypeRelevanceGate, cfg.LLMRelevanceGateModel)
 	registry.SetTaskModelOverride(TaskTypeCompress, cfg.LLMCompressModel)
+}
+
+// apiCallResult holds the common fields from LLM API responses.
+type apiCallResult struct {
+	Text             string
+	PromptTokens     int
+	CompletionTokens int
+}
+
+// bulletExtractionHelper handles common bullet extraction logic across providers.
+type bulletExtractionHelper struct {
+	providerName  ProviderName
+	usageRecorder UsageRecorder
+	logger        *zerolog.Logger
+}
+
+// extractBullets performs bullet extraction using the provided API call function.
+func (h *bulletExtractionHelper) extractBullets(
+	_ context.Context,
+	input BulletExtractionInput,
+	_ string,
+	resolvedModel string,
+	apiCall func() (apiCallResult, error),
+) (BulletExtractionResult, error) {
+	result, err := apiCall()
+	if err != nil {
+		h.usageRecorder.RecordTokenUsage(string(h.providerName), resolvedModel, TaskBulletExtract, 0, 0, false)
+		return BulletExtractionResult{}, err
+	}
+
+	h.usageRecorder.RecordTokenUsage(string(h.providerName), resolvedModel, TaskBulletExtract, result.PromptTokens, result.CompletionTokens, true)
+
+	bullets, err := parseBulletResponse(result.Text)
+	if err != nil {
+		h.logger.Warn().Err(err).Str(logKeyResponse, result.Text).Msg(logMsgBulletParseError)
+		return makeBulletFallback(input), nil
+	}
+
+	return BulletExtractionResult{Bullets: bullets}, nil
+}
+
+// relevanceGateHelper handles common relevance gate logic across providers.
+type relevanceGateHelper struct {
+	providerName      ProviderName
+	usageRecorder     UsageRecorder
+	logger            *zerolog.Logger
+	defaultConfidence float32
+}
+
+// executeRelevanceGate performs relevance gate using the provided API call function.
+func (h *relevanceGateHelper) executeRelevanceGate(
+	resolvedModel string,
+	apiCall func() (apiCallResult, error),
+) (RelevanceGateResult, error) {
+	apiResult, err := apiCall()
+	if err != nil {
+		h.usageRecorder.RecordTokenUsage(string(h.providerName), resolvedModel, TaskRelevanceGate, 0, 0, false)
+		return RelevanceGateResult{}, err
+	}
+
+	h.usageRecorder.RecordTokenUsage(string(h.providerName), resolvedModel, TaskRelevanceGate, apiResult.PromptTokens, apiResult.CompletionTokens, true)
+	responseText := extractJSON(apiResult.Text)
+
+	var result RelevanceGateResult
+	if unmarshalErr := json.Unmarshal([]byte(responseText), &result); unmarshalErr != nil {
+		h.logger.Warn().Err(unmarshalErr).Str(logKeyResponse, responseText).Msg(logMsgParseRelevanceGateFail)
+
+		return RelevanceGateResult{
+			Decision:   "relevant",
+			Confidence: h.defaultConfidence,
+			Reason:     "failed to parse response",
+		}, nil
+	}
+
+	return result, nil
+}
+
+// compressHelper handles common compress summaries logic across providers.
+type compressHelper struct {
+	providerName  ProviderName
+	usageRecorder UsageRecorder
+}
+
+// executeCompress performs summary compression using the provided API call function.
+func (h *compressHelper) executeCompress(
+	resolvedModel string,
+	apiCall func() (apiCallResult, error),
+) ([]string, error) {
+	result, err := apiCall()
+	if err != nil {
+		h.usageRecorder.RecordTokenUsage(string(h.providerName), resolvedModel, TaskCompress, 0, 0, false)
+		return nil, err
+	}
+
+	h.usageRecorder.RecordTokenUsage(string(h.providerName), resolvedModel, TaskCompress, result.PromptTokens, result.CompletionTokens, true)
+	lines := strings.Split(strings.TrimSpace(result.Text), "\n")
+
+	var compressed []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			compressed = append(compressed, trimmed)
+		}
+	}
+
+	return compressed, nil
 }

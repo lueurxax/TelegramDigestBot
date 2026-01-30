@@ -308,11 +308,9 @@ why: rel 0.62 | imp 0.41 | corr 3ch | gate: pass
 
 ### Configuration
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `EXPLAINABILITY_LINE_ENABLED` | bool | `false` | Show explainability line |
+Explainability line is enabled by default. It can be disabled via the `explainability_line_enabled` database setting.
 
-**Note:** Keep disabled for public channels to avoid exposing internal metrics.
+**Note:** Consider disabling for public channels to avoid exposing internal metrics.
 
 ### Implementation
 
@@ -453,7 +451,6 @@ Cached summaries older than 7 days are not reused, even with high overlap.
 | `SUMMARY_MAX_CHARS` | `220` | Summary Post-Processing |
 | `SUMMARY_STRIP_PHRASES_EN` | (list) | Summary Post-Processing |
 | `SUMMARY_STRIP_PHRASES_RU` | (list) | Summary Post-Processing |
-| `EXPLAINABILITY_LINE_ENABLED` | `false` | Explainability |
 | `TIME_TO_DIGEST_ALERT_THRESHOLD` | `6h` | Time-to-Digest |
 
 ---

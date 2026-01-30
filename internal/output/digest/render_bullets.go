@@ -18,9 +18,22 @@ type bulletGroup struct {
 
 // Bullet rendering limits
 const (
-	defaultMaxBulletsPerItem  = 2  // Max bullets from a single item/cluster
-	defaultMaxBulletsPerTopic = 20 // Max bullets per topic section
+	defaultMaxBulletsPerCluster = 2  // Max bullets from a single cluster
+	defaultMaxBulletsPerTopic   = 20 // Max bullets per topic section
 )
+
+type bulletTier struct {
+	label    string
+	emoji    string
+	minScore float32
+}
+
+var bulletTiers = []bulletTier{
+	{label: "Breaking", emoji: EmojiBreaking, minScore: ImportanceScoreBreaking},
+	{label: "Notable", emoji: EmojiNotable, minScore: ImportanceScoreNotable},
+	{label: "Standard", emoji: EmojiStandard, minScore: ImportanceScoreStandard},
+	{label: "Minor", emoji: EmojiBullet, minScore: -1},
+}
 
 // formatBullets formats bullets for display instead of summaries.
 // Returns empty string if no bullets are available, allowing fallback to summary mode.
@@ -42,16 +55,27 @@ func (rc *digestRenderContext) formatBullets(ctx context.Context, items []db.Ite
 		return "" // Fallback to summary mode
 	}
 
-	// Step 2: Limit bullets per item/cluster to avoid one story dominating
-	limitedBullets := limitBulletsPerItem(filteredBullets, rc.settings.bulletMaxPerCluster)
+	// Step 2: Limit bullets per cluster to avoid one story dominating
+	clusterIndex := buildItemClusterIndex(rc.clusters)
+	limitedBullets := limitBulletsPerCluster(filteredBullets, rc.settings.bulletMaxPerCluster, clusterIndex)
 
-	// Step 3: Group by topic with a higher limit
-	groups := groupBulletsByTopic(limitedBullets, defaultMaxBulletsPerTopic)
+	// Step 3: Group by tier, then topic
+	tiers := groupBulletsByTier(limitedBullets)
 
 	var sb strings.Builder
 
-	for _, g := range groups {
-		rc.formatBulletGroup(&sb, g)
+	for idx, tier := range bulletTiers {
+		tierBullets := tiers[idx]
+		if len(tierBullets) == 0 {
+			continue
+		}
+
+		sb.WriteString(fmt.Sprintf(FormatSectionHeader, tier.emoji, tier.label))
+
+		groups := groupBulletsByTopic(tierBullets, defaultMaxBulletsPerTopic)
+		for _, g := range groups {
+			rc.formatBulletGroup(&sb, g)
+		}
 	}
 
 	return sb.String()
@@ -85,20 +109,25 @@ func filterBulletsByImportance(bullets []db.BulletForDigest, minImportance float
 	return result
 }
 
-// limitBulletsPerItem limits the number of bullets from each item/cluster.
+// limitBulletsPerCluster limits the number of bullets from each cluster.
 // This prevents a single story from dominating the digest.
-func limitBulletsPerItem(bullets []db.BulletForDigest, maxPerItem int) []db.BulletForDigest {
-	if maxPerItem <= 0 {
-		maxPerItem = defaultMaxBulletsPerItem
+func limitBulletsPerCluster(bullets []db.BulletForDigest, maxPerCluster int, clusterIndex map[string]string) []db.BulletForDigest {
+	if maxPerCluster <= 0 {
+		maxPerCluster = defaultMaxBulletsPerCluster
 	}
 
-	itemCounts := make(map[string]int)
+	clusterCounts := make(map[string]int)
 	result := make([]db.BulletForDigest, 0, len(bullets))
 
 	for _, b := range bullets {
-		if itemCounts[b.ItemID] < maxPerItem {
+		clusterID := clusterIndex[b.ItemID]
+		if clusterID == "" {
+			clusterID = b.ItemID
+		}
+
+		if clusterCounts[clusterID] < maxPerCluster {
 			result = append(result, b)
-			itemCounts[b.ItemID]++
+			clusterCounts[clusterID]++
 		}
 	}
 
@@ -136,6 +165,39 @@ func groupBulletsByTopic(bullets []db.BulletForDigest, maxPerTopic int) []bullet
 	return groups
 }
 
+func groupBulletsByTier(bullets []db.BulletForDigest) map[int][]db.BulletForDigest {
+	tiered := make(map[int][]db.BulletForDigest, len(bulletTiers))
+
+	for _, b := range bullets {
+		idx := tierIndex(b.ImportanceScore)
+		tiered[idx] = append(tiered[idx], b)
+	}
+
+	return tiered
+}
+
+func tierIndex(score float32) int {
+	for i, tier := range bulletTiers {
+		if score >= tier.minScore {
+			return i
+		}
+	}
+
+	return len(bulletTiers) - 1
+}
+
+func buildItemClusterIndex(clusters []db.ClusterWithItems) map[string]string {
+	index := make(map[string]string)
+
+	for _, cluster := range clusters {
+		for _, item := range cluster.Items {
+			index[item.ID] = cluster.ID
+		}
+	}
+
+	return index
+}
+
 // formatBulletGroup formats a group of bullets with the same topic.
 func (rc *digestRenderContext) formatBulletGroup(sb *strings.Builder, g bulletGroup) {
 	emoji := topicEmojis[g.topic]
@@ -171,8 +233,8 @@ func (rc *digestRenderContext) formatSingleBullet(sb *strings.Builder, b db.Bull
 	// Add corroboration count if multiple sources confirm this claim
 	if b.SourceCount > 1 {
 		fmt.Fprintf(sb, " <i>(%d sources)</i>", b.SourceCount)
-	} else if rc.settings.bulletSourceAttribution {
-		// Add single source attribution if enabled
+	} else if rc.settings.bulletSourceAttribution && b.ImportanceScore >= ImportanceScoreNotable {
+		// Add single source attribution only for high-importance bullets
 		sb.WriteString(rc.formatBulletSource(b))
 	}
 

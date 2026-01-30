@@ -75,9 +75,10 @@ Set cache TTL for fetched links:
 
 ### Basic Settings
 
+Link enrichment is enabled by default.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LINK_ENRICHMENT_ENABLED` | `false` | Enable link resolution |
 | `LINK_ENRICHMENT_SCOPE` | `summary` | Pipeline stages that use link content |
 | `MAX_LINKS_PER_MESSAGE` | `3` | Max URLs to process per message |
 | `LINK_CACHE_TTL` | `24h` | Cache TTL for web links |

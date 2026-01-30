@@ -19,8 +19,9 @@ The feature reuses existing evidence and cluster data, avoiding additional LLM c
 
 ### Enable Expanded Views
 
+Expanded views are automatically enabled when both `EXPANDED_VIEW_BASE_URL` and `EXPANDED_VIEW_SIGNING_SECRET` are configured:
+
 ```env
-EXPANDED_VIEW_ENABLED=true
 EXPANDED_VIEW_BASE_URL=https://digest.example.com
 EXPANDED_VIEW_SIGNING_SECRET=changeme
 ```
@@ -29,8 +30,7 @@ EXPANDED_VIEW_SIGNING_SECRET=changeme
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `EXPANDED_VIEW_ENABLED` | `false` | Enable expanded view feature |
-| `EXPANDED_VIEW_BASE_URL` | - | Public URL where expanded views are served |
+| `EXPANDED_VIEW_BASE_URL` | - | Public URL where expanded views are served (required) |
 | `EXPANDED_VIEW_SIGNING_SECRET` | - | HMAC signing secret for tokens (required) |
 | `EXPANDED_VIEW_TTL_HOURS` | `72` | Token expiration time in hours |
 | `EXPANDED_VIEW_REQUIRE_ADMIN` | `true` | Restrict access to admin users |
@@ -40,7 +40,6 @@ EXPANDED_VIEW_SIGNING_SECRET=changeme
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `EXPANDED_CHATGPT_SHORTCUT_ENABLED` | `false` | Enable ChatGPT shortcut button |
 | `EXPANDED_CHATGPT_SHORTCUT_NAME` | `Ask ChatGPT` | Name of the iOS shortcut |
 | `EXPANDED_CHATGPT_SHORTCUT_ICLOUD_URL` | - | iCloud link to install the shortcut |
 | `EXPANDED_SHORTCUT_URL_MAX_CHARS` | `2000` | Max prompt length in shortcuts URL |

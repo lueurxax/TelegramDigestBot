@@ -144,12 +144,12 @@ Both features can coexist, but bulletized output must be implemented with the cl
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BULLET_EXTRACTION_ENABLED` | `false` | Enable bullet extraction |
-| `BULLET_BATCH_SIZE` | `5` | Messages per LLM batch |
-| `BULLET_DEDUP_THRESHOLD` | `0.92` | Similarity threshold for dedup |
+| `BULLET_BATCH_SIZE` | `3` | Max bullets extracted per message |
+| `BULLET_DEDUP_THRESHOLD` | `0.88` | Similarity threshold for dedup |
 | `BULLET_SOURCE_ATTRIBUTION` | `true` | Show source channel |
 | `BULLET_SOURCE_FORMAT` | `compact` | Attribution format (`full` or `compact`) |
-| `BULLET_MAX_PER_CLUSTER` | `5` | Max bullets per cluster |
+| `BULLET_MAX_PER_CLUSTER` | `2` | Max bullets per cluster |
+| `BULLET_MIN_IMPORTANCE` | `0.4` | Minimum importance threshold |
 
 ## Next Steps
 

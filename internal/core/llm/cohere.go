@@ -470,7 +470,7 @@ func (p *cohereProvider) GenerateClusterTopic(ctx context.Context, items []domai
 
 // RelevanceGate implements Provider interface.
 //
-//nolint:dupl // Provider implementations share similar structure
+
 func (p *cohereProvider) RelevanceGate(ctx context.Context, text, model, prompt string) (RelevanceGateResult, error) {
 	if err := p.rateLimiter.Wait(ctx); err != nil {
 		return RelevanceGateResult{}, fmt.Errorf(errRateLimiterSimple, err)
@@ -479,28 +479,17 @@ func (p *cohereProvider) RelevanceGate(ctx context.Context, text, model, prompt 
 	fullPrompt := fmt.Sprintf(relevanceGateFormat, prompt, text)
 	resolvedModel := p.resolveModel(model)
 
-	apiResult, err := p.callCohereAPI(ctx, fullPrompt, model, cohereMaxTokensMicro)
-	if err != nil {
-		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskRelevanceGate, 0, 0, false)
-
-		return RelevanceGateResult{}, err
+	helper := &relevanceGateHelper{
+		providerName:      ProviderCohere,
+		usageRecorder:     p.usageRecorder,
+		logger:            p.logger,
+		defaultConfidence: cohereDefaultConfidence,
 	}
 
-	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskRelevanceGate, apiResult.PromptTokens, apiResult.CompletionTokens, true)
-	responseText := extractJSON(apiResult.Text)
-
-	var result RelevanceGateResult
-	if unmarshalErr := json.Unmarshal([]byte(responseText), &result); unmarshalErr != nil {
-		p.logger.Warn().Err(unmarshalErr).Str(logKeyResponse, responseText).Msg(logMsgParseRelevanceGateFail)
-
-		return RelevanceGateResult{
-			Decision:   "relevant",
-			Confidence: cohereDefaultConfidence,
-			Reason:     "failed to parse response",
-		}, nil
-	}
-
-	return result, nil
+	return helper.executeRelevanceGate(resolvedModel, func() (apiCallResult, error) {
+		result, err := p.callCohereAPI(ctx, fullPrompt, model, cohereMaxTokensMicro)
+		return apiCallResult(result), err
+	})
 }
 
 // CompressSummariesForCover implements Provider interface.
@@ -516,26 +505,15 @@ func (p *cohereProvider) CompressSummariesForCover(ctx context.Context, summarie
 	prompt := buildCompressSummariesPrompt(summaries)
 	resolvedModel := p.resolveModel(model)
 
-	result, err := p.callCohereAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, model, cohereMaxTokensTiny)
-	if err != nil {
-		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCompress, 0, 0, false)
-
-		return nil, err
+	helper := &compressHelper{
+		providerName:  ProviderCohere,
+		usageRecorder: p.usageRecorder,
 	}
 
-	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCompress, result.PromptTokens, result.CompletionTokens, true)
-	lines := strings.Split(strings.TrimSpace(result.Text), "\n")
-
-	var compressed []string
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			compressed = append(compressed, trimmed)
-		}
-	}
-
-	return compressed, nil
+	return helper.executeCompress(resolvedModel, func() (apiCallResult, error) {
+		result, err := p.callCohereAPI(ctx, compressSummariesSystemPrompt+"\n\n"+prompt, model, cohereMaxTokensTiny)
+		return apiCallResult(result), err
+	})
 }
 
 // GenerateDigestCover returns an error as Cohere doesn't support image generation.
@@ -544,19 +522,24 @@ func (p *cohereProvider) GenerateDigestCover(_ context.Context, _ []string, _ st
 }
 
 // ExtractBullets extracts key bullet points from a message.
-// This is a stub implementation - actual bullet extraction logic will be added later.
-func (p *cohereProvider) ExtractBullets(_ context.Context, input BulletExtractionInput, _, _ string) (BulletExtractionResult, error) {
-	// Stub: return the input text as a single bullet with default scores
-	return BulletExtractionResult{
-		Bullets: []ExtractedBullet{
-			{
-				Text:            input.Summary,
-				RelevanceScore:  fallbackBulletScore,
-				ImportanceScore: fallbackBulletScore,
-				Topic:           "",
-			},
-		},
-	}, nil
+func (p *cohereProvider) ExtractBullets(ctx context.Context, input BulletExtractionInput, targetLanguage, model string) (BulletExtractionResult, error) {
+	if err := p.rateLimiter.Wait(ctx); err != nil {
+		return BulletExtractionResult{}, fmt.Errorf(errRateLimiterSimple, err)
+	}
+
+	prompt := buildBulletExtractionPrompt(input, targetLanguage)
+	resolvedModel := p.resolveModel(model)
+
+	helper := &bulletExtractionHelper{
+		providerName:  ProviderCohere,
+		usageRecorder: p.usageRecorder,
+		logger:        p.logger,
+	}
+
+	return helper.extractBullets(ctx, input, targetLanguage, resolvedModel, func() (apiCallResult, error) {
+		result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensTiny)
+		return apiCallResult(result), err
+	})
 }
 
 // Ensure cohereProvider implements Provider interface.

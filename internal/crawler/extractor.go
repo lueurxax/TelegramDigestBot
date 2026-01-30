@@ -199,18 +199,23 @@ func (e *Extractor) fetchPage(ctx context.Context, rawURL string) ([]byte, strin
 		return nil, "", fmt.Errorf("%w: %d", errHTTPError, resp.StatusCode)
 	}
 
-	// Get content type
+	// Read body first (needed for content type detection fallback)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxContentLength))
+	if err != nil {
+		return nil, "", fmt.Errorf("read body: %w", err)
+	}
+
+	// Get content type from header
 	contentType := resp.Header.Get(extractorHeaderCT)
+
+	// Fallback to body detection if header is missing or generic
+	if contentType == "" || contentType == "application/octet-stream" {
+		contentType = http.DetectContentType(body)
+	}
 
 	// Accept HTML, XHTML, and XML (for RSS/Atom feeds)
 	if !isAcceptableContentType(contentType) {
 		return nil, "", fmt.Errorf("%w: %s", errUnsupportedContentType, contentType)
-	}
-
-	// Read body with size limit
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxContentLength))
-	if err != nil {
-		return nil, "", fmt.Errorf("read body: %w", err)
 	}
 
 	return body, contentType, nil

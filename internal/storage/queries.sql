@@ -97,10 +97,11 @@ WHERE processing_started_at IS NOT NULL
   AND processing_started_at < now() - $1::interval;
 
 -- name: SaveItem :one
-INSERT INTO items (raw_message_id, relevance_score, importance_score, topic, summary, language, language_source, status, retry_count, next_retry_at, first_seen_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, NULL, (SELECT tg_date FROM raw_messages WHERE id = $1))
+INSERT INTO items (raw_message_id, relevance_score, importance_score, topic, summary, language, language_source, status, bullet_total_count, bullet_included_count, retry_count, next_retry_at, first_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, NULL, (SELECT tg_date FROM raw_messages WHERE id = $1))
 ON CONFLICT (raw_message_id) DO UPDATE SET
     relevance_score = $2, importance_score = $3, topic = $4, summary = $5, language = $6, language_source = $7, status = $8,
+    bullet_total_count = $9, bullet_included_count = $10,
     retry_count = 0, next_retry_at = NULL, error_json = NULL,
     first_seen_at = COALESCE(items.first_seen_at, EXCLUDED.first_seen_at)
 RETURNING id;

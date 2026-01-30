@@ -33,14 +33,16 @@ type ItemRating struct {
 
 func (db *DB) SaveItem(ctx context.Context, item *Item) error {
 	id, err := db.Queries.SaveItem(ctx, sqlc.SaveItemParams{
-		RawMessageID:    toUUID(item.RawMessageID),
-		RelevanceScore:  item.RelevanceScore,
-		ImportanceScore: item.ImportanceScore,
-		Topic:           toText(item.Topic),
-		Summary:         toText(item.Summary),
-		Language:        toText(item.Language),
-		LanguageSource:  toText(item.LanguageSource),
-		Status:          SanitizeUTF8(item.Status),
+		RawMessageID:        toUUID(item.RawMessageID),
+		RelevanceScore:      item.RelevanceScore,
+		ImportanceScore:     item.ImportanceScore,
+		Topic:               toText(item.Topic),
+		Summary:             toText(item.Summary),
+		Language:            toText(item.Language),
+		LanguageSource:      toText(item.LanguageSource),
+		Status:              SanitizeUTF8(item.Status),
+		BulletTotalCount:    safeIntToInt32(item.BulletTotalCount),
+		BulletIncludedCount: safeIntToInt32(item.BulletIncludedCount),
 	})
 	if err != nil {
 		return fmt.Errorf("save item: %w", err)

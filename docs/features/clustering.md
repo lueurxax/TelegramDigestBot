@@ -55,7 +55,6 @@ Clustering behavior can be tuned via environment variables:
 | `CLUSTER_COHERENCE_THRESHOLD` | float32 | `0.70` | Minimum average pairwise similarity required for a valid cluster. |
 | `CLUSTER_TIME_WINDOW_HOURS` | int | `36` | Maximum time difference between items in a cluster. |
 | `CROSS_TOPIC_CLUSTERING_ENABLED` | bool | `false` | If true, allows clustering items that were initially categorized into different broad topics. |
-| `EVIDENCE_CLUSTERING_ENABLED` | bool | `true` | If true, boosts similarity scores for items that share the same external evidence sources. |
 | `EVIDENCE_CLUSTERING_BOOST` | float32 | `0.15` | The amount to boost the similarity score if evidence matches. |
 | `EVIDENCE_CLUSTERING_MIN_SCORE` | float32 | `0.5` | Minimum initial similarity required before applying an evidence boost. |
 
@@ -63,7 +62,7 @@ Clustering behavior can be tuned via environment variables:
 
 ### Evidence-Enhanced Clustering
 
-When `EVIDENCE_CLUSTERING_ENABLED` is true, the system looks at the external links (evidence) associated with items. If two items link to the same external article (or very similar ones), their similarity score is boosted. This helps group items that report on the same source even if their text descriptions vary significantly.
+Evidence-enhanced clustering is enabled by default. The system looks at the external links (evidence) associated with items. If two items link to the same external article (or very similar ones), their similarity score is boosted. This helps group items that report on the same source even if their text descriptions vary significantly.
 
 ### Consolidated Clusters
 
