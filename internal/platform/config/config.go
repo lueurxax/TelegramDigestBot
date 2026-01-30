@@ -226,6 +226,8 @@ type Config struct {
 	BulletSourceAttribution bool    `env:"BULLET_SOURCE_ATTRIBUTION" envDefault:"true"`
 	BulletSourceFormat      string  `env:"BULLET_SOURCE_FORMAT" envDefault:"compact"`
 	BulletMaxPerCluster     int     `env:"BULLET_MAX_PER_CLUSTER" envDefault:"5"`
+	BulletMinImportance     float32 `env:"BULLET_MIN_IMPORTANCE" envDefault:"0.6"`
+	BulletDedupIntervalMins int     `env:"BULLET_DEDUP_INTERVAL_MINS" envDefault:"5"`
 }
 
 func Load() (*Config, error) {

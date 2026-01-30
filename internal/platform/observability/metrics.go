@@ -287,4 +287,26 @@ var (
 		Name: "crawler_queue_pending",
 		Help: "Current number of pending URLs in the crawler queue",
 	})
+
+	// Telegram Reader metrics
+	ReaderFloodWaitSecondsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_reader_flood_wait_seconds_total",
+		Help: "Total time in seconds spent waiting for Telegram flood control",
+	}, []string{"channel"})
+
+	ReaderFloodWaitCountTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_reader_flood_wait_total",
+		Help: "Total number of Telegram flood wait events",
+	}, []string{"channel"})
+
+	ReaderFetchRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_reader_fetch_requests_total",
+		Help: "Total number of history fetch requests to Telegram",
+	}, []string{"channel", "status"})
+
+	ReaderMessageAgeSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "digest_reader_message_age_seconds",
+		Help:    "Age of ingested messages at time of collection",
+		Buckets: []float64{60, 300, 900, 1800, 3600, 7200, 14400, 28800, 43200, 86400, 172800, 604800},
+	}, []string{"channel"})
 )

@@ -29,6 +29,7 @@ type BulletForDigest struct {
 	SourceChannel      string
 	SourceChannelTitle string
 	TGDate             time.Time
+	SourceCount        int // Number of corroborating sources (items with similar bullets)
 }
 
 // InsertBullet saves a new bullet to the database.
@@ -138,6 +139,7 @@ func (db *DB) GetBulletsForDigest(ctx context.Context, itemIDs []string) ([]Bull
 			SourceChannel:      fromText(row.SourceChannel),
 			SourceChannelTitle: fromText(row.SourceChannelTitle),
 			TGDate:             fromTimestamptz(row.TgDate),
+			SourceCount:        int(row.SourceCount),
 		}
 	}
 
@@ -153,6 +155,27 @@ func (db *DB) MarkDuplicateBullets(ctx context.Context, bulletIDs []string) erro
 
 	if err := db.Queries.MarkDuplicateBullets(ctx, uuids); err != nil {
 		return fmt.Errorf("mark duplicate bullets: %w", err)
+	}
+
+	return nil
+}
+
+// MarkBulletAsDuplicateOf marks a bullet as duplicate and links it to its canonical bullet.
+func (db *DB) MarkBulletAsDuplicateOf(ctx context.Context, bulletID, canonicalID string) error {
+	if err := db.Queries.MarkBulletAsDuplicateOf(ctx, sqlc.MarkBulletAsDuplicateOfParams{
+		ID:              toUUID(bulletID),
+		BulletClusterID: toUUID(canonicalID),
+	}); err != nil {
+		return fmt.Errorf("mark bullet as duplicate of: %w", err)
+	}
+
+	return nil
+}
+
+// MarkBulletAsCanonical marks a bullet as ready and sets its cluster ID to itself.
+func (db *DB) MarkBulletAsCanonical(ctx context.Context, bulletID string) error {
+	if err := db.Queries.MarkBulletAsCanonical(ctx, toUUID(bulletID)); err != nil {
+		return fmt.Errorf("mark bullet as canonical: %w", err)
 	}
 
 	return nil

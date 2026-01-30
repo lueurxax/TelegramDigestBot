@@ -173,6 +173,14 @@ func (m *mockRepo) MarkDuplicateBullets(_ context.Context, _ []string) error {
 	return nil
 }
 
+func (m *mockRepo) MarkBulletAsDuplicateOf(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (m *mockRepo) MarkBulletAsCanonical(_ context.Context, _ string) error {
+	return nil
+}
+
 func (m *mockRepo) DeleteSetting(_ context.Context, key string) error {
 	delete(m.settings, key)
 

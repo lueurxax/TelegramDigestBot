@@ -14,8 +14,14 @@ import (
 
 // extractAndStoreBullets extracts bullets from the message and stores them.
 // This is a non-fatal operation - failures are logged but don't block the pipeline.
+// Only extracts bullets for items above the importance threshold to reduce LLM costs.
 func (p *Pipeline) extractAndStoreBullets(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, item *db.Item, digestLanguage string) {
 	if !p.cfg.BulletExtractionEnabled || item.Status != StatusReady {
+		return
+	}
+
+	// Only extract bullets for high-importance items to reduce LLM costs
+	if item.ImportanceScore < p.cfg.BulletMinImportance {
 		return
 	}
 
@@ -57,12 +63,14 @@ func (p *Pipeline) storeBullets(ctx context.Context, logger zerolog.Logger, bull
 }
 
 // createBulletFromExtracted creates a domain Bullet from an extracted bullet.
+// Topic is inherited from the item (which comes from clustering) to avoid fragmentation.
+// LLM-generated bullet topics are only used as fallback when item has no topic.
 func (p *Pipeline) createBulletFromExtracted(index int, b llm.ExtractedBullet, item *db.Item) *domain.Bullet {
 	bullet := &domain.Bullet{
 		ItemID:             item.ID,
 		BulletIndex:        index,
 		Text:               b.Text,
-		Topic:              coalesceTopic(b.Topic, item.Topic),
+		Topic:              coalesceTopic(item.Topic, b.Topic), // Prefer item topic to avoid fragmentation
 		RelevanceScore:     b.RelevanceScore,
 		ImportanceScore:    b.ImportanceScore,
 		Status:             domain.BulletStatusPending,

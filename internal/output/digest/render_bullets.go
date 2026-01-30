@@ -114,8 +114,11 @@ func (rc *digestRenderContext) formatSingleBullet(sb *strings.Builder, b db.Bull
 	sb.WriteString(BulletItemPrefix)
 	sb.WriteString(sanitizedText)
 
-	// Add source attribution if enabled
-	if rc.settings.bulletSourceAttribution {
+	// Add corroboration count if multiple sources confirm this claim
+	if b.SourceCount > 1 {
+		fmt.Fprintf(sb, " <i>(%d sources)</i>", b.SourceCount)
+	} else if rc.settings.bulletSourceAttribution {
+		// Add single source attribution if enabled
 		sb.WriteString(rc.formatBulletSource(b))
 	}
 

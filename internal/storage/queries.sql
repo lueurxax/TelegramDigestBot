@@ -989,11 +989,19 @@ UPDATE item_bullets SET status = $2 WHERE id = $1;
 -- name: GetBulletsForDigest :many
 SELECT b.id, b.item_id, b.bullet_index, b.text, b.topic, b.relevance_score,
        b.importance_score, b.bullet_hash, b.status, b.created_at,
-       c.username as source_channel, c.title as source_channel_title, rm.tg_date
+       c.username as source_channel, c.title as source_channel_title, rm.tg_date,
+       COALESCE(corr.source_count, 1)::int as source_count
 FROM item_bullets b
 JOIN items i ON b.item_id = i.id
 JOIN raw_messages rm ON i.raw_message_id = rm.id
 JOIN channels c ON rm.channel_id = c.id
+LEFT JOIN (
+    -- Count distinct items that have bullets pointing to this canonical bullet
+    SELECT bullet_cluster_id, COUNT(DISTINCT item_id) as source_count
+    FROM item_bullets
+    WHERE bullet_cluster_id IS NOT NULL
+    GROUP BY bullet_cluster_id
+) corr ON corr.bullet_cluster_id = b.id
 WHERE i.id = ANY($1::uuid[]) AND b.status = 'ready'
 ORDER BY b.importance_score DESC;
 
@@ -1007,3 +1015,13 @@ SELECT id, text, embedding, item_id, importance_score
 FROM item_bullets
 WHERE status = 'pending' AND embedding IS NOT NULL
 ORDER BY importance_score DESC;
+
+-- name: MarkBulletAsDuplicateOf :exec
+UPDATE item_bullets
+SET status = 'duplicate', bullet_cluster_id = $2
+WHERE id = $1;
+
+-- name: MarkBulletAsCanonical :exec
+UPDATE item_bullets
+SET status = 'ready', bullet_cluster_id = id
+WHERE id = $1;

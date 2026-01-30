@@ -56,6 +56,8 @@ type Repository interface {
 	UpdateBulletStatus(ctx context.Context, bulletID, status string) error
 	GetPendingBulletsForDedup(ctx context.Context) ([]db.PendingBulletForDedup, error)
 	MarkDuplicateBullets(ctx context.Context, bulletIDs []string) error
+	MarkBulletAsDuplicateOf(ctx context.Context, bulletID, canonicalID string) error
+	MarkBulletAsCanonical(ctx context.Context, bulletID string) error
 }
 
 // Compile-time assertion that *db.DB implements Repository.
@@ -173,6 +175,8 @@ func (p *Pipeline) Run(ctx context.Context) error {
 
 	// Track last recovery time
 	lastRecovery := time.Now()
+	lastBulletDedup := time.Now()
+	bulletDedupInterval := time.Duration(p.cfg.BulletDedupIntervalMins) * time.Minute
 
 	for {
 		// Periodically recover stuck messages
@@ -180,6 +184,13 @@ func (p *Pipeline) Run(ctx context.Context) error {
 			p.recoverStuckMessages(ctx)
 
 			lastRecovery = time.Now()
+		}
+
+		// Periodically deduplicate pending bullets
+		if p.cfg.BulletExtractionEnabled && time.Since(lastBulletDedup) >= bulletDedupInterval {
+			p.runBulletDeduplication(ctx)
+
+			lastBulletDedup = time.Now()
 		}
 
 		correlationID := uuid.New().String()
@@ -208,6 +219,15 @@ func (p *Pipeline) recoverStuckMessages(ctx context.Context) {
 
 	if recovered > 0 {
 		p.logger.Info().Int64("recovered", recovered).Msg("recovered stuck pipeline messages")
+	}
+}
+
+// runBulletDeduplication processes pending bullets and marks duplicates.
+func (p *Pipeline) runBulletDeduplication(ctx context.Context) {
+	logger := p.logger.With().Str(LogFieldTask, "bullet_dedup").Logger()
+
+	if err := p.DeduplicatePendingBullets(ctx, logger); err != nil {
+		logger.Error().Err(err).Msg("bullet deduplication failed")
 	}
 }
 

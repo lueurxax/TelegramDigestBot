@@ -903,6 +903,8 @@ func (r *Reader) fetchDescriptionIfMissing(ctx context.Context, api *tg.Client, 
 func (r *Reader) fetchHistory(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, ch db.Channel) (tg.MessagesMessagesClass, error) {
 	r.logger.Debug().Str(logFieldUsername, ch.Username).Int64(logFieldPeerID, ch.TGPeerID).Int64("last_id", ch.LastTGMessageID).Msg("Getting history")
 
+	observability.ReaderFetchRequestsTotal.WithLabelValues(ch.Username, "attempt").Inc()
+
 	req := &tg.MessagesGetHistoryRequest{
 		Peer:  peer,
 		Limit: r.cfg.ReaderFetchLimit,
@@ -920,6 +922,10 @@ func (r *Reader) fetchHistory(ctx context.Context, api *tg.Client, peer tg.Input
 		if ok && floodErr.Type == "FLOOD_WAIT" {
 			r.logger.Warn().Int("seconds", floodErr.Argument).Str(logFieldChannel, ch.Username).Msg("flood wait")
 
+			observability.ReaderFloodWaitCountTotal.WithLabelValues(ch.Username).Inc()
+			observability.ReaderFloodWaitSecondsTotal.WithLabelValues(ch.Username).Add(float64(floodErr.Argument))
+			observability.ReaderFetchRequestsTotal.WithLabelValues(ch.Username, "flood_wait").Inc()
+
 			select {
 			case <-ctx.Done():
 				return nil, fmt.Errorf("flood wait canceled: %w", ctx.Err())
@@ -930,8 +936,12 @@ func (r *Reader) fetchHistory(ctx context.Context, api *tg.Client, peer tg.Input
 			return r.fetchHistory(ctx, api, peer, ch)
 		}
 
+		observability.ReaderFetchRequestsTotal.WithLabelValues(ch.Username, "error").Inc()
+
 		return nil, fmt.Errorf("failed to get history: %w", err)
 	}
+
+	observability.ReaderFetchRequestsTotal.WithLabelValues(ch.Username, "success").Inc()
 
 	return history, nil
 }
@@ -993,6 +1003,10 @@ func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessin
 		CanonicalHash: r.canonicalize(msg.Message),
 		IsForward:     isForward,
 	}
+
+	// Record message age
+	age := time.Since(rawMsg.TGDate).Seconds()
+	observability.ReaderMessageAgeSeconds.WithLabelValues(hpc.ch.Username).Observe(age)
 
 	if err := r.database.SaveRawMessage(ctx, rawMsg); err != nil {
 		r.logger.Error().Err(err).Str(logFieldChannel, hpc.ch.Username).Int(logFieldMsgID, msg.ID).Msg("failed to save raw message")

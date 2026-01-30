@@ -7,12 +7,12 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 // DeduplicatePendingBullets processes pending bullets and marks duplicates.
 // Uses higher threshold (0.92) than item dedup due to short string false positives.
+// Also sets bullet_cluster_id to link duplicates to their canonical bullet for corroboration counting.
 func (p *Pipeline) DeduplicatePendingBullets(ctx context.Context, logger zerolog.Logger) error {
 	threshold := p.cfg.BulletDedupThreshold
 	if threshold <= 0 {
@@ -28,32 +28,45 @@ func (p *Pipeline) DeduplicatePendingBullets(ctx context.Context, logger zerolog
 		return nil
 	}
 
-	// Group bullets by item (to avoid marking bullets from the same item as duplicates of each other)
-	byItem := make(map[string][]db.PendingBulletForDedup)
-	for _, b := range bullets {
-		byItem[b.ItemID] = append(byItem[b.ItemID], b)
+	// Find duplicates with their canonical bullet mappings
+	duplicateToCanonical := findDuplicateBulletsWithCanonical(bullets, threshold)
+
+	// Mark duplicates
+	p.markDuplicates(ctx, logger, duplicateToCanonical)
+
+	// Mark canonical bullets as ready
+	readyCount := p.markCanonicalBullets(ctx, logger, bullets, duplicateToCanonical)
+
+	logger.Info().Int(LogFieldReady, readyCount).Int(LogFieldDuplicate, len(duplicateToCanonical)).Msg("bullet deduplication complete")
+
+	return nil
+}
+
+// markDuplicates marks bullets as duplicates and links them to their canonical bullets.
+func (p *Pipeline) markDuplicates(ctx context.Context, logger zerolog.Logger, duplicateToCanonical map[string]string) {
+	if len(duplicateToCanonical) == 0 {
+		return
 	}
 
-	// Find duplicates across items
-	duplicateIDs := findDuplicateBullets(bullets, threshold)
-
-	if len(duplicateIDs) > 0 {
-		if err := p.database.MarkDuplicateBullets(ctx, duplicateIDs); err != nil {
-			return fmt.Errorf("mark duplicate bullets: %w", err)
+	for duplicateID, canonicalID := range duplicateToCanonical {
+		if err := p.database.MarkBulletAsDuplicateOf(ctx, duplicateID, canonicalID); err != nil {
+			logger.Warn().Err(err).Str(LogFieldBulletID, duplicateID).Msg("failed to mark bullet as duplicate")
 		}
-
-		logger.Info().Int(LogFieldCount, len(duplicateIDs)).Msg("marked duplicate bullets")
 	}
 
-	// Mark remaining bullets as ready
+	logger.Info().Int(LogFieldCount, len(duplicateToCanonical)).Msg("marked duplicate bullets")
+}
+
+// markCanonicalBullets marks non-duplicate bullets as ready with cluster_id set to self.
+func (p *Pipeline) markCanonicalBullets(ctx context.Context, logger zerolog.Logger, bullets []db.PendingBulletForDedup, duplicateToCanonical map[string]string) int {
 	readyCount := 0
 
 	for _, b := range bullets {
-		if containsString(duplicateIDs, b.ID) {
+		if _, isDupe := duplicateToCanonical[b.ID]; isDupe {
 			continue
 		}
 
-		if err := p.database.UpdateBulletStatus(ctx, b.ID, domain.BulletStatusReady); err != nil {
+		if err := p.database.MarkBulletAsCanonical(ctx, b.ID); err != nil {
 			logger.Warn().Err(err).Str(LogFieldBulletID, b.ID).Msg("failed to mark bullet as ready")
 
 			continue
@@ -62,17 +75,13 @@ func (p *Pipeline) DeduplicatePendingBullets(ctx context.Context, logger zerolog
 		readyCount++
 	}
 
-	logger.Info().Int(LogFieldReady, readyCount).Int(LogFieldDuplicate, len(duplicateIDs)).Msg("bullet deduplication complete")
-
-	return nil
+	return readyCount
 }
 
-// findDuplicateBullets finds bullets that are semantically similar to higher-scoring bullets.
-func findDuplicateBullets(bullets []db.PendingBulletForDedup, threshold float64) []string {
-	var duplicates []string
-
-	// Track which bullets we've already marked as canonical (kept)
-	canonical := make(map[string]bool)
+// findDuplicateBulletsWithCanonical finds bullets that are semantically similar to higher-scoring bullets.
+// Returns a map of duplicate bullet ID -> canonical bullet ID for corroboration tracking.
+func findDuplicateBulletsWithCanonical(bullets []db.PendingBulletForDedup, threshold float64) map[string]string {
+	duplicateToCanonical := make(map[string]string)
 
 	// Bullets are already sorted by importance_score DESC
 	for i, bullet := range bullets {
@@ -80,13 +89,10 @@ func findDuplicateBullets(bullets []db.PendingBulletForDedup, threshold float64)
 			continue
 		}
 
-		// Check if this bullet is already marked as duplicate
-		if containsString(duplicates, bullet.ID) {
+		// Skip if this bullet is already marked as duplicate
+		if _, isDupe := duplicateToCanonical[bullet.ID]; isDupe {
 			continue
 		}
-
-		// Mark this bullet as canonical
-		canonical[bullet.ID] = true
 
 		// Compare with all subsequent (lower-scored) bullets
 		for j := i + 1; j < len(bullets); j++ {
@@ -97,7 +103,7 @@ func findDuplicateBullets(bullets []db.PendingBulletForDedup, threshold float64)
 			}
 
 			// Skip if already marked
-			if containsString(duplicates, other.ID) {
+			if _, isDupe := duplicateToCanonical[other.ID]; isDupe {
 				continue
 			}
 
@@ -110,12 +116,12 @@ func findDuplicateBullets(bullets []db.PendingBulletForDedup, threshold float64)
 			similarity := cosineSimilarity(bullet.Embedding, other.Embedding)
 
 			if similarity >= threshold {
-				duplicates = append(duplicates, other.ID)
+				duplicateToCanonical[other.ID] = bullet.ID
 			}
 		}
 	}
 
-	return duplicates
+	return duplicateToCanonical
 }
 
 // cosineSimilarity calculates the cosine similarity between two embedding vectors.
@@ -137,17 +143,6 @@ func cosineSimilarity(a, b []float32) float64 {
 	}
 
 	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
-}
-
-// containsString checks if a string is in a slice.
-func containsString(slice []string, s string) bool {
-	for _, item := range slice {
-		if item == s {
-			return true
-		}
-	}
-
-	return false
 }
 
 // defaultBulletDedupThreshold is the default similarity threshold for bullet deduplication.

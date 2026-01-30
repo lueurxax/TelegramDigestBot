@@ -100,6 +100,8 @@ type Querier interface {
 	IsChannelTracked(ctx context.Context, arg IsChannelTrackedParams) (bool, error)
 	LinkMessageToLink(ctx context.Context, arg LinkMessageToLinkParams) error
 	MarkAsProcessed(ctx context.Context, id pgtype.UUID) error
+	MarkBulletAsCanonical(ctx context.Context, id pgtype.UUID) error
+	MarkBulletAsDuplicateOf(ctx context.Context, arg MarkBulletAsDuplicateOfParams) error
 	MarkDuplicateBullets(ctx context.Context, dollar_1 []pgtype.UUID) error
 	MarkItemsAsDigested(ctx context.Context, dollar_1 []pgtype.UUID) error
 	// Recovers messages that were claimed but not processed within the timeout.
