@@ -211,3 +211,31 @@ func safeIntToInt32(i int) int32 {
 
 	return int32(i)
 }
+
+func toFloat4(f float32) pgtype.Float4 {
+	return pgtype.Float4{Float32: f, Valid: true}
+}
+
+func fromFloat4(f pgtype.Float4) float32 {
+	if !f.Valid {
+		return 0
+	}
+
+	return f.Float32
+}
+
+func fromText(t pgtype.Text) string {
+	if !t.Valid {
+		return ""
+	}
+
+	return t.String
+}
+
+func fromTimestamptz(t pgtype.Timestamptz) time.Time {
+	if !t.Valid {
+		return time.Time{}
+	}
+
+	return t.Time
+}

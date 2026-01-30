@@ -135,19 +135,59 @@ func (c *openaiClient) SetBudgetAlertCallback(_ func(alert BudgetAlert)) {}
 func (c *openaiClient) RecordTokensForBudget(_ int) {}
 
 // ExtractBullets extracts key bullet points from a message.
-// This is a stub implementation - actual bullet extraction logic will be added later.
-func (c *openaiClient) ExtractBullets(_ context.Context, input BulletExtractionInput, _, _ string) (BulletExtractionResult, error) {
-	// Stub: return the input text as a single bullet with default scores
-	return BulletExtractionResult{
-		Bullets: []ExtractedBullet{
+// Uses LLM to identify 1-3 self-contained claims with scores and topics.
+func (c *openaiClient) ExtractBullets(ctx context.Context, input BulletExtractionInput, targetLanguage, model string) (BulletExtractionResult, error) {
+	if err := c.checkCircuit(); err != nil {
+		return c.bulletFallback(input), nil //nolint:nilerr // Fallback is intentional on circuit breaker
+	}
+
+	if err := c.rateLimiter.Wait(ctx); err != nil {
+		return BulletExtractionResult{}, fmt.Errorf(errRateLimiter, err)
+	}
+
+	prompt := buildBulletExtractionPrompt(input, targetLanguage)
+	resolvedModel := c.resolveModel(model)
+
+	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model: resolvedModel,
+		Messages: []openai.ChatCompletionMessage{
 			{
-				Text:            input.Summary,
-				RelevanceScore:  fallbackBulletScore,
-				ImportanceScore: fallbackBulletScore,
-				Topic:           "",
+				Role:    openai.ChatMessageRoleUser,
+				Content: prompt,
 			},
 		},
-	}, nil
+		ResponseFormat: &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		},
+	})
+	if err != nil {
+		c.recordFailure()
+		c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), resolvedModel, TaskBulletExtract, 0, 0, false)
+
+		return c.bulletFallback(input), nil //nolint:nilerr // Fallback is intentional on API error
+	}
+
+	c.recordSuccess()
+
+	if len(resp.Choices) == 0 {
+		return c.bulletFallback(input), nil
+	}
+
+	c.usageRecorder.RecordTokenUsage(string(ProviderOpenAI), resolvedModel, TaskBulletExtract, resp.Usage.PromptTokens, resp.Usage.CompletionTokens, true)
+
+	bullets, err := parseBulletResponse(resp.Choices[0].Message.Content)
+	if err != nil {
+		c.logger.Warn().Err(err).Str(logKeyResponse, resp.Choices[0].Message.Content).Msg(logMsgBulletParseError)
+
+		return c.bulletFallback(input), nil
+	}
+
+	return BulletExtractionResult{Bullets: bullets}, nil
+}
+
+// bulletFallback returns the input summary as a single bullet with default scores.
+func (c *openaiClient) bulletFallback(input BulletExtractionInput) BulletExtractionResult {
+	return makeBulletFallback(input)
 }
 
 // Ensure openaiClient implements Provider interface.

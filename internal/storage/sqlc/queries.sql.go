@@ -502,6 +502,142 @@ func (q *Queries) GetBacklogCount(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const getBulletsForDigest = `-- name: GetBulletsForDigest :many
+SELECT b.id, b.item_id, b.bullet_index, b.text, b.topic, b.relevance_score,
+       b.importance_score, b.bullet_hash, b.status, b.created_at,
+       c.username as source_channel, c.title as source_channel_title, rm.tg_date
+FROM item_bullets b
+JOIN items i ON b.item_id = i.id
+JOIN raw_messages rm ON i.raw_message_id = rm.id
+JOIN channels c ON rm.channel_id = c.id
+WHERE i.id = ANY($1::uuid[]) AND b.status = 'ready'
+ORDER BY b.importance_score DESC
+`
+
+type GetBulletsForDigestRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	ItemID             pgtype.UUID        `json:"item_id"`
+	BulletIndex        int32              `json:"bullet_index"`
+	Text               string             `json:"text"`
+	Topic              pgtype.Text        `json:"topic"`
+	RelevanceScore     pgtype.Float4      `json:"relevance_score"`
+	ImportanceScore    pgtype.Float4      `json:"importance_score"`
+	BulletHash         pgtype.Text        `json:"bullet_hash"`
+	Status             pgtype.Text        `json:"status"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	SourceChannel      pgtype.Text        `json:"source_channel"`
+	SourceChannelTitle pgtype.Text        `json:"source_channel_title"`
+	TgDate             pgtype.Timestamptz `json:"tg_date"`
+}
+
+func (q *Queries) GetBulletsForDigest(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetBulletsForDigestRow, error) {
+	rows, err := q.db.Query(ctx, getBulletsForDigest, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetBulletsForDigestRow
+	for rows.Next() {
+		var i GetBulletsForDigestRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ItemID,
+			&i.BulletIndex,
+			&i.Text,
+			&i.Topic,
+			&i.RelevanceScore,
+			&i.ImportanceScore,
+			&i.BulletHash,
+			&i.Status,
+			&i.CreatedAt,
+			&i.SourceChannel,
+			&i.SourceChannelTitle,
+			&i.TgDate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getBulletsForItem = `-- name: GetBulletsForItem :many
+SELECT id, item_id, bullet_index, text, topic, relevance_score, importance_score, embedding, bullet_hash, bullet_cluster_id, status, created_at FROM item_bullets WHERE item_id = $1 ORDER BY bullet_index
+`
+
+func (q *Queries) GetBulletsForItem(ctx context.Context, itemID pgtype.UUID) ([]ItemBullet, error) {
+	rows, err := q.db.Query(ctx, getBulletsForItem, itemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ItemBullet
+	for rows.Next() {
+		var i ItemBullet
+		if err := rows.Scan(
+			&i.ID,
+			&i.ItemID,
+			&i.BulletIndex,
+			&i.Text,
+			&i.Topic,
+			&i.RelevanceScore,
+			&i.ImportanceScore,
+			&i.Embedding,
+			&i.BulletHash,
+			&i.BulletClusterID,
+			&i.Status,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getBulletsForItems = `-- name: GetBulletsForItems :many
+SELECT id, item_id, bullet_index, text, topic, relevance_score, importance_score, embedding, bullet_hash, bullet_cluster_id, status, created_at FROM item_bullets WHERE item_id = ANY($1::uuid[]) AND status = 'ready' ORDER BY importance_score DESC
+`
+
+func (q *Queries) GetBulletsForItems(ctx context.Context, dollar_1 []pgtype.UUID) ([]ItemBullet, error) {
+	rows, err := q.db.Query(ctx, getBulletsForItems, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ItemBullet
+	for rows.Next() {
+		var i ItemBullet
+		if err := rows.Scan(
+			&i.ID,
+			&i.ItemID,
+			&i.BulletIndex,
+			&i.Text,
+			&i.Topic,
+			&i.RelevanceScore,
+			&i.ImportanceScore,
+			&i.Embedding,
+			&i.BulletHash,
+			&i.BulletClusterID,
+			&i.Status,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getChannelByID = `-- name: GetChannelByID :one
 SELECT id, tg_peer_id, username, invite_link, is_active FROM channels WHERE id = $1
 `
@@ -1787,6 +1923,47 @@ func (q *Queries) GetLinksForMessage(ctx context.Context, rawMessageID pgtype.UU
 	return items, nil
 }
 
+const getPendingBulletsForDedup = `-- name: GetPendingBulletsForDedup :many
+SELECT id, text, embedding, item_id, importance_score
+FROM item_bullets
+WHERE status = 'pending' AND embedding IS NOT NULL
+ORDER BY importance_score DESC
+`
+
+type GetPendingBulletsForDedupRow struct {
+	ID              pgtype.UUID     `json:"id"`
+	Text            string          `json:"text"`
+	Embedding       pgvector.Vector `json:"embedding"`
+	ItemID          pgtype.UUID     `json:"item_id"`
+	ImportanceScore pgtype.Float4   `json:"importance_score"`
+}
+
+func (q *Queries) GetPendingBulletsForDedup(ctx context.Context) ([]GetPendingBulletsForDedupRow, error) {
+	rows, err := q.db.Query(ctx, getPendingBulletsForDedup)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPendingBulletsForDedupRow
+	for rows.Next() {
+		var i GetPendingBulletsForDedupRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Text,
+			&i.Embedding,
+			&i.ItemID,
+			&i.ImportanceScore,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPendingDiscoveries = `-- name: GetPendingDiscoveries :many
 SELECT id, username, tg_peer_id, invite_link, title, description, source_type, discovery_count, first_seen_at, last_seen_at, max_views, max_forwards, engagement_score FROM (
   SELECT DISTINCT ON (dc.username)
@@ -2314,6 +2491,43 @@ func (q *Queries) IncrementDiscoveryResolutionAttempts(ctx context.Context, id p
 	return err
 }
 
+const insertBullet = `-- name: InsertBullet :one
+
+INSERT INTO item_bullets (item_id, bullet_index, text, topic, relevance_score, importance_score, bullet_hash, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id
+`
+
+type InsertBulletParams struct {
+	ItemID          pgtype.UUID   `json:"item_id"`
+	BulletIndex     int32         `json:"bullet_index"`
+	Text            string        `json:"text"`
+	Topic           pgtype.Text   `json:"topic"`
+	RelevanceScore  pgtype.Float4 `json:"relevance_score"`
+	ImportanceScore pgtype.Float4 `json:"importance_score"`
+	BulletHash      pgtype.Text   `json:"bullet_hash"`
+	Status          pgtype.Text   `json:"status"`
+}
+
+// ============================================================================
+// Bullet extraction queries
+// ============================================================================
+func (q *Queries) InsertBullet(ctx context.Context, arg InsertBulletParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, insertBullet,
+		arg.ItemID,
+		arg.BulletIndex,
+		arg.Text,
+		arg.Topic,
+		arg.RelevanceScore,
+		arg.ImportanceScore,
+		arg.BulletHash,
+		arg.Status,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const insertThresholdTuningLog = `-- name: InsertThresholdTuningLog :exec
 INSERT INTO threshold_tuning_log (
     tuned_at,
@@ -2415,6 +2629,17 @@ UPDATE raw_messages SET processed_at = now(), processing_started_at = NULL WHERE
 
 func (q *Queries) MarkAsProcessed(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markAsProcessed, id)
+	return err
+}
+
+const markDuplicateBullets = `-- name: MarkDuplicateBullets :exec
+UPDATE item_bullets
+SET status = 'duplicate'
+WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) MarkDuplicateBullets(ctx context.Context, dollar_1 []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markDuplicateBullets, dollar_1)
 	return err
 }
 
@@ -2939,6 +3164,34 @@ func (q *Queries) TryAcquireSchedulerLock(ctx context.Context, arg TryAcquireSch
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const updateBulletEmbedding = `-- name: UpdateBulletEmbedding :exec
+UPDATE item_bullets SET embedding = $2 WHERE id = $1
+`
+
+type UpdateBulletEmbeddingParams struct {
+	ID        pgtype.UUID     `json:"id"`
+	Embedding pgvector.Vector `json:"embedding"`
+}
+
+func (q *Queries) UpdateBulletEmbedding(ctx context.Context, arg UpdateBulletEmbeddingParams) error {
+	_, err := q.db.Exec(ctx, updateBulletEmbedding, arg.ID, arg.Embedding)
+	return err
+}
+
+const updateBulletStatus = `-- name: UpdateBulletStatus :exec
+UPDATE item_bullets SET status = $2 WHERE id = $1
+`
+
+type UpdateBulletStatusParams struct {
+	ID     pgtype.UUID `json:"id"`
+	Status pgtype.Text `json:"status"`
+}
+
+func (q *Queries) UpdateBulletStatus(ctx context.Context, arg UpdateBulletStatusParams) error {
+	_, err := q.db.Exec(ctx, updateBulletStatus, arg.ID, arg.Status)
+	return err
 }
 
 const updateChannel = `-- name: UpdateChannel :exec

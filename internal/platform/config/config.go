@@ -218,6 +218,14 @@ type Config struct {
 	ExpandedShortcutName      string `env:"EXPANDED_CHATGPT_SHORTCUT_NAME" envDefault:"Ask ChatGPT"`
 	ExpandedShortcutICloudURL string `env:"EXPANDED_CHATGPT_SHORTCUT_ICLOUD_URL" envDefault:""`
 	ExpandedShortcutMaxChars  int    `env:"EXPANDED_SHORTCUT_URL_MAX_CHARS" envDefault:"2000"`
+
+	// Bulletized output settings
+	BulletExtractionEnabled bool    `env:"BULLET_EXTRACTION_ENABLED" envDefault:"false"`
+	BulletBatchSize         int     `env:"BULLET_BATCH_SIZE" envDefault:"5"`
+	BulletDedupThreshold    float64 `env:"BULLET_DEDUP_THRESHOLD" envDefault:"0.92"`
+	BulletSourceAttribution bool    `env:"BULLET_SOURCE_ATTRIBUTION" envDefault:"true"`
+	BulletSourceFormat      string  `env:"BULLET_SOURCE_FORMAT" envDefault:"compact"`
+	BulletMaxPerCluster     int     `env:"BULLET_MAX_PER_CLUSTER" envDefault:"5"`
 }
 
 func Load() (*Config, error) {

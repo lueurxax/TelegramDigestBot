@@ -1,6 +1,7 @@
 package digest
 
 import (
+	"context"
 	"fmt"
 	"html"
 	"strings"
@@ -18,8 +19,21 @@ type summaryGroup struct {
 
 // formatItems formats a list of items for display.
 func (rc *digestRenderContext) formatItems(items []db.Item, includeTopic bool) string {
+	return rc.formatItemsWithContext(context.Background(), items, includeTopic)
+}
+
+// formatItemsWithContext formats a list of items for display with context support.
+func (rc *digestRenderContext) formatItemsWithContext(ctx context.Context, items []db.Item, includeTopic bool) string {
 	if len(items) == 0 {
 		return ""
+	}
+
+	// Try bullet mode if enabled
+	if rc.settings.bulletModeEnabled {
+		if bulletOutput := rc.formatBullets(ctx, items); bulletOutput != "" {
+			return bulletOutput
+		}
+		// Fallback to summary mode if no bullets available
 	}
 
 	groups := groupItemsBySummary(items, rc.seenSummaries)

@@ -556,9 +556,91 @@ func extractGoogleTokenUsage(resp *genai.GenerateContentResponse) (promptTokens,
 }
 
 // ExtractBullets extracts key bullet points from a message.
-// This is a stub implementation - actual bullet extraction logic will be added later.
-func (p *googleProvider) ExtractBullets(_ context.Context, input BulletExtractionInput, _, _ string) (BulletExtractionResult, error) {
-	// Stub: return the input text as a single bullet with default scores
+// Uses LLM to identify 1-3 self-contained claims with scores and topics.
+func (p *googleProvider) ExtractBullets(ctx context.Context, input BulletExtractionInput, targetLanguage, model string) (BulletExtractionResult, error) {
+	if err := p.rateLimiter.Wait(ctx); err != nil {
+		return BulletExtractionResult{}, fmt.Errorf(errRateLimiterSimple, err)
+	}
+
+	prompt := buildBulletExtractionPrompt(input, targetLanguage)
+	resolvedModel := p.resolveModel(model)
+
+	resp, err := p.generateContent(ctx, model, genai.Text(prompt))
+	if err != nil {
+		p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskBulletExtract, 0, 0, false)
+
+		return p.bulletFallback(input), nil //nolint:nilerr // Fallback is intentional on error
+	}
+
+	promptTokens, completionTokens := extractGoogleTokenUsage(resp)
+	p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskBulletExtract, promptTokens, completionTokens, true)
+
+	bullets, err := parseBulletResponse(extractGoogleResponseText(resp))
+	if err != nil {
+		p.logger.Warn().Err(err).Str(logKeyResponse, extractGoogleResponseText(resp)).Msg(logMsgBulletParseError)
+
+		return p.bulletFallback(input), nil
+	}
+
+	return BulletExtractionResult{Bullets: bullets}, nil
+}
+
+// bulletFallback returns the input summary as a single bullet with default scores.
+func (p *googleProvider) bulletFallback(input BulletExtractionInput) BulletExtractionResult {
+	return makeBulletFallback(input)
+}
+
+// Ensure googleProvider implements Provider interface.
+var _ Provider = (*googleProvider)(nil)
+
+// buildBulletExtractionPrompt builds the prompt for bullet extraction.
+func buildBulletExtractionPrompt(input BulletExtractionInput, targetLanguage string) string {
+	maxBullets := input.MaxBullets
+	if maxBullets == 0 {
+		maxBullets = defaultMaxBullets
+	}
+
+	var contextSection string
+	if input.PreviewText != "" {
+		contextSection = fmt.Sprintf(bulletContextFormat, input.PreviewText)
+	}
+
+	return fmt.Sprintf(bulletExtractionPrompt, maxBullets, targetLanguage, sanitizeUTF8(input.Text), contextSection)
+}
+
+// parseBulletResponse parses the LLM response into bullets and validates scores.
+func parseBulletResponse(responseText string) ([]ExtractedBullet, error) {
+	jsonText := extractJSON(responseText)
+
+	var bullets []ExtractedBullet
+	if err := json.Unmarshal([]byte(jsonText), &bullets); err != nil {
+		return nil, fmt.Errorf(errParseResponse, err)
+	}
+
+	// Validate and cap scores
+	for i := range bullets {
+		bullets[i].RelevanceScore = clampScore(bullets[i].RelevanceScore)
+		bullets[i].ImportanceScore = clampScore(bullets[i].ImportanceScore)
+	}
+
+	return bullets, nil
+}
+
+// clampScore ensures a score is within the valid 0-1 range.
+func clampScore(score float32) float32 {
+	if score < 0 {
+		return 0
+	}
+
+	if score > 1 {
+		return 1
+	}
+
+	return score
+}
+
+// makeBulletFallback creates a fallback bullet result from the input summary.
+func makeBulletFallback(input BulletExtractionInput) BulletExtractionResult {
 	return BulletExtractionResult{
 		Bullets: []ExtractedBullet{
 			{
@@ -568,8 +650,5 @@ func (p *googleProvider) ExtractBullets(_ context.Context, input BulletExtractio
 				Topic:           "",
 			},
 		},
-	}, nil
+	}
 }
-
-// Ensure googleProvider implements Provider interface.
-var _ Provider = (*googleProvider)(nil)

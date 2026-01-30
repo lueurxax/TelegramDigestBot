@@ -141,7 +141,7 @@ func (rc *digestRenderContext) renderGroup(ctx context.Context, sb *strings.Buil
 					hasContent = true
 				}
 			} else {
-				formatted := rc.formatItems(c.Items, true)
+				formatted := rc.formatItemsWithContext(ctx, c.Items, true)
 				if formatted != "" {
 					hasContent = true
 
@@ -150,7 +150,7 @@ func (rc *digestRenderContext) renderGroup(ctx context.Context, sb *strings.Buil
 			}
 		}
 	} else {
-		formatted := rc.formatItems(group.items, true)
+		formatted := rc.formatItemsWithContext(ctx, group.items, true)
 		if formatted != "" {
 			hasContent = true
 

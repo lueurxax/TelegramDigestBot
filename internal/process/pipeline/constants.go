@@ -46,6 +46,9 @@ const (
 	LogFieldLinkID        = "link_id"
 	LogFieldHours         = "hours"
 	LogFieldLimit         = "limit"
+	LogFieldBulletID      = "bullet_id"
+	LogFieldReady         = "ready"
+	LogFieldDuplicate     = "duplicate"
 )
 
 // Setting key constants

@@ -22,6 +22,11 @@ type digestSettings struct {
 	corroborationBoost          float32
 	singleSourcePenalty         float32
 	explainabilityLineEnabled   bool
+	// Bullet mode settings
+	bulletModeEnabled       bool
+	bulletSourceAttribution bool
+	bulletSourceFormat      string
+	bulletMaxPerCluster     int
 }
 
 const errInvalidScheduleTimezone = "invalid digest schedule timezone"
@@ -37,6 +42,11 @@ func (s *Scheduler) getDigestSettings(ctx context.Context, logger *zerolog.Logge
 		corroborationBoost:        s.cfg.CorroborationImportanceBoost,
 		singleSourcePenalty:       s.cfg.SingleSourcePenalty,
 		explainabilityLineEnabled: s.cfg.ExplainabilityLineEnabled,
+		// Bullet mode defaults from config
+		bulletModeEnabled:       s.cfg.BulletExtractionEnabled,
+		bulletSourceAttribution: s.cfg.BulletSourceAttribution,
+		bulletSourceFormat:      s.cfg.BulletSourceFormat,
+		bulletMaxPerCluster:     s.cfg.BulletMaxPerCluster,
 	}
 
 	s.loadDigestSettingsFromDB(ctx, logger, &ds)
@@ -62,4 +72,9 @@ func (s *Scheduler) loadDigestSettingsFromDB(ctx context.Context, logger *zerolo
 	loadSetting(SettingDigestLanguage, &ds.digestLanguage, MsgCouldNotGetDigestLanguage)
 	loadSetting("digest_tone", &ds.digestTone, "could not get digest_tone from DB")
 	loadSetting("others_as_narrative", &ds.othersAsNarrative, "could not get others_as_narrative from DB")
+	// Bullet mode settings (can be overridden from DB)
+	loadSetting("bullet_mode_enabled", &ds.bulletModeEnabled, "could not get bullet_mode_enabled from DB")
+	loadSetting("bullet_source_attribution", &ds.bulletSourceAttribution, "could not get bullet_source_attribution from DB")
+	loadSetting("bullet_source_format", &ds.bulletSourceFormat, "could not get bullet_source_format from DB")
+	loadSetting("bullet_max_per_cluster", &ds.bulletMaxPerCluster, "could not get bullet_max_per_cluster from DB")
 }

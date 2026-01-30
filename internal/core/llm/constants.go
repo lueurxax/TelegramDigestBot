@@ -103,8 +103,35 @@ const (
 	mockConfidenceScore = 0.5
 )
 
-// Fallback score for bullet extraction stubs
-const fallbackBulletScore = 0.5
+// Bullet extraction defaults
+const (
+	fallbackBulletScore = 0.5
+	defaultMaxBullets   = 3
+)
+
+// Bullet extraction prompts
+const (
+	bulletContextFormat = "\nAdditional context from links:\n%s"
+
+	bulletExtractionPrompt = `Identify the %d most important self-contained claims in this text.
+Each claim must be understandable without additional context.
+Target language for output: %s
+
+Text: %s%s
+
+Return ONLY a JSON array (no markdown, no explanation):
+[{"text": "claim text", "relevance_score": 0.0-1.0, "importance_score": 0.0-1.0, "topic": "short topic"}]
+
+Guidelines:
+- Each claim should be a complete, standalone statement
+- relevance_score: how relevant to the channel's typical content (0.0-1.0)
+- importance_score: how newsworthy or significant (0.0-1.0)
+- topic: 1-3 word category (e.g., "Politics", "Technology", "Economy")
+- If text has fewer claims than requested, return fewer bullets
+- Return empty array [] if no meaningful claims can be extracted`
+
+	logMsgBulletParseError = "failed to parse bullet extraction response"
+)
 
 // Circuit breaker defaults
 const (
@@ -125,6 +152,7 @@ const (
 // Log field keys
 const (
 	logKeyProvider = "provider"
+	LogKeyCount    = "count"
 )
 
 // LLM task names for metrics tracking.
@@ -138,6 +166,7 @@ const (
 	TaskRelevanceGate = "relevance_gate"
 	TaskCompress      = "compress"
 	TaskImageGen      = "image_gen"
+	TaskBulletExtract = "bullet_extract"
 )
 
 // Request status for metrics.

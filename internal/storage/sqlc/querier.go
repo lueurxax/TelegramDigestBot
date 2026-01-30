@@ -40,6 +40,9 @@ type Querier interface {
 	GetActiveFilters(ctx context.Context) ([]GetActiveFiltersRow, error)
 	GetAllSettings(ctx context.Context) ([]GetAllSettingsRow, error)
 	GetBacklogCount(ctx context.Context) (int64, error)
+	GetBulletsForDigest(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetBulletsForDigestRow, error)
+	GetBulletsForItem(ctx context.Context, itemID pgtype.UUID) ([]ItemBullet, error)
+	GetBulletsForItems(ctx context.Context, dollar_1 []pgtype.UUID) ([]ItemBullet, error)
 	GetChannelByID(ctx context.Context, id pgtype.UUID) (GetChannelByIDRow, error)
 	GetChannelByPeerID(ctx context.Context, tgPeerID int64) (Channel, error)
 	GetChannelStats(ctx context.Context) ([]GetChannelStatsRow, error)
@@ -71,6 +74,7 @@ type Querier interface {
 	GetLatestGlobalRatingStats(ctx context.Context) (GetLatestGlobalRatingStatsRow, error)
 	GetLinkCache(ctx context.Context, url string) (LinkCache, error)
 	GetLinksForMessage(ctx context.Context, rawMessageID pgtype.UUID) ([]LinkCache, error)
+	GetPendingBulletsForDedup(ctx context.Context) ([]GetPendingBulletsForDedupRow, error)
 	// Only return actionable discoveries (with username for approve/reject)
 	// Uses DISTINCT ON to deduplicate multiple rows for the same channel (discovered via different identifiers)
 	GetPendingDiscoveries(ctx context.Context, arg GetPendingDiscoveriesParams) ([]GetPendingDiscoveriesRow, error)
@@ -87,11 +91,16 @@ type Querier interface {
 	// Atomically claims messages by setting processing_started_at.
 	GetUnprocessedMessages(ctx context.Context, limit int32) ([]GetUnprocessedMessagesRow, error)
 	IncrementDiscoveryResolutionAttempts(ctx context.Context, id pgtype.UUID) error
+	// ============================================================================
+	// Bullet extraction queries
+	// ============================================================================
+	InsertBullet(ctx context.Context, arg InsertBulletParams) (pgtype.UUID, error)
 	InsertThresholdTuningLog(ctx context.Context, arg InsertThresholdTuningLogParams) error
 	IsChannelDiscoveredRejected(ctx context.Context, arg IsChannelDiscoveredRejectedParams) (bool, error)
 	IsChannelTracked(ctx context.Context, arg IsChannelTrackedParams) (bool, error)
 	LinkMessageToLink(ctx context.Context, arg LinkMessageToLinkParams) error
 	MarkAsProcessed(ctx context.Context, id pgtype.UUID) error
+	MarkDuplicateBullets(ctx context.Context, dollar_1 []pgtype.UUID) error
 	MarkItemsAsDigested(ctx context.Context, dollar_1 []pgtype.UUID) error
 	// Recovers messages that were claimed but not processed within the timeout.
 	// This handles cases where a worker crashed after claiming messages.
@@ -123,6 +132,8 @@ type Querier interface {
 	// Tries to acquire a row-based lock. Returns true if acquired.
 	// Automatically expires stale locks older than the specified duration.
 	TryAcquireSchedulerLock(ctx context.Context, arg TryAcquireSchedulerLockParams) (bool, error)
+	UpdateBulletEmbedding(ctx context.Context, arg UpdateBulletEmbeddingParams) error
+	UpdateBulletStatus(ctx context.Context, arg UpdateBulletStatusParams) error
 	UpdateChannel(ctx context.Context, arg UpdateChannelParams) error
 	UpdateChannelAutoWeight(ctx context.Context, arg UpdateChannelAutoWeightParams) error
 	UpdateChannelContext(ctx context.Context, arg UpdateChannelContextParams) error

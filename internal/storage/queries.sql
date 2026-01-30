@@ -964,3 +964,46 @@ SELECT period_start,
 FROM global_rating_stats
 ORDER BY period_end DESC
 LIMIT 1;
+
+-- ============================================================================
+-- Bullet extraction queries
+-- ============================================================================
+
+-- name: InsertBullet :one
+INSERT INTO item_bullets (item_id, bullet_index, text, topic, relevance_score, importance_score, bullet_hash, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id;
+
+-- name: UpdateBulletEmbedding :exec
+UPDATE item_bullets SET embedding = $2 WHERE id = $1;
+
+-- name: GetBulletsForItem :many
+SELECT * FROM item_bullets WHERE item_id = $1 ORDER BY bullet_index;
+
+-- name: GetBulletsForItems :many
+SELECT * FROM item_bullets WHERE item_id = ANY($1::uuid[]) AND status = 'ready' ORDER BY importance_score DESC;
+
+-- name: UpdateBulletStatus :exec
+UPDATE item_bullets SET status = $2 WHERE id = $1;
+
+-- name: GetBulletsForDigest :many
+SELECT b.id, b.item_id, b.bullet_index, b.text, b.topic, b.relevance_score,
+       b.importance_score, b.bullet_hash, b.status, b.created_at,
+       c.username as source_channel, c.title as source_channel_title, rm.tg_date
+FROM item_bullets b
+JOIN items i ON b.item_id = i.id
+JOIN raw_messages rm ON i.raw_message_id = rm.id
+JOIN channels c ON rm.channel_id = c.id
+WHERE i.id = ANY($1::uuid[]) AND b.status = 'ready'
+ORDER BY b.importance_score DESC;
+
+-- name: MarkDuplicateBullets :exec
+UPDATE item_bullets
+SET status = 'duplicate'
+WHERE id = ANY($1::uuid[]);
+
+-- name: GetPendingBulletsForDedup :many
+SELECT id, text, embedding, item_id, importance_score
+FROM item_bullets
+WHERE status = 'pending' AND embedding IS NOT NULL
+ORDER BY importance_score DESC;

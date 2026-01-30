@@ -50,6 +50,12 @@ type Repository interface {
 	GetSummaryCache(ctx context.Context, canonicalHash, digestLanguage string) (*db.SummaryCacheEntry, error)
 	UpsertSummaryCache(ctx context.Context, entry *db.SummaryCacheEntry) error
 	LinkMessageToLink(ctx context.Context, rawMsgID, linkCacheID string, position int) error
+	// Bullet extraction
+	InsertBullet(ctx context.Context, bullet *db.Bullet) error
+	UpdateBulletEmbedding(ctx context.Context, bulletID string, embedding []float32) error
+	UpdateBulletStatus(ctx context.Context, bulletID, status string) error
+	GetPendingBulletsForDedup(ctx context.Context) ([]db.PendingBulletForDedup, error)
+	MarkDuplicateBullets(ctx context.Context, bulletIDs []string) error
 }
 
 // Compile-time assertion that *db.DB implements Repository.
@@ -1206,6 +1212,9 @@ func (p *Pipeline) saveAndMarkProcessed(ctx context.Context, logger zerolog.Logg
 			logger.Error().Str(LogFieldItemID, item.ID).Err(err).Msg("failed to save embedding")
 		}
 	}
+
+	// Extract and store bullets (non-fatal)
+	p.extractAndStoreBullets(ctx, logger, c, item, digestLanguage)
 
 	if err := p.database.MarkAsProcessed(ctx, c.ID); err != nil {
 		logger.Error().Str(LogFieldMsgID, c.ID).Err(err).Msg(LogMsgFailedToMarkProcessed)

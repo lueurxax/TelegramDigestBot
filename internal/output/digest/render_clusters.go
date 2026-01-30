@@ -64,7 +64,7 @@ func (rc *digestRenderContext) renderConsolidatedSummary(sb *strings.Builder, su
 		}
 
 		sb.WriteString(DigestTopicBorderTop)
-		fmt.Fprintf(sb, "│ %s <b>%s</b> (%d)\n", emoji, strings.ToUpper(html.EscapeString(c.Topic)), len(c.Items))
+		fmt.Fprintf(sb, FormatTopicHeaderWithCount, emoji, strings.ToUpper(html.EscapeString(c.Topic)), len(c.Items))
 		sb.WriteString(DigestTopicBorderBot)
 	}
 

@@ -41,6 +41,9 @@ type Repository interface {
 	GetClusterSummaryCacheEntry(ctx context.Context, digestLanguage, fingerprint string) (*db.ClusterSummaryCacheEntry, error)
 	UpsertClusterSummaryCache(ctx context.Context, entry *db.ClusterSummaryCacheEntry) error
 
+	// Bullet operations
+	GetBulletsForDigest(ctx context.Context, itemIDs []string) ([]db.BulletForDigest, error)
+
 	// Cluster operations
 	GetClustersForWindow(ctx context.Context, start, end time.Time) ([]db.ClusterWithItems, error)
 	DeleteClustersForWindow(ctx context.Context, start, end time.Time) error

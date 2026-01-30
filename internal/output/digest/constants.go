@@ -91,18 +91,19 @@ const (
 
 // Digest formatting constants
 const (
-	DigestSeparatorLine   = "━━━━━━━━━━━━━━━━━━━━━━\n"
-	DigestTopicBorderTop  = "┌─────────────────────\n"
-	DigestTopicBorderBot  = "└─────────────────────\n"
-	DigestSourceSeparator = " • "
-	FormatPrefixSummary   = "%s %s"
-	FormatSectionHeader   = "\n%s <b>%s</b>\n"
-	DefaultTopicEmoji     = "📂"
-	EmojiBreaking         = "🔴"
-	EmojiNotable          = "📌"
-	EmojiStandard         = "📝"
-	EmojiBullet           = "•"
-	DigestSourceVia       = "\n    ↳ <i>via %s</i>"
+	DigestSeparatorLine        = "━━━━━━━━━━━━━━━━━━━━━━\n"
+	DigestTopicBorderTop       = "┌─────────────────────\n"
+	DigestTopicBorderBot       = "└─────────────────────\n"
+	DigestSourceSeparator      = " • "
+	FormatPrefixSummary        = "%s %s"
+	FormatSectionHeader        = "\n%s <b>%s</b>\n"
+	FormatTopicHeaderWithCount = "│ %s <b>%s</b> (%d)\n"
+	DefaultTopicEmoji          = "📂"
+	EmojiBreaking              = "🔴"
+	EmojiNotable               = "📌"
+	EmojiStandard              = "📝"
+	EmojiBullet                = "•"
+	DigestSourceVia            = "\n    ↳ <i>via %s</i>"
 )
 
 // Magic number constants for auto-weight calculation
@@ -177,4 +178,12 @@ const (
 // Threshold tuning constants
 const (
 	DefaultThresholdTuningStep = 0.05
+)
+
+// Bullet rendering constants
+const (
+	BulletSourceFormatCompact = "compact"
+	BulletSourceFormatFull    = "full"
+	BulletSourceEmoji         = "📰"
+	BulletItemPrefix          = "• "
 )

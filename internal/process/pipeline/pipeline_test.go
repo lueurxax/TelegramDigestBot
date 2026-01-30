@@ -153,6 +153,26 @@ func (m *mockRepo) LinkMessageToLink(_ context.Context, _, _ string, _ int) erro
 	return nil
 }
 
+func (m *mockRepo) InsertBullet(_ context.Context, _ *db.Bullet) error {
+	return nil
+}
+
+func (m *mockRepo) UpdateBulletEmbedding(_ context.Context, _ string, _ []float32) error {
+	return nil
+}
+
+func (m *mockRepo) UpdateBulletStatus(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (m *mockRepo) GetPendingBulletsForDedup(_ context.Context) ([]db.PendingBulletForDedup, error) {
+	return nil, nil
+}
+
+func (m *mockRepo) MarkDuplicateBullets(_ context.Context, _ []string) error {
+	return nil
+}
+
 func (m *mockRepo) DeleteSetting(_ context.Context, key string) error {
 	delete(m.settings, key)
 

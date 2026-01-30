@@ -109,6 +109,8 @@ type Claim struct {
 	ContradictedBy  []pgtype.UUID      `json:"contradicted_by"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	NormalizedHash  pgtype.Text        `json:"normalized_hash"`
+	Embedding       pgvector.Vector    `json:"embedding"`
 }
 
 type Cluster struct {
