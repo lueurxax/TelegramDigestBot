@@ -15,7 +15,13 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/core/solr"
 )
 
-const filterURLErrFormat = "filterURL(%q) = %q, want %q"
+const (
+	filterURLErrFormat = "filterURL(%q) = %q, want %q"
+	testPathGet        = "/get"
+	testPathUpdate     = "/update"
+	testErrUnexpPath   = "unexpected path: %s"
+	testTgURI          = "tg://peer/1/msg/2"
+)
 
 func TestFilterURL(t *testing.T) {
 	seeder := &Seeder{
@@ -412,29 +418,7 @@ func TestEnqueueURLCanonicalizes(t *testing.T) {
 	var indexedDoc map[string]interface{}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasPrefix(r.URL.Path, "/get"):
-			w.WriteHeader(http.StatusNotFound)
-		case strings.HasPrefix(r.URL.Path, "/update"):
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				t.Fatalf("read update body: %v", err)
-			}
-
-			var docs []map[string]interface{}
-			if err := json.Unmarshal(body, &docs); err != nil {
-				t.Fatalf("unmarshal update body: %v", err)
-			}
-
-			if len(docs) != 1 {
-				t.Fatalf("expected 1 doc, got %d", len(docs))
-			}
-
-			indexedDoc = docs[0]
-			w.WriteHeader(http.StatusOK)
-		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
+		indexedDoc = handleTestRequest(t, w, r, indexedDoc)
 	}))
 	t.Cleanup(server.Close)
 
@@ -442,9 +426,52 @@ func TestEnqueueURLCanonicalizes(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	seeder := New(Config{}, client, &logger)
 
-	if err := seeder.enqueueURL(context.Background(), rawURL, "tg://peer/1/msg/2"); err != nil {
+	if err := seeder.enqueueURL(context.Background(), rawURL, testTgURI); err != nil {
 		t.Fatalf("enqueueURL error: %v", err)
 	}
+
+	verifyIndexedDoc(t, indexedDoc, expectedDocID, expectedCanonical, rawURL)
+}
+
+func handleTestRequest(t *testing.T, w http.ResponseWriter, r *http.Request, indexedDoc map[string]interface{}) map[string]interface{} {
+	t.Helper()
+
+	switch {
+	case strings.HasPrefix(r.URL.Path, testPathGet):
+		w.WriteHeader(http.StatusNotFound)
+	case strings.HasPrefix(r.URL.Path, testPathUpdate):
+		indexedDoc = parseUpdateBody(t, r)
+
+		w.WriteHeader(http.StatusOK)
+	default:
+		t.Fatalf(testErrUnexpPath, r.URL.Path)
+	}
+
+	return indexedDoc
+}
+
+func parseUpdateBody(t *testing.T, r *http.Request) map[string]interface{} {
+	t.Helper()
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("read update body: %v", err)
+	}
+
+	var docs []map[string]interface{}
+	if err := json.Unmarshal(body, &docs); err != nil {
+		t.Fatalf("unmarshal update body: %v", err)
+	}
+
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 doc, got %d", len(docs))
+	}
+
+	return docs[0]
+}
+
+func verifyIndexedDoc(t *testing.T, indexedDoc map[string]interface{}, expectedDocID, expectedCanonical, rawURL string) {
+	t.Helper()
 
 	if indexedDoc == nil {
 		t.Fatalf("expected indexed document")
@@ -472,14 +499,18 @@ func TestEnqueueURLDuplicate(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case strings.HasPrefix(r.URL.Path, "/get"):
+		case strings.HasPrefix(r.URL.Path, testPathGet):
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"doc":{"id":"existing"}}`))
-		case strings.HasPrefix(r.URL.Path, "/update"):
+
+			if _, err := w.Write([]byte(`{"doc":{"id":"existing"}}`)); err != nil {
+				t.Fatalf("write response: %v", err)
+			}
+		case strings.HasPrefix(r.URL.Path, testPathUpdate):
 			updateCalled = true
+
 			w.WriteHeader(http.StatusOK)
 		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
+			t.Fatalf(testErrUnexpPath, r.URL.Path)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -488,7 +519,7 @@ func TestEnqueueURLDuplicate(t *testing.T) {
 	logger := zerolog.New(io.Discard)
 	seeder := New(Config{}, client, &logger)
 
-	err := seeder.enqueueURL(context.Background(), "https://example.com/article", "tg://peer/1/msg/2")
+	err := seeder.enqueueURL(context.Background(), "https://example.com/article", testTgURI)
 	if !errors.Is(err, errDuplicate) {
 		t.Fatalf("expected errDuplicate, got %v", err)
 	}
