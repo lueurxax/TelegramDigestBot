@@ -12,6 +12,9 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
 
+// Conversion constants for time intervals.
+const microsecondsPerHour = 3600 * 1000000 // 1 hour in microseconds
+
 // Bullet is an alias for the domain type.
 type Bullet = domain.Bullet
 
@@ -134,7 +137,7 @@ func (db *DB) GetBulletsForDigest(ctx context.Context, itemIDs []string) ([]Bull
 			Topic:              fromText(row.Topic),
 			RelevanceScore:     fromFloat4(row.RelevanceScore),
 			ImportanceScore:    fromFloat4(row.ImportanceScore),
-			Status:             fromText(row.Status),
+			Status:             row.Status, // Already a string from SQL literal
 			CreatedAt:          fromTimestamptz(row.CreatedAt),
 			SourceChannel:      fromText(row.SourceChannel),
 			SourceChannelTitle: fromText(row.SourceChannelTitle),
@@ -188,11 +191,18 @@ type PendingBulletForDedup struct {
 	Embedding       []float32
 	ItemID          string
 	ImportanceScore float32
+	Status          string // "pending" or "ready" (for global dedup pool)
 }
 
-// GetPendingBulletsForDedup retrieves pending bullets that have embeddings for deduplication.
-func (db *DB) GetPendingBulletsForDedup(ctx context.Context) ([]PendingBulletForDedup, error) {
-	rows, err := db.Queries.GetPendingBulletsForDedup(ctx)
+// GetPendingBulletsForDedup retrieves pending bullets plus recent ready bullets for deduplication.
+// lookbackHours specifies how far back to include ready bullets for global dedup.
+func (db *DB) GetPendingBulletsForDedup(ctx context.Context, lookbackHours int) ([]PendingBulletForDedup, error) {
+	interval := pgtype.Interval{
+		Microseconds: int64(lookbackHours) * microsecondsPerHour,
+		Valid:        true,
+	}
+
+	rows, err := db.Queries.GetPendingBulletsForDedup(ctx, interval)
 	if err != nil {
 		return nil, fmt.Errorf("get pending bullets for dedup: %w", err)
 	}
@@ -205,6 +215,7 @@ func (db *DB) GetPendingBulletsForDedup(ctx context.Context) ([]PendingBulletFor
 			Embedding:       row.Embedding.Slice(),
 			ItemID:          fromUUID(row.ItemID),
 			ImportanceScore: fromFloat4(row.ImportanceScore),
+			Status:          fromText(row.Status),
 		}
 	}
 

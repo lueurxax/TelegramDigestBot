@@ -25,11 +25,16 @@ func (p *Pipeline) extractAndStoreBullets(ctx context.Context, logger zerolog.Lo
 		return
 	}
 
+	maxBullets := p.cfg.BulletBatchSize
+	if maxBullets <= 0 {
+		maxBullets = defaultMaxBullets
+	}
+
 	input := llm.BulletExtractionInput{
 		Text:        c.Text,
 		PreviewText: c.PreviewText,
 		Summary:     item.Summary,
-		MaxBullets:  defaultMaxBullets,
+		MaxBullets:  maxBullets,
 	}
 
 	extracted, err := p.llmClient.ExtractBullets(ctx, input, digestLanguage, "")

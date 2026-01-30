@@ -13,13 +13,19 @@ import (
 // DeduplicatePendingBullets processes pending bullets and marks duplicates.
 // Uses higher threshold (0.92) than item dedup due to short string false positives.
 // Also sets bullet_cluster_id to link duplicates to their canonical bullet for corroboration counting.
+// Includes ready bullets from the lookback window for global deduplication.
 func (p *Pipeline) DeduplicatePendingBullets(ctx context.Context, logger zerolog.Logger) error {
 	threshold := p.cfg.BulletDedupThreshold
 	if threshold <= 0 {
 		threshold = defaultBulletDedupThreshold
 	}
 
-	bullets, err := p.database.GetPendingBulletsForDedup(ctx)
+	lookbackHours := p.cfg.BulletDedupLookbackHours
+	if lookbackHours <= 0 {
+		lookbackHours = defaultDedupLookbackHours
+	}
+
+	bullets, err := p.database.GetPendingBulletsForDedup(ctx, lookbackHours)
 	if err != nil {
 		return fmt.Errorf("get pending bullets for dedup: %w", err)
 	}
@@ -29,12 +35,13 @@ func (p *Pipeline) DeduplicatePendingBullets(ctx context.Context, logger zerolog
 	}
 
 	// Find duplicates with their canonical bullet mappings
+	// Only pending bullets can be marked as duplicates; ready bullets serve as canonical candidates
 	duplicateToCanonical := findDuplicateBulletsWithCanonical(bullets, threshold)
 
-	// Mark duplicates
+	// Mark duplicates (only pending bullets)
 	p.markDuplicates(ctx, logger, duplicateToCanonical)
 
-	// Mark canonical bullets as ready
+	// Mark remaining pending bullets as canonical (ready bullets are already ready)
 	readyCount := p.markCanonicalBullets(ctx, logger, bullets, duplicateToCanonical)
 
 	logger.Info().Int(LogFieldReady, readyCount).Int(LogFieldDuplicate, len(duplicateToCanonical)).Msg("bullet deduplication complete")
@@ -57,11 +64,18 @@ func (p *Pipeline) markDuplicates(ctx context.Context, logger zerolog.Logger, du
 	logger.Info().Int(LogFieldCount, len(duplicateToCanonical)).Msg("marked duplicate bullets")
 }
 
-// markCanonicalBullets marks non-duplicate bullets as ready with cluster_id set to self.
+// markCanonicalBullets marks non-duplicate pending bullets as ready with cluster_id set to self.
+// Only processes pending bullets; ready bullets from the global pool are already canonical.
 func (p *Pipeline) markCanonicalBullets(ctx context.Context, logger zerolog.Logger, bullets []db.PendingBulletForDedup, duplicateToCanonical map[string]string) int {
 	readyCount := 0
 
 	for _, b := range bullets {
+		// Skip bullets that are already ready (from global dedup pool)
+		if b.Status == BulletStatusReady {
+			continue
+		}
+
+		// Skip bullets marked as duplicates
 		if _, isDupe := duplicateToCanonical[b.ID]; isDupe {
 			continue
 		}
@@ -78,12 +92,13 @@ func (p *Pipeline) markCanonicalBullets(ctx context.Context, logger zerolog.Logg
 	return readyCount
 }
 
-// findDuplicateBulletsWithCanonical finds bullets that are semantically similar to higher-scoring bullets.
+// findDuplicateBulletsWithCanonical finds pending bullets that are semantically similar to canonical bullets.
 // Returns a map of duplicate bullet ID -> canonical bullet ID for corroboration tracking.
+// Only pending bullets can be marked as duplicates; ready bullets serve as canonical candidates only.
 func findDuplicateBulletsWithCanonical(bullets []db.PendingBulletForDedup, threshold float64) map[string]string {
 	duplicateToCanonical := make(map[string]string)
 
-	// Bullets are already sorted by importance_score DESC
+	// Bullets are sorted: ready first (canonical candidates), then pending by importance_score DESC
 	for i, bullet := range bullets {
 		if len(bullet.Embedding) == 0 {
 			continue
@@ -94,11 +109,16 @@ func findDuplicateBulletsWithCanonical(bullets []db.PendingBulletForDedup, thres
 			continue
 		}
 
-		// Compare with all subsequent (lower-scored) bullets
+		// Compare with all subsequent bullets
 		for j := i + 1; j < len(bullets); j++ {
 			other := bullets[j]
 
 			if len(other.Embedding) == 0 {
+				continue
+			}
+
+			// Only pending bullets can be marked as duplicates
+			if other.Status != BulletStatusPending {
 				continue
 			}
 
@@ -145,5 +165,10 @@ func cosineSimilarity(a, b []float32) float64 {
 	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
-// defaultBulletDedupThreshold is the default similarity threshold for bullet deduplication.
-const defaultBulletDedupThreshold = 0.92
+// Bullet deduplication constants.
+const (
+	defaultBulletDedupThreshold = 0.92 // Default similarity threshold for bullet deduplication
+	defaultDedupLookbackHours   = 48   // Default lookback window for global dedup pool
+	BulletStatusPending         = "pending"
+	BulletStatusReady           = "ready"
+)

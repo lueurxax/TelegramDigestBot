@@ -165,7 +165,7 @@ func (m *mockRepo) UpdateBulletStatus(_ context.Context, _, _ string) error {
 	return nil
 }
 
-func (m *mockRepo) GetPendingBulletsForDedup(_ context.Context) ([]db.PendingBulletForDedup, error) {
+func (m *mockRepo) GetPendingBulletsForDedup(_ context.Context, _ int) ([]db.PendingBulletForDedup, error) {
 	return nil, nil
 }
 

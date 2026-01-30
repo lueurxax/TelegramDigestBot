@@ -27,6 +27,7 @@ type digestSettings struct {
 	bulletSourceAttribution bool
 	bulletSourceFormat      string
 	bulletMaxPerCluster     int
+	bulletMinImportance     float32
 }
 
 const errInvalidScheduleTimezone = "invalid digest schedule timezone"
@@ -47,6 +48,7 @@ func (s *Scheduler) getDigestSettings(ctx context.Context, logger *zerolog.Logge
 		bulletSourceAttribution: s.cfg.BulletSourceAttribution,
 		bulletSourceFormat:      s.cfg.BulletSourceFormat,
 		bulletMaxPerCluster:     s.cfg.BulletMaxPerCluster,
+		bulletMinImportance:     s.cfg.BulletMinImportance,
 	}
 
 	s.loadDigestSettingsFromDB(ctx, logger, &ds)
@@ -77,4 +79,5 @@ func (s *Scheduler) loadDigestSettingsFromDB(ctx context.Context, logger *zerolo
 	loadSetting("bullet_source_attribution", &ds.bulletSourceAttribution, "could not get bullet_source_attribution from DB")
 	loadSetting("bullet_source_format", &ds.bulletSourceFormat, "could not get bullet_source_format from DB")
 	loadSetting("bullet_max_per_cluster", &ds.bulletMaxPerCluster, "could not get bullet_max_per_cluster from DB")
+	loadSetting("bullet_min_importance", &ds.bulletMinImportance, "could not get bullet_min_importance from DB")
 }

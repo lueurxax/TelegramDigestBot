@@ -987,23 +987,60 @@ SELECT * FROM item_bullets WHERE item_id = ANY($1::uuid[]) AND status = 'ready' 
 UPDATE item_bullets SET status = $2 WHERE id = $1;
 
 -- name: GetBulletsForDigest :many
-SELECT b.id, b.item_id, b.bullet_index, b.text, b.topic, b.relevance_score,
-       b.importance_score, b.bullet_hash, b.status, b.created_at,
-       c.username as source_channel, c.title as source_channel_title, rm.tg_date,
-       COALESCE(corr.source_count, 1)::int as source_count
-FROM item_bullets b
-JOIN items i ON b.item_id = i.id
-JOIN raw_messages rm ON i.raw_message_id = rm.id
-JOIN channels c ON rm.channel_id = c.id
-LEFT JOIN (
-    -- Count distinct items that have bullets pointing to this canonical bullet
+-- Handles both canonical bullets and duplicate bullets whose canonical may be outside the digest.
+-- For duplicates, joins to canonical bullet to get text while keeping digest item's source info.
+WITH digest_item_bullets AS (
+    -- Get all bullets from items in the digest (ready or duplicate)
+    SELECT b.*, i.raw_message_id
+    FROM item_bullets b
+    JOIN items i ON b.item_id = i.id
+    WHERE b.item_id = ANY($1::uuid[])
+      AND (b.status = 'ready' OR b.status = 'duplicate')
+),
+resolved AS (
+    -- For duplicates, resolve to canonical bullet's text; for ready bullets, use self
+    SELECT
+        COALESCE(canonical.id, dib.id) as id,
+        dib.item_id,  -- Keep digest item for source attribution
+        COALESCE(canonical.bullet_index, dib.bullet_index) as bullet_index,
+        COALESCE(canonical.text, dib.text) as text,
+        COALESCE(canonical.topic, dib.topic) as topic,
+        COALESCE(canonical.relevance_score, dib.relevance_score) as relevance_score,
+        COALESCE(canonical.importance_score, dib.importance_score) as importance_score,
+        COALESCE(canonical.bullet_hash, dib.bullet_hash) as bullet_hash,
+        'ready'::text as status,
+        COALESCE(canonical.created_at, dib.created_at) as created_at,
+        dib.raw_message_id,
+        -- canonical_id for deduplication
+        COALESCE(dib.bullet_cluster_id, dib.id) as canonical_id
+    FROM digest_item_bullets dib
+    LEFT JOIN item_bullets canonical
+        ON dib.status = 'duplicate'
+        AND dib.bullet_cluster_id = canonical.id
+        AND canonical.status = 'ready'
+    WHERE dib.status = 'ready'
+       OR canonical.id IS NOT NULL  -- Include duplicates only if canonical exists and is ready
+),
+source_counts AS (
+    -- Count distinct items that have bullets pointing to each canonical bullet
     SELECT bullet_cluster_id, COUNT(DISTINCT item_id) as source_count
     FROM item_bullets
     WHERE bullet_cluster_id IS NOT NULL
     GROUP BY bullet_cluster_id
-) corr ON corr.bullet_cluster_id = b.id
-WHERE i.id = ANY($1::uuid[]) AND b.status = 'ready'
-ORDER BY b.importance_score DESC;
+)
+SELECT * FROM (
+    SELECT DISTINCT ON (r.canonical_id)
+        r.id, r.item_id, r.bullet_index, r.text, r.topic, r.relevance_score,
+        r.importance_score, r.bullet_hash, r.status, r.created_at,
+        c.username as source_channel, c.title as source_channel_title, rm.tg_date,
+        COALESCE(sc.source_count, 1)::int as source_count
+    FROM resolved r
+    JOIN raw_messages rm ON r.raw_message_id = rm.id
+    JOIN channels c ON rm.channel_id = c.id
+    LEFT JOIN source_counts sc ON sc.bullet_cluster_id = r.canonical_id
+    ORDER BY r.canonical_id, r.importance_score DESC
+) deduped
+ORDER BY importance_score DESC;
 
 -- name: MarkDuplicateBullets :exec
 UPDATE item_bullets
@@ -1011,10 +1048,19 @@ SET status = 'duplicate'
 WHERE id = ANY($1::uuid[]);
 
 -- name: GetPendingBulletsForDedup :many
-SELECT id, text, embedding, item_id, importance_score
+-- Returns pending bullets plus recent ready bullets for global deduplication.
+-- Ready bullets within the lookback window serve as canonical candidates.
+-- Pending bullets are ordered last so they get deduplicated against ready bullets.
+SELECT id, text, embedding, item_id, importance_score, status
 FROM item_bullets
-WHERE status = 'pending' AND embedding IS NOT NULL
-ORDER BY importance_score DESC;
+WHERE embedding IS NOT NULL
+  AND (
+    status = 'pending'
+    OR (status = 'ready' AND created_at >= NOW() - $1::interval)
+  )
+ORDER BY
+  CASE WHEN status = 'ready' THEN 0 ELSE 1 END,  -- Ready bullets first (candidates)
+  importance_score DESC;
 
 -- name: MarkBulletAsDuplicateOf :exec
 UPDATE item_bullets

@@ -40,6 +40,8 @@ type Querier interface {
 	GetActiveFilters(ctx context.Context) ([]GetActiveFiltersRow, error)
 	GetAllSettings(ctx context.Context) ([]GetAllSettingsRow, error)
 	GetBacklogCount(ctx context.Context) (int64, error)
+	// Handles both canonical bullets and duplicate bullets whose canonical may be outside the digest.
+	// For duplicates, joins to canonical bullet to get text while keeping digest item's source info.
 	GetBulletsForDigest(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetBulletsForDigestRow, error)
 	GetBulletsForItem(ctx context.Context, itemID pgtype.UUID) ([]ItemBullet, error)
 	GetBulletsForItems(ctx context.Context, dollar_1 []pgtype.UUID) ([]ItemBullet, error)
@@ -74,7 +76,10 @@ type Querier interface {
 	GetLatestGlobalRatingStats(ctx context.Context) (GetLatestGlobalRatingStatsRow, error)
 	GetLinkCache(ctx context.Context, url string) (LinkCache, error)
 	GetLinksForMessage(ctx context.Context, rawMessageID pgtype.UUID) ([]LinkCache, error)
-	GetPendingBulletsForDedup(ctx context.Context) ([]GetPendingBulletsForDedupRow, error)
+	// Returns pending bullets plus recent ready bullets for global deduplication.
+	// Ready bullets within the lookback window serve as canonical candidates.
+	// Pending bullets are ordered last so they get deduplicated against ready bullets.
+	GetPendingBulletsForDedup(ctx context.Context, dollar_1 pgtype.Interval) ([]GetPendingBulletsForDedupRow, error)
 	// Only return actionable discoveries (with username for approve/reject)
 	// Uses DISTINCT ON to deduplicate multiple rows for the same channel (discovered via different identifiers)
 	GetPendingDiscoveries(ctx context.Context, arg GetPendingDiscoveriesParams) ([]GetPendingDiscoveriesRow, error)

@@ -54,7 +54,7 @@ type Repository interface {
 	InsertBullet(ctx context.Context, bullet *db.Bullet) error
 	UpdateBulletEmbedding(ctx context.Context, bulletID string, embedding []float32) error
 	UpdateBulletStatus(ctx context.Context, bulletID, status string) error
-	GetPendingBulletsForDedup(ctx context.Context) ([]db.PendingBulletForDedup, error)
+	GetPendingBulletsForDedup(ctx context.Context, lookbackHours int) ([]db.PendingBulletForDedup, error)
 	MarkDuplicateBullets(ctx context.Context, bulletIDs []string) error
 	MarkBulletAsDuplicateOf(ctx context.Context, bulletID, canonicalID string) error
 	MarkBulletAsCanonical(ctx context.Context, bulletID string) error

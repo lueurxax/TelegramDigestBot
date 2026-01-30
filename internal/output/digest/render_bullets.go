@@ -16,6 +16,12 @@ type bulletGroup struct {
 	bullets []db.BulletForDigest
 }
 
+// Bullet rendering limits
+const (
+	defaultMaxBulletsPerItem  = 3  // Max bullets from a single item/cluster
+	defaultMaxBulletsPerTopic = 20 // Max bullets per topic section
+)
+
 // formatBullets formats bullets for display instead of summaries.
 // Returns empty string if no bullets are available, allowing fallback to summary mode.
 func (rc *digestRenderContext) formatBullets(ctx context.Context, items []db.Item) string {
@@ -30,7 +36,17 @@ func (rc *digestRenderContext) formatBullets(ctx context.Context, items []db.Ite
 		return "" // Fallback to summary mode
 	}
 
-	groups := groupBulletsByTopic(bullets, rc.settings.bulletMaxPerCluster)
+	// Step 1: Filter out low-importance bullets (post-dedup filtering)
+	filteredBullets := filterBulletsByImportance(bullets, rc.settings.bulletMinImportance)
+	if len(filteredBullets) == 0 {
+		return "" // Fallback to summary mode
+	}
+
+	// Step 2: Limit bullets per item/cluster to avoid one story dominating
+	limitedBullets := limitBulletsPerItem(filteredBullets, rc.settings.bulletMaxPerCluster)
+
+	// Step 3: Group by topic with a higher limit
+	groups := groupBulletsByTopic(limitedBullets, defaultMaxBulletsPerTopic)
 
 	var sb strings.Builder
 
@@ -51,10 +67,48 @@ func extractItemIDs(items []db.Item) []string {
 	return ids
 }
 
-// groupBulletsByTopic groups bullets by topic and limits per group.
+// filterBulletsByImportance filters out bullets below the importance threshold.
+// This allows post-dedup filtering since corroboration may boost importance.
+func filterBulletsByImportance(bullets []db.BulletForDigest, minImportance float32) []db.BulletForDigest {
+	if minImportance <= 0 {
+		return bullets // No filtering if threshold is zero or negative
+	}
+
+	result := make([]db.BulletForDigest, 0, len(bullets))
+
+	for _, b := range bullets {
+		if b.ImportanceScore >= minImportance {
+			result = append(result, b)
+		}
+	}
+
+	return result
+}
+
+// limitBulletsPerItem limits the number of bullets from each item/cluster.
+// This prevents a single story from dominating the digest.
+func limitBulletsPerItem(bullets []db.BulletForDigest, maxPerItem int) []db.BulletForDigest {
+	if maxPerItem <= 0 {
+		maxPerItem = defaultMaxBulletsPerItem
+	}
+
+	itemCounts := make(map[string]int)
+	result := make([]db.BulletForDigest, 0, len(bullets))
+
+	for _, b := range bullets {
+		if itemCounts[b.ItemID] < maxPerItem {
+			result = append(result, b)
+			itemCounts[b.ItemID]++
+		}
+	}
+
+	return result
+}
+
+// groupBulletsByTopic groups bullets by topic with a limit per topic.
 func groupBulletsByTopic(bullets []db.BulletForDigest, maxPerTopic int) []bulletGroup {
 	if maxPerTopic <= 0 {
-		maxPerTopic = 5 // Default limit
+		maxPerTopic = defaultMaxBulletsPerTopic
 	}
 
 	topicToIdx := make(map[string]int)
