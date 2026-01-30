@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/rs/zerolog"
+
 	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 	"github.com/lueurxax/telegram-digest-bot/migrations"
 	"github.com/pressly/goose/v3"
@@ -20,6 +22,7 @@ import (
 type DB struct {
 	Pool    *pgxpool.Pool
 	Queries *sqlc.Queries
+	Logger  *zerolog.Logger
 }
 
 // PoolOptions configures the database connection pool.
@@ -43,12 +46,12 @@ func DefaultPoolOptions() PoolOptions {
 }
 
 // New creates a new database connection with default pool options.
-func New(ctx context.Context, dsn string) (*DB, error) {
-	return NewWithOptions(ctx, dsn, DefaultPoolOptions())
+func New(ctx context.Context, dsn string, logger *zerolog.Logger) (*DB, error) {
+	return NewWithOptions(ctx, dsn, DefaultPoolOptions(), logger)
 }
 
 // NewWithOptions creates a new database connection with custom pool options.
-func NewWithOptions(ctx context.Context, dsn string, opts PoolOptions) (*DB, error) {
+func NewWithOptions(ctx context.Context, dsn string, opts PoolOptions, logger *zerolog.Logger) (*DB, error) {
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse db config: %w", err)
@@ -56,7 +59,7 @@ func NewWithOptions(ctx context.Context, dsn string, opts PoolOptions) (*DB, err
 
 	applyPoolOptions(config, opts)
 
-	return connectWithRetries(ctx, config)
+	return connectWithRetries(ctx, config, logger)
 }
 
 // applyPoolOptions applies non-zero pool options to the config.
@@ -83,7 +86,7 @@ func applyPoolOptions(config *pgxpool.Config, opts PoolOptions) {
 }
 
 // connectWithRetries attempts to connect to the database with retries.
-func connectWithRetries(ctx context.Context, config *pgxpool.Config) (*DB, error) {
+func connectWithRetries(ctx context.Context, config *pgxpool.Config, logger *zerolog.Logger) (*DB, error) {
 	var pool *pgxpool.Pool
 
 	var err error
@@ -92,7 +95,7 @@ func connectWithRetries(ctx context.Context, config *pgxpool.Config) (*DB, error
 		pool, err = pgxpool.NewWithConfig(ctx, config)
 		if err == nil {
 			if err = pool.Ping(ctx); err == nil {
-				return &DB{Pool: pool, Queries: sqlc.New(pool)}, nil
+				return &DB{Pool: pool, Queries: sqlc.New(pool), Logger: logger}, nil
 			}
 		}
 
@@ -111,6 +114,18 @@ func (db *DB) Close() {
 }
 
 const migrationLockID = 1000
+
+type gooseLogger struct {
+	logger *zerolog.Logger
+}
+
+func (l *gooseLogger) Fatalf(format string, v ...interface{}) {
+	l.logger.Fatal().Msgf(format, v...)
+}
+
+func (l *gooseLogger) Printf(format string, v ...interface{}) {
+	l.logger.Info().Msgf(format, v...)
+}
 
 func (db *DB) Migrate(ctx context.Context) error {
 	conn, err := db.Pool.Acquire(ctx)
@@ -136,6 +151,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 	}()
 
 	goose.SetBaseFS(migrations.FS)
+	goose.SetLogger(&gooseLogger{logger: db.Logger})
 
 	if err := goose.SetDialect("postgres"); err != nil {
 		return fmt.Errorf("set goose dialect: %w", err)

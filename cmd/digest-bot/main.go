@@ -17,10 +17,13 @@ import (
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
-const modeHTTP = "http"
+const (
+	modeHTTP = "http"
+	flagMode = "mode"
+)
 
 func main() {
-	mode := flag.String("mode", "", "Service mode (bot, reader, worker, digest)")
+	mode := flag.String(flagMode, "", "Service mode (bot, reader, worker, digest)")
 	once := flag.Bool("once", false, "Run once and exit (for digest mode)")
 
 	flag.Parse()
@@ -43,7 +46,7 @@ func main() {
 		HealthCheckPeriod: cfg.DBHealthCheckPeriod,
 	}
 
-	database, err := db.NewWithOptions(ctx, cfg.PostgresDSN, poolOpts)
+	database, err := db.NewWithOptions(ctx, cfg.PostgresDSN, poolOpts, &logger)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to connect to database")
 	}
@@ -64,7 +67,7 @@ func main() {
 		}()
 	}
 
-	if err := runMode(ctx, application, *mode, *once); err != nil {
+	if err := runMode(ctx, application, *mode, *once, &logger); err != nil {
 		if errors.Is(err, context.Canceled) {
 			logger.Info().Msg("application stopped")
 			return
@@ -82,7 +85,7 @@ func newLogger(appEnv string) zerolog.Logger {
 	return zerolog.New(os.Stderr).With().Timestamp().Logger()
 }
 
-func runMode(ctx context.Context, application *app.App, mode string, once bool) error {
+func runMode(ctx context.Context, application *app.App, mode string, once bool, logger *zerolog.Logger) error {
 	switch mode {
 	case "bot":
 		return application.RunBot(ctx)
@@ -95,7 +98,7 @@ func runMode(ctx context.Context, application *app.App, mode string, once bool) 
 	case modeHTTP:
 		return application.RunHTTP(ctx)
 	default:
-		log.Fatalf("Usage: %s --mode=[bot|reader|worker|digest|http]", os.Args[0])
+		logger.Fatal().Str(flagMode, mode).Msg("invalid service mode")
 
 		return nil
 	}

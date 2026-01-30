@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
+	"github.com/rs/zerolog"
+
+	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 const (
@@ -21,8 +23,8 @@ const (
 )
 
 var (
-	errDSNRequired     = errors.New("POSTGRES_DSN is required (or provide -dsn)")
-	errLimitMustBePos  = errors.New("limit must be positive")
+	errDSNRequired    = errors.New("POSTGRES_DSN is required (or provide -dsn)")
+	errLimitMustBePos = errors.New("limit must be positive")
 )
 
 type exportConfig struct {
@@ -78,8 +80,9 @@ func validateConfig(cfg exportConfig) error {
 
 func runExport(cfg exportConfig) error {
 	ctx := context.Background()
+	logger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Logger()
 
-	database, err := db.New(ctx, cfg.dsn)
+	database, err := db.New(ctx, cfg.dsn, &logger)
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -94,7 +97,7 @@ func runExport(cfg exportConfig) error {
 		return err
 	}
 
-	fmt.Printf("Exported %d labeled items to %s\n", len(records), cfg.outPath)
+	logger.Info().Int("count", len(records)).Str("path", cfg.outPath).Msg("Exported labeled items")
 
 	return nil
 }

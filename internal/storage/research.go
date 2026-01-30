@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 	"unicode"
@@ -59,6 +58,9 @@ const (
 	langLinkMaxLagSeconds  = 604800
 	originTopicLimit       = 5
 	retentionItemsMonths   = 18
+
+	// Log field names.
+	logFieldView = "view"
 
 	// Slice preallocation capacity for timeline queries.
 	timelineArgsCapacity = 2
@@ -3030,17 +3032,17 @@ func (db *DB) RefreshResearchMaterializedViews(ctx context.Context) error {
 	if err := db.rebuildResearchDerivedTables(ctx); err != nil {
 		// Log the error but continue to refresh views if possible,
 		// as views don't depend on the derived tables.
-		log.Printf("research derived tables rebuild failed: %v", err)
+		db.Logger.Error().Err(err).Msg("research derived tables rebuild failed")
 	}
 
 	for _, view := range views {
-		log.Printf("refreshing materialized view: %s", view)
+		db.Logger.Info().Str(logFieldView, view).Msg("refreshing materialized view")
 
 		if _, err := db.Pool.Exec(ctx, fmt.Sprintf("REFRESH MATERIALIZED VIEW CONCURRENTLY %s", view)); err != nil {
-			log.Printf("failed to refresh materialized view %s concurrently: %v (trying non-concurrently)", view, err)
+			db.Logger.Warn().Err(err).Str(logFieldView, view).Msg("failed to refresh materialized view concurrently (trying non-concurrently)")
 			// Fallback to non-concurrent refresh if concurrent fails (e.g. if it was never populated)
 			if _, err := db.Pool.Exec(ctx, fmt.Sprintf("REFRESH MATERIALIZED VIEW %s", view)); err != nil {
-				log.Printf("failed to refresh materialized view %s: %v", view, err)
+				db.Logger.Error().Err(err).Str(logFieldView, view).Msg("failed to refresh materialized view")
 			}
 		}
 	}
@@ -3074,7 +3076,7 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 		return err
 	}
 
-	log.Printf("committing research derived tables transaction...")
+	db.Logger.Info().Msg("committing research derived tables transaction")
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit research derived tables: %w", err)
@@ -3084,7 +3086,7 @@ func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
 }
 
 func (db *DB) rebuildClusterFirstAppearance(ctx context.Context, tx pgx.Tx) error {
-	log.Printf("rebuilding cluster_first_appearance...")
+	db.Logger.Info().Msg("rebuilding cluster_first_appearance")
 
 	if _, err := tx.Exec(ctx, "TRUNCATE cluster_first_appearance"); err != nil {
 		return fmt.Errorf("truncate cluster_first_appearance: %w", err)
@@ -3113,7 +3115,7 @@ func (db *DB) rebuildClusterFirstAppearance(ctx context.Context, tx pgx.Tx) erro
 }
 
 func (db *DB) rebuildClusterTopicHistory(ctx context.Context, tx pgx.Tx) error {
-	log.Printf("rebuilding cluster_topic_history...")
+	db.Logger.Info().Msg("rebuilding cluster_topic_history")
 
 	if _, err := tx.Exec(ctx, "TRUNCATE cluster_topic_history"); err != nil {
 		return fmt.Errorf("truncate cluster_topic_history: %w", err)
@@ -3138,7 +3140,7 @@ func (db *DB) rebuildClusterTopicHistory(ctx context.Context, tx pgx.Tx) error {
 }
 
 func (db *DB) rebuildEvidenceClaims(ctx context.Context, tx pgx.Tx) error {
-	log.Printf("rebuilding claims (evidence-based)...")
+	db.Logger.Info().Msg("rebuilding claims (evidence-based)")
 
 	if _, err := tx.Exec(ctx, "DELETE FROM claims WHERE normalized_hash IS NULL"); err != nil {
 		return fmt.Errorf("delete old evidence claims: %w", err)
@@ -3183,7 +3185,7 @@ func (db *DB) rebuildEvidenceClaims(ctx context.Context, tx pgx.Tx) error {
 }
 
 func (db *DB) rebuildClusterLanguageLinks(ctx context.Context, tx pgx.Tx) error {
-	log.Printf("rebuilding cluster_language_links...")
+	db.Logger.Info().Msg("rebuilding cluster_language_links")
 
 	if _, err := tx.Exec(ctx, "TRUNCATE cluster_language_links"); err != nil {
 		return fmt.Errorf("truncate cluster_language_links: %w", err)
