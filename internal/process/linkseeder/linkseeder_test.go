@@ -352,28 +352,6 @@ func TestParseCommaSeparated(t *testing.T) {
 	}
 }
 
-func TestSeedLinksDisabled(t *testing.T) {
-	seeder := &Seeder{
-		enabled: false,
-	}
-
-	input := SeedInput{
-		PeerID:    12345,
-		MessageID: 100,
-		URLs:      []string{"https://example.com/page1", "https://example.com/page2"},
-	}
-
-	result := seeder.SeedLinks(t.Context(), input)
-
-	if result.Skipped[SkipReasonDisabled] != 2 {
-		t.Errorf("expected 2 URLs skipped with reason 'disabled', got %d", result.Skipped[SkipReasonDisabled])
-	}
-
-	if result.Enqueued != 0 {
-		t.Errorf("expected 0 URLs enqueued when disabled, got %d", result.Enqueued)
-	}
-}
-
 func TestSeedInputFields(t *testing.T) {
 	// Test that SeedInput has correct field types for traceability
 	input := SeedInput{

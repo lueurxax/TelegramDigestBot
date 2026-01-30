@@ -48,7 +48,8 @@ func (s *Scheduler) UpdateGlobalThresholds(ctx context.Context, logger *zerolog.
 }
 
 func (s *Scheduler) getAutoThresholdTuningEnabled(ctx context.Context, logger *zerolog.Logger) bool {
-	enabled := s.cfg.AutoThresholdTuningEnabled
+	// Default to enabled; can be disabled via DB setting
+	enabled := true
 	if err := s.database.GetSetting(ctx, "auto_threshold_tuning_enabled", &enabled); err != nil {
 		logger.Debug().Err(err).Msg("could not get auto_threshold_tuning_enabled from DB")
 	}

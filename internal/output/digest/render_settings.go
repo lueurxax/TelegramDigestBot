@@ -42,9 +42,9 @@ func (s *Scheduler) getDigestSettings(ctx context.Context, logger *zerolog.Logge
 		editorDetailedItems:       true,
 		corroborationBoost:        s.cfg.CorroborationImportanceBoost,
 		singleSourcePenalty:       s.cfg.SingleSourcePenalty,
-		explainabilityLineEnabled: s.cfg.ExplainabilityLineEnabled,
+		explainabilityLineEnabled: true,
 		// Bullet mode defaults from config
-		bulletModeEnabled:       s.cfg.BulletExtractionEnabled,
+		bulletModeEnabled:       true,
 		bulletSourceAttribution: s.cfg.BulletSourceAttribution,
 		bulletSourceFormat:      s.cfg.BulletSourceFormat,
 		bulletMaxPerCluster:     s.cfg.BulletMaxPerCluster,

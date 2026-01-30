@@ -11,7 +11,6 @@ data:
   RELEVANCE_THRESHOLD: "0.5"
   IMPORTANCE_THRESHOLD: "0.5"
   CLUSTER_SIMILARITY_THRESHOLD: "0.25"
-  AUTO_THRESHOLD_TUNING_ENABLED: "true"
   SUMMARY_MAX_CHARS: "220"
   SUMMARY_STRIP_PHRASES_RU: "сводка:,итог:,итоги:,дайджест:,summary:,summary,дайджест"
   SUMMARY_STRIP_PHRASES_UK: "зведення:,підсумок:,підсумки:,дайджест:,summary:,summary,дайджест"
@@ -51,7 +50,6 @@ data:
   ENRICHMENT_PROVIDER_COOLDOWN: "10m"
   ENRICHMENT_PROVIDER_GRACE: "3s"
   # Solr provider (SolrCloud)
-  SOLR_ENABLED: "true"
   SOLR_URL: "http://solr:8983/solr/news"
   SOLR_TIMEOUT: "10s"
   SOLR_MAX_RESULTS: "10"
@@ -77,41 +75,34 @@ data:
   GDELT_RPM: "30"
   GDELT_TIMEOUT: "30s"
   # Evidence-enhanced clustering
-  EVIDENCE_CLUSTERING_ENABLED: "true"
   EVIDENCE_CLUSTERING_BOOST: "0.15"
   EVIDENCE_CLUSTERING_MIN_SCORE: "0.25"
   # Telegram link seeding (seeds URLs from messages into crawler queue)
-  TELEGRAM_LINK_SEEDING_ENABLED: "true"
   MAX_LINKS_PER_MESSAGE: "3"
   CRAWLER_QUEUE_MAX_PENDING: "10000"
   LINK_SEED_EXT_DENYLIST: ".zip,.exe,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.rar,.7z,.tar,.gz"
   # Link enrichment
-  LINK_ENRICHMENT_ENABLED: "true"
   LINK_ENRICHMENT_SCOPE: "summary, relevance, topic, dedup, queries, factcheck"
   ENRICHMENT_LANGUAGE_POLICY: '{
   "default": [ "en" ],
   "context": [ { "name": "cyprus","languages": [ "el" ],"keywords": [ "cyprus","nicosia","limassol","larnaca","paphos" ] } ],
   "channel": { "@russiancyprusnews": [ "el" ] }
 }'
-  ENRICHMENT_QUERY_LLM: "true"
   ENRICHMENT_LLM_TIMEOUT: "120s"
   OPENAI_EMBEDDING_MODEL: "text-embedding-3-small"
   OPENAI_EMBEDDING_DIMENSIONS: "1536"
   COHERE_EMBEDDING_MODEL: "embed-multilingual-v3.0"
   EMBEDDING_CIRCUIT_THRESHOLD: "5"
   EMBEDDING_CIRCUIT_TIMEOUT: "1m"
-  EXPLAINABILITY_LINE_ENABLED: "true"
   # Bot settings
   TELEGRAM_BOT_USERNAME: "IDigestBot"
   # Expanded view (on-demand item detail pages)
-  EXPANDED_VIEW_ENABLED: "true"
   EXPANDED_VIEW_BASE_URL: "https://digest.lueurxax.org"
   EXPANDED_VIEW_TTL_HOURS: "72"
   EXPANDED_VIEW_REQUIRE_ADMIN: "true"
   EXPANDED_VIEW_ALLOW_SYSTEM_TOKENS: "true"
   # Apple Shortcuts integration for ChatGPT (iOS/macOS)
-  EXPANDED_CHATGPT_SHORTCUT_ENABLED: "true"
   EXPANDED_CHATGPT_SHORTCUT_NAME: "Ask ChatGPT"
   EXPANDED_CHATGPT_SHORTCUT_ICLOUD_URL: "https://www.icloud.com/shortcuts/f658b37493e94db3aa8d50757b7ad16f"
   EXPANDED_SHORTCUT_URL_MAX_CHARS: "2000"
-  BULLET_EXTRACTION_ENABLED: "true"
+  BULLET_MIN_IMPORTANCE: "0.4"

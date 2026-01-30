@@ -152,10 +152,9 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 		logger:          logger,
 	}
 
-	// Initialize Solr client for language updates if enabled
-	if cfg.SolrEnabled && cfg.SolrBaseURL != "" {
+	// Initialize Solr client for language updates if configured
+	if cfg.SolrBaseURL != "" {
 		w.solrClient = solr.New(solr.Config{
-			Enabled:    true,
 			BaseURL:    cfg.SolrBaseURL,
 			Timeout:    cfg.SolrTimeout,
 			MaxResults: cfg.SolrMaxResults,
@@ -338,7 +337,7 @@ func (w *Worker) processWithProviders(ctx context.Context, item *db.EnrichmentQu
 
 	var resolvedLinks []domain.ResolvedLink
 
-	if item.RawMessageID != "" && w.cfg.LinkEnrichmentEnabled && strings.Contains(w.cfg.LinkEnrichmentScope, domain.ScopeQueries) {
+	if item.RawMessageID != "" && strings.Contains(w.cfg.LinkEnrichmentScope, domain.ScopeQueries) {
 		var err error
 
 		resolvedLinks, err = w.db.GetLinksForMessage(ctx, item.RawMessageID)
@@ -373,7 +372,8 @@ func (w *Worker) getMaxResults() int {
 }
 
 func (w *Worker) generateQueries(ctx context.Context, item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []GeneratedQuery {
-	if w.cfg.EnrichmentQueryLLM && w.queryLLM != nil {
+	// Always try LLM query generation when LLM client is available
+	if w.queryLLM != nil {
 		if queries := w.generateQueriesWithLLM(ctx, item, links); len(queries) > 0 {
 			return queries
 		}
@@ -923,9 +923,8 @@ func registerProvider(cfg *config.Config, registry *ProviderRegistry, name Provi
 }
 
 func registerSolr(cfg *config.Config, registry *ProviderRegistry) {
-	if cfg.SolrEnabled && cfg.SolrBaseURL != "" {
+	if cfg.SolrBaseURL != "" {
 		solrProvider := NewSolrProvider(SolrConfig{
-			Enabled:    true,
 			BaseURL:    cfg.SolrBaseURL,
 			Timeout:    cfg.SolrTimeout,
 			MaxResults: cfg.SolrMaxResults,

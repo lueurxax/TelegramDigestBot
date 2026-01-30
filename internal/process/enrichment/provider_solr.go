@@ -19,12 +19,10 @@ const (
 type SolrProvider struct {
 	client     *solr.Client
 	maxResults int
-	enabled    bool
 }
 
 // SolrConfig holds configuration for the Solr provider.
 type SolrConfig struct {
-	Enabled    bool
 	BaseURL    string
 	Timeout    time.Duration
 	MaxResults int
@@ -33,7 +31,6 @@ type SolrConfig struct {
 // NewSolrProvider creates a new Solr search provider.
 func NewSolrProvider(cfg SolrConfig) *SolrProvider {
 	client := solr.New(solr.Config{
-		Enabled:    cfg.Enabled,
 		BaseURL:    cfg.BaseURL,
 		Timeout:    cfg.Timeout,
 		MaxResults: cfg.MaxResults,
@@ -42,7 +39,6 @@ func NewSolrProvider(cfg SolrConfig) *SolrProvider {
 	return &SolrProvider{
 		client:     client,
 		maxResults: cfg.MaxResults,
-		enabled:    cfg.Enabled,
 	}
 }
 
@@ -58,7 +54,7 @@ func (p *SolrProvider) Priority() int {
 
 // IsAvailable checks if Solr is reachable.
 func (p *SolrProvider) IsAvailable(ctx context.Context) bool {
-	if !p.enabled {
+	if !p.client.Enabled() {
 		return false
 	}
 
@@ -75,7 +71,7 @@ func (p *SolrProvider) Search(ctx context.Context, query string, maxResults int)
 
 // SearchWithLanguage executes a search query with optional language-specific field boosting.
 func (p *SolrProvider) SearchWithLanguage(ctx context.Context, query, language string, maxResults int) ([]SearchResult, error) {
-	if !p.enabled {
+	if !p.client.Enabled() {
 		return nil, errProviderNotFound
 	}
 

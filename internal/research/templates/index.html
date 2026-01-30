@@ -5,431 +5,193 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{.Title}}</title>
     <style>
+      @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap");
       :root {
-        --color-bg-primary: #f8f9fa;
-        --color-bg-secondary: #ffffff;
-        --color-bg-tertiary: #f1f3f5;
-        --color-text-primary: #1a1a2e;
-        --color-text-secondary: #4a5568;
-        --color-text-muted: #6b7280;
-        --color-accent-primary: #2563eb;
-        --color-accent-hover: #1d4ed8;
-        --color-success: #059669;
-        --color-warning: #d97706;
-        --color-error: #dc2626;
-        --color-border-subtle: #e2e8f0;
-        --color-border-default: #cbd5e1;
-        --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-        --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
-        --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1);
-        --radius-sm: 4px;
-        --radius-md: 6px;
-        --radius-lg: 8px;
-        --space-1: 0.25rem;
-        --space-2: 0.5rem;
-        --space-3: 0.75rem;
-        --space-4: 1rem;
-        --space-5: 1.25rem;
-        --space-6: 1.5rem;
-        --space-8: 2rem;
+        --bg: #f7f1e7;
+        --bg-2: #ecf7f4;
+        --card: #fffaf4;
+        --ink: #0f172a;
+        --ink-2: #334155;
+        --muted: #64748b;
+        --border: rgba(15, 23, 42, 0.08);
+        --accent: #f05d5e;
+        --accent-2: #2f8c9f;
+        --shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+        --font-body: "IBM Plex Sans", "Noto Sans", sans-serif;
+        --font-display: "Space Grotesk", "IBM Plex Sans", sans-serif;
       }
-      * { box-sizing: border-box; margin: 0; padding: 0; }
+      * { box-sizing: border-box; }
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
-        color: var(--color-text-primary);
-        background: var(--color-bg-primary);
+        margin: 0;
+        font-family: var(--font-body);
+        color: var(--ink);
+        background:
+          radial-gradient(900px 400px at 8% -10%, rgba(240, 93, 94, 0.18), transparent 60%),
+          radial-gradient(800px 380px at 92% 0%, rgba(47, 140, 159, 0.16), transparent 55%),
+          linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
         min-height: 100vh;
-        line-height: 1.5;
       }
-      a { color: var(--color-accent-primary); text-decoration: none; }
-      a:hover { color: var(--color-accent-hover); }
-
-      /* Skip link for accessibility */
-      .skip-link {
-        position: absolute;
-        top: -100%;
-        left: var(--space-4);
-        padding: var(--space-3) var(--space-4);
-        background: var(--color-accent-primary);
-        color: white;
-        border-radius: var(--radius-md);
-        z-index: 1000;
-      }
-      .skip-link:focus { top: var(--space-4); }
-
-      /* Header */
-      .site-header {
+      a { color: var(--accent-2); text-decoration: none; }
+      a:hover { color: var(--accent); }
+      header {
         position: sticky;
         top: 0;
-        z-index: 100;
-        background: var(--color-bg-secondary);
-        border-bottom: 1px solid var(--color-border-subtle);
+        z-index: 10;
+        background: rgba(15, 23, 42, 0.94);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(10px);
       }
-      .header-container {
+      .nav {
         max-width: 1200px;
         margin: 0 auto;
-        padding: var(--space-3) var(--space-5);
+        padding: 12px 20px;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: var(--space-4);
-      }
-      .brand {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        font-weight: 600;
-        font-size: 0.95rem;
-        color: var(--color-text-primary);
-        text-decoration: none;
-      }
-      .brand-mark {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--color-accent-primary);
-      }
-      .main-nav {
-        display: flex;
-        align-items: center;
-        gap: var(--space-1);
+        gap: 16px;
         flex-wrap: wrap;
       }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-family: var(--font-display);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.8rem;
+        color: #f8fafc;
+      }
+      .brand-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 4px rgba(240, 93, 94, 0.2);
+      }
+      .nav-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
       .nav-link {
-        padding: var(--space-2) var(--space-3);
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: var(--color-text-secondary);
-        border-radius: var(--radius-md);
-        transition: color 0.15s, background 0.15s;
+        color: #e2e8f0;
+        background: rgba(148, 163, 184, 0.15);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 0.85rem;
       }
       .nav-link:hover {
-        color: var(--color-text-primary);
-        background: var(--color-bg-tertiary);
+        color: #fff;
+        border-color: rgba(240, 93, 94, 0.6);
+        background: rgba(240, 93, 94, 0.25);
       }
-      .nav-link--active {
-        color: var(--color-accent-primary);
-        background: rgba(37, 99, 235, 0.08);
-      }
-
-      /* Dropdown */
-      .nav-dropdown { position: relative; }
-      .nav-dropdown-trigger {
-        display: flex;
-        align-items: center;
-        gap: var(--space-1);
-        padding: var(--space-2) var(--space-3);
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: var(--color-text-secondary);
-        background: none;
-        border: none;
-        border-radius: var(--radius-md);
-        cursor: pointer;
-        font-family: inherit;
-        transition: color 0.15s, background 0.15s;
-      }
-      .nav-dropdown-trigger:hover {
-        color: var(--color-text-primary);
-        background: var(--color-bg-tertiary);
-      }
-      .dropdown-icon { transition: transform 0.15s; }
-      .nav-dropdown-menu {
-        position: absolute;
-        top: 100%;
-        right: 0;
-        margin-top: var(--space-1);
-        min-width: 200px;
-        background: var(--color-bg-secondary);
-        border: 1px solid var(--color-border-subtle);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-lg);
-        padding: var(--space-2);
-        opacity: 0;
-        visibility: hidden;
-        transform: translateY(-8px);
-        transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
-      }
-      .nav-dropdown:hover .nav-dropdown-menu,
-      .nav-dropdown:focus-within .nav-dropdown-menu {
-        opacity: 1;
-        visibility: visible;
-        transform: translateY(0);
-      }
-      .nav-dropdown:hover .dropdown-icon { transform: rotate(180deg); }
-      .nav-dropdown-menu a {
-        display: block;
-        padding: var(--space-2) var(--space-3);
-        font-size: 0.875rem;
-        color: var(--color-text-secondary);
-        border-radius: var(--radius-sm);
-      }
-      .nav-dropdown-menu a:hover {
-        background: var(--color-bg-tertiary);
-        color: var(--color-text-primary);
-      }
-
-      /* Mobile menu */
-      .mobile-menu-toggle {
-        display: none;
-        align-items: center;
-        justify-content: center;
-        width: 40px;
-        height: 40px;
-        background: none;
-        border: none;
-        cursor: pointer;
-      }
-      .hamburger {
-        width: 18px;
-        height: 2px;
-        background: var(--color-text-primary);
-        position: relative;
-      }
-      .hamburger::before, .hamburger::after {
-        content: '';
-        position: absolute;
-        width: 100%;
-        height: 2px;
-        background: inherit;
-        left: 0;
-      }
-      .hamburger::before { top: -6px; }
-      .hamburger::after { bottom: -6px; }
-
-      @media (max-width: 900px) {
-        .main-nav { display: none; }
-        .main-nav.is-open {
-          display: flex;
-          flex-direction: column;
-          position: absolute;
-          top: 100%;
-          left: 0;
-          right: 0;
-          background: var(--color-bg-secondary);
-          border-bottom: 1px solid var(--color-border-subtle);
-          padding: var(--space-4);
-          box-shadow: var(--shadow-lg);
-          align-items: stretch;
-        }
-        .main-nav.is-open .nav-link,
-        .main-nav.is-open .nav-dropdown-trigger { justify-content: flex-start; }
-        .main-nav.is-open .nav-dropdown-menu {
-          position: static;
-          opacity: 1;
-          visibility: visible;
-          transform: none;
-          box-shadow: none;
-          border: none;
-          padding-left: var(--space-4);
-        }
-        .mobile-menu-toggle { display: flex; }
-      }
-
-      /* Main content */
       main {
-        padding: var(--space-8) var(--space-5);
+        padding: 32px 20px 80px;
         max-width: 1200px;
         margin: 0 auto;
       }
-      h1 {
-        font-size: 1.875rem;
-        font-weight: 700;
-        color: var(--color-text-primary);
-        margin-bottom: var(--space-2);
+      h1, h2 {
+        font-family: var(--font-display);
+        color: var(--ink);
       }
-      h2 {
-        font-size: 1.125rem;
-        font-weight: 600;
-        color: var(--color-text-primary);
-        margin-bottom: var(--space-4);
-      }
-      .hint {
-        color: var(--color-text-muted);
-        font-size: 0.875rem;
-        margin-bottom: var(--space-6);
-      }
-
-      /* Cards */
+      h1 { font-size: clamp(2rem, 3vw, 3rem); margin: 0 0 8px; }
+      h2 { font-size: clamp(1.2rem, 2vw, 1.6rem); margin: 20px 0 10px; }
       .card {
-        background: var(--color-bg-secondary);
-        border: 1px solid var(--color-border-subtle);
-        border-radius: var(--radius-lg);
-        padding: var(--space-5);
-        margin-bottom: var(--space-5);
-        box-shadow: var(--shadow-sm);
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: var(--shadow);
       }
-      .card h2 { margin-top: 0; }
-
-      /* Forms */
-      .search-form {
-        display: flex;
-        gap: var(--space-3);
-        flex-wrap: wrap;
-        align-items: flex-end;
+      .hint { color: var(--muted); font-size: 0.95rem; }
+      form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        align-items: end;
       }
-      .form-group {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
-        flex: 1;
-        min-width: 140px;
-      }
-      .form-group label {
-        font-size: 0.75rem;
-        font-weight: 500;
-        color: var(--color-text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      input, select {
-        padding: var(--space-2) var(--space-3);
-        font-size: 0.875rem;
-        border: 1px solid var(--color-border-default);
-        border-radius: var(--radius-md);
-        background: var(--color-bg-secondary);
-        color: var(--color-text-primary);
-        font-family: inherit;
-        transition: border-color 0.15s, box-shadow 0.15s;
-      }
-      input:focus, select:focus {
-        outline: none;
-        border-color: var(--color-accent-primary);
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      form input, form select {
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        font-size: 0.95rem;
+        background: #fff;
       }
       .btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: var(--space-2) var(--space-4);
-        font-size: 0.875rem;
-        font-weight: 600;
-        color: white;
-        background: var(--color-accent-primary);
+        background: var(--accent);
+        color: #fff;
         border: none;
-        border-radius: var(--radius-md);
+        padding: 10px 16px;
+        border-radius: 12px;
         cursor: pointer;
-        font-family: inherit;
-        transition: background 0.15s;
-        min-height: 38px;
+        font-weight: 600;
+        box-shadow: 0 8px 20px rgba(240, 93, 94, 0.25);
       }
-      .btn:hover { background: var(--color-accent-hover); }
-
-      /* Quick links */
-      .quick-links {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: var(--space-3);
+      .btn:hover { transform: translateY(-1px); }
+      @keyframes fadeUp {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
       }
-      .quick-link {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        padding: var(--space-3);
-        background: var(--color-bg-tertiary);
-        border-radius: var(--radius-md);
-        color: var(--color-text-secondary);
-        font-size: 0.875rem;
-        transition: background 0.15s, color 0.15s;
-      }
-      .quick-link:hover {
-        background: var(--color-bg-primary);
-        color: var(--color-accent-primary);
-      }
-
-      /* Focus visible */
-      :focus-visible {
-        outline: 2px solid var(--color-accent-primary);
-        outline-offset: 2px;
-      }
-      input:focus-visible, select:focus-visible, button:focus-visible {
-        outline: none;
-      }
-
+      main > * { animation: fadeUp 0.6s ease both; }
       @media (prefers-reduced-motion: reduce) {
         * { animation: none !important; transition: none !important; }
       }
     </style>
   </head>
   <body>
-    <a href="#main-content" class="skip-link">Skip to main content</a>
-    <header class="site-header">
-      <div class="header-container">
-        <a href="/research/" class="brand">
-          <span class="brand-mark"></span>
-          <span>IDigest Research</span>
-        </a>
-        <nav class="main-nav" id="main-nav" aria-label="Main navigation">
-          <a class="nav-link nav-link--active" href="/research/">Home</a>
+    <header>
+      <div class="nav">
+        <div class="brand"><span class="brand-dot"></span>IDigest Research</div>
+        <nav class="nav-links">
+          <a class="nav-link" href="/research/">Home</a>
           <a class="nav-link" href="/research/search">Search</a>
-          <a class="nav-link" href="/research/claims">Claims</a>
           <a class="nav-link" href="/research/settings">Settings</a>
-          <div class="nav-dropdown">
-            <button class="nav-dropdown-trigger" aria-expanded="false" aria-haspopup="true">
-              Analytics
-              <svg class="dropdown-icon" width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-              </svg>
-            </button>
-            <div class="nav-dropdown-menu" role="menu">
-              <a href="/research/channels/overlap" role="menuitem">Channel Overlap</a>
-              <a href="/research/topics/timeline?bucket=week" role="menuitem">Topic Timeline</a>
-              <a href="/research/topics/drift" role="menuitem">Topic Drift</a>
-              <a href="/research/languages/coverage" role="menuitem">Cross-Language</a>
-              <a href="/research/channels/quality" role="menuitem">Channel Quality</a>
-              <a href="/research/channels/bias" role="menuitem">Channel Bias</a>
-              <a href="/research/diff/weekly" role="menuitem">Weekly Diff</a>
-            </div>
-          </div>
+          <a class="nav-link" href="/research/claims">Claims</a>
+          <a class="nav-link" href="/research/channels/overlap">Overlap</a>
+          <a class="nav-link" href="/research/topics/timeline?bucket=week">Timeline</a>
+          <a class="nav-link" href="/research/topics/drift">Drift</a>
+          <a class="nav-link" href="/research/languages/coverage">Cross-Lang</a>
+          <a class="nav-link" href="/research/channels/quality">Quality</a>
+          <a class="nav-link" href="/research/channels/bias">Bias</a>
+          <a class="nav-link" href="/research/diff/weekly">Weekly Diff</a>
         </nav>
-        <button class="mobile-menu-toggle" aria-label="Toggle menu" aria-expanded="false" onclick="document.getElementById('main-nav').classList.toggle('is-open')">
-          <span class="hamburger"></span>
-        </button>
       </div>
     </header>
-    <main id="main-content">
+    <main>
       <h1>{{.Title}}</h1>
       <p class="hint">Generated at {{formatTime .Now}}</p>
 
       <div class="card">
         <h2>Quick Search</h2>
-        <form class="search-form" action="/research/search" method="get">
-          <div class="form-group" style="flex: 2;">
-            <label for="search-q">Query</label>
-            <input type="text" id="search-q" name="q" placeholder="Search items..." />
-          </div>
-          <div class="form-group">
-            <label for="search-channel">Channel</label>
-            <input type="text" id="search-channel" name="channel" placeholder="@channel" />
-          </div>
-          <div class="form-group">
-            <label for="search-topic">Topic</label>
-            <input type="text" id="search-topic" name="topic" placeholder="Topic" />
-          </div>
-          <div class="form-group">
-            <label for="search-scope">Scope</label>
-            <select id="search-scope" name="scope">
-              <option value="items">Items</option>
-              <option value="evidence">Evidence</option>
-              <option value="all">All</option>
-            </select>
-          </div>
+        <form action="/research/search" method="get">
+          <input type="text" name="q" placeholder="Query" />
+          <input type="text" name="channel" placeholder="@channel" />
+          <input type="text" name="topic" placeholder="Topic" />
+          <input type="text" name="lang" placeholder="Language" />
+          <select name="scope">
+            <option value="items">Items</option>
+            <option value="evidence">Evidence</option>
+            <option value="all">All</option>
+          </select>
           <button class="btn" type="submit">Search</button>
         </form>
       </div>
 
       <div class="card">
-        <h2>Quick Links</h2>
-        <div class="quick-links">
-          <a class="quick-link" href="/research/search">Search items &amp; evidence</a>
-          <a class="quick-link" href="/research/claims">Claim ledger</a>
-          <a class="quick-link" href="/research/channels/overlap">Channel overlap</a>
-          <a class="quick-link" href="/research/topics/timeline?bucket=week">Topic timeline</a>
-          <a class="quick-link" href="/research/topics/drift">Topic drift</a>
-          <a class="quick-link" href="/research/languages/coverage">Cross-language coverage</a>
-          <a class="quick-link" href="/research/channels/quality">Channel quality</a>
-          <a class="quick-link" href="/research/diff/weekly">Weekly diff</a>
-        </div>
+        <h2>Common Views</h2>
+        <p><a href="/research/search">Search items and evidence</a></p>
+        <p><a href="/research/settings">Settings snapshot</a></p>
+        <p><a href="/research/claims">Claim ledger</a></p>
+        <p><a href="/research/channels/overlap">Channel overlap (Jaccard)</a></p>
+        <p><a href="/research/topics/timeline?bucket=week">Topic timeline (weekly)</a></p>
+        <p><a href="/research/topics/drift">Topic drift</a></p>
+        <p><a href="/research/languages/coverage">Cross-language coverage</a></p>
+        <p><a href="/research/channels/quality">Channel quality (latest)</a></p>
+        <p><a href="/research/channels/bias">Channel bias lens</a></p>
+        <p><a href="/research/diff/weekly?from=2026-01-01&amp;to=2026-01-08">Weekly diff (example)</a></p>
       </div>
     </main>
   </body>

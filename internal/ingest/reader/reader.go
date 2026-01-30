@@ -139,10 +139,9 @@ func New(cfg *config.Config, database Repository, linkCache links.LinkCacheRepos
 		workerSem:   make(chan struct{}, workerCount),              // limit concurrent channel fetches
 	}
 
-	// Initialize Solr client if enabled
-	if cfg.SolrEnabled && cfg.SolrBaseURL != "" {
+	// Initialize Solr client if configured
+	if cfg.SolrBaseURL != "" {
 		r.solrClient = solr.New(solr.Config{
-			Enabled:    true,
 			BaseURL:    cfg.SolrBaseURL,
 			Timeout:    cfg.SolrTimeout,
 			MaxResults: cfg.SolrMaxResults,

@@ -14,7 +14,6 @@ import (
 
 func newTestConfig() *config.Config {
 	return &config.Config{
-		ExpandedViewEnabled:       true,
 		ExpandedViewSigningSecret: "test-secret",
 		ExpandedViewTTLHours:      24,
 		ExpandedViewRequireAdmin:  true,

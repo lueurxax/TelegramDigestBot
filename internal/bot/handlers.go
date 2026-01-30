@@ -2874,8 +2874,8 @@ func (b *Bot) handleResearch(ctx context.Context, msg *tgbotapi.Message) {
 
 	switch {
 	case strings.EqualFold(args[0], "login"):
-		if !b.cfg.ExpandedViewEnabled || b.cfg.ExpandedViewSigningSecret == "" || b.cfg.ExpandedViewBaseURL == "" {
-			b.reply(msg, "❌ Research dashboard is not configured. Set EXPANDED_VIEW_ENABLED, EXPANDED_VIEW_SIGNING_SECRET, and EXPANDED_VIEW_BASE_URL.")
+		if b.cfg.ExpandedViewSigningSecret == "" || b.cfg.ExpandedViewBaseURL == "" {
+			b.reply(msg, "❌ Research dashboard is not configured. Set EXPANDED_VIEW_SIGNING_SECRET and EXPANDED_VIEW_BASE_URL.")
 			return
 		}
 

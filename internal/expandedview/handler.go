@@ -201,11 +201,8 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 	chatGPTPrompt := BuildChatGPTPrompt(item, evidence, clusterItems, promptCfg)
 	originalMsgLink := BuildOriginalMsgLink(item)
 
-	// Build Apple Shortcuts URL if enabled
-	var shortcutURL string
-	if h.cfg.ExpandedShortcutEnabled {
-		shortcutURL = BuildShortcutURL(h.cfg.ExpandedShortcutName, chatGPTPrompt, h.cfg.ExpandedShortcutMaxChars)
-	}
+	// Build Apple Shortcuts URL
+	shortcutURL := BuildShortcutURL(h.cfg.ExpandedShortcutName, chatGPTPrompt, h.cfg.ExpandedShortcutMaxChars)
 
 	// Determine if HTML rendering is safe
 	// Only allow safeHTML when admin-only mode is enforced (no public system tokens)
@@ -221,7 +218,7 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		GeneratedAt:     time.Now(),
 
 		// Apple Shortcuts
-		ShortcutEnabled:   h.cfg.ExpandedShortcutEnabled,
+		ShortcutEnabled:   true,
 		ShortcutURL:       shortcutURL,
 		ShortcutICloudURL: h.cfg.ExpandedShortcutICloudURL,
 

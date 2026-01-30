@@ -16,7 +16,7 @@ import (
 // This is a non-fatal operation - failures are logged but don't block the pipeline.
 // Only extracts bullets for items above the importance threshold to reduce LLM costs.
 func (p *Pipeline) extractAndStoreBullets(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, item *db.Item, digestLanguage string) {
-	if !p.cfg.BulletExtractionEnabled || item.Status != StatusReady {
+	if item.Status != StatusReady {
 		return
 	}
 

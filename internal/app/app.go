@@ -68,7 +68,7 @@ func (a *App) StartHealthServer(ctx context.Context) error {
 		researchHandler http.Handler
 	)
 
-	if a.cfg.ExpandedViewEnabled && a.cfg.ExpandedViewSigningSecret != "" {
+	if a.cfg.ExpandedViewSigningSecret != "" && a.cfg.ExpandedViewBaseURL != "" {
 		tokenService := expandedview.NewTokenService(
 			a.cfg.ExpandedViewSigningSecret,
 			a.cfg.ExpandedViewTTLHours,
@@ -120,7 +120,7 @@ func (a *App) RunBot(ctx context.Context) error {
 	digestBuilder := digest.New(a.cfg, a.database, nil, llmClient, a.logger)
 
 	// Set up expand link generator for preview commands
-	if a.cfg.ExpandedViewEnabled && a.cfg.ExpandedViewSigningSecret != "" {
+	if a.cfg.ExpandedViewSigningSecret != "" && a.cfg.ExpandedViewBaseURL != "" {
 		tokenService := expandedview.NewTokenService(
 			a.cfg.ExpandedViewSigningSecret,
 			a.cfg.ExpandedViewTTLHours,
@@ -315,9 +315,8 @@ func (a *App) populateHeuristicClaims(ctx context.Context) {
 func (a *App) configureEnrichmentWorker(worker *enrichment.Worker, llmClient llm.Client) {
 	if a.hasConfiguredLLMProvider() {
 		worker.EnableLLMExtraction(llmClient, a.cfg.LLMModel)
-	}
 
-	if a.cfg.EnrichmentQueryLLM && a.hasConfiguredLLMProvider() {
+		// Always enable LLM query generation when provider is available
 		queryModel := a.cfg.EnrichmentQueryLLMModel
 		if queryModel == "" {
 			queryModel = a.cfg.LLMModel
@@ -539,8 +538,8 @@ func (a *App) RunDigest(ctx context.Context, once bool) error {
 
 	s := digest.New(a.cfg, a.database, b, llmClient, a.logger)
 
-	// Set up expand link generator if enabled
-	if a.cfg.ExpandedViewEnabled && a.cfg.ExpandedViewSigningSecret != "" {
+	// Set up expand link generator if signing secret and base URL are configured
+	if a.cfg.ExpandedViewSigningSecret != "" && a.cfg.ExpandedViewBaseURL != "" {
 		tokenService := expandedview.NewTokenService(
 			a.cfg.ExpandedViewSigningSecret,
 			a.cfg.ExpandedViewTTLHours,
@@ -599,12 +598,11 @@ func (a *App) newLinkResolver() *links.Resolver {
 
 // newLinkSeeder creates a new link seeder for seeding external links into crawler queue.
 func (a *App) newLinkSeeder() pipeline.LinkSeeder {
-	if !a.cfg.TelegramLinkSeedingEnabled || !a.cfg.SolrEnabled {
+	if a.cfg.SolrBaseURL == "" {
 		return nil
 	}
 
 	solrClient := solr.New(solr.Config{
-		Enabled:    a.cfg.SolrEnabled,
 		BaseURL:    a.cfg.SolrBaseURL,
 		Timeout:    a.cfg.SolrTimeout,
 		MaxResults: a.cfg.SolrMaxResults,

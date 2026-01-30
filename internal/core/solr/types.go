@@ -4,9 +4,8 @@ import "time"
 
 // Config holds configuration for the Solr client.
 type Config struct {
-	// Enabled controls whether the Solr client is active.
-	Enabled bool
 	// BaseURL is the Solr collection URL, e.g., "http://solr:8983/solr/news".
+	// Client is considered enabled if BaseURL is non-empty.
 	BaseURL string
 	// Timeout is the HTTP request timeout.
 	Timeout time.Duration

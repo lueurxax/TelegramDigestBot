@@ -187,7 +187,7 @@ func (p *Pipeline) Run(ctx context.Context) error {
 		}
 
 		// Periodically deduplicate pending bullets
-		if p.cfg.BulletExtractionEnabled && time.Since(lastBulletDedup) >= bulletDedupInterval {
+		if time.Since(lastBulletDedup) >= bulletDedupInterval {
 			p.runBulletDeduplication(ctx)
 
 			lastBulletDedup = time.Now()
@@ -331,7 +331,7 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 		relevanceGateEnabled:      p.cfg.RelevanceGateEnabled,
 		relevanceGateMode:         p.cfg.RelevanceGateMode,
 		relevanceGateModel:        p.cfg.RelevanceGateModel,
-		linkEnrichmentEnabled:     p.cfg.LinkEnrichmentEnabled,
+		linkEnrichmentEnabled:     true,
 		maxLinks:                  p.cfg.MaxLinksPerMessage,
 		linkCacheTTL:              p.cfg.LinkCacheTTL,
 		tgLinkCacheTTL:            p.cfg.TelegramLinkCacheTTL,

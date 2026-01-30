@@ -156,7 +156,7 @@ func (s *Scheduler) getClusteringConfig(ctx context.Context, logger *zerolog.Log
 		crossTopicEnabled:    s.cfg.CrossTopicClusteringEnabled,
 		crossTopicThreshold:  float64(s.cfg.CrossTopicSimilarityThreshold),
 		coherenceThreshold:   float32(s.cfg.ClusterCoherenceThreshold),
-		evidenceEnabled:      s.cfg.EvidenceClusteringEnabled,
+		evidenceEnabled:      true,
 		evidenceBoost:        s.cfg.EvidenceClusteringBoost,
 		evidenceMinAgreement: s.cfg.EvidenceClusteringMinScore,
 	}
@@ -494,7 +494,7 @@ func (s *Scheduler) generateClusterTopic(ctx context.Context, clusterItemsList [
 
 func (s *Scheduler) augmentClusterItemsForTopic(ctx context.Context, items []db.Item) []db.Item {
 	augmentedItems := make([]db.Item, len(items))
-	useLinks := s.cfg.LinkEnrichmentEnabled && strings.Contains(s.cfg.LinkEnrichmentScope, domain.ScopeTopic)
+	useLinks := strings.Contains(s.cfg.LinkEnrichmentScope, domain.ScopeTopic)
 
 	for i, item := range items {
 		augmentedItems[i] = item

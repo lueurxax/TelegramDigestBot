@@ -5,87 +5,65 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{.Title}}</title>
     <style>
+      @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap");
       :root {
-        --color-bg-primary: #f8f9fa;
-        --color-bg-secondary: #ffffff;
-        --color-text-primary: #1a1a2e;
-        --color-text-muted: #6b7280;
-        --color-accent-primary: #2563eb;
-        --color-accent-hover: #1d4ed8;
-        --color-error: #dc2626;
-        --color-border-subtle: #e2e8f0;
-        --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
-        --radius-lg: 8px;
-        --space-4: 1rem;
-        --space-5: 1.25rem;
-        --space-6: 1.5rem;
+        --bg: #f7f1e7;
+        --bg-2: #ecf7f4;
+        --card: #fffaf4;
+        --ink: #0f172a;
+        --muted: #64748b;
+        --border: rgba(15, 23, 42, 0.08);
+        --accent: #f05d5e;
+        --accent-2: #2f8c9f;
+        --shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+        --font-body: "IBM Plex Sans", "Noto Sans", sans-serif;
+        --font-display: "Space Grotesk", "IBM Plex Sans", sans-serif;
       }
-      * { box-sizing: border-box; margin: 0; padding: 0; }
+      * { box-sizing: border-box; }
       body {
-        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
-        background: var(--color-bg-primary);
-        color: var(--color-text-primary);
+        margin: 0;
+        font-family: var(--font-body);
+        color: var(--ink);
+        background:
+          radial-gradient(900px 400px at 8% -10%, rgba(240, 93, 94, 0.18), transparent 60%),
+          radial-gradient(800px 380px at 92% 0%, rgba(47, 140, 159, 0.16), transparent 55%),
+          linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+        min-height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
-        min-height: 100vh;
-        padding: var(--space-4);
-        line-height: 1.5;
+        padding: 20px;
       }
-      .error-card {
-        background: var(--color-bg-secondary);
-        border: 1px solid var(--color-border-subtle);
-        border-radius: var(--radius-lg);
-        padding: var(--space-6);
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 32px;
         text-align: center;
-        max-width: 400px;
-        box-shadow: var(--shadow-md);
-      }
-      .error-code {
-        font-size: 3rem;
-        font-weight: 700;
-        color: var(--color-error);
-        margin-bottom: var(--space-4);
-        line-height: 1;
+        max-width: 520px;
+        width: 100%;
+        box-shadow: var(--shadow);
       }
       h1 {
-        font-size: 1.25rem;
-        font-weight: 600;
-        margin-bottom: var(--space-4);
+        font-family: var(--font-display);
+        font-size: 2rem;
+        margin: 0 0 10px;
       }
-      p {
-        color: var(--color-text-muted);
-        margin-bottom: var(--space-5);
-      }
-      .btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: var(--space-4) var(--space-5);
-        font-size: 0.875rem;
-        font-weight: 600;
-        color: white;
-        background: var(--color-accent-primary);
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        font-family: inherit;
+      p { margin: 6px 0; color: var(--muted); }
+      a {
+        color: var(--accent-2);
         text-decoration: none;
-        transition: background 0.15s;
+        font-weight: 600;
       }
-      .btn:hover { background: var(--color-accent-hover); }
-      :focus-visible {
-        outline: 2px solid var(--color-accent-primary);
-        outline-offset: 2px;
-      }
+      a:hover { color: var(--accent); }
     </style>
   </head>
   <body>
-    <div class="error-card">
-      <div class="error-code">{{.Status}}</div>
+    <div class="card">
       <h1>{{.Title}}</h1>
       <p>{{.Message}}</p>
-      <a class="btn" href="/research/">Back to dashboard</a>
+      <p>Status: {{.Status}}</p>
+      <p><a href="/research/">Back to dashboard</a></p>
     </div>
   </body>
 </html>

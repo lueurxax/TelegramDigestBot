@@ -83,7 +83,6 @@ type ClusterConfig struct {
 	TimeWindowHours      int     `env:"CLUSTER_TIME_WINDOW_HOURS" envDefault:"36"`
 	CrossTopicEnabled    bool    `env:"CROSS_TOPIC_CLUSTERING_ENABLED" envDefault:"false"`
 	CrossTopicSimilarity float32 `env:"CROSS_TOPIC_SIMILARITY_THRESHOLD" envDefault:"0.90"`
-	EvidenceEnabled      bool    `env:"EVIDENCE_CLUSTERING_ENABLED" envDefault:"true"`
 	EvidenceBoost        float32 `env:"EVIDENCE_CLUSTERING_BOOST" envDefault:"0.15"`
 	EvidenceMinScore     float32 `env:"EVIDENCE_CLUSTERING_MIN_SCORE" envDefault:"0.5"`
 }
@@ -104,7 +103,6 @@ type EnrichmentConfig struct {
 	ProviderCooldown   time.Duration `env:"ENRICHMENT_PROVIDER_COOLDOWN" envDefault:"10m"`
 	ProviderGrace      time.Duration `env:"ENRICHMENT_PROVIDER_GRACE" envDefault:"0s"`
 	QueryTranslate     bool          `env:"ENRICHMENT_QUERY_TRANSLATE" envDefault:"true"`
-	QueryLLM           bool          `env:"ENRICHMENT_QUERY_LLM" envDefault:"false"`
 	QueryLLMModel      string        `env:"ENRICHMENT_QUERY_LLM_MODEL" envDefault:""`
 	MaxQueriesPerItem  int           `env:"ENRICHMENT_MAX_QUERIES_PER_ITEM" envDefault:"5"`
 	LanguagePolicy     string        `env:"ENRICHMENT_LANGUAGE_POLICY" envDefault:""`
@@ -119,7 +117,6 @@ type EnrichmentConfig struct {
 
 // ExpandedViewConfig holds expanded view (detail page) settings.
 type ExpandedViewConfig struct {
-	Enabled           bool   `env:"EXPANDED_VIEW_ENABLED" envDefault:"false"`
 	BaseURL           string `env:"EXPANDED_VIEW_BASE_URL" envDefault:""`
 	SigningSecret     string `env:"EXPANDED_VIEW_SIGNING_SECRET" envDefault:""`
 	TTLHours          int    `env:"EXPANDED_VIEW_TTL_HOURS" envDefault:"72"`
@@ -127,7 +124,6 @@ type ExpandedViewConfig struct {
 	AllowSystemTokens bool   `env:"EXPANDED_VIEW_ALLOW_SYSTEM_TOKENS" envDefault:"false"`
 
 	// Apple Shortcuts integration
-	ShortcutEnabled   bool   `env:"EXPANDED_CHATGPT_SHORTCUT_ENABLED" envDefault:"false"`
 	ShortcutName      string `env:"EXPANDED_CHATGPT_SHORTCUT_NAME" envDefault:"Ask ChatGPT"`
 	ShortcutICloudURL string `env:"EXPANDED_CHATGPT_SHORTCUT_ICLOUD_URL" envDefault:""`
 	ShortcutMaxChars  int    `env:"EXPANDED_SHORTCUT_URL_MAX_CHARS" envDefault:"2000"`
@@ -146,7 +142,6 @@ type CrawlerConfig struct {
 
 // ProviderSolrConfig holds Solr search provider settings.
 type ProviderSolrConfig struct {
-	Enabled    bool          `env:"SOLR_ENABLED" envDefault:"false"`
 	BaseURL    string        `env:"SOLR_URL" envDefault:"http://solr:8983/solr/news"`
 	Timeout    time.Duration `env:"SOLR_TIMEOUT" envDefault:"10s"`
 	MaxResults int           `env:"SOLR_MAX_RESULTS" envDefault:"10"`
@@ -239,7 +234,6 @@ func (c *Config) ClusterCfg() ClusterConfig {
 		TimeWindowHours:      c.ClusterTimeWindowHours,
 		CrossTopicEnabled:    c.CrossTopicClusteringEnabled,
 		CrossTopicSimilarity: c.CrossTopicSimilarityThreshold,
-		EvidenceEnabled:      c.EvidenceClusteringEnabled,
 		EvidenceBoost:        c.EvidenceClusteringBoost,
 		EvidenceMinScore:     c.EvidenceClusteringMinScore,
 	}
@@ -262,7 +256,6 @@ func (c *Config) EnrichmentCfg() EnrichmentConfig {
 		ProviderCooldown:   c.EnrichmentProviderCooldown,
 		ProviderGrace:      c.EnrichmentProviderGrace,
 		QueryTranslate:     c.EnrichmentQueryTranslate,
-		QueryLLM:           c.EnrichmentQueryLLM,
 		QueryLLMModel:      c.EnrichmentQueryLLMModel,
 		MaxQueriesPerItem:  c.EnrichmentMaxQueriesPerItem,
 		LanguagePolicy:     c.EnrichmentLanguagePolicy,
@@ -279,13 +272,11 @@ func (c *Config) EnrichmentCfg() EnrichmentConfig {
 // ExpandedViewCfg returns the expanded view configuration.
 func (c *Config) ExpandedViewCfg() ExpandedViewConfig {
 	return ExpandedViewConfig{
-		Enabled:           c.ExpandedViewEnabled,
 		BaseURL:           c.ExpandedViewBaseURL,
 		SigningSecret:     c.ExpandedViewSigningSecret,
 		TTLHours:          c.ExpandedViewTTLHours,
 		RequireAdmin:      c.ExpandedViewRequireAdmin,
 		AllowSystemTokens: c.ExpandedViewAllowSystemTokens,
-		ShortcutEnabled:   c.ExpandedShortcutEnabled,
 		ShortcutName:      c.ExpandedShortcutName,
 		ShortcutICloudURL: c.ExpandedShortcutICloudURL,
 		ShortcutMaxChars:  c.ExpandedShortcutMaxChars,
@@ -308,7 +299,6 @@ func (c *Config) CrawlerCfg() CrawlerConfig {
 // SolrCfg returns the Solr provider configuration.
 func (c *Config) SolrCfg() ProviderSolrConfig {
 	return ProviderSolrConfig{
-		Enabled:    c.SolrEnabled,
 		BaseURL:    c.SolrBaseURL,
 		Timeout:    c.SolrTimeout,
 		MaxResults: c.SolrMaxResults,

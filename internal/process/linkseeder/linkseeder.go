@@ -51,7 +51,6 @@ const SeedSourceTelegram = "telegram"
 type Seeder struct {
 	client             *solr.Client
 	logger             *zerolog.Logger
-	enabled            bool
 	maxLinksPerMessage int
 	maxQueuePending    int
 	extensionDenylist  map[string]struct{}
@@ -61,7 +60,6 @@ type Seeder struct {
 
 // Config holds the seeder configuration.
 type Config struct {
-	Enabled            bool
 	MaxLinksPerMessage int
 	MaxQueuePending    int
 	ExtensionDenylist  []string
@@ -76,7 +74,6 @@ func NewFromConfig(cfg *config.Config, client *solr.Client, logger *zerolog.Logg
 	domainDeny := parseCommaSeparated(cfg.DomainDenylist)
 
 	return New(Config{
-		Enabled:            cfg.TelegramLinkSeedingEnabled,
 		MaxLinksPerMessage: cfg.MaxLinksPerMessage,
 		MaxQueuePending:    cfg.CrawlerQueueMaxPending,
 		ExtensionDenylist:  extDenylist,
@@ -94,7 +91,6 @@ func New(cfg Config, client *solr.Client, logger *zerolog.Logger) *Seeder {
 	return &Seeder{
 		client:             client,
 		logger:             logger,
-		enabled:            cfg.Enabled,
 		maxLinksPerMessage: cfg.MaxLinksPerMessage,
 		maxQueuePending:    cfg.MaxQueuePending,
 		extensionDenylist:  extDenylist,
@@ -175,12 +171,6 @@ func (s *Seeder) SeedLinks(ctx context.Context, input SeedInput) SeedResult {
 }
 
 func (s *Seeder) shouldSkipSeeding(result *SeedResult, input SeedInput) bool {
-	if !s.enabled {
-		result.Skipped[SkipReasonDisabled] = len(input.URLs)
-
-		return true
-	}
-
 	if !s.client.Enabled() {
 		s.logger.Debug().Msg("Link seeding skipped: Solr client disabled")
 

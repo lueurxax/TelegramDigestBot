@@ -54,7 +54,7 @@ func New(cfg Config) *Client {
 	return &Client{
 		baseURL:    strings.TrimSuffix(cfg.BaseURL, "/"),
 		maxResults: maxResults,
-		enabled:    cfg.Enabled,
+		enabled:    cfg.BaseURL != "", // Enabled if BaseURL is configured
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},

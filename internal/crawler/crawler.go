@@ -46,7 +46,6 @@ type Crawler struct {
 // New creates a new Crawler.
 func New(cfg *Config, logger *zerolog.Logger) (*Crawler, error) {
 	client := solr.New(solr.Config{
-		Enabled:    true,
 		BaseURL:    cfg.SolrURL,
 		Timeout:    cfg.SolrTimeout,
 		MaxResults: cfg.CrawlBatchSize,

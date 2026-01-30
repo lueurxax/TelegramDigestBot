@@ -48,7 +48,6 @@ type Config struct {
 	FreshnessFloor                float32       `env:"FRESHNESS_FLOOR" envDefault:"0.4"`
 	MinTopicCount                 int           `env:"MIN_TOPIC_COUNT" envDefault:"3"`
 	TimeToDigestAlertThreshold    time.Duration `env:"TIME_TO_DIGEST_ALERT_THRESHOLD" envDefault:"0"`
-	AutoThresholdTuningEnabled    bool          `env:"AUTO_THRESHOLD_TUNING_ENABLED" envDefault:"false"`
 	ThresholdTuningStep           float32       `env:"THRESHOLD_TUNING_STEP" envDefault:"0.05"`
 	ThresholdTuningMin            float32       `env:"THRESHOLD_TUNING_MIN" envDefault:"0.10"`
 	ThresholdTuningMax            float32       `env:"THRESHOLD_TUNING_MAX" envDefault:"0.90"`
@@ -59,7 +58,6 @@ type Config struct {
 	ClusterTimeWindowHours        int           `env:"CLUSTER_TIME_WINDOW_HOURS" envDefault:"36"`
 	CrossTopicClusteringEnabled   bool          `env:"CROSS_TOPIC_CLUSTERING_ENABLED" envDefault:"false"`
 	CrossTopicSimilarityThreshold float32       `env:"CROSS_TOPIC_SIMILARITY_THRESHOLD" envDefault:"0.90"`
-	EvidenceClusteringEnabled     bool          `env:"EVIDENCE_CLUSTERING_ENABLED" envDefault:"true"`
 	EvidenceClusteringBoost       float32       `env:"EVIDENCE_CLUSTERING_BOOST" envDefault:"0.15"`
 	EvidenceClusteringMinScore    float32       `env:"EVIDENCE_CLUSTERING_MIN_SCORE" envDefault:"0.5"`
 	RatingMinSampleChannel        int           `env:"RATING_MIN_SAMPLE_CHANNEL" envDefault:"15"`
@@ -75,7 +73,6 @@ type Config struct {
 	DedupSameChannelWindowHours   int           `env:"DEDUP_SAME_CHANNEL_WINDOW_HOURS" envDefault:"6"`
 	CorroborationImportanceBoost  float32       `env:"CORROBORATION_IMPORTANCE_BOOST" envDefault:"0.08"`
 	SingleSourcePenalty           float32       `env:"SINGLE_SOURCE_PENALTY" envDefault:"0.05"`
-	ExplainabilityLineEnabled     bool          `env:"EXPLAINABILITY_LINE_ENABLED" envDefault:"false"`
 	DomainAllowlist               string        `env:"DOMAIN_ALLOWLIST" envDefault:""`
 	DomainDenylist                string        `env:"DOMAIN_DENYLIST" envDefault:""`
 	FactCheckGoogleEnabled        bool          `env:"FACTCHECK_GOOGLE_ENABLED" envDefault:"false"`
@@ -87,7 +84,6 @@ type Config struct {
 	FactCheckQueueMax             int           `env:"FACTCHECK_QUEUE_MAX" envDefault:"5000"`
 
 	// Link enrichment
-	LinkEnrichmentEnabled  bool          `env:"LINK_ENRICHMENT_ENABLED" envDefault:"false"`
 	WebFetchRPS            float64       `env:"WEB_FETCH_RPS" envDefault:"2"`
 	WebFetchTimeout        time.Duration `env:"WEB_FETCH_TIMEOUT" envDefault:"30s"`
 	LinkCacheTTL           time.Duration `env:"LINK_CACHE_TTL" envDefault:"24h"`
@@ -117,7 +113,6 @@ type Config struct {
 	EnrichmentProviderCooldown    time.Duration `env:"ENRICHMENT_PROVIDER_COOLDOWN" envDefault:"10m"`
 	EnrichmentProviderGrace       time.Duration `env:"ENRICHMENT_PROVIDER_GRACE" envDefault:"0s"`
 	EnrichmentQueryTranslate      bool          `env:"ENRICHMENT_QUERY_TRANSLATE" envDefault:"true"`
-	EnrichmentQueryLLM            bool          `env:"ENRICHMENT_QUERY_LLM" envDefault:"false"`
 	EnrichmentQueryLLMModel       string        `env:"ENRICHMENT_QUERY_LLM_MODEL" envDefault:""`
 	EnrichmentMaxQueriesPerItem   int           `env:"ENRICHMENT_MAX_QUERIES_PER_ITEM" envDefault:"5"`
 	EnrichmentLanguagePolicy      string        `env:"ENRICHMENT_LANGUAGE_POLICY" envDefault:""`
@@ -161,7 +156,6 @@ type Config struct {
 	OpenSearchTimeout        time.Duration `env:"ENRICHMENT_OPENSEARCH_TIMEOUT" envDefault:"30s"`
 
 	// Solr provider
-	SolrEnabled    bool          `env:"SOLR_ENABLED" envDefault:"false"`
 	SolrBaseURL    string        `env:"SOLR_URL" envDefault:"http://solr:8983/solr/news"`
 	SolrTimeout    time.Duration `env:"SOLR_TIMEOUT" envDefault:"10s"`
 	SolrMaxResults int           `env:"SOLR_MAX_RESULTS" envDefault:"10"`
@@ -201,12 +195,10 @@ type Config struct {
 	CrawlSeedsFile    string        `env:"CRAWL_SEEDS_FILE" envDefault:"/config/seeds.txt"`
 
 	// Telegram link seeding (seeds external links from Telegram posts into crawler queue)
-	TelegramLinkSeedingEnabled bool   `env:"TELEGRAM_LINK_SEEDING_ENABLED" envDefault:"false"`
-	CrawlerQueueMaxPending     int    `env:"CRAWLER_QUEUE_MAX_PENDING" envDefault:"10000"`
-	LinkSeedExtDenylist        string `env:"LINK_SEED_EXT_DENYLIST" envDefault:".zip,.exe,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.rar,.7z,.tar,.gz"`
+	CrawlerQueueMaxPending int    `env:"CRAWLER_QUEUE_MAX_PENDING" envDefault:"10000"`
+	LinkSeedExtDenylist    string `env:"LINK_SEED_EXT_DENYLIST" envDefault:".zip,.exe,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.rar,.7z,.tar,.gz"`
 
 	// Expanded view settings (on-demand item detail pages)
-	ExpandedViewEnabled           bool   `env:"EXPANDED_VIEW_ENABLED" envDefault:"false"`
 	ExpandedViewBaseURL           string `env:"EXPANDED_VIEW_BASE_URL" envDefault:""`
 	ExpandedViewSigningSecret     string `env:"EXPANDED_VIEW_SIGNING_SECRET" envDefault:""`
 	ExpandedViewTTLHours          int    `env:"EXPANDED_VIEW_TTL_HOURS" envDefault:"72"`
@@ -214,13 +206,11 @@ type Config struct {
 	ExpandedViewAllowSystemTokens bool   `env:"EXPANDED_VIEW_ALLOW_SYSTEM_TOKENS" envDefault:"false"`
 
 	// Apple Shortcuts integration for ChatGPT
-	ExpandedShortcutEnabled   bool   `env:"EXPANDED_CHATGPT_SHORTCUT_ENABLED" envDefault:"false"`
 	ExpandedShortcutName      string `env:"EXPANDED_CHATGPT_SHORTCUT_NAME" envDefault:"Ask ChatGPT"`
 	ExpandedShortcutICloudURL string `env:"EXPANDED_CHATGPT_SHORTCUT_ICLOUD_URL" envDefault:""`
 	ExpandedShortcutMaxChars  int    `env:"EXPANDED_SHORTCUT_URL_MAX_CHARS" envDefault:"2000"`
 
 	// Bulletized output settings
-	BulletExtractionEnabled  bool    `env:"BULLET_EXTRACTION_ENABLED" envDefault:"false"`
 	BulletBatchSize          int     `env:"BULLET_BATCH_SIZE" envDefault:"3"`
 	BulletDedupThreshold     float64 `env:"BULLET_DEDUP_THRESHOLD" envDefault:"0.88"`
 	BulletSourceAttribution  bool    `env:"BULLET_SOURCE_ATTRIBUTION" envDefault:"true"`

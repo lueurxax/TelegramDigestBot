@@ -229,6 +229,11 @@ func (m *mockLLM) TranslateText(_ context.Context, text string, _ string, _ stri
 	return text, nil
 }
 
+func (m *mockLLM) ExtractBullets(_ context.Context, _ llm.BulletExtractionInput, _, _ string) (llm.BulletExtractionResult, error) {
+	// Return empty result - bullets are optional and we don't need to test them here
+	return llm.BulletExtractionResult{}, nil
+}
+
 func (m *mockLLM) RelevanceGate(_ context.Context, _, _, _ string) (llm.RelevanceGateResult, error) {
 	return llm.RelevanceGateResult{
 		Decision:   DecisionRelevant,
@@ -401,6 +406,10 @@ func (m *mockLLMWithImportance) ProcessBatch(_ context.Context, messages []llm.M
 
 func (m *mockLLMWithImportance) TranslateText(_ context.Context, text string, _ string, _ string) (string, error) {
 	return text, nil
+}
+
+func (m *mockLLMWithImportance) ExtractBullets(_ context.Context, _ llm.BulletExtractionInput, _, _ string) (llm.BulletExtractionResult, error) {
+	return llm.BulletExtractionResult{}, nil
 }
 
 func TestHasUniqueInfo(t *testing.T) {
@@ -1362,6 +1371,10 @@ func (m *mockLLMForGate) RelevanceGate(_ context.Context, _, _, _ string) (llm.R
 		Confidence: m.confidence,
 		Reason:     "mock reason",
 	}, nil
+}
+
+func (m *mockLLMForGate) ExtractBullets(_ context.Context, _ llm.BulletExtractionInput, _, _ string) (llm.BulletExtractionResult, error) {
+	return llm.BulletExtractionResult{}, nil
 }
 
 func TestLoadGatePrompt(t *testing.T) {

@@ -47,8 +47,8 @@ func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSetting
 		displayEnd = end.In(loc)
 	}
 
-	// Check if expanded view links are enabled
-	expandLinksEnabled := s.cfg.ExpandedViewEnabled && s.expandLinkGenerator != nil && s.cfg.ExpandedViewBaseURL != ""
+	// Check if expanded view links are enabled (requires signing secret and base URL)
+	expandLinksEnabled := s.expandLinkGenerator != nil && s.cfg.ExpandedViewBaseURL != ""
 
 	return &digestRenderContext{
 		scheduler:          s,

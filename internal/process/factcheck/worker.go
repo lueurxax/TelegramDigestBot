@@ -214,7 +214,7 @@ func (w *Worker) shouldEnrichClaim(item *db.FactCheckQueueItem) bool {
 		return false
 	}
 
-	return w.cfg.LinkEnrichmentEnabled && strings.Contains(w.cfg.LinkEnrichmentScope, domain.ScopeFactCheck)
+	return strings.Contains(w.cfg.LinkEnrichmentScope, domain.ScopeFactCheck)
 }
 
 func (w *Worker) extractClaimFromLink(link domain.ResolvedLink) string {
