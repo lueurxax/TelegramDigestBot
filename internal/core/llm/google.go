@@ -610,7 +610,7 @@ func buildBulletExtractionPrompt(input BulletExtractionInput, targetLanguage str
 
 // parseBulletResponse parses the LLM response into bullets and validates scores.
 func parseBulletResponse(responseText string) ([]ExtractedBullet, error) {
-	jsonText := extractJSON(responseText)
+	jsonText := extractJSONArray(responseText)
 
 	var bullets []ExtractedBullet
 	if err := json.Unmarshal([]byte(jsonText), &bullets); err != nil {
@@ -624,6 +624,57 @@ func parseBulletResponse(responseText string) ([]ExtractedBullet, error) {
 	}
 
 	return bullets, nil
+}
+
+// extractJSONArray extracts a balanced JSON array from text, handling nested brackets.
+func extractJSONArray(text string) string {
+	start := strings.Index(text, "[")
+	if start == -1 {
+		return text
+	}
+
+	end := findMatchingBracket(text, start)
+	if end == -1 {
+		return extractJSON(text)
+	}
+
+	return text[start : end+1]
+}
+
+// findMatchingBracket finds the position of the closing bracket matching the opening at start.
+func findMatchingBracket(text string, start int) int {
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i := start; i < len(text); i++ {
+		c := text[i]
+
+		if escaped {
+			escaped = false
+
+			continue
+		}
+
+		switch {
+		case c == '\\' && inString:
+			escaped = true
+		case c == '"':
+			inString = !inString
+		case inString:
+			// Skip characters inside strings
+		case c == '[':
+			depth++
+		case c == ']':
+			depth--
+
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+
+	return -1
 }
 
 // clampScore ensures a score is within the valid 0-1 range.
