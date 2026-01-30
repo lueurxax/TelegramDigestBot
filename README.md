@@ -42,8 +42,11 @@ See [docs/index.md](docs/index.md) for the complete documentation index.
 - [Source Enrichment](docs/features/source-enrichment.md) - Multi-provider evidence retrieval (Solr, GDELT, NewsAPI, SearxNG)
 - [Corroboration](docs/features/corroboration.md) - Channel corroboration and Google Fact Check API integration
 - [Editor Mode](docs/features/editor-mode.md) - Narrative rendering, tiered importance, consolidated clusters
+- [Bulletized Output](docs/features/bulletized-output.md) - Claim extraction and bullet-based digest rendering
 - [Channel Discovery](docs/features/discovery.md) - Automatic channel discovery with keyword filters
 - [Vision & Images](docs/features/vision-images.md) - Vision routing, cover images, AI-generated covers
+- [Research Dashboard](docs/features/research-dashboard.md) - Web UI for archive exploration and analytics
+- [Link Seeding](docs/features/link-seeding.md) - Seed external URLs from Telegram to crawler queue
 
 ## Enrichment & Verification
 

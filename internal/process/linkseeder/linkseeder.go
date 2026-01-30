@@ -31,9 +31,10 @@ const (
 
 // Log field names.
 const (
-	logFieldURL    = "url"
-	logFieldPeerID = "peer_id"
-	logFieldMsgID  = "msg_id"
+	logFieldURL     = "url"
+	logFieldPeerID  = "peer_id"
+	logFieldMsgID   = "msg_id"
+	logFieldChannel = "channel"
 )
 
 // Telegram-internal domains to filter out.
@@ -135,6 +136,7 @@ func buildDomainSet(domains []string) map[string]struct{} {
 type SeedInput struct {
 	PeerID    int64 // Telegram peer ID of the channel
 	MessageID int64 // Telegram message ID
+	Channel   string
 	URLs      []string
 }
 
@@ -172,7 +174,9 @@ func (s *Seeder) SeedLinks(ctx context.Context, input SeedInput) SeedResult {
 
 func (s *Seeder) shouldSkipSeeding(result *SeedResult, input SeedInput) bool {
 	if !s.client.Enabled() {
-		s.logger.Debug().Msg("Link seeding skipped: Solr client disabled")
+		s.logger.Debug().
+			Str(logFieldChannel, input.Channel).
+			Msg("Link seeding skipped: Solr client disabled")
 
 		result.Skipped[SkipReasonDisabled] = len(input.URLs)
 
@@ -183,23 +187,27 @@ func (s *Seeder) shouldSkipSeeding(result *SeedResult, input SeedInput) bool {
 }
 
 func (s *Seeder) isQueueFull(ctx context.Context, result *SeedResult, input SeedInput) bool {
-	if s.maxQueuePending <= 0 {
-		return false
-	}
-
 	pendingCount, err := s.getQueuePendingCount(ctx)
 	if err != nil {
-		s.logger.Warn().Err(err).Msg("Failed to check queue pending count")
+		s.logger.Warn().
+			Err(err).
+			Str(logFieldChannel, input.Channel).
+			Msg("Failed to check queue pending count")
 
 		return false
 	}
 
 	observability.CrawlerQueuePending.Set(float64(pendingCount))
 
+	if s.maxQueuePending <= 0 {
+		return false
+	}
+
 	if pendingCount >= s.maxQueuePending {
 		s.logger.Debug().
 			Int("pending", pendingCount).
 			Int("max", s.maxQueuePending).
+			Str(logFieldChannel, input.Channel).
 			Msg("Link seeding skipped: queue full")
 
 		result.Skipped[SkipReasonQueueFull] = len(input.URLs)
@@ -240,6 +248,7 @@ func (s *Seeder) processURL(ctx context.Context, rawURL, seedRef string, input S
 			Str(logFieldURL, rawURL).
 			Int64(logFieldPeerID, input.PeerID).
 			Int64(logFieldMsgID, input.MessageID).
+			Str(logFieldChannel, input.Channel).
 			Str("reason", skipReason).
 			Msg("Link skipped")
 
@@ -256,6 +265,7 @@ func (s *Seeder) processURL(ctx context.Context, rawURL, seedRef string, input S
 		Str(logFieldURL, rawURL).
 		Int64(logFieldPeerID, input.PeerID).
 		Int64(logFieldMsgID, input.MessageID).
+		Str(logFieldChannel, input.Channel).
 		Msg("URL enqueued for crawling")
 
 	return true
@@ -277,6 +287,7 @@ func (s *Seeder) handleEnqueueError(err error, rawURL string, input SeedInput, r
 		Str(logFieldURL, rawURL).
 		Int64(logFieldPeerID, input.PeerID).
 		Int64(logFieldMsgID, input.MessageID).
+		Str(logFieldChannel, input.Channel).
 		Msg("Failed to enqueue URL")
 
 	return false

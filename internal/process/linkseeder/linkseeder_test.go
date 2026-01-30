@@ -1,7 +1,18 @@
 package linkseeder
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/rs/zerolog"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/core/solr"
 )
 
 const filterURLErrFormat = "filterURL(%q) = %q, want %q"
@@ -357,6 +368,7 @@ func TestSeedInputFields(t *testing.T) {
 	input := SeedInput{
 		PeerID:    1234567890,
 		MessageID: 42,
+		Channel:   "@example",
 		URLs:      []string{"https://example.com"},
 	}
 
@@ -366,6 +378,10 @@ func TestSeedInputFields(t *testing.T) {
 
 	if input.MessageID != 42 {
 		t.Errorf("MessageID = %d, want 42", input.MessageID)
+	}
+
+	if input.Channel != "@example" {
+		t.Errorf("Channel = %q, want @example", input.Channel)
 	}
 }
 
@@ -385,5 +401,99 @@ func TestSeedResultInit(t *testing.T) {
 
 	if totalSkipped != 8 {
 		t.Errorf("expected 8 total skipped, got %d", totalSkipped)
+	}
+}
+
+func TestEnqueueURLCanonicalizes(t *testing.T) {
+	rawURL := "HTTP://Example.com:80/path/?utm_source=a&b=2#frag"
+	expectedCanonical := "http://example.com/path?b=2"
+	expectedDocID := solr.WebDocID(expectedCanonical)
+
+	var indexedDoc map[string]interface{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/get"):
+			w.WriteHeader(http.StatusNotFound)
+		case strings.HasPrefix(r.URL.Path, "/update"):
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read update body: %v", err)
+			}
+
+			var docs []map[string]interface{}
+			if err := json.Unmarshal(body, &docs); err != nil {
+				t.Fatalf("unmarshal update body: %v", err)
+			}
+
+			if len(docs) != 1 {
+				t.Fatalf("expected 1 doc, got %d", len(docs))
+			}
+
+			indexedDoc = docs[0]
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := solr.New(solr.Config{BaseURL: server.URL})
+	logger := zerolog.New(io.Discard)
+	seeder := New(Config{}, client, &logger)
+
+	if err := seeder.enqueueURL(context.Background(), rawURL, "tg://peer/1/msg/2"); err != nil {
+		t.Fatalf("enqueueURL error: %v", err)
+	}
+
+	if indexedDoc == nil {
+		t.Fatalf("expected indexed document")
+	}
+
+	if gotID, _ := indexedDoc["id"].(string); gotID != expectedDocID {
+		t.Fatalf("doc id = %q, want %q", gotID, expectedDocID)
+	}
+
+	if gotCanonical, _ := indexedDoc["url_canonical"].(string); gotCanonical != expectedCanonical {
+		t.Fatalf("url_canonical = %q, want %q", gotCanonical, expectedCanonical)
+	}
+
+	if gotURL, _ := indexedDoc["url"].(string); gotURL != rawURL {
+		t.Fatalf("url = %q, want %q", gotURL, rawURL)
+	}
+
+	if gotDomain, _ := indexedDoc["domain"].(string); gotDomain != "example.com" {
+		t.Fatalf("domain = %q, want example.com", gotDomain)
+	}
+}
+
+func TestEnqueueURLDuplicate(t *testing.T) {
+	updateCalled := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/get"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"doc":{"id":"existing"}}`))
+		case strings.HasPrefix(r.URL.Path, "/update"):
+			updateCalled = true
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := solr.New(solr.Config{BaseURL: server.URL})
+	logger := zerolog.New(io.Discard)
+	seeder := New(Config{}, client, &logger)
+
+	err := seeder.enqueueURL(context.Background(), "https://example.com/article", "tg://peer/1/msg/2")
+	if !errors.Is(err, errDuplicate) {
+		t.Fatalf("expected errDuplicate, got %v", err)
+	}
+
+	if updateCalled {
+		t.Fatalf("did not expect update call when document exists")
 	}
 }

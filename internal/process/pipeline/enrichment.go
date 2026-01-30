@@ -62,9 +62,15 @@ func (p *Pipeline) seedLinksForCrawler(ctx context.Context, logger zerolog.Logge
 		return
 	}
 
+	channel := strings.TrimSpace(m.ChannelTitle)
+	if channel == "" {
+		channel = m.ChannelID
+	}
+
 	result := p.linkSeeder.SeedLinks(ctx, LinkSeedInput{
 		PeerID:    m.TGPeerID,
 		MessageID: m.TGMessageID,
+		Channel:   channel,
 		URLs:      urls,
 	})
 

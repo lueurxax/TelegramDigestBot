@@ -73,7 +73,7 @@ This feature (enabled via `/settings` in the bot or `consolidated_clusters_enabl
 
 ### Research & Analytics
 
-The clustering system underpins several research tools (see `internal/research/`):
+The clustering system underpins several research tools available in the [Research Dashboard](research-dashboard.md):
 
 *   **Timeline Analysis**: Tracking how a story evolves over time by following the cluster's timeline.
 *   **Channel Overlap**: Calculating the "Jaccard Index" between channels based on how often they end up in the same clusters. This helps identify channels that copy each other or cover identical beats.

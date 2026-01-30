@@ -31,6 +31,7 @@ This directory contains all documentation for the Telegram Digest Bot project.
 | Document | Description |
 |----------|-------------|
 | [Editor Mode](features/editor-mode.md) | Narrative rendering, tiered importance, consolidated clusters |
+| [Bulletized Output](features/bulletized-output.md) | Claim extraction, deduplication, and bullet-based rendering |
 | [Vision & Images](features/vision-images.md) | Vision routing, cover images, AI-generated covers |
 | [Item Expansion](features/item-expansion.md) | Expanded item views with evidence, context, and ChatGPT Q&A |
 
@@ -41,6 +42,7 @@ This directory contains all documentation for the Telegram Digest Bot project.
 | [Source Enrichment](features/source-enrichment.md) | Multi-provider evidence retrieval and agreement scoring |
 | [Corroboration](features/corroboration.md) | Channel corroboration and fact-check links |
 | [Link Enrichment](features/link-enrichment.md) | URL resolution and content extraction |
+| [Link Seeding](features/link-seeding.md) | Seed external URLs from Telegram to crawler queue |
 
 ### Quality & Evaluation
 
@@ -50,15 +52,22 @@ This directory contains all documentation for the Telegram Digest Bot project.
 | [Annotations](features/annotations.md) | Item labeling for quality evaluation and threshold tuning |
 | [Evaluation Harness](eval/README.md) | Offline quality evaluation with labeled datasets |
 
+### Research & Analytics
+
+| Document | Description |
+|----------|-------------|
+| [Research Dashboard](features/research-dashboard.md) | Web UI and API for archive exploration and analytics |
+
 ## Proposals
 
 These documents describe features under consideration or in development.
 
-| Document | Description |
-|----------|-------------|
-| [LLM Budget Guardrails](proposals/llm-budget-guardrails.md) | Per-model budgets and rate limits |
-| [Research & Visualization](proposals/research-interactivity-visualization.md) | Interactive research UI and analytics |
-| [Telegram Link Seeding](proposals/telegram-link-seeding.md) | Seeding evidence from Telegram links |
+| Document | Status | Description |
+|----------|--------|-------------|
+| [LLM Budget Guardrails](proposals/llm-budget-guardrails.md) | Proposed | Per-model budgets and rate limits |
+| [Research & Visualization](proposals/research-interactivity-visualization.md) | Implemented | Original proposal for research dashboard |
+| [Telegram Link Seeding](proposals/telegram-link-seeding.md) | Implemented | Original proposal for link seeding |
+| [Bulletized Output](proposals/digest-bulletized-output.md) | Implemented | Original proposal for bullet-based digests |
 
 ## Other
 

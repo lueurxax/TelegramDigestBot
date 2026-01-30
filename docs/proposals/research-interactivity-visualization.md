@@ -1,8 +1,10 @@
 # Interactivity and Visualization for Research
 
-> **Status: PROPOSAL** (January 2026)
+> **Status: IMPLEMENTED**
 >
-> This feature has not yet been implemented. It proposes a research-focused exploration layer for media analysis.
+> This feature has been fully implemented. See [features/research-dashboard.md](../features/research-dashboard.md) for current documentation.
+>
+> Original proposal context preserved below for reference.
 
 ## Summary
 Add a research-focused exploration layer on top of the existing dataset (items, clusters, evidence, channel stats, and quality signals). The goal is to move beyond passive digests and enable direct investigation of media behavior through interactive search, cluster inspection, and analytics.

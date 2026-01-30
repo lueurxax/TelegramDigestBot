@@ -623,6 +623,7 @@ func (a *linkSeederAdapter) SeedLinks(ctx context.Context, input pipeline.LinkSe
 	result := a.seeder.SeedLinks(ctx, linkseeder.SeedInput{
 		PeerID:    input.PeerID,
 		MessageID: input.MessageID,
+		Channel:   input.Channel,
 		URLs:      input.URLs,
 	})
 

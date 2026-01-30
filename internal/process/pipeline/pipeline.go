@@ -78,6 +78,7 @@ type LinkSeeder interface {
 type LinkSeedInput struct {
 	PeerID    int64
 	MessageID int64
+	Channel   string
 	URLs      []string
 }
 

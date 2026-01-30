@@ -14,6 +14,8 @@ internal/
     domain/      # Shared domain types
     links/       # Link extraction and resolution
     llm/         # LLM client for summarization and scoring
+    solr/        # Solr client for evidence search
+  expandedview/  # On-demand item expansion with ChatGPT integration
   ingest/        # Telegram message intake
     reader/      # MTProto reader for channel messages
   output/        # Digest generation and publishing
@@ -24,8 +26,12 @@ internal/
     observability/ # Health checks and metrics
   process/       # Message processing pipeline
     dedup/       # Deduplication logic
+    enrichment/  # Evidence retrieval and scoring
+    factcheck/   # Google Fact Check API integration
     filters/     # Content filtering
+    linkseeder/  # Seed external URLs to crawler queue
     pipeline/    # Main processing pipeline
+  research/      # Research dashboard API and web UI
   storage/       # Database layer
     sqlc/        # Generated query code
     migrations/  # Database schema migrations

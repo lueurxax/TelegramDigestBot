@@ -3,7 +3,6 @@
 Source enrichment extends the corroboration system by searching external sources to find evidence that supports or relates to digest items. It queries multiple providers (Solr, GDELT, NewsAPI, SearxNG, OpenSearch) and scores how well external sources agree with item content.
 
 > **Status:** Implemented. Only USD-based budget caps remain unimplemented (count-based limits work).
-> See [proposals/source-enrichment-fact-checking.md](../proposals/source-enrichment-fact-checking.md) for the original proposal.
 
 ## Overview
 
@@ -158,7 +157,6 @@ ENRICHMENT_LLM_TIMEOUT=120s        # Translation timeout
 
 When enabled, queries are translated to target languages before searching. The digest output language remains unchanged (typically Russian).
 
-See [proposals/enrichment-language-routing.md](../proposals/enrichment-language-routing.md) for design rationale.
 
 ### Evidence-Enhanced Clustering
 
@@ -355,7 +353,6 @@ All other proposal features are implemented including:
 - Parallel source retrieval within time budget
 - Corroboration coverage and circuit breaker metrics
 
-See [proposals/source-enrichment-fact-checking.md](../proposals/source-enrichment-fact-checking.md) for the original proposal.
 
 ---
 
