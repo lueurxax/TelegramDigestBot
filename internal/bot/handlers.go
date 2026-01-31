@@ -19,7 +19,7 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/schedule"
 	"github.com/lueurxax/telegram-digest-bot/internal/research"
-	"github.com/lueurxax/telegram-digest-bot/internal/storage"
+	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 func (b *Bot) handleThreshold(ctx context.Context, msg *tgbotapi.Message, key string) {
@@ -2891,7 +2891,7 @@ func (b *Bot) handleResearch(ctx context.Context, msg *tgbotapi.Message) {
 		loginURL := fmt.Sprintf("%s/research/login?token=%s", baseURL, url.QueryEscape(token))
 		b.reply(msg, fmt.Sprintf("🔐 <b>Research Login</b>\n%s", html.EscapeString(loginURL)))
 	case strings.EqualFold(args[0], "rebuild"):
-		if err := b.database.RefreshResearchMaterializedViews(ctx); err != nil {
+		if err := b.rebuildResearch(ctx); err != nil {
 			b.reply(msg, fmt.Sprintf("❌ Research rebuild failed: %s", html.EscapeString(err.Error())))
 			return
 		}
@@ -2900,6 +2900,70 @@ func (b *Bot) handleResearch(ctx context.Context, msg *tgbotapi.Message) {
 	default:
 		b.reply(msg, helpResearchMessage())
 	}
+}
+
+const (
+	researchRebuildLookbackDays = 14
+	researchRebuildItemLimit    = 2000
+	researchRebuildTimeout      = 10 * time.Minute
+	researchRebuildLockID       = int64(94231)
+)
+
+var errResearchRebuildRunning = fmt.Errorf("research rebuild already running")
+
+const errFmtRefreshResearchViews = "refresh research views: %w"
+
+func (b *Bot) rebuildResearch(ctx context.Context) error {
+	dbConn, ok := b.database.(*db.DB)
+	if !ok {
+		if err := b.database.RefreshResearchMaterializedViews(ctx); err != nil {
+			return fmt.Errorf(errFmtRefreshResearchViews, err)
+		}
+
+		return nil
+	}
+
+	rebuildCtx, cancel := context.WithTimeout(ctx, researchRebuildTimeout)
+	defer cancel()
+
+	acquired, err := dbConn.TryAcquireAdvisoryLock(rebuildCtx, researchRebuildLockID)
+	if err != nil {
+		return fmt.Errorf("acquire research lock: %w", err)
+	}
+
+	if !acquired {
+		return errResearchRebuildRunning
+	}
+
+	defer func() {
+		if err := dbConn.ReleaseAdvisoryLock(rebuildCtx, researchRebuildLockID); err != nil {
+			b.logger.Warn().Err(err).Msg("release research rebuild lock failed")
+		}
+	}()
+
+	end := time.Now().UTC()
+	start := end.AddDate(0, 0, -researchRebuildLookbackDays)
+
+	items, err := dbConn.GetReadyItemsForResearch(rebuildCtx, start, end, researchRebuildItemLimit)
+	if err != nil {
+		return fmt.Errorf("load research items: %w", err)
+	}
+
+	clusterer := digest.New(b.cfg, dbConn, nil, b.llmClient, b.logger)
+	if err := clusterer.ClusterItemsForResearch(rebuildCtx, items, start, end, b.logger); err != nil {
+		return fmt.Errorf("cluster research items: %w", err)
+	}
+
+	if err := dbConn.RefreshResearchMaterializedViews(rebuildCtx); err != nil {
+		return fmt.Errorf(errFmtRefreshResearchViews, err)
+	}
+
+	populator := research.NewHeuristicClaimPopulator(dbConn, b.logger)
+	if _, err := populator.PopulateHeuristicClaims(rebuildCtx); err != nil {
+		return fmt.Errorf("populate heuristic claims: %w", err)
+	}
+
+	return nil
 }
 
 func (b *Bot) handleErrors(ctx context.Context, msg *tgbotapi.Message) {

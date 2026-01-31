@@ -1161,18 +1161,18 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.50, sum(rate(digest_reader_message_age_seconds_bucket{namespace=\"digest\"}[5m])) by (le))",
-              "legendFormat": "P50 Age",
+              "expr": "histogram_quantile(0.50, sum(rate(digest_reader_ingest_lag_seconds_bucket{namespace=\"digest\"}[5m])) by (le))",
+              "legendFormat": "P50 Lag",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "histogram_quantile(0.90, sum(rate(digest_reader_message_age_seconds_bucket{namespace=\"digest\"}[5m])) by (le))",
-              "legendFormat": "P90 Age",
+              "expr": "histogram_quantile(0.90, sum(rate(digest_reader_ingest_lag_seconds_bucket{namespace=\"digest\"}[5m])) by (le))",
+              "legendFormat": "P90 Lag",
               "refId": "B"
             }
           ],
-          "title": "Ingested Message Age",
+          "title": "Reader Ingest Lag",
           "type": "timeseries"
         },
         {
@@ -1275,6 +1275,66 @@ data:
             }
           ],
           "title": "Oldest Unprocessed Message Age",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 12,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 90},
+          "id": 47,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "avg(digest_reader_backfill_ratio{namespace=\"digest\"})",
+              "legendFormat": "Backfill",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "avg(digest_reader_replay_ratio{namespace=\"digest\"})",
+              "legendFormat": "Replay",
+              "refId": "B"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "avg(digest_reader_forwarded_ratio{namespace=\"digest\"})",
+              "legendFormat": "Forwarded",
+              "refId": "C"
+            }
+          ],
+          "title": "Reader Backfill / Replay / Forward Ratio",
           "type": "timeseries"
         }
       ],

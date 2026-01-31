@@ -1,6 +1,6 @@
 module github.com/lueurxax/telegram-digest-bot
 
-go 1.24.0
+go 1.25.6
 
 require (
 	codeberg.org/readeck/go-readability/v2 v2.1.0

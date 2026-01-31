@@ -39,6 +39,11 @@ func (s *Scheduler) clusterItemsWithSource(ctx context.Context, items []db.Item,
 		logger.Error().Err(err).Msg("failed to delete old clusters")
 	}
 
+	minClusterSize := 2
+	if source == db.ClusterSourceResearch {
+		minClusterSize = 1
+	}
+
 	cfg := s.getClusteringConfig(ctx, logger)
 	topicIndex, topicGroups := s.buildTopicGrouping(items)
 	clusterCtx := &clusterBuildContext{
@@ -52,7 +57,7 @@ func (s *Scheduler) clusterItemsWithSource(ctx context.Context, items []db.Item,
 	}
 
 	for topic, groupItems := range clusterCtx.topicGroups {
-		if err := s.processTopicGroup(ctx, topic, groupItems, clusterCtx, start, end, source, logger); err != nil {
+		if err := s.processTopicGroup(ctx, topic, groupItems, clusterCtx, start, end, source, minClusterSize, logger); err != nil {
 			return err
 		}
 	}
@@ -72,14 +77,18 @@ type clusterBuildContext struct {
 
 func (s *Scheduler) limitClusterItems(items []db.Item, logger *zerolog.Logger) []db.Item {
 	if len(items) > ClusterMaxItemsLimit {
-		logger.Warn().Int(LogFieldCount, len(items)).Msg("Too many items to cluster, limiting to first 500")
+		logger.Warn().
+			Int(LogFieldCount, len(items)).
+			Int("limit", ClusterMaxItemsLimit).
+			Msg("Too many items to cluster, limiting to first items")
+
 		return items[:ClusterMaxItemsLimit]
 	}
 
 	return items
 }
 
-func (s *Scheduler) processTopicGroup(ctx context.Context, topic string, groupItems []db.Item, bc *clusterBuildContext, start, end time.Time, source string, logger *zerolog.Logger) error {
+func (s *Scheduler) processTopicGroup(ctx context.Context, topic string, groupItems []db.Item, bc *clusterBuildContext, start, end time.Time, source string, minClusterSize int, logger *zerolog.Logger) error {
 	for _, itemA := range groupItems {
 		if bc.assigned[itemA.ID] {
 			continue
@@ -89,7 +98,7 @@ func (s *Scheduler) processTopicGroup(ctx context.Context, topic string, groupIt
 		bc.assigned[itemA.ID] = true
 
 		clusterItemsList = s.validateClusterCoherence(clusterItemsList, bc, logger)
-		if len(clusterItemsList) <= 1 {
+		if len(clusterItemsList) < minClusterSize {
 			continue
 		}
 

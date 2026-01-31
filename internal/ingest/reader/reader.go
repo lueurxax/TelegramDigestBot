@@ -46,6 +46,8 @@ const (
 	// Batch sizes
 	unknownDiscoveryBatchSize    = 10
 	inviteLinkDiscoveryBatchSize = 5
+	backfillThresholdHours       = 24
+	secondsPerHour               = 3600
 
 	// Slice capacities
 	discoverySliceCapacity = 8
@@ -950,6 +952,10 @@ type historyProcessingContext struct {
 	ch                  db.Channel
 	channelTitles       map[int64]string
 	channelAccessHashes map[int64]int64
+	processedCount      int
+	backfillCount       int
+	replayCount         int
+	forwardCount        int
 }
 
 func (r *Reader) extractHistoryData(history tg.MessagesMessagesClass) ([]tg.MessageClass, []tg.ChatClass, bool) {
@@ -1003,9 +1009,26 @@ func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessin
 		IsForward:     isForward,
 	}
 
-	// Record message age
+	// Record message age and ingestion lag
 	age := time.Since(rawMsg.TGDate).Seconds()
 	observability.ReaderMessageAgeSeconds.WithLabelValues(hpc.ch.Username).Observe(age)
+	observability.ReaderIngestLagSeconds.WithLabelValues(hpc.ch.Username).Observe(age)
+
+	hpc.processedCount++
+	if age > float64(backfillThresholdHours*secondsPerHour) {
+		hpc.backfillCount++
+		observability.ReaderBackfillTotal.WithLabelValues(hpc.ch.Username).Inc()
+	}
+
+	if hpc.ch.LastTGMessageID > 0 && int64(msg.ID) <= hpc.ch.LastTGMessageID {
+		hpc.replayCount++
+		observability.ReaderReplayTotal.WithLabelValues(hpc.ch.Username).Inc()
+	}
+
+	if isForward {
+		hpc.forwardCount++
+		observability.ReaderForwardedTotal.WithLabelValues(hpc.ch.Username).Inc()
+	}
 
 	if err := r.database.SaveRawMessage(ctx, rawMsg); err != nil {
 		r.logger.Error().Err(err).Str(logFieldChannel, hpc.ch.Username).Int(logFieldMsgID, msg.ID).Msg("failed to save raw message")
@@ -1140,6 +1163,13 @@ func (r *Reader) processHistoryMessages(ctx context.Context, api *tg.Client, his
 	}
 
 	r.logProcessingResult(ctx, ch, count, maxID)
+
+	if hpc.processedCount > 0 {
+		total := float64(hpc.processedCount)
+		observability.ReaderBackfillRatio.WithLabelValues(ch.Username).Set(float64(hpc.backfillCount) / total)
+		observability.ReaderReplayRatio.WithLabelValues(ch.Username).Set(float64(hpc.replayCount) / total)
+		observability.ReaderForwardedRatio.WithLabelValues(ch.Username).Set(float64(hpc.forwardCount) / total)
+	}
 
 	return count, nil
 }

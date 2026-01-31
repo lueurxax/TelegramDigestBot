@@ -326,4 +326,40 @@ var (
 		Help:    "Age of ingested messages at time of collection",
 		Buckets: []float64{60, 300, 900, 1800, 3600, 7200, 14400, 28800, 43200, 86400, 172800, 604800},
 	}, []string{"channel"})
+
+	ReaderIngestLagSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "digest_reader_ingest_lag_seconds",
+		Help:    "Lag between message timestamp and ingestion time",
+		Buckets: []float64{60, 300, 900, 1800, 3600, 7200, 14400, 28800, 43200, 86400, 172800, 604800},
+	}, []string{"channel"})
+
+	ReaderBackfillTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_reader_backfill_total",
+		Help: "Total number of ingested messages older than the backfill threshold",
+	}, []string{"channel"})
+
+	ReaderReplayTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_reader_replay_total",
+		Help: "Total number of ingested messages with IDs at or below last seen",
+	}, []string{"channel"})
+
+	ReaderForwardedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_reader_forwarded_total",
+		Help: "Total number of forwarded messages ingested",
+	}, []string{"channel"})
+
+	ReaderBackfillRatio = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "digest_reader_backfill_ratio",
+		Help: "Share of ingested messages considered backfill within the last batch",
+	}, []string{"channel"})
+
+	ReaderReplayRatio = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "digest_reader_replay_ratio",
+		Help: "Share of ingested messages with IDs at or below last seen within the last batch",
+	}, []string{"channel"})
+
+	ReaderForwardedRatio = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "digest_reader_forwarded_ratio",
+		Help: "Share of ingested messages that are forwarded within the last batch",
+	}, []string{"channel"})
 )

@@ -1394,8 +1394,8 @@ func (h *Handler) getClaimsEmptyDescription(ctx context.Context) string {
 		)
 	case summary.ClusterItemsCount == 0:
 		return fmt.Sprintf(
-			"No items in clusters. Evidence claims: %d, Items with evidence: %d, Clustered items: 0. "+
-				"Items need to be part of a digest to be clustered.",
+			"No items in clusters yet. Evidence claims: %d, Items with evidence: %d, Clustered items: 0. "+
+				"Research clustering runs hourly; you can also run /research rebuild to force a refresh.",
 			summary.EvidenceClaimsCount,
 			summary.EvidenceItemsCount,
 		)
@@ -1411,7 +1411,7 @@ func (h *Handler) getClaimsEmptyDescription(ctx context.Context) string {
 	case summary.ClaimsCount == 0:
 		return fmt.Sprintf(
 			"Data exists but claims table is empty. Evidence claims: %d, Items with evidence: %d, "+
-				"Clustered items: %d, Overlap: %d. Click 'Rebuild Analytics' to populate.",
+				"Clustered items: %d, Overlap: %d. Run /research rebuild to populate.",
 			summary.EvidenceClaimsCount,
 			summary.EvidenceItemsCount,
 			summary.ClusterItemsCount,
