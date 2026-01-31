@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 
 	"github.com/rs/zerolog"
 
@@ -39,7 +40,7 @@ func (p *Pipeline) extractBullets(ctx context.Context, logger zerolog.Logger, c 
 
 	logger.Debug().Str(LogFieldMsgID, c.ID).Int(LogFieldCount, len(extracted.Bullets)).Msg("bullets extracted")
 
-	return extracted.Bullets
+	return dedupeExtractedBullets(extracted.Bullets)
 }
 
 // storeBullets saves extracted bullets to the database and generates embeddings.
@@ -109,9 +110,53 @@ func coalesceTopic(topics ...string) string {
 
 // generateBulletHash creates a hash of the bullet text for deduplication.
 func generateBulletHash(text string) string {
-	hash := sha256.Sum256([]byte(text))
+	normalized := normalizeBulletText(text)
+	if normalized == "" {
+		normalized = text
+	}
+
+	hash := sha256.Sum256([]byte(normalized))
 
 	return hex.EncodeToString(hash[:16]) // Use first 16 bytes (32 hex chars)
+}
+
+func dedupeExtractedBullets(bullets []llm.ExtractedBullet) []llm.ExtractedBullet {
+	if len(bullets) <= 1 {
+		return bullets
+	}
+
+	seen := make(map[string]bool, len(bullets))
+	deduped := make([]llm.ExtractedBullet, 0, len(bullets))
+
+	for _, b := range bullets {
+		key := normalizeBulletText(b.Text)
+		if key == "" {
+			continue
+		}
+
+		if seen[key] {
+			continue
+		}
+
+		seen[key] = true
+
+		deduped = append(deduped, b)
+	}
+
+	return deduped
+}
+
+func normalizeBulletText(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return ""
+	}
+
+	return strings.Join(strings.Fields(normalized), " ")
 }
 
 // defaultMaxBullets is the default number of bullets to extract per message.

@@ -61,12 +61,14 @@ func (rc *digestRenderContext) formatBullets(ctx context.Context, items []db.Ite
 	clusterIndex := buildItemClusterIndex(rc.clusters)
 	limitedBullets := limitBulletsPerCluster(filteredBullets, rc.settings.bulletMaxPerCluster, clusterIndex)
 
-	if !hasSufficientBulletCoverage(len(items), len(limitedBullets)) {
+	dedupedBullets := dedupeBulletsByText(limitedBullets)
+
+	if !hasSufficientBulletCoverage(len(items), len(dedupedBullets)) {
 		return "" // Fallback to summary mode when bullet coverage is too low
 	}
 
 	// Step 3: Group by tier, then topic
-	tiers := groupBulletsByTier(limitedBullets)
+	tiers := groupBulletsByTier(dedupedBullets)
 
 	var sb strings.Builder
 
@@ -191,6 +193,45 @@ func groupBulletsByTier(bullets []db.BulletForDigest) map[int][]db.BulletForDige
 	}
 
 	return tiered
+}
+
+func dedupeBulletsByText(bullets []db.BulletForDigest) []db.BulletForDigest {
+	if len(bullets) <= 1 {
+		return bullets
+	}
+
+	seen := make(map[string]bool, len(bullets))
+	deduped := make([]db.BulletForDigest, 0, len(bullets))
+
+	for _, b := range bullets {
+		key := normalizeBulletText(b.Text)
+		if key == "" {
+			continue
+		}
+
+		if seen[key] {
+			continue
+		}
+
+		seen[key] = true
+
+		deduped = append(deduped, b)
+	}
+
+	return deduped
+}
+
+func normalizeBulletText(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return ""
+	}
+
+	return strings.Join(strings.Fields(normalized), " ")
 }
 
 func tierIndex(score float32) int {
