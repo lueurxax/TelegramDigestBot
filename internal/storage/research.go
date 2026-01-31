@@ -101,6 +101,10 @@ const (
 			       c.tg_peer_id,
 			       cl.cluster_id,
 			       ev.evidence_count,
+			       ir.rating,
+			       ir.feedback,
+			       ir.source,
+			       ir.created_at,
 			       %s AS score
 			FROM items i
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
@@ -117,6 +121,13 @@ const (
 				FROM item_evidence ie
 				WHERE ie.item_id = i.id
 			) ev ON true
+			LEFT JOIN LATERAL (
+				SELECT rating, feedback, source, created_at
+				FROM item_ratings
+				WHERE item_id = i.id
+				ORDER BY created_at DESC
+				LIMIT 1
+			) ir ON true
 			WHERE %s
 			ORDER BY score DESC, rm.tg_date DESC
 			LIMIT %d OFFSET %d
@@ -190,6 +201,10 @@ type ResearchItemSearchResult struct {
 	ChannelPeerID   int64
 	ClusterID       string
 	EvidenceCount   int
+	LastRating      string
+	LastFeedback    string
+	LastSource      string
+	LastRatedAt     *time.Time
 	Score           float64
 }
 
@@ -349,6 +364,10 @@ func (db *DB) SearchResearchItems(ctx context.Context, params ResearchSearchPara
 			title         pgtype.Text
 			clusterID     pgtype.UUID
 			evidenceCount int64
+			lastRating    pgtype.Text
+			lastFeedback  pgtype.Text
+			lastSource    pgtype.Text
+			lastRatedAt   pgtype.Timestamptz
 		)
 
 		res := ResearchItemSearchResult{}
@@ -368,6 +387,10 @@ func (db *DB) SearchResearchItems(ctx context.Context, params ResearchSearchPara
 			&res.ChannelPeerID,
 			&clusterID,
 			&evidenceCount,
+			&lastRating,
+			&lastFeedback,
+			&lastSource,
+			&lastRatedAt,
 			&res.Score,
 		); err != nil {
 			return nil, nil, fmt.Errorf("scan research item: %w", err)
@@ -381,6 +404,14 @@ func (db *DB) SearchResearchItems(ctx context.Context, params ResearchSearchPara
 		res.ChannelTitle = title.String
 		res.ClusterID = fromUUID(clusterID)
 		res.EvidenceCount = int(evidenceCount)
+		res.LastRating = lastRating.String
+		res.LastFeedback = lastFeedback.String
+		res.LastSource = lastSource.String
+
+		if lastRatedAt.Valid {
+			t := lastRatedAt.Time
+			res.LastRatedAt = &t
+		}
 
 		results = append(results, res)
 	}
@@ -3519,7 +3550,7 @@ type HeuristicClaimInput struct {
 
 // SimilarClaim represents a claim found by embedding similarity search.
 type SimilarClaim struct {
-	ID         int64
+	ID         string
 	ClaimText  string
 	Similarity float64
 }
@@ -3632,10 +3663,13 @@ func (db *DB) FindSimilarClaimsByEmbedding(ctx context.Context, embedding []floa
 	for rows.Next() {
 		var claim SimilarClaim
 
-		if err := rows.Scan(&claim.ID, &claim.ClaimText, &claim.Similarity); err != nil {
+		var claimID pgtype.UUID
+
+		if err := rows.Scan(&claimID, &claim.ClaimText, &claim.Similarity); err != nil {
 			return nil, fmt.Errorf("scan similar claim: %w", err)
 		}
 
+		claim.ID = fromUUID(claimID)
 		claims = append(claims, claim)
 	}
 
@@ -3647,7 +3681,7 @@ func (db *DB) FindSimilarClaimsByEmbedding(ctx context.Context, embedding []floa
 }
 
 // UpdateClaimClusters adds cluster IDs to an existing claim.
-func (db *DB) UpdateClaimClusters(ctx context.Context, claimID int64, clusterIDs []string) error {
+func (db *DB) UpdateClaimClusters(ctx context.Context, claimID string, clusterIDs []string) error {
 	clusterUUIDs := make([]pgtype.UUID, len(clusterIDs))
 	for i, id := range clusterIDs {
 		clusterUUIDs[i] = toUUID(id)
@@ -3660,7 +3694,7 @@ func (db *DB) UpdateClaimClusters(ctx context.Context, claimID int64, clusterIDs
 		),
 		updated_at = NOW()
 		WHERE id = $1
-	`, claimID, clusterUUIDs)
+	`, toUUID(claimID), clusterUUIDs)
 	if err != nil {
 		return fmt.Errorf("update claim clusters: %w", err)
 	}

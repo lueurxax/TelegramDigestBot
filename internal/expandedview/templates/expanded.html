@@ -141,6 +141,57 @@
             color: var(--color-text-primary);
         }
 
+        .annotate-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-2);
+            flex-wrap: wrap;
+        }
+        .annotate-btn {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            border: 1px solid var(--color-border-subtle);
+            background: #fff;
+            cursor: pointer;
+            font-size: 1rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .annotate-btn.good { color: var(--color-success); }
+        .annotate-btn.bad { color: var(--color-warning); }
+        .annotate-btn.irrelevant { color: var(--color-error); }
+        .annotate-btn.note { color: var(--color-text-muted); }
+        .annotate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .annotate-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-2);
+            font-size: 0.8rem;
+            color: var(--color-text-secondary);
+            padding: var(--space-1) var(--space-2);
+            border-radius: 999px;
+            border: 1px solid var(--color-border-subtle);
+            background: var(--color-bg-tertiary);
+        }
+        .annotate-note {
+            margin-top: var(--space-2);
+            display: none;
+        }
+        .annotate-note input {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--color-border-subtle);
+            font-size: 0.9rem;
+        }
+        .annotate-error {
+            margin-top: var(--space-2);
+            color: var(--color-error);
+            font-size: 0.85rem;
+        }
+
         .original-text {
             background: var(--color-bg-tertiary);
             border-left: 3px solid var(--color-accent-primary);
@@ -373,6 +424,23 @@
             <p class="summary">{{if .AllowSafeHTML}}{{.Item.Summary | safeHTML}}{{else}}{{.Item.Summary | stripHTML}}{{end}}</p>
         </div>
 
+        <div class="card" data-item-id="{{.Item.ID}}" data-annotation-token="{{.AnnotationToken}}">
+            <h2>Annotate</h2>
+            <div class="annotate-actions">
+                <button class="annotate-btn good" data-rating="good" aria-label="Good">✅</button>
+                <button class="annotate-btn bad" data-rating="bad" aria-label="Bad">⚠️</button>
+                <button class="annotate-btn irrelevant" data-rating="irrelevant" aria-label="Irrelevant">🚫</button>
+                <button class="annotate-btn note" data-note aria-label="Add note">📝</button>
+                {{if .LastRating}}
+                <span class="annotate-badge">{{.LastRating}}{{if .LastRatedAt}} • {{.LastRatedAt.Format "Jan 2 15:04"}}{{end}}</span>
+                {{end}}
+            </div>
+            <div class="annotate-note">
+                <input type="text" placeholder="Optional note…" maxlength="500" value="{{.LastFeedback}}" />
+            </div>
+            <div class="annotate-error" hidden></div>
+        </div>
+
         <div class="card">
             <h2>Original Message</h2>
             <div class="original-text">{{.Item.Text}}</div>
@@ -462,5 +530,66 @@
             Generated {{.GeneratedAt.Format "Jan 2, 2006 15:04:05 MST"}}
         </div>
     </div>
+    <script>
+      const annotateCard = document.querySelector("[data-item-id]");
+      if (annotateCard) {
+        const itemId = annotateCard.dataset.itemId;
+        const token = annotateCard.dataset.annotationToken;
+        const buttons = annotateCard.querySelectorAll(".annotate-btn[data-rating]");
+        const noteBtn = annotateCard.querySelector(".annotate-btn.note");
+        const noteWrap = annotateCard.querySelector(".annotate-note");
+        const noteInput = annotateCard.querySelector(".annotate-note input");
+        const errorEl = annotateCard.querySelector(".annotate-error");
+
+        const setError = (msg) => {
+          if (!errorEl) return;
+          if (!msg) {
+            errorEl.hidden = true;
+            errorEl.textContent = "";
+            return;
+          }
+          errorEl.hidden = false;
+          errorEl.textContent = msg;
+        };
+
+        const annotate = async (rating) => {
+          setError("");
+          buttons.forEach(b => b.disabled = true);
+          const payload = {
+            item_id: itemId,
+            rating,
+            comment: noteInput ? noteInput.value.trim() : "",
+            source: "web-expanded"
+          };
+          try {
+            const res = await fetch("/research/annotate", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Expanded-Token": token
+              },
+              body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              throw new Error(data.message || "Failed to save annotation");
+            }
+          } catch (err) {
+            setError(err.message || "Failed to save annotation");
+          } finally {
+            buttons.forEach(b => b.disabled = false);
+          }
+        };
+
+        buttons.forEach(btn => {
+          btn.addEventListener("click", () => annotate(btn.dataset.rating));
+        });
+        if (noteBtn && noteWrap) {
+          noteBtn.addEventListener("click", () => {
+            noteWrap.style.display = noteWrap.style.display === "block" ? "none" : "block";
+          });
+        }
+      }
+    </script>
 </body>
 </html>

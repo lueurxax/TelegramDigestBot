@@ -302,6 +302,14 @@ func (p *Pipeline) recordMessageAgeMetrics(messages []db.RawMessage) {
 		}
 
 		observability.PipelineMessageAgeSeconds.Observe(age)
+
+		kind := "native"
+
+		if message.IsForward {
+			kind = "forwarded"
+		}
+
+		observability.PipelineMessageAgeSecondsByKind.WithLabelValues(kind).Observe(age)
 	}
 }
 

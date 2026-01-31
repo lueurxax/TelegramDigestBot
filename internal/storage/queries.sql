@@ -337,9 +337,16 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT (digest_id, user_id) DO UPDATE SET rating = $3, feedback = $4;
 
 -- name: SaveItemRating :exec
-INSERT INTO item_ratings (item_id, user_id, rating, feedback)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (item_id, user_id) DO UPDATE SET rating = $3, feedback = $4;
+INSERT INTO item_ratings (item_id, user_id, rating, feedback, source)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (item_id, user_id) DO UPDATE SET rating = $3, feedback = $4, source = $5;
+
+-- name: GetItemRatingsByItem :many
+SELECT user_id, rating, feedback, source, created_at
+FROM item_ratings
+WHERE item_id = $1
+ORDER BY created_at DESC
+LIMIT $2;
 
 -- name: AddSettingHistory :exec
 INSERT INTO setting_history (key, old_value, new_value, changed_by)

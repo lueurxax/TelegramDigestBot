@@ -16,6 +16,7 @@ data:
 
     # Tech communities
     https://news.ycombinator.com
+    https://ntc.party
 
     # Science
     https://nature.com
@@ -60,7 +61,7 @@ metadata:
   name: news-crawler
   namespace: digest
 spec:
-  replicas: 4
+  replicas: 6
   selector:
     matchLabels:
       app: news-crawler

@@ -18,19 +18,10 @@ type Repository interface {
 
 	// Rating operations
 	SaveRating(ctx context.Context, digestID string, userID int64, rating int16, feedback string) error
-	SaveItemRating(ctx context.Context, itemID string, userID int64, rating, feedback string) error
+	SaveItemRating(ctx context.Context, itemID string, userID int64, rating, feedback, source string) error
 	GetItemRatingSummary(ctx context.Context, since time.Time) ([]db.RatingSummary, error)
 	GetLatestChannelRatingStats(ctx context.Context, limit int) ([]db.RatingStatsSummary, error)
 	GetLatestGlobalRatingStats(ctx context.Context) (*db.GlobalRatingStats, error)
-
-	// Annotation operations
-	EnqueueAnnotationItems(ctx context.Context, since time.Time, limit int) (int, error)
-	AssignNextAnnotation(ctx context.Context, userID int64) (*db.AnnotationItem, error)
-	LabelAssignedAnnotation(ctx context.Context, userID int64, label, comment string) (*db.AnnotationItem, error)
-	LabelAnnotationByItem(ctx context.Context, userID int64, itemID, label, comment string) (*db.AnnotationItem, error)
-	SkipAssignedAnnotation(ctx context.Context, userID int64) (*db.AnnotationItem, error)
-	SkipAnnotationByItem(ctx context.Context, userID int64, itemID string) (*db.AnnotationItem, error)
-	GetAnnotationStats(ctx context.Context) (map[string]int, error)
 
 	// Channel operations
 	GetActiveChannels(ctx context.Context) ([]db.Channel, error)

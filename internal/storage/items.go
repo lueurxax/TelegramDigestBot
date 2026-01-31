@@ -31,6 +31,14 @@ type ItemRating struct {
 	CreatedAt time.Time
 }
 
+type ItemRatingDetail struct {
+	UserID    int64
+	Rating    string
+	Feedback  string
+	Source    string
+	CreatedAt time.Time
+}
+
 func (db *DB) SaveItem(ctx context.Context, item *Item) error {
 	id, err := db.Queries.SaveItem(ctx, sqlc.SaveItemParams{
 		RawMessageID:        toUUID(item.RawMessageID),
@@ -189,12 +197,13 @@ func (db *DB) SaveEmbedding(ctx context.Context, itemID string, embedding []floa
 	return nil
 }
 
-func (db *DB) SaveItemRating(ctx context.Context, itemID string, userID int64, rating, feedback string) error {
+func (db *DB) SaveItemRating(ctx context.Context, itemID string, userID int64, rating, feedback, source string) error {
 	if err := db.Queries.SaveItemRating(ctx, sqlc.SaveItemRatingParams{
 		ItemID:   toUUID(itemID),
 		UserID:   userID,
 		Rating:   rating,
 		Feedback: toText(feedback),
+		Source:   source,
 	}); err != nil {
 		return fmt.Errorf(errSaveItemRating, err)
 	}
@@ -223,6 +232,33 @@ func (db *DB) GetItemRatingsSince(ctx context.Context, since time.Time) ([]ItemR
 	}
 
 	return ratings, nil
+}
+
+func (db *DB) GetItemRatingsByItem(ctx context.Context, itemID string, limit int) ([]ItemRatingDetail, error) {
+	rows, err := db.Queries.GetItemRatingsByItem(ctx, sqlc.GetItemRatingsByItemParams{
+		ItemID: toUUID(itemID),
+		Limit:  safeIntToInt32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get item ratings by item: %w", err)
+	}
+
+	results := make([]ItemRatingDetail, 0, len(rows))
+	for _, row := range rows {
+		if !row.CreatedAt.Valid {
+			continue
+		}
+
+		results = append(results, ItemRatingDetail{
+			UserID:    row.UserID,
+			Rating:    row.Rating,
+			Feedback:  row.Feedback.String,
+			Source:    row.Source,
+			CreatedAt: row.CreatedAt.Time,
+		})
+	}
+
+	return results, nil
 }
 
 func (db *DB) GetItemEmbedding(ctx context.Context, itemID string) ([]float32, error) {

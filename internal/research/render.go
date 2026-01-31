@@ -9,7 +9,10 @@ import (
 	"time"
 )
 
-const fmtDateISO = "2006-01-02"
+const (
+	fmtDateISO  = "2006-01-02"
+	fmtDateTime = "2006-01-02 15:04"
+)
 
 //go:embed templates/*.html
 var templateFS embed.FS
@@ -19,7 +22,13 @@ var templateFuncs = template.FuncMap{
 		if t.IsZero() {
 			return "-"
 		}
-		return t.Format("2006-01-02 15:04")
+		return t.Format(fmtDateTime)
+	},
+	"formatTimePtr": func(t *time.Time) string {
+		if t == nil || t.IsZero() {
+			return "-"
+		}
+		return t.Format(fmtDateTime)
 	},
 	"formatDate": func(t time.Time) string {
 		if t.IsZero() {

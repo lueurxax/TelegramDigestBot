@@ -11,6 +11,11 @@ var (
 		Help: "The total number of ingested messages",
 	}, []string{"channel"})
 
+	ReaderMessagesSeen = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_reader_messages_seen_total",
+		Help: "The total number of messages seen by the reader",
+	}, []string{"channel"})
+
 	PipelineProcessed = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "digest_pipeline_processed_total",
 		Help: "The total number of messages processed by the pipeline",
@@ -38,10 +43,37 @@ var (
 		Buckets: []float64{60, 300, 900, 1800, 3600, 7200, 14400, 28800, 43200, 86400, 172800, 604800},
 	})
 
+	PipelineMessageAgeSecondsByKind = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "digest_pipeline_message_age_seconds_by_kind",
+		Help:    "Age of messages when pipeline processing starts by kind (native or forwarded)",
+		Buckets: []float64{60, 300, 900, 1800, 3600, 7200, 14400, 28800, 43200, 86400, 172800, 604800},
+	}, []string{"kind"})
+
 	PipelineBatchDurationSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "digest_pipeline_batch_duration_seconds",
 		Help:    "Duration in seconds to process a pipeline batch",
 		Buckets: []float64{1, 2, 5, 10, 20, 30, 60, 120, 300},
+	})
+
+	AnnotationsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_item_annotations_total",
+		Help: "Total number of item annotations by rating",
+	}, []string{"rating"})
+
+	AnnotationRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_item_annotation_requests_total",
+		Help: "Total number of annotation API requests by status",
+	}, []string{"status"})
+
+	AnnotationBatchTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_item_annotation_batch_total",
+		Help: "Total number of annotation batch submissions",
+	})
+
+	AnnotationRequestDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "digest_item_annotation_request_duration_seconds",
+		Help:    "Duration of annotation API requests in seconds",
+		Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
 	})
 
 	DigestsPosted = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -320,6 +352,31 @@ var (
 		Name: "digest_reader_fetch_requests_total",
 		Help: "Total number of history fetch requests to Telegram",
 	}, []string{"channel", "status"})
+
+	ReaderHistoryBatchSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "digest_reader_history_batch_size",
+		Help: "Number of messages returned in a history fetch",
+	}, []string{"channel"})
+
+	ReaderHistoryNewMessages = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "digest_reader_history_new_messages",
+		Help: "Number of messages in a history fetch newer than the last seen ID",
+	}, []string{"channel"})
+
+	ReaderHistoryMaxID = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "digest_reader_history_max_id",
+		Help: "Max message ID seen in a history fetch",
+	}, []string{"channel"})
+
+	ReaderHistoryMinID = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "digest_reader_history_min_id",
+		Help: "Min message ID seen in a history fetch",
+	}, []string{"channel"})
+
+	ReaderReplayOnlyFetchTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_reader_replay_only_fetch_total",
+		Help: "Total number of history fetches that contained no new messages",
+	}, []string{"channel"})
 
 	ReaderMessageAgeSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "digest_reader_message_age_seconds",

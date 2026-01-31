@@ -1597,6 +1597,47 @@ func (q *Queries) GetItemRatingsSince(ctx context.Context, createdAt pgtype.Time
 	return items, nil
 }
 
+const getItemRatingsByItem = `-- name: GetItemRatingsByItem :many
+SELECT user_id, rating, feedback, source, created_at
+FROM item_ratings
+WHERE item_id = $1
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type GetItemRatingsByItemParams struct {
+	ItemID pgtype.UUID `json:"item_id"`
+	Limit  int32       `json:"limit"`
+}
+
+type GetItemRatingsByItemRow struct {
+	UserID    int64              `json:"user_id"`
+	Rating    string             `json:"rating"`
+	Feedback  pgtype.Text        `json:"feedback"`
+	Source    string             `json:"source"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetItemRatingsByItem(ctx context.Context, arg GetItemRatingsByItemParams) ([]GetItemRatingsByItemRow, error) {
+	rows, err := q.db.Query(ctx, getItemRatingsByItem, arg.ItemID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetItemRatingsByItemRow
+	for rows.Next() {
+		var i GetItemRatingsByItemRow
+		if err := rows.Scan(&i.UserID, &i.Rating, &i.Feedback, &i.Source, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getItemsForWindow = `-- name: GetItemsForWindow :many
 SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language, i.status, i.first_seen_at, rm.tg_date, c.username as source_channel, c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id, e.embedding
 FROM items i
@@ -2975,9 +3016,9 @@ func (q *Queries) SaveItemError(ctx context.Context, arg SaveItemErrorParams) er
 }
 
 const saveItemRating = `-- name: SaveItemRating :exec
-INSERT INTO item_ratings (item_id, user_id, rating, feedback)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (item_id, user_id) DO UPDATE SET rating = $3, feedback = $4
+INSERT INTO item_ratings (item_id, user_id, rating, feedback, source)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (item_id, user_id) DO UPDATE SET rating = $3, feedback = $4, source = $5
 `
 
 type SaveItemRatingParams struct {
@@ -2985,6 +3026,7 @@ type SaveItemRatingParams struct {
 	UserID   int64       `json:"user_id"`
 	Rating   string      `json:"rating"`
 	Feedback pgtype.Text `json:"feedback"`
+	Source   string      `json:"source"`
 }
 
 func (q *Queries) SaveItemRating(ctx context.Context, arg SaveItemRatingParams) error {
@@ -2993,6 +3035,7 @@ func (q *Queries) SaveItemRating(ctx context.Context, arg SaveItemRatingParams) 
 		arg.UserID,
 		arg.Rating,
 		arg.Feedback,
+		arg.Source,
 	)
 	return err
 }

@@ -164,6 +164,7 @@ func (db *DB) LabelAssignedAnnotation(ctx context.Context, userID int64, label, 
 		UserID:   userID,
 		Rating:   label,
 		Feedback: toText(comment),
+		Source:   "bot-annotate",
 	})
 	if err != nil {
 		return nil, fmt.Errorf(errSaveItemRating, err)
@@ -217,6 +218,7 @@ func (db *DB) LabelAnnotationByItem(ctx context.Context, userID int64, itemID, l
 		UserID:   userID,
 		Rating:   label,
 		Feedback: toText(comment),
+		Source:   "bot-annotate",
 	})
 	if err != nil {
 		return nil, fmt.Errorf(errSaveItemRating, err)

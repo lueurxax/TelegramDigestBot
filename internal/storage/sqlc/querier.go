@@ -68,6 +68,7 @@ type Querier interface {
 	GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetInviteLinkDiscoveriesNeedingResolutionRow, error)
 	GetItemByID(ctx context.Context, id pgtype.UUID) (GetItemByIDRow, error)
 	GetItemEmbedding(ctx context.Context, itemID pgtype.UUID) (string, error)
+	GetItemRatingsByItem(ctx context.Context, arg GetItemRatingsByItemParams) ([]GetItemRatingsByItemRow, error)
 	GetItemRatingsSince(ctx context.Context, createdAt pgtype.Timestamptz) ([]GetItemRatingsSinceRow, error)
 	GetItemsForWindow(ctx context.Context, arg GetItemsForWindowParams) ([]GetItemsForWindowRow, error)
 	GetItemsForWindowWithMedia(ctx context.Context, arg GetItemsForWindowWithMediaParams) ([]GetItemsForWindowWithMediaRow, error)

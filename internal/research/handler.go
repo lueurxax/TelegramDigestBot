@@ -18,7 +18,9 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/time/rate"
 
+	"github.com/lueurxax/telegram-digest-bot/internal/expandedview"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -32,6 +34,7 @@ const (
 	maxSearchLimit         = 200
 	defaultWeeklyDiffLimit = 10
 	defaultWeeklyDiffDays  = 7
+	annotationListLimit    = 20
 	slowQueryThreshold     = 2 * time.Second
 	weightHistoryLimit     = 50
 	fmtChannelLabel        = "%s (@%s)"
@@ -46,6 +49,9 @@ const (
 	routeChannels  = "channels/"
 	routeClaims    = "claims"
 	routeRebuild   = "rebuild"
+	routeAnnotate  = "annotate"
+	routeAnnBatch  = "annotate/batch"
+	routeAnnList   = "annotations"
 	routeTopics    = "topics/"
 	routeLanguages = "languages/"
 	routeDiff      = "diff/"
@@ -70,16 +76,41 @@ const (
 	errTitleInvalidRange   = "Invalid Range"
 
 	// Error message constants.
-	errMsgCreateSession = "Failed to create session."
-	errMsgGetEvidence   = "get evidence failed"
-	errMsgRenderTable   = "Failed to render table."
-	errMsgWeeklyDiff    = "Failed to load weekly diff."
-	errMsgLoginRequired = "Login required."
+	errMsgCreateSession    = "Failed to create session."
+	errMsgGetEvidence      = "get evidence failed"
+	errMsgRenderTable      = "Failed to render table."
+	errMsgWeeklyDiff       = "Failed to load weekly diff."
+	errMsgLoginRequired    = "Login required."
+	errMsgRateLimited      = "Rate limit exceeded."
+	errMsgItemNotFound     = "Item not found."
+	errMsgUsePostAnn       = "Use POST to annotate."
+	errMsgUseGetAnn        = "Use GET to fetch annotations."
+	errMsgValidateItem     = "Failed to validate item."
+	errMsgValidateItems    = "Failed to validate items."
+	errMsgSaveAnn          = "Failed to save annotation."
+	errMsgAccessDenied     = "Access denied."
+	errMsgInvalidAccess    = "Invalid or expired access."
+	errMsgAccessMismatch   = "Access does not match item."
+	errMsgAccessNotAllowed = "Access not allowed."
+	errMsgLoadAnnotations  = "Failed to load annotations."
+	errMsgSessionExpired   = "Session expired."
+
+	// Error code constants.
+	errCodeNotFound       = "not_found"
+	errCodeInvalidJSON    = "invalid_json"
+	errCodeInvalidPayload = "invalid_payload"
+	errCodeRateLimited    = "rate_limited"
+	errCodeMethodNotAllow = "method_not_allowed"
+	errCodeQueryFailed    = "query_failed"
+	errCodeSaveFailed     = "save_failed"
+	errCodeUnauthorized   = "unauthorized"
 
 	// Content type constants.
 	contentTypeHeader = "Content-Type"
 	contentTypeHTML   = "text/html; charset=utf-8"
 	contentTypeJSON   = "application/json; charset=utf-8"
+	headerExpandToken = "X-Expanded-Token"
+	headerRetryAfter  = "Retry-After"
 
 	// Template constants.
 	tmplTable = "table.html"
@@ -116,24 +147,44 @@ const (
 	rateLimitRequests = 30
 	rateLimitBurst    = 60
 	rateLimitWindow   = time.Minute
+
+	annotateLimitRequests     = 60
+	annotateLimitBurst        = 20
+	annotateBatchLimitRequest = 6
+	annotateBatchLimitBurst   = 6
+	annotationMaxBatch        = 100
+	annotationMaxComment      = 500
 )
 
 // Static errors for err113 compliance.
 var (
-	errInvalidScope  = errors.New("invalid scope")
-	errInvalidBucket = errors.New("invalid bucket")
+	errInvalidScope    = errors.New("invalid scope")
+	errInvalidBucket   = errors.New("invalid bucket")
+	errItemNotFound    = errors.New("item not found")
+	errInvalidJSONBody = errors.New("invalid JSON body")
+	errMissingItemID   = errors.New("missing item_id")
+	errEmptyItemIDs    = errors.New("empty item_ids")
+	errTooManyItemIDs  = errors.New("too many item_ids")
+	errInvalidRating   = errors.New("invalid rating")
+	errInvalidSource   = errors.New("invalid source")
+	errCommentTooLong  = errors.New("comment too long")
+	errInvalidItemID   = errors.New("invalid item_id")
 )
 
 // Handler serves research API and HTML views.
 type Handler struct {
-	cfg          *config.Config
-	db           *db.DB
-	tokenService *AuthTokenService
-	renderer     *Renderer
-	logger       *zerolog.Logger
-	rebuildFunc  func(context.Context) error
-	limitersMu   sync.Mutex
-	limiters     map[string]*rate.Limiter
+	cfg           *config.Config
+	db            *db.DB
+	tokenService  *AuthTokenService
+	extraTokens   *expandedview.TokenService
+	renderer      *Renderer
+	logger        *zerolog.Logger
+	rebuildFunc   func(context.Context) error
+	limitersMu    sync.Mutex
+	limiters      map[string]*rate.Limiter
+	annotateMu    sync.Mutex
+	annotate      map[int64]*rate.Limiter
+	annotateBatch map[int64]*rate.Limiter
 }
 
 // NewHandler creates a new research handler.
@@ -143,14 +194,22 @@ func NewHandler(cfg *config.Config, dbConn *db.DB, tokenService *AuthTokenServic
 		return nil, err
 	}
 
+	var expandedTokens *expandedview.TokenService
+	if cfg.ExpandedViewSigningSecret != "" {
+		expandedTokens = expandedview.NewTokenService(cfg.ExpandedViewSigningSecret, cfg.ExpandedViewTTLHours)
+	}
+
 	return &Handler{
-		cfg:          cfg,
-		db:           dbConn,
-		tokenService: tokenService,
-		renderer:     renderer,
-		logger:       logger,
-		rebuildFunc:  rebuildFunc,
-		limiters:     make(map[string]*rate.Limiter),
+		cfg:           cfg,
+		db:            dbConn,
+		tokenService:  tokenService,
+		extraTokens:   expandedTokens,
+		renderer:      renderer,
+		logger:        logger,
+		rebuildFunc:   rebuildFunc,
+		limiters:      make(map[string]*rate.Limiter),
+		annotate:      make(map[int64]*rate.Limiter),
+		annotateBatch: make(map[int64]*rate.Limiter),
 	}, nil
 }
 
@@ -166,7 +225,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // dispatch handles route matching and dispatches to the appropriate handler.
 func (h *Handler) dispatch(w http.ResponseWriter, r *http.Request) (route string, status int, resultSize int) {
 	if !h.allowRequest(getClientIP(r)) {
-		return "rate_limit", h.writeError(w, r, http.StatusTooManyRequests, "Too Many Requests", "Rate limit exceeded."), 0
+		return "rate_limit", h.writeError(w, r, http.StatusTooManyRequests, "Too Many Requests", errMsgRateLimited), 0
 	}
 
 	path := strings.TrimPrefix(r.URL.Path, "/")
@@ -211,6 +270,15 @@ type extendedRoute struct {
 // extendedRoutes defines the routing table for dispatchExtendedPath.
 // Order matters: more specific prefixes must come before less specific ones.
 var extendedRoutes = []extendedRoute{
+	{routeAnnBatch, "annotate_batch", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleAnnotateBatch(w, r), 0
+	}},
+	{routeAnnotate, "annotate", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleAnnotate(w, r), 0
+	}},
+	{routeAnnList, "annotations", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
+		return h.handleAnnotations(w, r), 0
+	}},
 	{routeChannels + "overlap", "channels_overlap", func(h *Handler, w http.ResponseWriter, r *http.Request, _ string) (int, int) {
 		return h.handleChannelOverlap(w, r)
 	}},
@@ -252,7 +320,7 @@ func (h *Handler) dispatchExtendedPath(w http.ResponseWriter, r *http.Request, p
 		}
 	}
 
-	return "not_found", h.writeError(w, r, http.StatusNotFound, errTitleNotFound, "Unknown research endpoint."), 0
+	return errCodeNotFound, h.writeError(w, r, http.StatusNotFound, errTitleNotFound, "Unknown research endpoint."), 0
 }
 
 // recordMetrics records request metrics.
@@ -471,7 +539,7 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request, itemID stri
 	}
 
 	if item == nil {
-		return h.writeError(w, r, http.StatusNotFound, errTitleNotFound, "Item not found.")
+		return h.writeError(w, r, http.StatusNotFound, errTitleNotFound, errMsgItemNotFound)
 	}
 
 	evidenceMap, err := h.db.GetEvidenceForItems(r.Context(), []string{itemID})
@@ -1554,6 +1622,380 @@ func (h *Handler) handleRebuild(w http.ResponseWriter, r *http.Request) int {
 	return h.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+type annotationRequest struct {
+	ItemID  string `json:"item_id"`
+	Rating  string `json:"rating"`
+	Comment string `json:"comment"`
+	Source  string `json:"source"`
+}
+
+type annotationBatchRequest struct {
+	ItemIDs []string `json:"item_ids"`
+	Rating  string   `json:"rating"`
+	Comment string   `json:"comment"`
+	Source  string   `json:"source"`
+}
+
+type annotationResponse struct {
+	OK        bool      `json:"ok"`
+	ItemID    string    `json:"item_id"`
+	Rating    string    `json:"rating"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type annotationBatchResponse struct {
+	OK    bool `json:"ok"`
+	Count int  `json:"count"`
+}
+
+type annotationError struct {
+	OK      bool   `json:"ok"`
+	Error   string `json:"error"`
+	Message string `json:"message"`
+}
+
+type annotationListResponse struct {
+	OK          bool                  `json:"ok"`
+	ItemID      string                `json:"item_id"`
+	Annotations []db.ItemRatingDetail `json:"annotations"`
+}
+
+func (h *Handler) handleAnnotate(w http.ResponseWriter, r *http.Request) int {
+	if r.Method != http.MethodPost {
+		return h.writeAnnotateError(w, http.StatusMethodNotAllowed, errCodeMethodNotAllow, errMsgUsePostAnn)
+	}
+
+	start := time.Now()
+
+	var req annotationRequest
+	if err := h.decodeJSON(w, r, &req); err != nil {
+		return h.writeAnnotateError(w, http.StatusBadRequest, errCodeInvalidJSON, err.Error())
+	}
+
+	req.Rating = strings.ToLower(strings.TrimSpace(req.Rating))
+	req.Source = strings.ToLower(strings.TrimSpace(req.Source))
+	req.Comment = strings.TrimSpace(req.Comment)
+
+	if err := validateAnnotationRequest(req); err != nil {
+		return h.writeAnnotateError(w, http.StatusBadRequest, errCodeInvalidPayload, err.Error())
+	}
+
+	userID, ok := h.authorizeAnnotate(w, r, req.ItemID)
+	if !ok {
+		return http.StatusUnauthorized
+	}
+
+	if !h.allowAnnotate(userID, false) {
+		w.Header().Set(headerRetryAfter, "60")
+		return h.writeAnnotateError(w, http.StatusTooManyRequests, errCodeRateLimited, errMsgRateLimited)
+	}
+
+	if err := h.ensureItemExists(r.Context(), req.ItemID); err != nil {
+		if errors.Is(err, errItemNotFound) {
+			return h.writeAnnotateError(w, http.StatusNotFound, errCodeNotFound, errMsgItemNotFound)
+		}
+
+		return h.writeAnnotateError(w, http.StatusInternalServerError, errCodeQueryFailed, errMsgValidateItem)
+	}
+
+	if err := h.db.SaveItemRating(r.Context(), req.ItemID, userID, req.Rating, req.Comment, req.Source); err != nil {
+		h.logger.Error().Err(err).Msg("save item rating failed")
+		return h.writeAnnotateError(w, http.StatusInternalServerError, errCodeSaveFailed, errMsgSaveAnn)
+	}
+
+	observabilityAnnotationRequest("ok", req.Rating, start)
+
+	return h.writeJSON(w, http.StatusOK, annotationResponse{
+		OK:        true,
+		ItemID:    req.ItemID,
+		Rating:    req.Rating,
+		CreatedAt: time.Now(),
+	})
+}
+
+func (h *Handler) handleAnnotateBatch(w http.ResponseWriter, r *http.Request) int {
+	if r.Method != http.MethodPost {
+		return h.writeAnnotateError(w, http.StatusMethodNotAllowed, errCodeMethodNotAllow, errMsgUsePostAnn)
+	}
+
+	start := time.Now()
+
+	var req annotationBatchRequest
+	if err := h.decodeJSON(w, r, &req); err != nil {
+		return h.writeAnnotateError(w, http.StatusBadRequest, errCodeInvalidJSON, err.Error())
+	}
+
+	req.Rating = strings.ToLower(strings.TrimSpace(req.Rating))
+	req.Source = strings.ToLower(strings.TrimSpace(req.Source))
+	req.Comment = strings.TrimSpace(req.Comment)
+
+	if err := validateAnnotationBatch(req); err != nil {
+		return h.writeAnnotateError(w, http.StatusBadRequest, errCodeInvalidPayload, err.Error())
+	}
+
+	userID, ok := h.requireSession(w, r)
+	if !ok {
+		return http.StatusUnauthorized
+	}
+
+	if !h.allowAnnotate(userID, true) {
+		w.Header().Set(headerRetryAfter, "60")
+		return h.writeAnnotateError(w, http.StatusTooManyRequests, errCodeRateLimited, errMsgRateLimited)
+	}
+
+	for _, id := range req.ItemIDs {
+		if err := h.ensureItemExists(r.Context(), id); err != nil {
+			if errors.Is(err, errItemNotFound) {
+				return h.writeAnnotateError(w, http.StatusNotFound, errCodeNotFound, errMsgItemNotFound)
+			}
+
+			return h.writeAnnotateError(w, http.StatusInternalServerError, errCodeQueryFailed, errMsgValidateItems)
+		}
+
+		if err := h.db.SaveItemRating(r.Context(), id, userID, req.Rating, req.Comment, req.Source); err != nil {
+			h.logger.Error().Err(err).Msg("save batch item rating failed")
+			return h.writeAnnotateError(w, http.StatusInternalServerError, errCodeSaveFailed, errMsgSaveAnn)
+		}
+	}
+
+	observabilityAnnotationRequest("ok", req.Rating, start)
+	observability.AnnotationBatchTotal.Inc()
+
+	return h.writeJSON(w, http.StatusOK, annotationBatchResponse{
+		OK:    true,
+		Count: len(req.ItemIDs),
+	})
+}
+
+func (h *Handler) handleAnnotations(w http.ResponseWriter, r *http.Request) int {
+	if r.Method != http.MethodGet {
+		return h.writeAnnotateError(w, http.StatusMethodNotAllowed, errCodeMethodNotAllow, errMsgUseGetAnn)
+	}
+
+	itemID := strings.TrimSpace(r.URL.Query().Get("item_id"))
+	if itemID == "" {
+		return h.writeAnnotateError(w, http.StatusBadRequest, errCodeInvalidPayload, errMissingItemID.Error())
+	}
+
+	userID, ok := h.authorizeAnnotate(w, r, itemID)
+	if !ok {
+		return http.StatusUnauthorized
+	}
+
+	if !h.allowAnnotate(userID, false) {
+		w.Header().Set(headerRetryAfter, "60")
+		return h.writeAnnotateError(w, http.StatusTooManyRequests, errCodeRateLimited, errMsgRateLimited)
+	}
+
+	if err := h.ensureItemExists(r.Context(), itemID); err != nil {
+		if errors.Is(err, errItemNotFound) {
+			return h.writeAnnotateError(w, http.StatusNotFound, errCodeNotFound, errMsgItemNotFound)
+		}
+
+		return h.writeAnnotateError(w, http.StatusInternalServerError, errCodeQueryFailed, errMsgValidateItem)
+	}
+
+	annotations, err := h.db.GetItemRatingsByItem(r.Context(), itemID, annotationListLimit)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("get annotations failed")
+		return h.writeAnnotateError(w, http.StatusInternalServerError, errCodeQueryFailed, errMsgLoadAnnotations)
+	}
+
+	return h.writeJSON(w, http.StatusOK, annotationListResponse{
+		OK:          true,
+		ItemID:      itemID,
+		Annotations: annotations,
+	})
+}
+
+func (h *Handler) decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+
+	if err := dec.Decode(dst); err != nil {
+		return errInvalidJSONBody
+	}
+
+	return nil
+}
+
+func (h *Handler) writeAnnotateError(w http.ResponseWriter, status int, code, message string) int {
+	observability.AnnotationRequestsTotal.WithLabelValues("error").Inc()
+
+	return h.writeJSON(w, status, annotationError{
+		OK:      false,
+		Error:   code,
+		Message: message,
+	})
+}
+
+func validateAnnotationRequest(req annotationRequest) error {
+	if req.ItemID == "" {
+		return errMissingItemID
+	}
+
+	if !isValidRating(req.Rating) {
+		return errInvalidRating
+	}
+
+	if !isValidSource(req.Source) {
+		return errInvalidSource
+	}
+
+	if len(req.Comment) > annotationMaxComment {
+		return errCommentTooLong
+	}
+
+	return nil
+}
+
+func validateAnnotationBatch(req annotationBatchRequest) error {
+	if len(req.ItemIDs) == 0 {
+		return errEmptyItemIDs
+	}
+
+	if len(req.ItemIDs) > annotationMaxBatch {
+		return errTooManyItemIDs
+	}
+
+	if !isValidRating(req.Rating) {
+		return errInvalidRating
+	}
+
+	if !isValidSource(req.Source) {
+		return errInvalidSource
+	}
+
+	if len(req.Comment) > annotationMaxComment {
+		return errCommentTooLong
+	}
+
+	for _, id := range req.ItemIDs {
+		if id == "" {
+			return errInvalidItemID
+		}
+	}
+
+	return nil
+}
+
+func isValidRating(rating string) bool {
+	return rating == "good" || rating == "bad" || rating == "irrelevant"
+}
+
+func isValidSource(source string) bool {
+	return source == "web-list" || source == "web-expanded"
+}
+
+func (h *Handler) authorizeAnnotate(w http.ResponseWriter, r *http.Request, itemID string) (int64, bool) {
+	if userID, ok := h.getSessionUserID(r); ok {
+		return userID, true
+	}
+
+	return h.authorizeAnnotateWithToken(w, r, itemID)
+}
+
+func (h *Handler) authorizeAnnotateWithToken(w http.ResponseWriter, r *http.Request, itemID string) (int64, bool) {
+	token := h.annotateTokenFromRequest(r)
+
+	if token == "" || h.extraTokens == nil {
+		return h.writeAnnotateUnauthorized(w, errMsgLoginRequired)
+	}
+
+	payload, err := h.extraTokens.Verify(token)
+	if err != nil {
+		return h.writeAnnotateUnauthorized(w, errMsgInvalidAccess)
+	}
+
+	if payload.ItemID != itemID {
+		return h.writeAnnotateUnauthorized(w, errMsgAccessMismatch)
+	}
+
+	if ok, msg := h.isAnnotateTokenAllowed(payload.UserID); !ok {
+		return h.writeAnnotateUnauthorized(w, msg)
+	}
+
+	return payload.UserID, true
+}
+
+func (h *Handler) annotateTokenFromRequest(r *http.Request) string {
+	token := r.Header.Get(headerExpandToken)
+	if token != "" {
+		return token
+	}
+
+	return r.URL.Query().Get("token")
+}
+
+func (h *Handler) isAnnotateTokenAllowed(userID int64) (bool, string) {
+	if !h.cfg.ExpandedViewRequireAdmin {
+		return true, ""
+	}
+
+	isSystemToken := userID == 0
+	if isSystemToken && !h.cfg.ExpandedViewAllowSystemTokens {
+		return false, errMsgAccessNotAllowed
+	}
+
+	if !isSystemToken && !h.isAdmin(userID) {
+		return false, errMsgAccessDenied
+	}
+
+	return true, ""
+}
+
+func (h *Handler) writeAnnotateUnauthorized(w http.ResponseWriter, message string) (int64, bool) {
+	h.writeAnnotateError(w, http.StatusUnauthorized, errCodeUnauthorized, message)
+	return 0, false
+}
+
+func (h *Handler) allowAnnotate(userID int64, batch bool) bool {
+	h.annotateMu.Lock()
+	defer h.annotateMu.Unlock()
+
+	if batch {
+		limiter, ok := h.annotateBatch[userID]
+		if !ok {
+			limiter = rate.NewLimiter(rate.Every(rateLimitWindow/annotateBatchLimitRequest), annotateBatchLimitBurst)
+			h.annotateBatch[userID] = limiter
+		}
+
+		return limiter.Allow()
+	}
+
+	limiter, ok := h.annotate[userID]
+	if !ok {
+		limiter = rate.NewLimiter(rate.Every(rateLimitWindow/annotateLimitRequests), annotateLimitBurst)
+		h.annotate[userID] = limiter
+	}
+
+	return limiter.Allow()
+}
+
+func (h *Handler) ensureItemExists(ctx context.Context, itemID string) error {
+	_, err := h.db.GetItemByID(ctx, itemID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errItemNotFound
+		}
+
+		return fmt.Errorf("get item: %w", err)
+	}
+
+	return nil
+}
+
+func observabilityAnnotationRequest(status string, rating string, start time.Time) {
+	observability.AnnotationRequestDuration.Observe(time.Since(start).Seconds())
+
+	if rating != "" {
+		observability.AnnotationsTotal.WithLabelValues(rating).Inc()
+	}
+
+	observability.AnnotationRequestsTotal.WithLabelValues(status).Inc()
+}
+
 func (h *Handler) requireSession(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	cookie, err := r.Cookie(researchCookieName)
 	if err != nil || cookie.Value == "" {
@@ -1575,12 +2017,12 @@ func (h *Handler) requireSession(w http.ResponseWriter, r *http.Request) (int64,
 	}
 
 	if time.Now().After(session.ExpiresAt) {
-		h.writeError(w, r, http.StatusUnauthorized, errTitleUnauthorized, "Session expired.")
+		h.writeError(w, r, http.StatusUnauthorized, errTitleUnauthorized, errMsgSessionExpired)
 		return 0, false
 	}
 
 	if !h.isAdmin(session.UserID) {
-		h.writeError(w, r, http.StatusUnauthorized, errTitleUnauthorized, "Access denied.")
+		h.writeError(w, r, http.StatusUnauthorized, errTitleUnauthorized, errMsgAccessDenied)
 		return 0, false
 	}
 

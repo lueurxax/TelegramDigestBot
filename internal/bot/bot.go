@@ -40,7 +40,6 @@ const (
 const (
 	CallbackPrefixRate     = "rate:"
 	CallbackPrefixDiscover = "discover:"
-	CallbackPrefixAnnotate = "annotate:"
 	CallbackSuffixUp       = ":up"
 	CallbackSuffixDown     = ":down"
 )
@@ -54,7 +53,6 @@ const (
 	CmdList               = "list"
 	CmdRemove             = "remove"
 	CmdPrompt             = "prompt"
-	CmdAnnotate           = "annotate"
 	CmdMinLength          = "min_length"
 	CmdMinLengthAlt       = "minlength"
 	CmdSkipForwards       = "skip_forwards"
@@ -277,8 +275,6 @@ func (b *Bot) handleCallback(ctx context.Context, query *tgbotapi.CallbackQuery)
 		b.handleRateCallback(ctx, query, data)
 	case strings.HasPrefix(data, CallbackPrefixDiscover):
 		b.handleDiscoverCallback(ctx, query)
-	case strings.HasPrefix(data, CallbackPrefixAnnotate):
-		b.handleAnnotateCallback(ctx, query, data)
 	}
 }
 

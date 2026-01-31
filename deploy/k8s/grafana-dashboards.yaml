@@ -1317,19 +1317,19 @@ data:
           "targets": [
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "avg(digest_reader_backfill_ratio{namespace=\"digest\"})",
+              "expr": "sum(rate(digest_reader_backfill_total{namespace=\"digest\"}[5m])) / clamp_min(sum(rate(digest_reader_messages_seen_total{namespace=\"digest\"}[5m])), 1)",
               "legendFormat": "Backfill",
               "refId": "A"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "avg(digest_reader_replay_ratio{namespace=\"digest\"})",
+              "expr": "sum(rate(digest_reader_replay_total{namespace=\"digest\"}[5m])) / clamp_min(sum(rate(digest_reader_messages_seen_total{namespace=\"digest\"}[5m])), 1)",
               "legendFormat": "Replay",
               "refId": "B"
             },
             {
               "datasource": {"type": "prometheus", "uid": "${datasource}"},
-              "expr": "avg(digest_reader_forwarded_ratio{namespace=\"digest\"})",
+              "expr": "sum(rate(digest_reader_forwarded_total{namespace=\"digest\"}[5m])) / clamp_min(sum(rate(digest_reader_messages_seen_total{namespace=\"digest\"}[5m])), 1)",
               "legendFormat": "Forwarded",
               "refId": "C"
             }

@@ -17,8 +17,8 @@ func helpSummaryMessage() string {
 		"\u2022 <code>/system</code> - Diagnostics\n" +
 		"\u2022 <code>/research</code> - Research dashboard\n\n" +
 		"Data & feedback:\n" +
-		"\u2022 <code>/scores</code> <code>/factcheck</code> <code>/enrichment</code> <code>/ratings</code> <code>/annotate</code> <code>/feedback</code>\n\n" +
-		"More: <code>/help &lt;topic&gt;</code> (channels, discover, filters, schedule, config, ai, enrichment, system, research, scores, factcheck, ratings, annotate)\n" +
+		"\u2022 <code>/scores</code> <code>/factcheck</code> <code>/enrichment</code> <code>/ratings</code> <code>/feedback</code>\n\n" +
+		"More: <code>/help &lt;topic&gt;</code> (channels, discover, filters, schedule, config, ai, enrichment, system, research, scores, factcheck, ratings)\n" +
 		"Full list: <code>/help all</code>\n" +
 		"BotFather list: <code>/help botfather</code>"
 }
@@ -137,12 +137,6 @@ func helpRatingsMessage() string {
 		"\u2022 <code>/ratings stats [limit]</code>"
 }
 
-// helpAnnotateMessage returns the help message for annotation commands.
-func helpAnnotateMessage() string {
-	return "\U0001F9E9 <b>Annotations</b>\n" +
-		"\u2022 <code>/annotate</code> - enqueue/next/label/skip/stats"
-}
-
 // helpResearchMessage returns the help message for research commands.
 func helpResearchMessage() string {
 	return "\U0001F50E <b>Research Dashboard</b>\n" +
@@ -164,8 +158,7 @@ func helpAllMessage() string {
 		helpResearchMessage() + "\n\n" +
 		helpScoresMessage() + "\n\n" +
 		helpFactCheckMessage() + "\n\n" +
-		helpRatingsMessage() + "\n\n" +
-		helpAnnotateMessage()
+		helpRatingsMessage()
 }
 
 // botFatherCommandsMessage returns the message for BotFather commands setup.
@@ -187,7 +180,6 @@ func botFatherCommandsMessage() string {
 		"scores - Score stats\n" +
 		"factcheck - Fact check status\n" +
 		"ratings - Rating stats\n" +
-		"annotate - Annotation queue\n" +
 		"discover - Channel discovery\n" +
 		"feedback - Rate an item\n" +
 		"settings - Show current settings" +

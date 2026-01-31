@@ -179,6 +179,73 @@
       }
       tbody tr:hover td { background: rgba(240, 93, 94, 0.08); }
       tbody tr:last-child td { border-bottom: none; }
+      .annotate-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .annotate-btn {
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        background: #fff;
+        cursor: pointer;
+        font-size: 0.95rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .annotate-btn.good { color: #15803d; }
+      .annotate-btn.bad { color: #b45309; }
+      .annotate-btn.irrelevant { color: #dc2626; }
+      .annotate-btn.note { color: #475569; }
+      .annotate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .annotate-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.78rem;
+        color: var(--ink-2);
+        padding: 4px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: rgba(15, 23, 42, 0.04);
+      }
+      .annotate-row {
+        position: relative;
+      }
+      .annotate-note {
+        display: none;
+        margin-top: 6px;
+      }
+      .annotate-note input {
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: 8px;
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        font-size: 0.85rem;
+      }
+      .annotate-error {
+        color: #dc2626;
+        font-size: 0.8rem;
+        margin-top: 4px;
+      }
+      .annotate-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        margin: 12px 0;
+      }
+      .annotate-toolbar .btn {
+        padding: 8px 12px;
+        font-size: 0.85rem;
+      }
+      .annotate-toolbar .muted {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
       @keyframes fadeUp {
         from { opacity: 0; transform: translateY(8px); }
         to { opacity: 1; transform: translateY(0); }
@@ -272,9 +339,16 @@
           {{if .ItemCount}}<span class="pill">Total {{.ItemCount.Total}}</span>{{end}}
         </div>
         {{if .Items}}
+        <div class="annotate-toolbar">
+          <span class="muted">Selected: <span id="selected-count">0</span></span>
+          <button class="btn" type="button" data-batch="good">✅</button>
+          <button class="btn" type="button" data-batch="bad">⚠️</button>
+          <button class="btn" type="button" data-batch="irrelevant">🚫</button>
+        </div>
         <table>
           <thead>
             <tr>
+              <th></th>
               <th>Summary</th>
               <th>Topic</th>
               <th>Channel</th>
@@ -282,12 +356,15 @@
               <th>Score</th>
               <th>Cluster</th>
               <th>Evidence</th>
+              <th>Status</th>
+              <th>Annotate</th>
               <th>Item</th>
             </tr>
           </thead>
           <tbody>
             {{range .Items}}
-            <tr>
+            <tr class="annotate-row" data-item-id="{{.ID}}" tabindex="0">
+              <td><input type="checkbox" class="annotate-select" /></td>
               <td>{{truncate .Summary 160}}</td>
               <td>{{.Topic}}</td>
               <td>{{.ChannelTitle}} {{if .ChannelUsername}}(@{{.ChannelUsername}}){{end}}</td>
@@ -306,6 +383,25 @@
                 {{else}}
                 -
                 {{end}}
+              </td>
+              <td>
+                {{if .LastRating}}
+                <span class="annotate-badge">{{.LastRating}}{{if .LastRatedAt}} • {{formatTimePtr .LastRatedAt}}{{end}}</span>
+                {{else}}
+                -
+                {{end}}
+              </td>
+              <td>
+                <div class="annotate-actions">
+                  <button class="annotate-btn good" data-rating="good" aria-label="Good">✅</button>
+                  <button class="annotate-btn bad" data-rating="bad" aria-label="Bad">⚠️</button>
+                  <button class="annotate-btn irrelevant" data-rating="irrelevant" aria-label="Irrelevant">🚫</button>
+                  <button class="annotate-btn note" data-note aria-label="Add note">📝</button>
+                </div>
+                <div class="annotate-note">
+                  <input type="text" placeholder="Optional note…" maxlength="500" />
+                </div>
+                <div class="annotate-error" hidden></div>
               </td>
               <td><a href="/research/item/{{.ID}}">Open</a></td>
             </tr>
@@ -350,5 +446,109 @@
         {{end}}
       </div>
     </main>
+    <script>
+      const selectedCount = document.getElementById("selected-count");
+      const rows = Array.from(document.querySelectorAll(".annotate-row"));
+
+      function updateSelectedCount() {
+        const count = rows.filter(r => r.querySelector(".annotate-select")?.checked).length;
+        selectedCount.textContent = String(count);
+      }
+
+      function setRowError(row, message) {
+        const el = row.querySelector(".annotate-error");
+        if (!el) return;
+        if (!message) {
+          el.hidden = true;
+          el.textContent = "";
+          return;
+        }
+        el.hidden = false;
+        el.textContent = message;
+      }
+
+      async function annotateRow(row, rating) {
+        const itemId = row.dataset.itemId;
+        const noteInput = row.querySelector(".annotate-note input");
+        const comment = noteInput ? noteInput.value.trim() : "";
+        const buttons = row.querySelectorAll(".annotate-btn");
+        buttons.forEach(b => b.disabled = true);
+        setRowError(row, "");
+
+        const payload = { item_id: itemId, rating, comment, source: "web-list" };
+        try {
+          const res = await fetch("/research/annotate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            throw new Error(data.message || "Failed to save annotation");
+          }
+          const badgeCell = row.querySelector(".annotate-badge");
+          if (badgeCell) {
+            badgeCell.textContent = rating;
+          } else {
+            const cell = row.children[8];
+            if (cell) cell.innerHTML = `<span class="annotate-badge">${rating}</span>`;
+          }
+        } catch (err) {
+          setRowError(row, err.message || "Failed to save annotation");
+        } finally {
+          buttons.forEach(b => b.disabled = false);
+        }
+      }
+
+      rows.forEach(row => {
+        row.addEventListener("keydown", (e) => {
+          if (e.key === "g") annotateRow(row, "good");
+          if (e.key === "b") annotateRow(row, "bad");
+          if (e.key === "i") annotateRow(row, "irrelevant");
+        });
+        row.querySelectorAll(".annotate-btn[data-rating]").forEach(btn => {
+          btn.addEventListener("click", () => annotateRow(row, btn.dataset.rating));
+        });
+        const noteBtn = row.querySelector(".annotate-btn.note");
+        if (noteBtn) {
+          noteBtn.addEventListener("click", () => {
+            const note = row.querySelector(".annotate-note");
+            if (note) note.style.display = note.style.display === "block" ? "none" : "block";
+          });
+        }
+        const select = row.querySelector(".annotate-select");
+        if (select) select.addEventListener("change", updateSelectedCount);
+      });
+
+      document.querySelectorAll("[data-batch]").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const rating = btn.dataset.batch;
+          const selected = rows.filter(r => r.querySelector(".annotate-select")?.checked);
+          if (!selected.length) return;
+          const itemIds = selected.map(r => r.dataset.itemId);
+          const payload = { item_ids: itemIds, rating, comment: "", source: "web-list" };
+          btn.disabled = true;
+          try {
+            const res = await fetch("/research/annotate/batch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              throw new Error(data.message || "Failed to save batch");
+            }
+            selected.forEach(row => {
+              const cell = row.children[8];
+              if (cell) cell.innerHTML = `<span class="annotate-badge">${rating}</span>`;
+            });
+          } catch (err) {
+            selected.forEach(row => setRowError(row, err.message || "Failed to save batch"));
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      });
+    </script>
   </body>
 </html>

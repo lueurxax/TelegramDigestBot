@@ -1,7 +1,6 @@
 package bot
 
 import (
-	"strconv"
 	"strings"
 	"testing"
 
@@ -616,40 +615,6 @@ func TestClampFloat32(t *testing.T) {
 	}
 }
 
-func TestNormalizeAnnotationLabel(t *testing.T) {
-	tests := []struct {
-		input  string
-		want   string
-		wantOk bool
-	}{
-		{"good", RatingGood, true},
-		{"bad", RatingBad, true},
-		{"irrelevant", RatingIrrelevant, true},
-		{"GOOD", RatingGood, true},
-		{"Bad", RatingBad, true},
-		{"IRRELEVANT", RatingIrrelevant, true},
-		{"  good  ", RatingGood, true},
-		{"invalid", "", false},
-		{"", "", false},
-		{"excellent", "", false},
-		{"neutral", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got, ok := normalizeAnnotationLabel(tt.input)
-
-			if ok != tt.wantOk {
-				t.Errorf("normalizeAnnotationLabel(%q) ok = %v, want %v", tt.input, ok, tt.wantOk)
-			}
-
-			if got != tt.want {
-				t.Errorf("normalizeAnnotationLabel(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestTruncateAnnotationText(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -695,49 +660,6 @@ func TestTruncateAnnotationText(t *testing.T) {
 
 			if got != tt.want {
 				t.Errorf("truncateAnnotationText() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestAnnotationChannelName(t *testing.T) {
-	tests := []struct {
-		name string
-		item *db.AnnotationItem
-		want string
-	}{
-		{
-			name: "prefer username",
-			item: &db.AnnotationItem{
-				ChannelUsername: "testchannel",
-				ChannelTitle:    "Test Channel",
-			},
-			want: "@testchannel",
-		},
-		{
-			name: "fallback to title",
-			item: &db.AnnotationItem{
-				ChannelUsername: "",
-				ChannelTitle:    "Test Channel",
-			},
-			want: "Test Channel",
-		},
-		{
-			name: "fallback to unknown",
-			item: &db.AnnotationItem{
-				ChannelUsername: "",
-				ChannelTitle:    "",
-			},
-			want: "unknown",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := annotationChannelName(tt.item)
-
-			if got != tt.want {
-				t.Errorf("annotationChannelName() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -938,24 +860,6 @@ func TestAppendItemSummariesForPreview(t *testing.T) {
 				t.Errorf("appendItemSummariesForPreview() returned %d summaries, want %d", len(got), tt.wantLen)
 			}
 		})
-	}
-}
-
-func TestAnnotateUsage(t *testing.T) {
-	usage := annotateUsage()
-
-	expectedStrings := []string{
-		"/annotate enqueue",
-		"/annotate next",
-		"/annotate label",
-		"/annotate skip",
-		"/annotate stats",
-	}
-
-	for _, expected := range expectedStrings {
-		if !containsString(usage, expected) {
-			t.Errorf("annotateUsage() does not contain %q", expected)
-		}
 	}
 }
 
@@ -1678,99 +1582,6 @@ func TestFormatDiscoveryItem(t *testing.T) {
 	}
 }
 
-func TestFormatAnnotationItem(t *testing.T) {
-	tests := []struct {
-		name      string
-		item      *db.AnnotationItem
-		wantParts []string
-	}{
-		{
-			name: "full item with all fields",
-			item: &db.AnnotationItem{
-				ItemID:          "item-123",
-				ChannelUsername: "testchannel",
-				ChannelTitle:    "Test Channel",
-				ChannelPeerID:   123456,
-				MessageID:       42,
-				Status:          "pending",
-				RelevanceScore:  0.85,
-				ImportanceScore: 0.72,
-				Topic:           "Technology",
-				Summary:         "This is a test summary",
-				Text:            "Full message text here",
-			},
-			wantParts: []string{
-				"Annotation Item",
-				"@testchannel",
-				"item-123",
-				"pending",
-				"rel <code>0.85</code>",
-				"imp <code>0.72</code>",
-				"Technology",
-				"This is a test summary",
-			},
-		},
-		{
-			name: "item without username",
-			item: &db.AnnotationItem{
-				ItemID:          "item-456",
-				ChannelUsername: "",
-				ChannelTitle:    "Private Channel",
-				ChannelPeerID:   789012,
-				MessageID:       99,
-				Status:          "assigned",
-				RelevanceScore:  0.65,
-				ImportanceScore: 0.50,
-				Summary:         "Another summary",
-			},
-			wantParts: []string{
-				"Private Channel",
-				"item-456",
-				"assigned",
-			},
-		},
-		{
-			name: "item without topic",
-			item: &db.AnnotationItem{
-				ItemID:          "item-789",
-				ChannelUsername: "channel",
-				Status:          "pending",
-				RelevanceScore:  0.55,
-				ImportanceScore: 0.40,
-				Summary:         "Simple summary",
-			},
-			wantParts: []string{
-				"@channel",
-				"item-789",
-			},
-		},
-		{
-			name: "item without summary",
-			item: &db.AnnotationItem{
-				ItemID:          "item-no-summary",
-				ChannelUsername: "testch",
-				Status:          "pending",
-				Summary:         "",
-			},
-			wantParts: []string{
-				"(no summary)",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := formatAnnotationItem(tt.item)
-
-			for _, part := range tt.wantParts {
-				if !containsString(got, part) {
-					t.Errorf("formatAnnotationItem() missing %q in output: %s", part, got)
-				}
-			}
-		})
-	}
-}
-
 func TestValidPromptBases(t *testing.T) {
 	validBases := []string{"summarize", "narrative", "cluster_summary", "cluster_topic", "relevance_gate"}
 
@@ -1869,61 +1680,6 @@ func TestFormatRatingsStatsOutputExtended(t *testing.T) {
 	}
 }
 
-func TestParseAnnotateEnqueueArgs(t *testing.T) {
-	tests := []struct {
-		name      string
-		args      []string
-		wantHours int
-		wantLimit int
-	}{
-		{
-			name:      "no args uses defaults",
-			args:      []string{},
-			wantHours: DefaultAnnotateHours,
-			wantLimit: DefaultAnnotateLimit,
-		},
-		{
-			name:      "first arg sets hours",
-			args:      []string{"48"},
-			wantHours: 48,
-			wantLimit: DefaultAnnotateLimit,
-		},
-		{
-			name:      "both args set hours and limit",
-			args:      []string{"12", "100"},
-			wantHours: 12,
-			wantLimit: 100,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			hours := DefaultAnnotateHours
-			limit := DefaultAnnotateLimit
-
-			if len(tt.args) > 0 {
-				if v, err := strconv.Atoi(tt.args[0]); err == nil && v > 0 {
-					hours = v
-				}
-			}
-
-			if len(tt.args) > 1 {
-				if v, err := strconv.Atoi(tt.args[1]); err == nil && v > 0 {
-					limit = v
-				}
-			}
-
-			if hours != tt.wantHours {
-				t.Errorf("hours = %d, want %d", hours, tt.wantHours)
-			}
-
-			if limit != tt.wantLimit {
-				t.Errorf("limit = %d, want %d", limit, tt.wantLimit)
-			}
-		})
-	}
-}
-
 func TestCallbackDataParsing(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -1987,7 +1743,6 @@ func TestCommandConstants(t *testing.T) {
 		"list":             CmdList,
 		"remove":           CmdRemove,
 		"prompt":           CmdPrompt,
-		"annotate":         CmdAnnotate,
 		"min_length":       CmdMinLength,
 		"minlength":        CmdMinLengthAlt,
 		"skip_forwards":    CmdSkipForwards,
@@ -2398,14 +2153,6 @@ func TestDefaultConstants(t *testing.T) {
 	if DefaultScoresLimit != 10 {
 		t.Errorf("DefaultScoresLimit = %d, want %d", DefaultScoresLimit, 10)
 	}
-
-	if DefaultAnnotateHours != 24 {
-		t.Errorf("DefaultAnnotateHours = %d, want %d", DefaultAnnotateHours, 24)
-	}
-
-	if DefaultAnnotateLimit != 50 {
-		t.Errorf("DefaultAnnotateLimit = %d, want %d", DefaultAnnotateLimit, 50)
-	}
 }
 
 func TestLogFieldConstants(t *testing.T) {
@@ -2572,7 +2319,6 @@ func TestHelpSummaryMessage(t *testing.T) {
 		"/factcheck",
 		"/enrichment",
 		"/ratings",
-		"/annotate",
 		"/help",
 	}
 
@@ -2769,21 +2515,6 @@ func TestHelpRatingsMessage(t *testing.T) {
 	}
 }
 
-func TestHelpAnnotateMessage(t *testing.T) {
-	msg := helpAnnotateMessage()
-
-	wantParts := []string{
-		"Annotations",
-		"/annotate",
-	}
-
-	for _, part := range wantParts {
-		if !containsString(msg, part) {
-			t.Errorf("helpAnnotateMessage() missing %q", part)
-		}
-	}
-}
-
 func TestHelpAllMessage(t *testing.T) {
 	msg := helpAllMessage()
 
@@ -2801,7 +2532,6 @@ func TestHelpAllMessage(t *testing.T) {
 		"Scores",              // from helpScoresMessage
 		"Fact Check",          // from helpFactCheckMessage
 		"Ratings",             // from helpRatingsMessage
-		"Annotations",         // from helpAnnotateMessage
 	}
 
 	for _, part := range wantParts {

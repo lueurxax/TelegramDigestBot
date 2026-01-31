@@ -130,7 +130,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch data and render
-	h.serveExpandedView(r.Context(), w, payload.ItemID)
+	h.serveExpandedView(r.Context(), w, payload.ItemID, token)
 }
 
 func (h *Handler) handleTokenError(w http.ResponseWriter, err error) {
@@ -146,7 +146,7 @@ func (h *Handler) handleTokenError(w http.ResponseWriter, err error) {
 	}
 }
 
-func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, itemID string) {
+func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, itemID string, token string) {
 	// Fetch item details
 	item, err := h.database.GetItemDebugDetail(ctx, itemID)
 	if err != nil {
@@ -204,6 +204,18 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 	// Build Apple Shortcuts URL
 	shortcutURL := BuildShortcutURL(h.cfg.ExpandedShortcutName, chatGPTPrompt, h.cfg.ExpandedShortcutMaxChars)
 
+	var (
+		lastRating   string
+		lastRatedAt  *time.Time
+		lastFeedback string
+	)
+
+	if ratings, err := h.database.GetItemRatingsByItem(ctx, itemID, 1); err == nil && len(ratings) > 0 {
+		lastRating = ratings[0].Rating
+		lastFeedback = ratings[0].Feedback
+		lastRatedAt = &ratings[0].CreatedAt
+	}
+
 	// Determine if HTML rendering is safe
 	// Only allow safeHTML when admin-only mode is enforced (no public system tokens)
 	allowSafeHTML := h.cfg.ExpandedViewRequireAdmin && !h.cfg.ExpandedViewAllowSystemTokens
@@ -216,6 +228,10 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		ChatGPTPrompt:   chatGPTPrompt,
 		OriginalMsgLink: originalMsgLink,
 		GeneratedAt:     time.Now(),
+		AnnotationToken: token,
+		LastRating:      lastRating,
+		LastRatedAt:     lastRatedAt,
+		LastFeedback:    lastFeedback,
 
 		// Apple Shortcuts
 		ShortcutEnabled:   true,

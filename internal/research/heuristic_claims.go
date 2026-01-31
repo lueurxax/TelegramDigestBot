@@ -33,7 +33,7 @@ type HeuristicClaimRepository interface {
 	GetItemsWithoutEvidenceClaims(ctx context.Context, limit int) ([]db.ItemForHeuristicClaim, error)
 	InsertHeuristicClaims(ctx context.Context, claims []db.HeuristicClaimInput) (int64, error)
 	FindSimilarClaimsByEmbedding(ctx context.Context, embedding []float32, limit int, threshold float64) ([]db.SimilarClaim, error)
-	UpdateClaimClusters(ctx context.Context, claimID int64, clusterIDs []string) error
+	UpdateClaimClusters(ctx context.Context, claimID string, clusterIDs []string) error
 }
 
 // NewHeuristicClaimPopulator creates a new populator.
@@ -194,12 +194,12 @@ func (p *HeuristicClaimPopulator) checkAndMergeSimilarClaim(ctx context.Context,
 
 	err = p.db.UpdateClaimClusters(ctx, bestMatch.ID, []string{clusterID})
 	if err != nil {
-		p.logger.Debug().Err(err).Int64(logFieldClaimID, bestMatch.ID).Msg("failed to update claim clusters")
+		p.logger.Debug().Err(err).Str(logFieldClaimID, bestMatch.ID).Msg("failed to update claim clusters")
 		return false
 	}
 
 	p.logger.Debug().
-		Int64(logFieldClaimID, bestMatch.ID).
+		Str(logFieldClaimID, bestMatch.ID).
 		Float64("similarity", bestMatch.Similarity).
 		Str("cluster_id", clusterID).
 		Msg("merged claim with existing similar claim")

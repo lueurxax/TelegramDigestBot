@@ -62,6 +62,7 @@ const (
 	logFieldUsername   = "username"
 	logFieldInviteLink = "invite_link"
 	logFieldMsgID      = "msg_id"
+	logFieldLastID     = "last_id"
 
 	// Error messages
 	errMsgIncrementResolutionAttempts = "failed to increment resolution attempts"
@@ -902,7 +903,7 @@ func (r *Reader) fetchDescriptionIfMissing(ctx context.Context, api *tg.Client, 
 }
 
 func (r *Reader) fetchHistory(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, ch db.Channel) (tg.MessagesMessagesClass, error) {
-	r.logger.Debug().Str(logFieldUsername, ch.Username).Int64(logFieldPeerID, ch.TGPeerID).Int64("last_id", ch.LastTGMessageID).Msg("Getting history")
+	r.logger.Debug().Str(logFieldUsername, ch.Username).Int64(logFieldPeerID, ch.TGPeerID).Int64(logFieldLastID, ch.LastTGMessageID).Msg("Getting history")
 
 	observability.ReaderFetchRequestsTotal.WithLabelValues(ch.Username, "attempt").Inc()
 
@@ -913,7 +914,7 @@ func (r *Reader) fetchHistory(ctx context.Context, api *tg.Client, peer tg.Input
 
 	if ch.LastTGMessageID > 0 {
 		// Fetch messages newer than last seen
-		req.MinID = int(ch.LastTGMessageID)
+		req.MinID = int(ch.LastTGMessageID + 1)
 	}
 
 	history, err := api.MessagesGetHistory(ctx, req)
@@ -951,10 +952,12 @@ type historyProcessingContext struct {
 	ch                  db.Channel
 	channelTitles       map[int64]string
 	channelAccessHashes map[int64]int64
+	seenCount           int
 	processedCount      int
 	backfillCount       int
 	replayCount         int
 	forwardCount        int
+	maxSavedID          int64
 }
 
 func (r *Reader) extractHistoryData(history tg.MessagesMessagesClass) ([]tg.MessageClass, []tg.ChatClass, bool) {
@@ -1008,20 +1011,21 @@ func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessin
 		IsForward:     isForward,
 	}
 
-	// Record message age and ingestion lag
 	age := time.Since(rawMsg.TGDate).Seconds()
+	hpc.seenCount++
+	observability.ReaderMessagesSeen.WithLabelValues(hpc.ch.Username).Inc()
 	observability.ReaderMessageAgeSeconds.WithLabelValues(hpc.ch.Username).Observe(age)
-	observability.ReaderIngestLagSeconds.WithLabelValues(hpc.ch.Username).Observe(age)
-
-	hpc.processedCount++
-	if age > float64(backfillThresholdHours*secondsPerHour) {
-		hpc.backfillCount++
-		observability.ReaderBackfillTotal.WithLabelValues(hpc.ch.Username).Inc()
-	}
 
 	if hpc.ch.LastTGMessageID > 0 && int64(msg.ID) <= hpc.ch.LastTGMessageID {
 		hpc.replayCount++
 		observability.ReaderReplayTotal.WithLabelValues(hpc.ch.Username).Inc()
+
+		return false
+	}
+
+	if age > float64(backfillThresholdHours*secondsPerHour) {
+		hpc.backfillCount++
+		observability.ReaderBackfillTotal.WithLabelValues(hpc.ch.Username).Inc()
 	}
 
 	if isForward {
@@ -1035,6 +1039,12 @@ func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessin
 		return false
 	}
 
+	hpc.processedCount++
+	if int64(msg.ID) > hpc.maxSavedID {
+		hpc.maxSavedID = int64(msg.ID)
+	}
+
+	observability.ReaderIngestLagSeconds.WithLabelValues(hpc.ch.Username).Observe(age)
 	observability.MessagesIngested.WithLabelValues(hpc.ch.Username).Inc()
 	r.startAsyncMediaDownload(ctx, hpc, msg, rawMsg)
 	r.startAsyncLinkResolution(ctx, msg.Message, entitiesJSON, mediaJSON)
@@ -1137,8 +1147,9 @@ func (r *Reader) processHistoryMessages(ctx context.Context, api *tg.Client, his
 
 	r.logger.Debug().Str(logFieldChannel, ch.Username).Int(logFieldCount, len(messages)).Int("chats_in_response", len(chats)).Msg("Processing messages")
 
+	r.recordHistoryBatchStats(ch, messages)
+
 	count := 0
-	maxID := ch.LastTGMessageID
 
 	for _, m := range messages {
 		if svcMsg, ok := m.(*tg.MessageService); ok {
@@ -1152,25 +1163,128 @@ func (r *Reader) processHistoryMessages(ctx context.Context, api *tg.Client, his
 			continue
 		}
 
-		if msg.ID > int(maxID) {
-			maxID = int64(msg.ID)
-		}
-
 		if r.processSingleMessage(ctx, hpc, msg) {
 			count++
 		}
 	}
 
-	r.logProcessingResult(ctx, ch, count, maxID)
+	r.logProcessingResult(ctx, ch, count, hpc.maxSavedID)
 
-	if hpc.processedCount > 0 {
-		total := float64(hpc.processedCount)
+	if hpc.seenCount > 0 {
+		total := float64(hpc.seenCount)
 		observability.ReaderBackfillRatio.WithLabelValues(ch.Username).Set(float64(hpc.backfillCount) / total)
 		observability.ReaderReplayRatio.WithLabelValues(ch.Username).Set(float64(hpc.replayCount) / total)
 		observability.ReaderForwardedRatio.WithLabelValues(ch.Username).Set(float64(hpc.forwardCount) / total)
 	}
 
 	return count, nil
+}
+
+func (r *Reader) recordHistoryBatchStats(ch db.Channel, messages []tg.MessageClass) {
+	stats := r.collectHistoryBatchStats(ch.LastTGMessageID, messages)
+	if stats.batchCount == 0 {
+		return
+	}
+
+	observability.ReaderHistoryBatchSize.WithLabelValues(ch.Username).Set(float64(stats.batchCount))
+	observability.ReaderHistoryNewMessages.WithLabelValues(ch.Username).Set(float64(stats.newCount))
+	observability.ReaderHistoryMaxID.WithLabelValues(ch.Username).Set(float64(stats.batchMaxID))
+	observability.ReaderHistoryMinID.WithLabelValues(ch.Username).Set(float64(stats.batchMinID))
+
+	if stats.lastID > 0 && stats.batchMaxID <= stats.lastID {
+		observability.ReaderReplayOnlyFetchTotal.WithLabelValues(ch.Username).Inc()
+		r.logger.Debug().
+			Str(logFieldChannel, ch.Username).
+			Int64(logFieldLastID, stats.lastID).
+			Int64("batch_max_id", stats.batchMaxID).
+			Int64("batch_min_id", stats.batchMinID).
+			Int(logFieldCount, stats.batchCount).
+			Msg("history fetch contained no new messages")
+	}
+}
+
+type historyBatchStats struct {
+	batchMaxID int64
+	batchMinID int64
+	batchCount int
+	newCount   int
+	lastID     int64
+}
+
+func (r *Reader) collectHistoryBatchStats(lastID int64, messages []tg.MessageClass) historyBatchStats {
+	ids := r.messageClassIDs(messages)
+	if len(ids) == 0 {
+		return historyBatchStats{}
+	}
+
+	batchMaxID, batchMinID := r.minMaxIDs(ids)
+	newCount := r.countNewIDs(lastID, ids)
+
+	return historyBatchStats{
+		batchMaxID: batchMaxID,
+		batchMinID: batchMinID,
+		batchCount: len(ids),
+		newCount:   newCount,
+		lastID:     lastID,
+	}
+}
+
+func (r *Reader) messageClassIDs(messages []tg.MessageClass) []int64 {
+	ids := make([]int64, 0, len(messages))
+	for _, m := range messages {
+		id, ok := r.messageClassID(m)
+		if !ok {
+			continue
+		}
+
+		ids = append(ids, id)
+	}
+
+	return ids
+}
+
+func (r *Reader) minMaxIDs(ids []int64) (int64, int64) {
+	maxID := ids[0]
+	minID := ids[0]
+
+	for _, id := range ids[1:] {
+		if id > maxID {
+			maxID = id
+		}
+
+		if id < minID {
+			minID = id
+		}
+	}
+
+	return maxID, minID
+}
+
+func (r *Reader) countNewIDs(lastID int64, ids []int64) int {
+	if lastID == 0 {
+		return len(ids)
+	}
+
+	newCount := 0
+
+	for _, id := range ids {
+		if id > lastID {
+			newCount++
+		}
+	}
+
+	return newCount
+}
+
+func (r *Reader) messageClassID(m tg.MessageClass) (int64, bool) {
+	switch msg := m.(type) {
+	case *tg.Message:
+		return int64(msg.ID), true
+	case *tg.MessageService:
+		return int64(msg.ID), true
+	default:
+		return 0, false
+	}
 }
 
 func (r *Reader) processServiceMessage(ctx context.Context, svcMsg *tg.MessageService, channelID string) {

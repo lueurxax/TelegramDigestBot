@@ -2064,7 +2064,7 @@ func (b *Bot) handleFeedback(ctx context.Context, msg *tgbotapi.Message) {
 		feedback = strings.Join(args[2:], " ")
 	}
 
-	if err := b.database.SaveItemRating(ctx, itemID, msg.From.ID, rating, feedback); err != nil {
+	if err := b.database.SaveItemRating(ctx, itemID, msg.From.ID, rating, feedback, "bot-feedback"); err != nil {
 		b.reply(msg, fmt.Sprintf("❌ Error saving feedback: %s", html.EscapeString(err.Error())))
 
 		return
@@ -2834,24 +2834,22 @@ func (b *Bot) handleHelp(_ context.Context, msg *tgbotapi.Message) {
 
 	topic := strings.ToLower(args[0])
 	helpMsgs := map[string]string{
-		"all":         helpAllMessage(),
-		"channels":    helpChannelsMessage(),
-		CmdChannel:    helpChannelsMessage(),
-		"discover":    helpDiscoverMessage(),
-		"filters":     helpFiltersMessage(),
-		"filter":      helpFiltersMessage(),
-		"schedule":    helpScheduleMessage(),
-		"config":      helpConfigMessage(),
-		"ai":          helpAIMessage(),
-		"enrichment":  enrichmentHelpMessage(),
-		"system":      helpSystemMessage(),
-		"research":    helpResearchMessage(),
-		"scores":      helpScoresMessage(),
-		"factcheck":   helpFactCheckMessage(),
-		"ratings":     helpRatingsMessage(),
-		"annotate":    helpAnnotateMessage(),
-		"annotations": helpAnnotateMessage(),
-		"botfather":   botFatherCommandsMessage(),
+		"all":        helpAllMessage(),
+		"channels":   helpChannelsMessage(),
+		CmdChannel:   helpChannelsMessage(),
+		"discover":   helpDiscoverMessage(),
+		"filters":    helpFiltersMessage(),
+		"filter":     helpFiltersMessage(),
+		"schedule":   helpScheduleMessage(),
+		"config":     helpConfigMessage(),
+		"ai":         helpAIMessage(),
+		"enrichment": enrichmentHelpMessage(),
+		"system":     helpSystemMessage(),
+		"research":   helpResearchMessage(),
+		"scores":     helpScoresMessage(),
+		"factcheck":  helpFactCheckMessage(),
+		"ratings":    helpRatingsMessage(),
+		"botfather":  botFatherCommandsMessage(),
 	}
 
 	if m, ok := helpMsgs[topic]; ok {

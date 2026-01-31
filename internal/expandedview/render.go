@@ -111,6 +111,10 @@ type ExpandedViewData struct {
 	ChatGPTPrompt   string // Full prompt text for View prompt section (no truncation)
 	OriginalMsgLink string // Telegram link to original message
 	GeneratedAt     time.Time
+	AnnotationToken string
+	LastRating      string
+	LastRatedAt     *time.Time
+	LastFeedback    string
 
 	// Apple Shortcuts integration
 	ShortcutEnabled   bool   // Whether shortcut button should be shown
