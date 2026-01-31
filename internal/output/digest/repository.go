@@ -47,7 +47,9 @@ type Repository interface {
 	// Cluster operations
 	GetClustersForWindow(ctx context.Context, start, end time.Time) ([]db.ClusterWithItems, error)
 	DeleteClustersForWindow(ctx context.Context, start, end time.Time) error
+	DeleteClustersForWindowAndSource(ctx context.Context, start, end time.Time, source string) error
 	CreateCluster(ctx context.Context, start, end time.Time, topic string) (string, error)
+	CreateClusterWithSource(ctx context.Context, start, end time.Time, topic, source string) (string, error)
 	AddToCluster(ctx context.Context, clusterID, itemID string) error
 
 	// Rating operations

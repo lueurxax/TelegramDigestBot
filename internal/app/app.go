@@ -40,9 +40,12 @@ const (
 	msgEnrichmentWorkerStopped       = "enrichment worker stopped"
 	llmAPIKeyMock                    = "mock"
 	logFieldBaseURL                  = "base_url"
+	logFieldItems                    = "items"
 	researchRefreshInterval          = time.Hour
 	researchRefreshLockID            = int64(94231)
 	researchRefreshTimeout           = 10 * time.Minute
+	researchClusterLookbackDays      = 14
+	researchClusterItemLimit         = 2000
 )
 
 // App holds the application dependencies and provides methods to run different modes.
@@ -50,6 +53,24 @@ type App struct {
 	cfg      *config.Config
 	database *db.DB
 	logger   *zerolog.Logger
+}
+
+type noopDigestPoster struct{}
+
+func (noopDigestPoster) SendDigest(_ context.Context, _ int64, _ string, _ string) (int64, error) {
+	return 0, nil
+}
+
+func (noopDigestPoster) SendDigestWithImage(_ context.Context, _ int64, _ string, _ string, _ []byte) (int64, error) {
+	return 0, nil
+}
+
+func (noopDigestPoster) SendRichDigest(_ context.Context, _ int64, _ digest.RichDigestContent) (int64, error) {
+	return 0, nil
+}
+
+func (noopDigestPoster) SendNotification(_ context.Context, _ string) error {
+	return nil
 }
 
 // New creates a new App instance with the given dependencies.
@@ -85,7 +106,7 @@ func (a *App) StartHealthServer(ctx context.Context) error {
 
 		authService := research.NewAuthTokenService(a.cfg.ExpandedViewSigningSecret, research.DefaultLoginTokenTTL)
 
-		researchHandler, err = research.NewHandler(a.cfg, a.database, authService, a.logger)
+		researchHandler, err = research.NewHandler(a.cfg, a.database, authService, a.logger, a.rebuildResearch)
 		if err != nil {
 			return fmt.Errorf("research handler init: %w", err)
 		}
@@ -263,6 +284,8 @@ func (a *App) runResearchAnalytics(ctx context.Context) {
 
 	a.logger.Info().Int("ready_items", readyCount).Int("backlog", backlog).Msg("Starting research refresh")
 
+	a.runResearchClustering(ctx)
+
 	if err := a.database.RefreshResearchMaterializedViews(ctx); err != nil {
 		a.logger.Warn().Err(err).Msg("research refresh failed")
 		// Continue to heuristic claims population even if views fail
@@ -270,6 +293,46 @@ func (a *App) runResearchAnalytics(ctx context.Context) {
 
 	// Populate heuristic claims for items without evidence
 	a.populateHeuristicClaims(ctx)
+}
+
+func (a *App) rebuildResearch(ctx context.Context) error {
+	a.runResearchClustering(ctx)
+
+	if err := a.database.RefreshResearchMaterializedViews(ctx); err != nil {
+		return fmt.Errorf("refresh research views: %w", err)
+	}
+
+	a.populateHeuristicClaims(ctx)
+
+	return nil
+}
+
+func (a *App) runResearchClustering(ctx context.Context) {
+	end := time.Now().UTC()
+	start := end.Add(-time.Duration(researchClusterLookbackDays) * 24 * time.Hour)
+
+	items, err := a.database.GetReadyItemsForResearch(ctx, start, end, researchClusterItemLimit)
+	if err != nil {
+		a.logger.Warn().Err(err).Msg("research clustering: failed to load items")
+		return
+	}
+
+	if len(items) < 2 {
+		a.logger.Debug().Int(logFieldItems, len(items)).Msg("research clustering skipped: not enough items")
+		return
+	}
+
+	clusterer := digest.New(a.cfg, a.database, noopDigestPoster{}, nil, a.logger)
+	if err := clusterer.ClusterItemsForResearch(ctx, items, start, end, a.logger); err != nil {
+		a.logger.Warn().Err(err).Msg("research clustering failed")
+		return
+	}
+
+	a.logger.Info().
+		Int("items", len(items)).
+		Time("start", start).
+		Time("end", end).
+		Msg("research clustering completed")
 }
 
 func (a *App) runResearchMaintenance(ctx context.Context) {

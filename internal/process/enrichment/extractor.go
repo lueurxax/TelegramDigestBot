@@ -57,6 +57,22 @@ const (
 	unicodeReplacementChr = 0xFFFD // Unicode replacement character (encoding error indicator)
 	c1ControlMin          = 0x80   // C1 control characters start
 	c1ControlMax          = 0x9F   // C1 control characters end
+
+	// Garbage detection thresholds
+	// These are lenient to allow valid short claims while filtering garbage like
+	// "NE provid FIRE(rightalar çayW Protective引き JOB..."
+	minGarbageCheckLength = 50   // Only apply garbage detection to longer strings
+	maxSpecialCharRatio   = 0.35 // Max 35% special characters (garbage has more)
+	minAlphanumericRatio  = 0.5  // At least 50% alphanumeric
+	maxMixedScriptChanges = 5    // Max script switches (Latin->CJK->Cyrillic jumbled)
+
+	// Script identifiers for mixed-script detection
+	scriptUnknown  = 0
+	scriptLatin    = 1
+	scriptCyrillic = 2
+	scriptCJK      = 3
+	scriptArabic   = 4
+	scriptGreek    = 5
 )
 
 var (
@@ -367,8 +383,10 @@ func (e *Extractor) parseLLMClaims(res string) ([]ExtractedClaim, error) {
 
 			err := json.Unmarshal([]byte(jsonStr), &currentClaims)
 			if err == nil {
-				if len(currentClaims) > 0 {
-					return currentClaims, nil
+				// Filter out garbage claims before returning
+				validClaims := filterGarbageClaims(currentClaims)
+				if len(validClaims) > 0 {
+					return validClaims, nil
 				}
 
 				foundValidArray = true
@@ -942,3 +960,116 @@ func sanitizeJSONString(s string) string {
 }
 
 var trailingCommaPattern = regexp.MustCompile(`,\s*([\]\}])`)
+
+// isGarbageClaim detects LLM garbage output that parses as valid JSON but contains nonsense text.
+// Examples: "NE provid FIRE(rightalar çayW Protective引き JOB..."
+// Short claims are allowed through - garbage detection only kicks in for longer strings.
+func isGarbageClaim(text string) bool {
+	// Allow short claims through - they're likely valid test data or short facts
+	if len(text) < minGarbageCheckLength {
+		return false
+	}
+
+	stats := countCharacterStats(text)
+	if stats.total == 0 {
+		return true
+	}
+
+	// Check for too many script changes (Latin->CJK->Cyrillic jumbled together)
+	if stats.scriptChanges > maxMixedScriptChanges {
+		return true
+	}
+
+	return hasInvalidCharRatios(stats)
+}
+
+// charStats holds character type counts for garbage detection.
+type charStats struct {
+	alphanumeric  int
+	special       int
+	spaces        int
+	total         int
+	scriptChanges int
+}
+
+// countCharacterStats analyzes text and returns character statistics.
+func countCharacterStats(text string) charStats {
+	var (
+		stats      charStats
+		lastScript int
+	)
+
+	for _, r := range text {
+		stats.countRune(r, &lastScript)
+	}
+
+	stats.total = stats.alphanumeric + stats.special + stats.spaces
+
+	return stats
+}
+
+// countRune updates statistics for a single rune.
+func (s *charStats) countRune(r rune, lastScript *int) {
+	switch {
+	case unicode.IsLetter(r) || unicode.IsDigit(r):
+		s.alphanumeric++
+		s.updateScriptChanges(r, lastScript)
+	case unicode.IsSpace(r):
+		s.spaces++
+	case unicode.IsPunct(r) || unicode.IsSymbol(r):
+		s.special++
+	}
+}
+
+// updateScriptChanges tracks script changes for mixed-script detection.
+func (s *charStats) updateScriptChanges(r rune, lastScript *int) {
+	currentScript := detectScript(r)
+	if *lastScript != scriptUnknown && currentScript != *lastScript {
+		s.scriptChanges++
+	}
+
+	*lastScript = currentScript
+}
+
+// hasInvalidCharRatios checks if character ratios indicate garbage.
+func hasInvalidCharRatios(stats charStats) bool {
+	specialRatio := float64(stats.special) / float64(stats.total)
+	alphanumericRatio := float64(stats.alphanumeric) / float64(stats.total)
+
+	return specialRatio > maxSpecialCharRatio || alphanumericRatio < minAlphanumericRatio
+}
+
+// detectScript returns a script identifier for the rune.
+func detectScript(r rune) int {
+	switch {
+	case unicode.Is(unicode.Latin, r):
+		return scriptLatin
+	case unicode.Is(unicode.Cyrillic, r):
+		return scriptCyrillic
+	case unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r):
+		return scriptCJK
+	case unicode.Is(unicode.Arabic, r):
+		return scriptArabic
+	case unicode.Is(unicode.Greek, r):
+		return scriptGreek
+	default:
+		return scriptUnknown
+	}
+}
+
+// filterGarbageClaims removes claims that appear to be LLM garbage output.
+func filterGarbageClaims(claims []ExtractedClaim) []ExtractedClaim {
+	if len(claims) == 0 {
+		return claims
+	}
+
+	filtered := make([]ExtractedClaim, 0, len(claims))
+
+	for _, claim := range claims {
+		if !isGarbageClaim(claim.Text) {
+			filtered = append(filtered, claim)
+		}
+	}
+
+	return filtered
+}

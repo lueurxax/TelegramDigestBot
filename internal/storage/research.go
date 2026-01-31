@@ -23,6 +23,8 @@ var (
 	ErrRelevanceGateNotFound         = errors.New("relevance gate decision not found")
 )
 
+const errIterateResearchItems = "iterate research items: %w"
+
 // nullableFloat64 extracts a float64 from a pgtype.Float8, returning 0 if not valid.
 func nullableFloat64(v pgtype.Float8) float64 {
 	if v.Valid {
@@ -106,6 +108,7 @@ const (
 			LEFT JOIN LATERAL (
 				SELECT ci.cluster_id
 				FROM cluster_items ci
+				JOIN clusters c2 ON ci.cluster_id = c2.id AND c2.source = 'research'
 				WHERE ci.item_id = i.id
 				LIMIT 1
 			) cl ON true
@@ -383,7 +386,7 @@ func (db *DB) SearchResearchItems(ctx context.Context, params ResearchSearchPara
 	}
 
 	if rows.Err() != nil {
-		return nil, nil, fmt.Errorf("iterate research items: %w", rows.Err())
+		return nil, nil, fmt.Errorf(errIterateResearchItems, rows.Err())
 	}
 
 	var count *ResearchSearchResultCount
@@ -718,9 +721,9 @@ func (db *DB) GetResearchCluster(ctx context.Context, clusterID string) (*Resear
 		JOIN items i ON ci.item_id = i.id
 		JOIN raw_messages rm ON i.raw_message_id = rm.id
 		JOIN channels ch ON rm.channel_id = ch.id
-		WHERE c.id = $1
+		WHERE c.id = $1 AND c.source = $2
 		GROUP BY c.id, c.topic
-	`, clusterUUID)
+	`, clusterUUID, ClusterSourceResearch)
 
 	var (
 		clusterIDRaw pgtype.UUID
@@ -783,12 +786,13 @@ func (db *DB) getResearchClusterItems(ctx context.Context, clusterUUID pgtype.UU
 		       ch.tg_peer_id,
 		       rm.tg_message_id
 		FROM cluster_items ci
+		JOIN clusters c ON ci.cluster_id = c.id AND c.source = $2
 		JOIN items i ON ci.item_id = i.id
 		JOIN raw_messages rm ON i.raw_message_id = rm.id
 		JOIN channels ch ON rm.channel_id = ch.id
 		WHERE ci.cluster_id = $1
 		ORDER BY i.importance_score DESC
-	`, clusterUUID)
+	`, clusterUUID, ClusterSourceResearch)
 	if err != nil {
 		return nil, fmt.Errorf("get research cluster items: %w", err)
 	}
@@ -847,12 +851,13 @@ func (db *DB) getResearchClusterTimeline(ctx context.Context, clusterUUID pgtype
 		SELECT date_trunc('day', rm.tg_date) AS bucket_date,
 		       COUNT(*) AS item_count
 		FROM cluster_items ci
+		JOIN clusters c ON ci.cluster_id = c.id AND c.source = $2
 		JOIN items i ON ci.item_id = i.id
 		JOIN raw_messages rm ON i.raw_message_id = rm.id
 		WHERE ci.cluster_id = $1
 		GROUP BY bucket_date
 		ORDER BY bucket_date
-	`, clusterUUID)
+	`, clusterUUID, ClusterSourceResearch)
 	if err != nil {
 		return nil, fmt.Errorf("get research cluster timeline: %w", err)
 	}
@@ -888,13 +893,14 @@ func (db *DB) getResearchClusterChannels(ctx context.Context, clusterUUID pgtype
 	rows, err := db.Pool.Query(ctx, `
 		SELECT ch.id, ch.title, ch.username, COUNT(*) AS item_count
 		FROM cluster_items ci
+		JOIN clusters c ON ci.cluster_id = c.id AND c.source = $2
 		JOIN items i ON ci.item_id = i.id
 		JOIN raw_messages rm ON i.raw_message_id = rm.id
 		JOIN channels ch ON rm.channel_id = ch.id
 		WHERE ci.cluster_id = $1
 		GROUP BY ch.id, ch.title, ch.username
 		ORDER BY item_count DESC
-	`, clusterUUID)
+	`, clusterUUID, ClusterSourceResearch)
 	if err != nil {
 		return nil, fmt.Errorf("get research cluster channels: %w", err)
 	}
@@ -1086,6 +1092,7 @@ func (db *DB) GetChannelOverlap(ctx context.Context, from, to *time.Time, limit 
 			WITH channel_clusters AS (
 				SELECT ch.id AS channel_id, ci.cluster_id
 				FROM cluster_items ci
+				JOIN clusters c ON ci.cluster_id = c.id AND c.source = 'research'
 				JOIN items i ON ci.item_id = i.id
 				JOIN raw_messages rm ON i.raw_message_id = rm.id
 				JOIN channels ch ON rm.channel_id = ch.id
@@ -1176,6 +1183,7 @@ func (db *DB) GetChannelOverlapSummary(ctx context.Context) (ResearchChannelOver
 		WITH channel_clusters AS (
 			SELECT ci.cluster_id, rm.channel_id
 			FROM cluster_items ci
+			JOIN clusters c ON ci.cluster_id = c.id AND c.source = $1
 			JOIN items i ON ci.item_id = i.id
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
 			GROUP BY ci.cluster_id, rm.channel_id
@@ -1189,7 +1197,7 @@ func (db *DB) GetChannelOverlapSummary(ctx context.Context) (ResearchChannelOver
 			(SELECT COUNT(*) FROM cluster_counts) AS total_clusters,
 			(SELECT COUNT(*) FROM cluster_counts WHERE channel_count > 1) AS shared_clusters,
 			(SELECT COUNT(DISTINCT channel_id) FROM channel_clusters) AS total_channels
-	`)
+	`, ClusterSourceResearch)
 
 	var (
 		totalClusters  pgtype.Int8
@@ -1728,6 +1736,7 @@ func (db *DB) GetTopicDrift(ctx context.Context, from, to *time.Time, limit int)
 			       ROW_NUMBER() OVER (PARTITION BY ci.cluster_id ORDER BY rm.tg_date ASC) AS rn_first,
 			       ROW_NUMBER() OVER (PARTITION BY ci.cluster_id ORDER BY rm.tg_date DESC) AS rn_last
 			FROM cluster_items ci
+			JOIN clusters c ON ci.cluster_id = c.id AND c.source = 'research'
 			JOIN items i ON ci.item_id = i.id
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
 		),
@@ -1929,11 +1938,16 @@ func (db *DB) GetClaimsSummary(ctx context.Context) (ResearchClaimsSummary, erro
 			(SELECT COUNT(*) FROM claims) AS claims_count,
 			(SELECT COUNT(*) FROM evidence_claims) AS evidence_claims_count,
 			(SELECT COUNT(DISTINCT item_id) FROM item_evidence) AS evidence_items_count,
-			(SELECT COUNT(DISTINCT item_id) FROM cluster_items) AS cluster_items_count,
+			(SELECT COUNT(DISTINCT ci.item_id)
+			 FROM cluster_items ci
+			 JOIN clusters c ON c.id = ci.cluster_id
+			 WHERE c.source = $1) AS cluster_items_count,
 			(SELECT COUNT(DISTINCT ie.item_id)
 			 FROM item_evidence ie
-			 JOIN cluster_items ci ON ci.item_id = ie.item_id) AS clustered_with_evidence
-	`)
+			 JOIN cluster_items ci ON ci.item_id = ie.item_id
+			 JOIN clusters c ON c.id = ci.cluster_id
+			 WHERE c.source = $1) AS clustered_with_evidence
+	`, ClusterSourceResearch)
 
 	var (
 		claimsCount          pgtype.Int8
@@ -1954,6 +1968,98 @@ func (db *DB) GetClaimsSummary(ctx context.Context) (ResearchClaimsSummary, erro
 		ClusterItemsCount:    int(clusterItemsCount.Int64),
 		ClusteredWithEvCount: int(clusteredWithEvCount.Int64),
 	}, nil
+}
+
+// GetReadyItemsForResearch returns ready items with embeddings for research clustering.
+func (db *DB) GetReadyItemsForResearch(ctx context.Context, start, end time.Time, limit int) ([]Item, error) {
+	if limit <= 0 {
+		limit = 2000
+	}
+
+	rows, err := db.Pool.Query(ctx, `
+		SELECT i.id, i.raw_message_id, i.relevance_score, i.importance_score, i.topic, i.summary, i.language,
+		       i.status, i.first_seen_at, rm.tg_date, c.username as source_channel,
+		       c.title as source_channel_title, c.tg_peer_id as source_channel_id, rm.tg_message_id as source_msg_id,
+		       e.embedding
+		FROM items i
+		JOIN raw_messages rm ON i.raw_message_id = rm.id
+		JOIN channels c ON rm.channel_id = c.id
+		JOIN embeddings e ON i.id = e.item_id
+		WHERE rm.tg_date >= $1 AND rm.tg_date < $2
+		  AND i.status = 'ready'
+		ORDER BY rm.tg_date DESC
+		LIMIT $3
+	`, toTimestamptz(start), toTimestamptz(end), safeIntToInt32(limit))
+	if err != nil {
+		return nil, fmt.Errorf("get research items: %w", err)
+	}
+	defer rows.Close()
+
+	var items []Item
+
+	for rows.Next() {
+		var (
+			id                 pgtype.UUID
+			rawMessageID       pgtype.UUID
+			relevanceScore     float32
+			importanceScore    float32
+			topic              pgtype.Text
+			summary            pgtype.Text
+			language           pgtype.Text
+			status             string
+			firstSeenAt        pgtype.Timestamptz
+			tgDate             pgtype.Timestamptz
+			sourceChannel      pgtype.Text
+			sourceChannelTitle pgtype.Text
+			sourceChannelID    int64
+			sourceMsgID        int64
+			embedding          pgvector.Vector
+		)
+
+		if err := rows.Scan(
+			&id,
+			&rawMessageID,
+			&relevanceScore,
+			&importanceScore,
+			&topic,
+			&summary,
+			&language,
+			&status,
+			&firstSeenAt,
+			&tgDate,
+			&sourceChannel,
+			&sourceChannelTitle,
+			&sourceChannelID,
+			&sourceMsgID,
+			&embedding,
+		); err != nil {
+			return nil, fmt.Errorf("scan research items: %w", err)
+		}
+
+		items = append(items, Item{
+			ID:                 fromUUID(id),
+			RawMessageID:       fromUUID(rawMessageID),
+			RelevanceScore:     relevanceScore,
+			ImportanceScore:    importanceScore,
+			Topic:              topic.String,
+			Summary:            summary.String,
+			Language:           language.String,
+			Status:             status,
+			FirstSeenAt:        firstSeenAt.Time,
+			TGDate:             tgDate.Time,
+			SourceChannel:      sourceChannel.String,
+			SourceChannelTitle: sourceChannelTitle.String,
+			SourceChannelID:    sourceChannelID,
+			SourceMsgID:        sourceMsgID,
+			Embedding:          embedding.Slice(),
+		})
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf(errIterateResearchItems, rows.Err())
+	}
+
+	return items, nil
 }
 
 // ResearchTopicTimelinePoint represents topic timeline buckets.
@@ -2560,11 +2666,12 @@ func (db *DB) GetOriginStats(ctx context.Context, channelID string, from, to *ti
 	row = db.Pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT COUNT(DISTINCT ci.cluster_id)
 		FROM cluster_items ci
+		JOIN clusters c ON ci.cluster_id = c.id AND c.source = '%s'
 		JOIN items i ON ci.item_id = i.id
 		JOIN raw_messages rm ON i.raw_message_id = rm.id
 		JOIN channels ch ON rm.channel_id = ch.id
 		WHERE %s
-	`, strings.Join(where, sqlAndJoin)), args...)
+	`, ClusterSourceResearch, strings.Join(where, sqlAndJoin)), args...)
 
 	var totalCount int
 	if err := row.Scan(&totalCount); err != nil {
@@ -2658,6 +2765,7 @@ func buildOriginTopicQuery(where []string, limitIdx int, origin bool) string {
 		WITH channel_clusters AS (
 			SELECT DISTINCT ci.cluster_id
 			FROM cluster_items ci
+			JOIN clusters c ON ci.cluster_id = c.id AND c.source = 'research'
 			JOIN items i ON ci.item_id = i.id
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
 			JOIN channels ch ON rm.channel_id = ch.id
@@ -3101,13 +3209,14 @@ func (db *DB) rebuildClusterFirstAppearance(ctx context.Context, tx pgx.Tx) erro
 			       rm.tg_date,
 			       ROW_NUMBER() OVER (PARTITION BY ci.cluster_id ORDER BY rm.tg_date ASC) AS rn
 			FROM cluster_items ci
+			JOIN clusters c ON ci.cluster_id = c.id AND c.source = $1
 			JOIN items i ON ci.item_id = i.id
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
 		)
 		SELECT cluster_id, channel_id, item_id, tg_date
 		FROM ranked
 		WHERE rn = 1
-	`); err != nil {
+	`, ClusterSourceResearch); err != nil {
 		return fmt.Errorf("populate cluster_first_appearance: %w", err)
 	}
 
@@ -3128,11 +3237,12 @@ func (db *DB) rebuildClusterTopicHistory(ctx context.Context, tx pgx.Tx) error {
 		       date_trunc('week', rm.tg_date),
 		       date_trunc('week', rm.tg_date) + INTERVAL '7 days'
 		FROM cluster_items ci
+		JOIN clusters c ON ci.cluster_id = c.id AND c.source = $1
 		JOIN items i ON ci.item_id = i.id
 		JOIN raw_messages rm ON i.raw_message_id = rm.id
 		WHERE i.topic IS NOT NULL AND i.topic <> ''
 		GROUP BY ci.cluster_id, i.topic, date_trunc('week', rm.tg_date)
-	`); err != nil {
+	`, ClusterSourceResearch); err != nil {
 		return fmt.Errorf("populate cluster_topic_history: %w", err)
 	}
 
@@ -3152,7 +3262,7 @@ func (db *DB) rebuildEvidenceClaims(ctx context.Context, tx pgx.Tx) error {
 			-- Gather all raw claim occurrences from evidence
 			SELECT ec.claim_text,
 			       rm.tg_date,
-			       ci.cluster_id,
+			       c.id AS cluster_id,
 			       ie.evidence_id,
 			       ie.is_contradiction
 			FROM evidence_claims ec
@@ -3160,6 +3270,7 @@ func (db *DB) rebuildEvidenceClaims(ctx context.Context, tx pgx.Tx) error {
 			JOIN items i ON i.id = ie.item_id
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
 			LEFT JOIN cluster_items ci ON ci.item_id = i.id
+			LEFT JOIN clusters c ON c.id = ci.cluster_id AND c.source = $1
 		),
 		claim_origin AS (
 			-- Identify the first occurrence (with or without cluster)
@@ -3177,7 +3288,7 @@ func (db *DB) rebuildEvidenceClaims(ctx context.Context, tx pgx.Tx) error {
 		FROM claim_data d
 		JOIN claim_origin o ON d.claim_text = o.claim_text
 		GROUP BY d.claim_text, o.cluster_id
-	`); err != nil {
+	`, ClusterSourceResearch); err != nil {
 		return fmt.Errorf("populate evidence claims: %w", err)
 	}
 
@@ -3202,6 +3313,7 @@ func (db *DB) rebuildClusterLanguageLinks(ctx context.Context, tx pgx.Tx) error 
 						ORDER BY i.importance_score DESC NULLS LAST, rm.tg_date DESC
 			       ) AS rn
 			FROM cluster_items ci
+			JOIN clusters c ON ci.cluster_id = c.id AND c.source = '%s'
 			JOIN items i ON ci.item_id = i.id
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
 			JOIN embeddings e ON e.item_id = i.id
@@ -3235,7 +3347,7 @@ func (db *DB) rebuildClusterLanguageLinks(ctx context.Context, tx pgx.Tx) error 
 		UNION ALL
 		SELECT linked_cluster_id, source_lang, cluster_id, similarity
 		FROM filtered
-	`, langLinkMaxLagSeconds, langLinkMinSimilarity)); err != nil {
+	`, ClusterSourceResearch, langLinkMaxLagSeconds, langLinkMinSimilarity)); err != nil {
 		return fmt.Errorf("populate cluster_language_links: %w", err)
 	}
 
@@ -3345,6 +3457,7 @@ func (db *DB) GetItemsWithoutEvidenceClaims(ctx context.Context, limit int) ([]I
 		       ci.cluster_id,
 		       rm.tg_date
 		FROM cluster_items ci
+		JOIN clusters c ON ci.cluster_id = c.id AND c.source = $2
 		JOIN items i ON ci.item_id = i.id
 		JOIN raw_messages rm ON i.raw_message_id = rm.id
 		LEFT JOIN item_evidence ie ON ie.item_id = i.id
@@ -3353,7 +3466,7 @@ func (db *DB) GetItemsWithoutEvidenceClaims(ctx context.Context, limit int) ([]I
 		  AND LENGTH(i.summary) > 30
 		ORDER BY ci.cluster_id, rm.tg_date ASC
 		LIMIT $1
-	`, limit)
+	`, limit, ClusterSourceResearch)
 	if err != nil {
 		return nil, fmt.Errorf("query items without evidence: %w", err)
 	}

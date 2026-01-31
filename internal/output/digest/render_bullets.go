@@ -233,8 +233,8 @@ func (rc *digestRenderContext) formatSingleBullet(sb *strings.Builder, b db.Bull
 	// Add corroboration count if multiple sources confirm this claim
 	if b.SourceCount > 1 {
 		fmt.Fprintf(sb, " <i>(%d sources)</i>", b.SourceCount)
-	} else if rc.settings.bulletSourceAttribution && b.ImportanceScore >= ImportanceScoreNotable {
-		// Add single source attribution only for high-importance bullets
+	} else if rc.settings.bulletSourceAttribution {
+		// Add single source attribution when enabled
 		sb.WriteString(rc.formatBulletSource(b))
 	}
 

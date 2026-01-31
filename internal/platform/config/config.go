@@ -214,7 +214,7 @@ type Config struct {
 	BulletBatchSize          int     `env:"BULLET_BATCH_SIZE" envDefault:"3"`
 	BulletDedupThreshold     float64 `env:"BULLET_DEDUP_THRESHOLD" envDefault:"0.92"`
 	BulletSourceAttribution  bool    `env:"BULLET_SOURCE_ATTRIBUTION" envDefault:"true"`
-	BulletSourceFormat       string  `env:"BULLET_SOURCE_FORMAT" envDefault:"compact"`
+	BulletSourceFormat       string  `env:"BULLET_SOURCE_FORMAT" envDefault:"full"`
 	BulletMaxPerCluster      int     `env:"BULLET_MAX_PER_CLUSTER" envDefault:"2"`
 	BulletMinImportance      float32 `env:"BULLET_MIN_IMPORTANCE" envDefault:"0.4"`
 	BulletDedupIntervalMins  int     `env:"BULLET_DEDUP_INTERVAL_MINS" envDefault:"5"`

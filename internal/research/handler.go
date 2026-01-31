@@ -125,12 +125,13 @@ type Handler struct {
 	tokenService *AuthTokenService
 	renderer     *Renderer
 	logger       *zerolog.Logger
+	rebuildFunc  func(context.Context) error
 	limitersMu   sync.Mutex
 	limiters     map[string]*rate.Limiter
 }
 
 // NewHandler creates a new research handler.
-func NewHandler(cfg *config.Config, dbConn *db.DB, tokenService *AuthTokenService, logger *zerolog.Logger) (*Handler, error) {
+func NewHandler(cfg *config.Config, dbConn *db.DB, tokenService *AuthTokenService, logger *zerolog.Logger, rebuildFunc func(context.Context) error) (*Handler, error) {
 	renderer, err := NewRenderer()
 	if err != nil {
 		return nil, err
@@ -142,6 +143,7 @@ func NewHandler(cfg *config.Config, dbConn *db.DB, tokenService *AuthTokenServic
 		tokenService: tokenService,
 		renderer:     renderer,
 		logger:       logger,
+		rebuildFunc:  rebuildFunc,
 		limiters:     make(map[string]*rate.Limiter),
 	}, nil
 }
@@ -1500,6 +1502,15 @@ func (h *Handler) handleRebuild(w http.ResponseWriter, r *http.Request) int {
 
 	if r.Method != http.MethodPost {
 		return h.writeError(w, r, http.StatusMethodNotAllowed, "Method Not Allowed", "Use POST to rebuild.")
+	}
+
+	if h.rebuildFunc != nil {
+		if err := h.rebuildFunc(r.Context()); err != nil {
+			h.logger.Error().Err(err).Msg("research rebuild failed")
+			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to rebuild research data.")
+		}
+
+		return h.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)

@@ -24,6 +24,10 @@ const wwwPrefix = "www."
 const topicJaccardThreshold = 0.8
 
 func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, end time.Time, logger *zerolog.Logger) error {
+	return s.clusterItemsWithSource(ctx, items, start, end, db.ClusterSourceDigest, logger)
+}
+
+func (s *Scheduler) clusterItemsWithSource(ctx context.Context, items []db.Item, start, end time.Time, source string, logger *zerolog.Logger) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -31,7 +35,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	items = s.limitClusterItems(items, logger)
 
 	// Clean up old clusters for this window to prevent duplicates on retries
-	if err := s.database.DeleteClustersForWindow(ctx, start, end); err != nil {
+	if err := s.database.DeleteClustersForWindowAndSource(ctx, start, end, source); err != nil {
 		logger.Error().Err(err).Msg("failed to delete old clusters")
 	}
 
@@ -48,7 +52,7 @@ func (s *Scheduler) clusterItems(ctx context.Context, items []db.Item, start, en
 	}
 
 	for topic, groupItems := range clusterCtx.topicGroups {
-		if err := s.processTopicGroup(ctx, topic, groupItems, clusterCtx, start, end, logger); err != nil {
+		if err := s.processTopicGroup(ctx, topic, groupItems, clusterCtx, start, end, source, logger); err != nil {
 			return err
 		}
 	}
@@ -75,7 +79,7 @@ func (s *Scheduler) limitClusterItems(items []db.Item, logger *zerolog.Logger) [
 	return items
 }
 
-func (s *Scheduler) processTopicGroup(ctx context.Context, topic string, groupItems []db.Item, bc *clusterBuildContext, start, end time.Time, logger *zerolog.Logger) error {
+func (s *Scheduler) processTopicGroup(ctx context.Context, topic string, groupItems []db.Item, bc *clusterBuildContext, start, end time.Time, source string, logger *zerolog.Logger) error {
 	for _, itemA := range groupItems {
 		if bc.assigned[itemA.ID] {
 			continue
@@ -89,7 +93,7 @@ func (s *Scheduler) processTopicGroup(ctx context.Context, topic string, groupIt
 			continue
 		}
 
-		if err := s.persistCluster(ctx, clusterItemsList, topic, bc.cfg, start, end, logger); err != nil {
+		if err := s.persistCluster(ctx, clusterItemsList, topic, bc.cfg, start, end, source, logger); err != nil {
 			return err
 		}
 	}
@@ -113,7 +117,7 @@ func (s *Scheduler) validateClusterCoherence(clusterItemsList []db.Item, bc *clu
 	return clusterItemsList
 }
 
-func (s *Scheduler) persistCluster(ctx context.Context, clusterItemsList []db.Item, topic string, cfg clusteringConfig, start, end time.Time, logger *zerolog.Logger) error {
+func (s *Scheduler) persistCluster(ctx context.Context, clusterItemsList []db.Item, topic string, cfg clusteringConfig, start, end time.Time, source string, logger *zerolog.Logger) error {
 	s.sortClusterItems(clusterItemsList)
 
 	logger.Debug().
@@ -124,7 +128,7 @@ func (s *Scheduler) persistCluster(ctx context.Context, clusterItemsList []db.It
 
 	clusterTopic := s.generateClusterTopic(ctx, clusterItemsList, topic, cfg.digestLanguage)
 
-	clusterID, err := s.database.CreateCluster(ctx, start, end, clusterTopic)
+	clusterID, err := s.database.CreateClusterWithSource(ctx, start, end, clusterTopic, source)
 	if err != nil {
 		return fmt.Errorf("failed to create cluster: %w", err)
 	}
@@ -136,6 +140,11 @@ func (s *Scheduler) persistCluster(ctx context.Context, clusterItemsList []db.It
 	}
 
 	return nil
+}
+
+// ClusterItemsForResearch clusters items for research analytics without affecting digest output.
+func (s *Scheduler) ClusterItemsForResearch(ctx context.Context, items []db.Item, start, end time.Time, logger *zerolog.Logger) error {
+	return s.clusterItemsWithSource(ctx, items, start, end, db.ClusterSourceResearch, logger)
 }
 
 type clusteringConfig struct {
@@ -249,6 +258,11 @@ func (s *Scheduler) getEmbeddings(ctx context.Context, items []db.Item, logger *
 	embeddings := make(map[string][]float32)
 
 	for _, item := range items {
+		if len(item.Embedding) > 0 {
+			embeddings[item.ID] = item.Embedding
+			continue
+		}
+
 		emb, err := s.database.GetItemEmbedding(ctx, item.ID)
 		if err != nil {
 			logger.Warn().Str(logFieldItemID, item.ID).Err(err).Msg("failed to get embedding for item")
@@ -485,6 +499,10 @@ func (s *Scheduler) generateClusterTopic(ctx context.Context, clusterItemsList [
 
 	// Pass empty model to let the LLM registry handle task-specific model selection
 	// via LLM_CLUSTER_MODEL env var or default task config
+	if s.llmClient == nil {
+		return defaultTopic
+	}
+
 	if betterTopic, err := s.llmClient.GenerateClusterTopic(ctx, augmentedItems, digestLanguage, ""); err == nil && betterTopic != "" {
 		return betterTopic
 	}

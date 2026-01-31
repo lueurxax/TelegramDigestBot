@@ -16,13 +16,24 @@ type ClusterWithItems struct {
 	Items []Item
 }
 
+const (
+	ClusterSourceDigest   = "digest"
+	ClusterSourceResearch = "research"
+)
+
 func (db *DB) CreateCluster(ctx context.Context, start, end time.Time, topic string) (string, error) {
-	id, err := db.Queries.CreateCluster(ctx, sqlc.CreateClusterParams{
-		WindowStart: toTimestamptz(start),
-		WindowEnd:   toTimestamptz(end),
-		Topic:       toText(topic),
-	})
-	if err != nil {
+	return db.CreateClusterWithSource(ctx, start, end, topic, ClusterSourceDigest)
+}
+
+func (db *DB) CreateClusterWithSource(ctx context.Context, start, end time.Time, topic, source string) (string, error) {
+	row := db.Pool.QueryRow(ctx, `
+		INSERT INTO clusters (window_start, window_end, topic, source)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, toTimestamptz(start), toTimestamptz(end), toText(topic), toText(source))
+
+	var id pgtype.UUID
+	if err := row.Scan(&id); err != nil {
 		return "", fmt.Errorf("create cluster: %w", err)
 	}
 
@@ -30,10 +41,13 @@ func (db *DB) CreateCluster(ctx context.Context, start, end time.Time, topic str
 }
 
 func (db *DB) DeleteClustersForWindow(ctx context.Context, start, end time.Time) error {
-	if err := db.Queries.DeleteClustersForWindow(ctx, sqlc.DeleteClustersForWindowParams{
-		WindowStart: toTimestamptz(start),
-		WindowEnd:   toTimestamptz(end),
-	}); err != nil {
+	return db.DeleteClustersForWindowAndSource(ctx, start, end, ClusterSourceDigest)
+}
+
+func (db *DB) DeleteClustersForWindowAndSource(ctx context.Context, start, end time.Time, source string) error {
+	if _, err := db.Pool.Exec(ctx, `
+		DELETE FROM clusters WHERE window_start = $1 AND window_end = $2 AND source = $3
+	`, toTimestamptz(start), toTimestamptz(end), toText(source)); err != nil {
 		return fmt.Errorf("delete clusters for window: %w", err)
 	}
 
@@ -52,32 +66,58 @@ func (db *DB) AddToCluster(ctx context.Context, clusterID, itemID string) error 
 }
 
 func (db *DB) GetClustersForWindow(ctx context.Context, start, end time.Time) ([]ClusterWithItems, error) {
-	sqlcRows, err := db.Queries.GetClustersForWindow(ctx, sqlc.GetClustersForWindowParams{
-		WindowStart: toTimestamptz(start),
-		WindowEnd:   toTimestamptz(end),
-	})
+	rows, err := db.Pool.Query(ctx, `
+		SELECT c.id as cluster_id, c.topic as cluster_topic, i.id as item_id, i.summary as item_summary,
+		       ch.username as channel_username, ch.tg_peer_id as channel_peer_id, rm.tg_message_id as rm_msg_id
+		FROM clusters c
+		JOIN cluster_items ci ON c.id = ci.cluster_id
+		JOIN items i ON ci.item_id = i.id
+		JOIN raw_messages rm ON i.raw_message_id = rm.id
+		JOIN channels ch ON rm.channel_id = ch.id
+		WHERE c.window_start = $1 AND c.window_end = $2 AND c.source = $3
+		ORDER BY c.id
+	`, toTimestamptz(start), toTimestamptz(end), toText(ClusterSourceDigest))
 	if err != nil {
 		return nil, fmt.Errorf("get clusters for window: %w", err)
 	}
+	defer rows.Close()
 
 	clusterMap := make(map[string]*ClusterWithItems)
 
 	var clusters []string // to keep order
 
-	for _, row := range sqlcRows {
-		cID := fromUUID(row.ClusterID)
+	for rows.Next() {
+		var (
+			clusterID       pgtype.UUID
+			clusterTopic    pgtype.Text
+			itemID          pgtype.UUID
+			itemSummary     pgtype.Text
+			channelUsername pgtype.Text
+			channelPeerID   int64
+			rmMsgID         int64
+		)
+
+		if err := rows.Scan(&clusterID, &clusterTopic, &itemID, &itemSummary, &channelUsername, &channelPeerID, &rmMsgID); err != nil {
+			return nil, fmt.Errorf("scan clusters for window: %w", err)
+		}
+
+		cID := fromUUID(clusterID)
 		if _, ok := clusterMap[cID]; !ok {
-			clusterMap[cID] = &ClusterWithItems{ID: cID, Topic: row.ClusterTopic.String}
+			clusterMap[cID] = &ClusterWithItems{ID: cID, Topic: clusterTopic.String}
 			clusters = append(clusters, cID)
 		}
 
 		clusterMap[cID].Items = append(clusterMap[cID].Items, Item{
-			ID:              fromUUID(row.ItemID),
-			Summary:         row.ItemSummary.String,
-			SourceChannel:   row.ChannelUsername.String,
-			SourceChannelID: row.ChannelPeerID,
-			SourceMsgID:     row.RmMsgID,
+			ID:              fromUUID(itemID),
+			Summary:         itemSummary.String,
+			SourceChannel:   channelUsername.String,
+			SourceChannelID: channelPeerID,
+			SourceMsgID:     rmMsgID,
 		})
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate clusters for window: %w", rows.Err())
 	}
 
 	result := make([]ClusterWithItems, 0, len(clusters))
