@@ -913,8 +913,7 @@ func (r *Reader) fetchHistory(ctx context.Context, api *tg.Client, peer tg.Input
 
 	if ch.LastTGMessageID > 0 {
 		// Fetch messages newer than last seen
-		req.OffsetID = int(ch.LastTGMessageID)
-		req.AddOffset = -r.cfg.ReaderFetchLimit
+		req.MinID = int(ch.LastTGMessageID)
 	}
 
 	history, err := api.MessagesGetHistory(ctx, req)
