@@ -18,6 +18,21 @@ const (
 var templateFS embed.FS
 
 var templateFuncs = template.FuncMap{
+	"formatRFC3339": func(t time.Time) string {
+		if t.IsZero() {
+			return ""
+		}
+		return t.UTC().Format(time.RFC3339)
+	},
+	"pageFromOffset": func(offset, limit int) int {
+		if limit <= 0 {
+			return 1
+		}
+		if offset < 0 {
+			offset = 0
+		}
+		return (offset / limit) + 1
+	},
 	"formatTime": func(t time.Time) string {
 		if t.IsZero() {
 			return "-"

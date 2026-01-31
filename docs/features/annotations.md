@@ -194,3 +194,146 @@ go run ./cmd/tools/eval \
 3. **Add comments**: Note edge cases for future reference
 4. **Review skipped items**: Periodically check skipped items with fresh eyes
 5. **Export and evaluate**: Run the eval tool after accumulating ~100+ labels
+
+---
+
+## Web-Based Annotation
+
+In addition to bot commands, annotations can be submitted through the research dashboard web UI. This provides a faster workflow when reviewing multiple items.
+
+### Access
+
+Web annotation uses the same admin authentication as the research dashboard. Log in via `/research login` bot command, then access the research search at `/research/search`.
+
+### Annotation Surfaces
+
+**Research Search (List View)**
+- Each search result row displays annotation buttons
+- One tap saves a label immediately (no modal)
+- After labeling, the row shows a status badge with timestamp
+- Optional comments available via a collapsible note icon
+- Supports batch selection with "Apply to selected" for multiple items
+- Keyboard shortcuts: `g` (good), `b` (bad), `i` (irrelevant) when row focused
+
+**Expanded View**
+- Compact annotation strip available on item detail pages
+- Same one-tap labeling workflow as list view
+
+### API Endpoints
+
+Web annotation is powered by JSON endpoints under `/research/`:
+
+**Single Annotation**
+
+```
+POST /research/annotate
+```
+
+Request body:
+```json
+{
+  "item_id": "<uuid>",
+  "rating": "good|bad|irrelevant",
+  "comment": "optional note",
+  "source": "web-list|web-expanded"
+}
+```
+
+Response:
+```json
+{
+  "ok": true,
+  "item_id": "...",
+  "rating": "...",
+  "created_at": "..."
+}
+```
+
+**Batch Annotation**
+
+```
+POST /research/annotate/batch
+```
+
+Request body:
+```json
+{
+  "item_ids": ["uuid1", "uuid2", ...],
+  "rating": "good|bad|irrelevant",
+  "comment": "optional note",
+  "source": "web-list"
+}
+```
+
+Response:
+```json
+{
+  "ok": true,
+  "count": 12
+}
+```
+
+Maximum 100 items per batch request.
+
+**Fetch Annotations**
+
+```
+GET /research/annotations?item_id=<uuid>
+```
+
+Returns recent annotations for an item, most recent first.
+
+### Input Validation
+
+| Field | Constraints |
+|-------|-------------|
+| `rating` | Required. Must be `good`, `bad`, or `irrelevant` |
+| `item_id` | Required. Valid UUID, item must exist |
+| `item_ids` | Required for batch. Non-empty, max 100 UUIDs |
+| `source` | Required. Must be `web-list` or `web-expanded` |
+| `comment` | Optional. Max 500 characters |
+
+### Error Responses
+
+| Status | Code | Description |
+|--------|------|-------------|
+| 400 | `invalid_payload` | Bad UUID, invalid rating, invalid source, empty batch |
+| 401 | `unauthorized` | Not admin or no session |
+| 404 | `not_found` | Item not found |
+| 429 | `rate_limited` | Rate limit exceeded |
+| 500 | `save_failed` | Server error |
+
+Error response format:
+```json
+{
+  "ok": false,
+  "error": "<code>",
+  "message": "<human message>"
+}
+```
+
+### Rate Limiting
+
+Rate limits are enforced per admin user ID:
+
+| Endpoint | Limit | Burst |
+|----------|-------|-------|
+| Single (`/annotate`) | 60 requests/minute | 20 |
+| Batch (`/annotate/batch`) | 6 requests/minute | 6 |
+
+When rate limited, the response includes a `Retry-After` header with seconds to wait.
+
+### Source Tracking
+
+The `source` field distinguishes where annotations originate:
+
+| Source | Meaning |
+|--------|---------|
+| `web-list` | Annotated from research search list view |
+| `web-expanded` | Annotated from expanded item detail view |
+
+This allows comparison of workflow efficiency and accuracy between the two interfaces. The source is stored in the `item_ratings.source` column.
+
+### Integration with Research Dashboard
+
+For full documentation on the research dashboard including search, item detail, and authentication, see [Research Dashboard](research-dashboard.md).

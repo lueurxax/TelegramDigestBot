@@ -71,7 +71,7 @@ const (
 	sqlAndJoin = " AND "
 
 	// SQL format patterns for building dynamic queries.
-	fmtScoreExpr       = "(0.5 * i.importance_score + 0.5 * exp(-extract(epoch from (now() - rm.tg_date)) / 86400 / %.1f))"
+	fmtScoreExpr       = "(0.5 * i.importance_score + 0.5 * exp(-extract(epoch from ($%d - rm.tg_date)) / 86400 / %.1f))"
 	fmtTextIlike       = "(i.summary ILIKE $%d OR rm.text ILIKE $%d OR c.title ILIKE $%d OR c.username ILIKE $%d)"
 	fmtSearchTS        = "(i.search_vector @@ plainto_tsquery('simple', $%d) OR c.title ILIKE $%d OR c.username ILIKE $%d)"
 	fmtEvidenceIlike   = "(es.title ILIKE $%d OR es.description ILIKE $%d)"
@@ -176,6 +176,7 @@ type ResearchSearchParams struct {
 	Query        string
 	From         *time.Time
 	To           *time.Time
+	SearchAt     time.Time
 	Channel      string
 	Topic        string
 	Lang         string
@@ -307,7 +308,6 @@ func buildItemSearchQuery(params ResearchSearchParams, where []string, args []an
 		args = append(args, params.Query)
 		tsQueryIdx := len(args)
 		rankExpr := fmt.Sprintf("ts_rank_cd(i.search_vector, plainto_tsquery('simple', $%d))", tsQueryIdx)
-		scoreExpr := fmt.Sprintf("(0.5 * %s + 0.3 * i.importance_score + 0.2 * exp(-extract(epoch from (now() - rm.tg_date)) / 86400 / %.1f))", rankExpr, recencyHalfLifeDays)
 
 		pattern := "%" + SanitizeUTF8(params.Query) + "%"
 		args = append(args, pattern)
@@ -320,6 +320,10 @@ func buildItemSearchQuery(params ResearchSearchParams, where []string, args []an
 			patternIdx,
 		))
 
+		args = append(args, toTimestamptz(params.SearchAt))
+		scoreIdx := len(args)
+		scoreExpr := fmt.Sprintf("(0.5 * %s + 0.3 * i.importance_score + 0.2 * exp(-extract(epoch from ($%d - rm.tg_date)) / 86400 / %.1f))", rankExpr, scoreIdx, recencyHalfLifeDays)
+
 		return fmt.Sprintf(sqlSearchItems, scoreExpr, strings.Join(where, sqlAndJoin), limit, params.Offset), args
 	}
 
@@ -327,13 +331,18 @@ func buildItemSearchQuery(params ResearchSearchParams, where []string, args []an
 		pattern := "%" + SanitizeUTF8(params.Query) + "%"
 		args = append(args, pattern)
 		patternIdx := len(args)
-		scoreExpr := fmt.Sprintf(fmtScoreExpr, recencyHalfLifeDays)
 		where = append(where, fmt.Sprintf(fmtTextIlike, patternIdx, patternIdx, patternIdx, patternIdx))
+
+		args = append(args, toTimestamptz(params.SearchAt))
+		scoreIdx := len(args)
+		scoreExpr := fmt.Sprintf(fmtScoreExpr, scoreIdx, recencyHalfLifeDays)
 
 		return fmt.Sprintf(sqlSearchItems, scoreExpr, strings.Join(where, sqlAndJoin), limit, params.Offset), args
 	}
 
-	scoreExpr := fmt.Sprintf(fmtScoreExpr, recencyHalfLifeDays)
+	args = append(args, toTimestamptz(params.SearchAt))
+	scoreIdx := len(args)
+	scoreExpr := fmt.Sprintf(fmtScoreExpr, scoreIdx, recencyHalfLifeDays)
 
 	return fmt.Sprintf(sqlSearchItems, scoreExpr, strings.Join(where, sqlAndJoin), limit, params.Offset), args
 }

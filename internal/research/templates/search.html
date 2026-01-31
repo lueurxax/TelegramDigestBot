@@ -281,6 +281,7 @@
 
       <div class="card">
         <form action="/research/search" method="get" class="form-grid">
+          <input type="hidden" name="as_of" value="{{formatRFC3339 .Params.SearchAt}}" />
           <label class="field" style="grid-column: span 2;">
             <span>Query</span>
             <input type="text" name="q" placeholder="Query" value="{{.Params.Query}}" />
@@ -314,8 +315,8 @@
             <input type="number" name="limit" min="1" max="200" value="{{.Params.Limit}}" />
           </label>
           <label class="field">
-            <span>Offset</span>
-            <input type="number" name="offset" min="0" value="{{.Params.Offset}}" />
+            <span>Page</span>
+            <input type="number" name="page" min="1" value="{{pageFromOffset .Params.Offset .Params.Limit}}" />
           </label>
           <label class="field">
             <span>Scope</span>

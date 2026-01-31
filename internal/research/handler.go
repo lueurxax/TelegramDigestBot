@@ -141,6 +141,7 @@ const (
 
 	// Query parameter constants.
 	queryParamChannel = "channel"
+	queryParamAsOf    = "as_of"
 
 	// Format constants for percentage display.
 	percentMultiplier = 100
@@ -2129,10 +2130,13 @@ func parseSearchParams(r *http.Request) (db.ResearchSearchParams, string, error)
 		Topic:        strings.TrimSpace(q.Get("topic")),
 		Lang:         strings.TrimSpace(q.Get("lang")),
 		Provider:     strings.TrimSpace(q.Get("provider")),
-		Limit:        parseLimit(r, defaultSearchLimit),
-		Offset:       parseOffset(r),
 		IncludeCount: parseBool(q.Get("include_count")),
 	}
+
+	limit := parseLimit(r, defaultSearchLimit)
+	_, offset := parsePage(r, limit)
+	params.Limit = limit
+	params.Offset = offset
 
 	from, to, err := parseRange(r)
 	if err != nil {
@@ -2141,6 +2145,13 @@ func parseSearchParams(r *http.Request) (db.ResearchSearchParams, string, error)
 
 	params.From = from
 	params.To = to
+
+	searchAt, err := parseSearchAt(q.Get(queryParamAsOf))
+	if err != nil {
+		return params, "", err
+	}
+
+	params.SearchAt = searchAt
 
 	scope := strings.ToLower(strings.TrimSpace(q.Get("scope")))
 	if scope == "" {
@@ -2346,6 +2357,36 @@ func parseOffset(r *http.Request) int {
 	return num
 }
 
+func parsePage(r *http.Request, limit int) (int, int) {
+	val := strings.TrimSpace(r.URL.Query().Get("page"))
+	if val == "" {
+		offset := parseOffset(r)
+		return pageFromOffset(offset, limit), offset
+	}
+
+	page, err := strconv.Atoi(val)
+	if err != nil || page < 1 {
+		offset := parseOffset(r)
+		return pageFromOffset(offset, limit), offset
+	}
+
+	return page, (page - 1) * limit
+}
+
+func parseSearchAt(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Now().UTC(), nil
+	}
+
+	t, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse as_of %q: %w", value, err)
+	}
+
+	return t.UTC(), nil
+}
+
 func parseBool(val string) bool {
 	val = strings.ToLower(strings.TrimSpace(val))
 	return val == "true" || val == "1" || val == "yes"
@@ -2360,7 +2401,7 @@ func wantsHTML(r *http.Request) bool {
 }
 
 func hashSearchParams(params db.ResearchSearchParams, scope string) string {
-	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t",
+	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t",
 		scope,
 		params.Query,
 		params.Channel,
@@ -2369,6 +2410,7 @@ func hashSearchParams(params db.ResearchSearchParams, scope string) string {
 		params.Provider,
 		formatTimePtr(params.From),
 		formatTimePtr(params.To),
+		formatSearchTime(params.SearchAt),
 		params.Limit,
 		params.Offset,
 		params.IncludeCount,
@@ -2388,6 +2430,26 @@ func formatTimePtr(t *time.Time) string {
 	}
 
 	return t.UTC().Format(time.RFC3339)
+}
+
+func formatSearchTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+
+	return t.UTC().Format(time.RFC3339)
+}
+
+func pageFromOffset(offset int, limit int) int {
+	if limit <= 0 {
+		return 1
+	}
+
+	if offset < 0 {
+		offset = 0
+	}
+
+	return (offset / limit) + 1
 }
 
 func formatPercent(value float64) string {
