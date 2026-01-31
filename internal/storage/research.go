@@ -666,6 +666,7 @@ func buildResearchCommonFilters(params ResearchSearchParams, channel string) ([]
 type ResearchClusterDetail struct {
 	ClusterID      string
 	Topic          string
+	Canonical      string
 	FirstSeenAt    time.Time
 	LastSeenAt     time.Time
 	ItemCount      int
@@ -755,6 +756,9 @@ func (db *DB) GetResearchCluster(ctx context.Context, clusterID string) (*Resear
 	}
 
 	detail.Items = items
+	if len(items) > 0 {
+		detail.Canonical = items[0].Summary
+	}
 
 	timeline, err := db.getResearchClusterTimeline(ctx, clusterUUID)
 	if err != nil {
@@ -1006,6 +1010,7 @@ type ResearchAgendaSimilarityEdge struct {
 }
 
 type ResearchLanguageCoverageEntry struct {
+	Topic        string
 	FromLang     string
 	ToLang       string
 	ClusterCount int
@@ -1643,7 +1648,10 @@ func (db *DB) GetLanguageCoverage(ctx context.Context, from, to *time.Time, limi
 		where = append(where, fmt.Sprintf("ms.first_seen_at <= $%d", len(args)))
 	}
 
+	args = append(args, ClusterSourceResearch)
+	sourceIdx := len(args)
 	args = append(args, safeIntToInt32(limit))
+	limitIdx := len(args)
 
 	query := fmt.Sprintf(`
 		WITH cluster_lang AS (
@@ -1657,19 +1665,21 @@ func (db *DB) GetLanguageCoverage(ctx context.Context, from, to *time.Time, limi
 			       l.linked_cluster_id,
 			       cl.language AS from_lang,
 			       l.language AS to_lang,
+			       c.topic AS topic,
 			       abs(EXTRACT(epoch FROM (mt.first_seen_at - ms.first_seen_at))) / 3600 AS lag_hours
 			FROM cluster_language_links l
 			JOIN cluster_lang cl ON l.cluster_id = cl.cluster_id
+			JOIN clusters c ON l.cluster_id = c.id AND c.source = $%d
 			JOIN mv_cluster_stats ms ON l.cluster_id = ms.cluster_id
 			JOIN mv_cluster_stats mt ON l.linked_cluster_id = mt.cluster_id
 			WHERE %s
 		)
-		SELECT from_lang, to_lang, COUNT(DISTINCT cluster_id), AVG(lag_hours)
+		SELECT topic, from_lang, to_lang, COUNT(DISTINCT cluster_id), AVG(lag_hours)
 		FROM links
-		GROUP BY from_lang, to_lang
+		GROUP BY topic, from_lang, to_lang
 		ORDER BY COUNT(DISTINCT cluster_id) DESC
 		LIMIT $%d
-	`, strings.Join(where, sqlAndJoin), len(args))
+	`, sourceIdx, strings.Join(where, sqlAndJoin), limitIdx)
 
 	rows, err := db.Pool.Query(ctx, query, args...)
 	if err != nil {
@@ -1681,17 +1691,19 @@ func (db *DB) GetLanguageCoverage(ctx context.Context, from, to *time.Time, limi
 
 	for rows.Next() {
 		var (
+			topic    pgtype.Text
 			fromLang pgtype.Text
 			toLang   pgtype.Text
 			count    int
 			avgLag   pgtype.Float8
 		)
 
-		if err := rows.Scan(&fromLang, &toLang, &count, &avgLag); err != nil {
+		if err := rows.Scan(&topic, &fromLang, &toLang, &count, &avgLag); err != nil {
 			return nil, fmt.Errorf("scan language coverage: %w", err)
 		}
 
 		entry := ResearchLanguageCoverageEntry{
+			Topic:        topic.String,
 			FromLang:     fromLang.String,
 			ToLang:       toLang.String,
 			ClusterCount: count,

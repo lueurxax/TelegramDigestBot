@@ -253,6 +253,18 @@
             </tr>
             {{end}}
             {{end}}
+            {{if .Explain.DropReason}}
+            <tr>
+              <th>Drop reason</th>
+              <td>{{.Explain.DropReason}}</td>
+            </tr>
+            {{end}}
+            {{if .Explain.DropDetail}}
+            <tr>
+              <th>Drop detail</th>
+              <td>{{.Explain.DropDetail}}</td>
+            </tr>
+            {{end}}
           </tbody>
         </table>
       </div>

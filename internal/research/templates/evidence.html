@@ -176,6 +176,7 @@
               <th>Agreement</th>
               <th>Contradiction</th>
               <th>Matched claims</th>
+              <th>Examples</th>
               <th>Matched at</th>
             </tr>
           </thead>
@@ -188,6 +189,7 @@
               <td>{{formatFloat32 .AgreementScore}}</td>
               <td>{{if .IsContradiction}}yes{{else}}no{{end}}</td>
               <td>{{.MatchedClaimsCount}}</td>
+              <td>{{.MatchedClaims}}</td>
               <td>{{formatTime .MatchedAt}}</td>
             </tr>
             {{end}}

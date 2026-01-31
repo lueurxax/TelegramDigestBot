@@ -55,6 +55,12 @@ const (
 	scopeItems    = "items"
 	scopeEvidence = "evidence"
 
+	// Route name constants (for metrics/logging).
+	routeNameItem = "item"
+
+	// Display limit constants.
+	maxDisplayedMatchedClaims = 2
+
 	// Error title constants.
 	errTitleNotFound       = "Not Found"
 	errTitleError          = "Error"
@@ -180,7 +186,7 @@ func (h *Handler) dispatchPath(w http.ResponseWriter, r *http.Request, path stri
 		s, rs := h.handleSearch(w, r)
 		return "search", s, rs
 	case strings.HasPrefix(path, routeItem):
-		return "item", h.handleItem(w, r, strings.TrimPrefix(path, "item/")), 0
+		return routeNameItem, h.handleItem(w, r, strings.TrimPrefix(path, routeItem)), 0
 	case strings.HasPrefix(path, routeCluster):
 		return "cluster", h.handleCluster(w, r, strings.TrimPrefix(path, "cluster/")), 0
 	case strings.HasPrefix(path, routeEvidence):
@@ -569,6 +575,7 @@ func (h *Handler) handleEvidence(w http.ResponseWriter, r *http.Request, itemID 
 				IsContradiction:    entry.IsContradiction,
 				MatchedAt:          entry.MatchedAt,
 				MatchedClaimsCount: countMatchedClaims(entry.MatchedClaimsJSON),
+				MatchedClaims:      formatMatchedClaims(entry.MatchedClaimsJSON, maxDisplayedMatchedClaims),
 			})
 		}
 
@@ -692,6 +699,23 @@ func (h *Handler) buildItemExplain(ctx context.Context, item *db.ItemDebugDetail
 		return ItemExplainData{}, err
 	}
 
+	var (
+		dropReason string
+		dropDetail string
+	)
+
+	dropInfo, err := h.db.GetRawMessageDropLog(ctx, item.RawMessageID)
+
+	switch {
+	case err == nil:
+		dropReason = dropInfo.Reason
+		dropDetail = dropInfo.Detail
+	case errors.Is(err, db.ErrDropLogNotFound):
+		// No drop log exists - this is normal for items that weren't dropped
+	default:
+		return ItemExplainData{}, fmt.Errorf("get drop log: %w", err)
+	}
+
 	return ItemExplainData{
 		Status:              item.Status,
 		RelevanceScore:      item.RelevanceScore,
@@ -701,6 +725,8 @@ func (h *Handler) buildItemExplain(ctx context.Context, item *db.ItemDebugDetail
 		ImportanceThreshold: impThreshold,
 		ImportancePass:      item.ImportanceScore >= impThreshold,
 		Gate:                gateInfo,
+		DropReason:          dropReason,
+		DropDetail:          dropDetail,
 	}, nil
 }
 
@@ -927,7 +953,13 @@ func (h *Handler) handleLanguageCoverage(w http.ResponseWriter, r *http.Request)
 	if wantsHTML(r) {
 		rows := make([][]string, 0, len(entries))
 		for _, entry := range entries {
+			topic := entry.Topic
+			if topic == "" {
+				topic = "Unknown"
+			}
+
 			rows = append(rows, []string{
+				topic,
 				entry.FromLang,
 				entry.ToLang,
 				strconv.Itoa(entry.ClusterCount),
@@ -937,9 +969,9 @@ func (h *Handler) handleLanguageCoverage(w http.ResponseWriter, r *http.Request)
 
 		data := TableViewData{
 			Title:       "Cross-Language Coverage",
-			Headers:     []string{"From", "To", "Clusters", "Avg Lag (h)"},
+			Headers:     []string{"Topic", "From", "To", "Clusters", "Avg Lag (h)"},
 			Rows:        rows,
-			Description: "Language pairs linked across clusters by embedding similarity (lag based on first appearance).",
+			Description: "Language pairs linked across clusters by embedding similarity (lag based on first appearance), grouped by topic.",
 		}
 		if err := h.renderHTML(w, tmplTable, data); err != nil {
 			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
@@ -1660,7 +1692,7 @@ func parseSearchParams(r *http.Request) (db.ResearchSearchParams, string, error)
 	}
 
 	switch scope {
-	case "items", "evidence", "all":
+	case scopeItems, scopeEvidence, scopeAll:
 	default:
 		return params, "", fmt.Errorf("%w: %s", errInvalidScope, scope)
 	}
@@ -1947,6 +1979,43 @@ func countMatchedClaims(raw []byte) int {
 	return len(claims)
 }
 
+func formatMatchedClaims(raw []byte, limit int) string {
+	if len(raw) == 0 || limit <= 0 {
+		return ""
+	}
+
+	var claims []matchedClaim
+	if err := json.Unmarshal(raw, &claims); err != nil {
+		return ""
+	}
+
+	if len(claims) > limit {
+		claims = claims[:limit]
+	}
+
+	parts := make([]string, 0, len(claims))
+	for _, claim := range claims {
+		item := strings.TrimSpace(claim.ItemClaim)
+
+		evidence := strings.TrimSpace(claim.EvidenceClaim)
+		if item == "" && evidence == "" {
+			continue
+		}
+
+		if item == "" {
+			item = "item"
+		}
+
+		if evidence == "" {
+			evidence = "evidence"
+		}
+
+		parts = append(parts, fmt.Sprintf("%s → %s", item, evidence))
+	}
+
+	return strings.Join(parts, " | ")
+}
+
 func clampFloat32(value, min, max float32) float32 {
 	if value < min {
 		return min
@@ -2100,6 +2169,7 @@ type EvidenceViewRow struct {
 	IsContradiction    bool
 	MatchedAt          time.Time
 	MatchedClaimsCount int
+	MatchedClaims      string
 }
 
 type ItemExplainData struct {
@@ -2111,6 +2181,8 @@ type ItemExplainData struct {
 	ImportanceThreshold float32
 	ImportancePass      bool
 	Gate                *RelevanceGateInfo
+	DropReason          string
+	DropDetail          string
 }
 
 type RelevanceGateInfo struct {

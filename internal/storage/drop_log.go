@@ -2,17 +2,28 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/storage/sqlc"
 )
 
+// ErrDropLogNotFound is returned when no drop log exists for a message.
+var ErrDropLogNotFound = errors.New("drop log not found")
+
 type DropReasonStat struct {
 	Reason string
 	Count  int
+}
+
+type RawMessageDropInfo struct {
+	Reason    string
+	Detail    string
+	UpdatedAt time.Time
 }
 
 func (db *DB) SaveRawMessageDropLog(ctx context.Context, rawMsgID, reason, detail string) error {
@@ -26,6 +37,38 @@ func (db *DB) SaveRawMessageDropLog(ctx context.Context, rawMsgID, reason, detai
 	}
 
 	return nil
+}
+
+func (db *DB) GetRawMessageDropLog(ctx context.Context, rawMsgID string) (*RawMessageDropInfo, error) {
+	row := db.Pool.QueryRow(ctx, `
+		SELECT reason, detail, updated_at
+		FROM raw_message_drop_log
+		WHERE raw_message_id = $1
+	`, toUUID(rawMsgID))
+
+	var (
+		reason    string
+		detail    pgtype.Text
+		updatedAt pgtype.Timestamptz
+	)
+
+	if err := row.Scan(&reason, &detail, &updatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrDropLogNotFound
+		}
+
+		return nil, fmt.Errorf("get raw message drop log: %w", err)
+	}
+
+	info := &RawMessageDropInfo{
+		Reason: reason,
+		Detail: detail.String,
+	}
+	if updatedAt.Valid {
+		info.UpdatedAt = updatedAt.Time
+	}
+
+	return info, nil
 }
 
 func (db *DB) GetDropReasonStats(ctx context.Context, since time.Time, limit int) ([]DropReasonStat, error) {
