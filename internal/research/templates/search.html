@@ -472,8 +472,14 @@
         const noteInput = row.querySelector(".annotate-note input");
         const comment = noteInput ? noteInput.value.trim() : "";
         const buttons = row.querySelectorAll(".annotate-btn");
+        const badgeCell = row.querySelector(".annotate-badge");
+        const badgeContainer = row.children[8];
+        const prevBadgeHTML = badgeContainer ? badgeContainer.innerHTML : "";
         buttons.forEach(b => b.disabled = true);
         setRowError(row, "");
+        if (badgeContainer) {
+          badgeContainer.innerHTML = `<span class="annotate-badge">${rating} • saving</span>`;
+        }
 
         const payload = { item_id: itemId, rating, comment, source: "web-list" };
         try {
@@ -486,15 +492,14 @@
           if (!res.ok || !data.ok) {
             throw new Error(data.message || "Failed to save annotation");
           }
-          const badgeCell = row.querySelector(".annotate-badge");
           if (badgeCell) {
             badgeCell.textContent = rating;
-          } else {
-            const cell = row.children[8];
-            if (cell) cell.innerHTML = `<span class="annotate-badge">${rating}</span>`;
+          } else if (badgeContainer) {
+            badgeContainer.innerHTML = `<span class="annotate-badge">${rating}</span>`;
           }
         } catch (err) {
           setRowError(row, err.message || "Failed to save annotation");
+          if (badgeContainer) badgeContainer.innerHTML = prevBadgeHTML;
         } finally {
           buttons.forEach(b => b.disabled = false);
         }
@@ -528,6 +533,13 @@
           const itemIds = selected.map(r => r.dataset.itemId);
           const payload = { item_ids: itemIds, rating, comment: "", source: "web-list" };
           btn.disabled = true;
+          const previousHTML = new Map();
+          selected.forEach(row => {
+            const cell = row.children[8];
+            if (!cell) return;
+            previousHTML.set(row, cell.innerHTML);
+            cell.innerHTML = `<span class="annotate-badge">${rating} • saving</span>`;
+          });
           try {
             const res = await fetch("/research/annotate/batch", {
               method: "POST",
@@ -543,7 +555,11 @@
               if (cell) cell.innerHTML = `<span class="annotate-badge">${rating}</span>`;
             });
           } catch (err) {
-            selected.forEach(row => setRowError(row, err.message || "Failed to save batch"));
+            selected.forEach(row => {
+              setRowError(row, err.message || "Failed to save batch");
+              const prev = previousHTML.get(row);
+              if (prev !== undefined) row.children[8].innerHTML = prev;
+            });
           } finally {
             btn.disabled = false;
           }

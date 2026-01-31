@@ -540,6 +540,12 @@
         const noteWrap = annotateCard.querySelector(".annotate-note");
         const noteInput = annotateCard.querySelector(".annotate-note input");
         const errorEl = annotateCard.querySelector(".annotate-error");
+        const badge = annotateCard.querySelector(".annotate-badge");
+
+        const setBadge = (text) => {
+          if (!badge) return;
+          badge.textContent = text;
+        };
 
         const setError = (msg) => {
           if (!errorEl) return;
@@ -555,6 +561,8 @@
         const annotate = async (rating) => {
           setError("");
           buttons.forEach(b => b.disabled = true);
+          const previousBadge = badge ? badge.textContent : "";
+          if (badge) setBadge(`${rating} • saving`);
           const payload = {
             item_id: itemId,
             rating,
@@ -574,8 +582,10 @@
             if (!res.ok || !data.ok) {
               throw new Error(data.message || "Failed to save annotation");
             }
+            if (badge) setBadge(rating);
           } catch (err) {
             setError(err.message || "Failed to save annotation");
+            if (badge) setBadge(previousBadge);
           } finally {
             buttons.forEach(b => b.disabled = false);
           }

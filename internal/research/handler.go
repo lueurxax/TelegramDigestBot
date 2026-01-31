@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 	"golang.org/x/time/rate"
@@ -1777,6 +1778,10 @@ func (h *Handler) handleAnnotations(w http.ResponseWriter, r *http.Request) int 
 		return h.writeAnnotateError(w, http.StatusBadRequest, errCodeInvalidPayload, errMissingItemID.Error())
 	}
 
+	if !isValidUUID(itemID) {
+		return h.writeAnnotateError(w, http.StatusBadRequest, errCodeInvalidPayload, errInvalidItemID.Error())
+	}
+
 	userID, ok := h.authorizeAnnotate(w, r, itemID)
 	if !ok {
 		return http.StatusUnauthorized
@@ -1835,6 +1840,10 @@ func validateAnnotationRequest(req annotationRequest) error {
 		return errMissingItemID
 	}
 
+	if !isValidUUID(req.ItemID) {
+		return errInvalidItemID
+	}
+
 	if !isValidRating(req.Rating) {
 		return errInvalidRating
 	}
@@ -1872,7 +1881,7 @@ func validateAnnotationBatch(req annotationBatchRequest) error {
 	}
 
 	for _, id := range req.ItemIDs {
-		if id == "" {
+		if id == "" || !isValidUUID(id) {
 			return errInvalidItemID
 		}
 	}
@@ -1886,6 +1895,11 @@ func isValidRating(rating string) bool {
 
 func isValidSource(source string) bool {
 	return source == "web-list" || source == "web-expanded"
+}
+
+func isValidUUID(value string) bool {
+	_, err := uuid.Parse(value)
+	return err == nil
 }
 
 func (h *Handler) authorizeAnnotate(w http.ResponseWriter, r *http.Request, itemID string) (int64, bool) {
