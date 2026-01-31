@@ -147,7 +147,7 @@ const (
 
 // Clustering constants
 const (
-	ClusterMaxItemsLimit             = 500
+	ClusterMaxItemsLimit             = 2000
 	ClusterDefaultCoherenceThreshold = 0.7
 )
 

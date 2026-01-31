@@ -20,6 +20,8 @@ type bulletGroup struct {
 const (
 	defaultMaxBulletsPerCluster = 2  // Max bullets from a single cluster
 	defaultMaxBulletsPerTopic   = 20 // Max bullets per topic section
+	minBulletsForBulletMode     = 3  // Minimum bullets to keep bullet mode active
+	minBulletCoverageRatio      = 0.5
 )
 
 type bulletTier struct {
@@ -59,6 +61,10 @@ func (rc *digestRenderContext) formatBullets(ctx context.Context, items []db.Ite
 	clusterIndex := buildItemClusterIndex(rc.clusters)
 	limitedBullets := limitBulletsPerCluster(filteredBullets, rc.settings.bulletMaxPerCluster, clusterIndex)
 
+	if !hasSufficientBulletCoverage(len(items), len(limitedBullets)) {
+		return "" // Fallback to summary mode when bullet coverage is too low
+	}
+
 	// Step 3: Group by tier, then topic
 	tiers := groupBulletsByTier(limitedBullets)
 
@@ -89,6 +95,17 @@ func extractItemIDs(items []db.Item) []string {
 	}
 
 	return ids
+}
+
+// hasSufficientBulletCoverage checks if bullet mode should be used.
+func hasSufficientBulletCoverage(itemCount, bulletCount int) bool {
+	if itemCount < minBulletsForBulletMode {
+		return true // Small digests don't need coverage check
+	}
+
+	coverage := float32(bulletCount) / float32(itemCount)
+
+	return bulletCount >= minBulletsForBulletMode && coverage >= minBulletCoverageRatio
 }
 
 // filterBulletsByImportance filters out bullets below the importance threshold.
@@ -205,11 +222,9 @@ func (rc *digestRenderContext) formatBulletGroup(sb *strings.Builder, g bulletGr
 		emoji = DefaultTopicEmoji
 	}
 
-	// Write topic header
+	// Write compact topic header for mobile-friendly output
 	sb.WriteString(htmlutils.ItemStart)
-	sb.WriteString(DigestTopicBorderTop)
-	fmt.Fprintf(sb, FormatTopicHeaderWithCount, emoji, strings.ToUpper(html.EscapeString(g.topic)), len(g.bullets))
-	sb.WriteString(DigestTopicBorderBot)
+	fmt.Fprintf(sb, "%s <b>%s</b> (%d)\n", emoji, strings.ToUpper(html.EscapeString(g.topic)), len(g.bullets))
 
 	// Write each bullet
 	for _, b := range g.bullets {
@@ -230,32 +245,30 @@ func (rc *digestRenderContext) formatSingleBullet(sb *strings.Builder, b db.Bull
 	sb.WriteString(BulletItemPrefix)
 	sb.WriteString(sanitizedText)
 
-	// Add corroboration count if multiple sources confirm this claim
+	var sourceParts []string
+
 	if b.SourceCount > 1 {
-		fmt.Fprintf(sb, " <i>(%d sources)</i>", b.SourceCount)
+		sourceParts = append(sourceParts, fmt.Sprintf("<i>(%d sources)</i>", b.SourceCount))
 	} else if rc.settings.bulletSourceAttribution {
-		// Add single source attribution when enabled
-		sb.WriteString(rc.formatBulletSource(b))
+		source := strings.TrimSpace(rc.formatBulletSource(b))
+		if source != "" {
+			sourceParts = append(sourceParts, source)
+		}
 	}
 
-	// Add expanded view link if enabled
-	rc.appendBulletExpandLink(sb, b.ItemID)
+	if rc.expandLinksEnabled && b.ItemID != "" {
+		token, err := rc.scheduler.expandLinkGenerator.Generate(b.ItemID, ExpandedViewSystemUserID)
+		if err == nil {
+			sourceParts = append(sourceParts, fmt.Sprintf("<a href=\"%s/i/%s\">📖</a>", rc.expandBaseURL, token))
+		}
+	}
+
+	if len(sourceParts) > 0 {
+		sb.WriteString("\n    ↳ ")
+		sb.WriteString(strings.Join(sourceParts, " "))
+	}
 
 	sb.WriteString("\n")
-}
-
-// appendBulletExpandLink adds an expanded view link for a bullet's source item.
-func (rc *digestRenderContext) appendBulletExpandLink(sb *strings.Builder, itemID string) {
-	if !rc.expandLinksEnabled || itemID == "" {
-		return
-	}
-
-	token, err := rc.scheduler.expandLinkGenerator.Generate(itemID, ExpandedViewSystemUserID)
-	if err != nil {
-		return
-	}
-
-	fmt.Fprintf(sb, " <a href=\"%s/i/%s\">📖</a>", rc.expandBaseURL, token)
 }
 
 // formatBulletSource formats the source attribution for a bullet.

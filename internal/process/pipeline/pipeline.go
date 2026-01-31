@@ -252,6 +252,14 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 		return nil
 	}
 
+	batchStart := time.Now()
+
+	defer func() {
+		observability.PipelineBatchDurationSeconds.Observe(time.Since(batchStart).Seconds())
+	}()
+
+	p.recordMessageAgeMetrics(messages)
+
 	// Log backlog
 	backlog, err := p.database.GetBacklogCount(ctx)
 	if err == nil {
@@ -274,6 +282,27 @@ func (p *Pipeline) processNextBatch(ctx context.Context, correlationID string) e
 	}
 
 	return p.storeResults(ctx, logger, candidates, results, embeddings, s)
+}
+
+// recordMessageAgeMetrics records metrics for message age and backlog.
+func (p *Pipeline) recordMessageAgeMetrics(messages []db.RawMessage) {
+	now := time.Now()
+
+	oldestAge := now.Sub(messages[0].TGDate).Seconds()
+	if oldestAge < 0 {
+		oldestAge = 0
+	}
+
+	observability.PipelineBacklogOldestAgeSeconds.Set(oldestAge)
+
+	for _, message := range messages {
+		age := now.Sub(message.TGDate).Seconds()
+		if age < 0 {
+			age = 0
+		}
+
+		observability.PipelineMessageAgeSeconds.Observe(age)
+	}
 }
 
 var (

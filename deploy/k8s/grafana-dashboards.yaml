@@ -1174,6 +1174,108 @@ data:
           ],
           "title": "Ingested Message Age",
           "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 82},
+          "id": 45,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.50, sum(rate(digest_pipeline_message_age_seconds_bucket{namespace=\"digest\"}[5m])) by (le))",
+              "legendFormat": "P50 Age",
+              "refId": "A"
+            },
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "histogram_quantile(0.90, sum(rate(digest_pipeline_message_age_seconds_bucket{namespace=\"digest\"}[5m])) by (le))",
+              "legendFormat": "P90 Age",
+              "refId": "B"
+            }
+          ],
+          "title": "Pipeline Message Age",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "${datasource}"},
+          "fieldConfig": {
+            "defaults": {
+              "color": {"mode": "palette-classic"},
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {"legend": false, "tooltip": false, "viz": false},
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {"type": "linear"},
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": {"group": "A", "mode": "none"},
+                "thresholdsStyle": {"mode": "off"}
+              },
+              "mappings": [],
+              "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 82},
+          "id": 46,
+          "options": {
+            "legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "right", "showLegend": true},
+            "tooltip": {"mode": "multi", "sort": "desc"}
+          },
+          "pluginVersion": "10.0.0",
+          "targets": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "expr": "max(digest_pipeline_backlog_oldest_age_seconds{namespace=\"digest\"})",
+              "legendFormat": "Oldest Age",
+              "refId": "A"
+            }
+          ],
+          "title": "Oldest Unprocessed Message Age",
+          "type": "timeseries"
         }
       ],
       "refresh": "30s",

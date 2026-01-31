@@ -27,6 +27,23 @@ var (
 		Help: "Number of unprocessed messages in the database",
 	})
 
+	PipelineBacklogOldestAgeSeconds = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "digest_pipeline_backlog_oldest_age_seconds",
+		Help: "Age in seconds of the oldest unprocessed message in the pipeline",
+	})
+
+	PipelineMessageAgeSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "digest_pipeline_message_age_seconds",
+		Help:    "Age of messages when pipeline processing starts",
+		Buckets: []float64{60, 300, 900, 1800, 3600, 7200, 14400, 28800, 43200, 86400, 172800, 604800},
+	})
+
+	PipelineBatchDurationSeconds = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "digest_pipeline_batch_duration_seconds",
+		Help:    "Duration in seconds to process a pipeline batch",
+		Buckets: []float64{1, 2, 5, 10, 20, 30, 60, 120, 300},
+	})
+
 	DigestsPosted = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "digest_posts_total",
 		Help: "The total number of digests posted",
