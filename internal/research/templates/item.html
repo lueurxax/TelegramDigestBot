@@ -150,10 +150,7 @@
       table {
         width: 100%;
         border-collapse: collapse;
-        background: var(--card);
-        border-radius: 16px;
-        overflow: hidden;
-        box-shadow: var(--shadow);
+        background: transparent;
       }
       th, td {
         border-bottom: 1px solid var(--border);
@@ -170,6 +167,12 @@
       }
       tbody tr:hover td { background: rgba(240, 93, 94, 0.08); }
       tbody tr:last-child td { border-bottom: none; }
+      .table-wrap {
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        background: #fff;
+      }
       .pass { color: #15803d; font-weight: 600; }
       .fail { color: #b45309; font-weight: 600; }
     </style>
@@ -221,6 +224,7 @@
 
       <div class="card">
         <h2>Why included / suppressed</h2>
+        <div class="table-wrap">
         <table>
           <tbody>
             <tr>
@@ -267,6 +271,7 @@
             {{end}}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div class="card">
@@ -302,6 +307,7 @@
       {{if .ClusterItems}}
       <div class="card">
         <h2>Cluster Items</h2>
+        <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -324,6 +330,7 @@
             {{end}}
           </tbody>
         </table>
+        </div>
       </div>
       {{end}}
     </main>
