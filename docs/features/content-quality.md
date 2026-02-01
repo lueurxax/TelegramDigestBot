@@ -115,6 +115,76 @@ Automatic threshold tuning is enabled by default. It can be disabled via the `au
 
 ---
 
+## Annotation-Driven Processing
+
+User annotations directly influence real-time processing decisions through three mechanisms: channel bias, irrelevant similarity suppression, and uncertain-item sampling. These work alongside the weekly threshold tuning to provide immediate feedback effects.
+
+### Recent-Rating Channel Bias
+
+When channels accumulate ratings, a small bounded bias adjusts relevance scores in real-time.
+
+**Algorithm:**
+1. Load ratings from the last 14 days with exponential time decay (7-day half-life)
+2. Compute weighted net score: `(good - bad - irrelevant) / total`
+3. Calculate bias: `clamp(net_score * 0.12, -0.12, 0.12)`
+4. Apply to relevance: `relevance += bias * 0.5`
+
+**Guardrails:**
+- Requires at least 10 ratings per channel before any bias applies
+- Maximum bias is +/- 0.12 (bounded, never extreme)
+- Bias recalculates on each pipeline batch (not cached long-term)
+
+### Irrelevant Similarity Suppression
+
+Items semantically similar to recently-marked irrelevant items are automatically downranked or rejected.
+
+**How it works:**
+1. Find the most similar item rated "irrelevant" in the last 7 days
+2. Compare via cosine similarity on embeddings (existing pgvector index)
+3. Apply penalty or rejection based on similarity threshold
+
+**Thresholds:**
+| Similarity | Action |
+|------------|--------|
+| >= 0.92 | Apply penalty: importance -0.15, relevance -0.10 |
+| >= 0.96 | Hard reject (set both scores to 0) |
+| < 0.92 | No action |
+
+This prevents repeated low-signal variants of the same content from appearing.
+
+### Uncertain-Item Sampling
+
+Items near decision boundaries are flagged for prioritized annotation review.
+
+**Uncertainty calculation:**
+- Distance from nearest threshold (importance or relevance)
+- Items within +/- 0.10 of either threshold are marked "Needs Review"
+- Displayed as badge in research search UI
+
+**Where used:**
+- Research search view shows "Needs Review" badge
+- Filter available to show only uncertain items
+- Helps focus annotation effort on borderline cases
+
+### Observability
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `digest_annotation_bias_applied_total{channel}` | Counter | Items adjusted by channel bias |
+| `digest_irrelevant_similarity_hits_total` | Counter | Items penalized for irrelevant similarity |
+| `digest_irrelevant_similarity_rejects_total` | Counter | Items rejected for irrelevant similarity |
+| `digest_irrelevant_similarity_score` | Histogram | Distribution of similarity scores |
+| `digest_uncertainty_flagged_total` | Counter | Items flagged as needs-review |
+| `digest_low_reliability_badge_total` | Counter | Items marked with low-reliability badges |
+
+### Implementation
+
+- **File**: `internal/process/pipeline/annotation_adjustments.go`
+- **Constants**: `internal/process/pipeline/constants.go` (lines 89-99)
+- **Needs-review**: `internal/research/annotation_sampling.go`
+
+---
+
 ## Auto-Relevance (Per-Channel Credibility)
 
 Channels with consistently poor-rated content automatically receive stricter relevance thresholds.

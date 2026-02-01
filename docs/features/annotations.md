@@ -334,6 +334,17 @@ The `source` field distinguishes where annotations originate:
 
 This allows comparison of workflow efficiency and accuracy between the two interfaces. The source is stored in the `item_ratings.source` column.
 
+### Observability
+
+The annotation system exposes Prometheus metrics:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `digest_annotations_total{rating}` | Counter | Total annotations by rating value |
+| `digest_annotation_requests_total{status}` | Counter | API requests by status (ok/error) |
+| `digest_annotation_batch_total` | Counter | Batch annotation submissions |
+| `digest_annotation_request_duration_seconds` | Histogram | API request latency |
+
 ### Integration with Research Dashboard
 
 For full documentation on the research dashboard including search, item detail, and authentication, see [Research Dashboard](research-dashboard.md).

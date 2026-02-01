@@ -14,7 +14,7 @@ This directory contains all documentation for the Telegram Digest Bot project.
 
 | Document | Description |
 |----------|-------------|
-| [Content Quality](features/content-quality.md) | Relevance gates, feedback loops, clustering, topic balance |
+| [Content Quality](features/content-quality.md) | Relevance gates, feedback loops, annotation-driven processing, topic balance |
 | [Semantic Clustering](features/clustering.md) | Deduplication, coherence validation, and topic generation |
 | [Digest Schedule](features/digest-schedule.md) | Timezone-aware scheduling and window configuration |
 | [Channel Discovery](features/discovery.md) | Automatic channel discovery, keyword filters, admin review |
@@ -41,7 +41,7 @@ This directory contains all documentation for the Telegram Digest Bot project.
 |----------|-------------|
 | [Source Enrichment](features/source-enrichment.md) | Multi-provider evidence retrieval and agreement scoring |
 | [Corroboration](features/corroboration.md) | Channel corroboration and fact-check links |
-| [Link Enrichment](features/link-enrichment.md) | URL resolution and content extraction |
+| [Link Enrichment](features/link-enrichment.md) | URL resolution, content extraction, canonical detection, cross-language queries |
 | [Link Seeding](features/link-seeding.md) | Seed external URLs from Telegram to crawler queue |
 
 ### Quality & Evaluation
@@ -49,7 +49,7 @@ This directory contains all documentation for the Telegram Digest Bot project.
 | Document | Description |
 |----------|-------------|
 | [Pipeline Optimization](features/pipeline-optimization.md) | Heuristic filters, caching, summary post-processing |
-| [Annotations](features/annotations.md) | Item labeling for quality evaluation and threshold tuning |
+| [Annotations](features/annotations.md) | Item labeling via bot and web UI, quality evaluation |
 | [Evaluation Harness](eval/README.md) | Offline quality evaluation with labeled datasets |
 
 ### Research & Analytics
@@ -64,10 +64,7 @@ These documents describe features under consideration or in development.
 
 | Document | Status | Description |
 |----------|--------|-------------|
-| [LLM Budget Guardrails](proposals/llm-budget-guardrails.md) | Proposed | Per-model budgets and rate limits |
-| [Research & Visualization](proposals/research-interactivity-visualization.md) | Implemented | Original proposal for research dashboard |
-| [Telegram Link Seeding](proposals/telegram-link-seeding.md) | Implemented | Original proposal for link seeding |
-| [Bulletized Output](proposals/digest-bulletized-output.md) | Implemented | Original proposal for bullet-based digests |
+| [LLM Budget Guardrails](proposals/llm-budget-guardrails.md) | Proposed | Per-model budgets, rate limits, and fallback behavior |
 
 ## Other
 
