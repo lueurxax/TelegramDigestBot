@@ -41,6 +41,8 @@ const (
 	fieldResponse     = "response"
 	fieldAttempt      = "attempt"
 	markdownCodeFence = "```"
+	errStrUnmarshal   = "unmarshal"
+	errStrInvalidChar = "invalid character"
 
 	// LLM retry settings.
 	// With 45s timeout × 3 attempts + ~6s delays = ~141s max for LLM.
@@ -183,7 +185,7 @@ func (e *Extractor) Extract(ctx context.Context, result SearchResult, provider P
 	if e.llmClient != nil {
 		claims, err = e.extractClaimsWithLLM(ctx, analysisText)
 		if err != nil {
-			if errors.Is(err, errInvalidLLMResponse) || strings.Contains(err.Error(), "unmarshal") {
+			if errors.Is(err, errInvalidLLMResponse) || strings.Contains(err.Error(), errStrUnmarshal) {
 				e.logger.Warn().Err(err).Str(logKeyURL, result.URL).Msg("LLM extraction returned invalid format")
 			} else {
 				e.logger.Error().Err(err).Str(logKeyURL, result.URL).Msg("LLM extraction failed")
@@ -311,9 +313,13 @@ func (e *Extractor) sleepWithContext(ctx context.Context, d time.Duration) error
 	}
 }
 
-// isRetryableError checks if the error is retryable (timeout only).
+// isRetryableError checks if the error is retryable.
 // context.Canceled is NOT retryable as it indicates parent shutdown.
-// Only context.DeadlineExceeded (LLM timeout) should trigger retry.
+// Retryable errors include:
+// - context.DeadlineExceeded (LLM timeout)
+// - Network timeout errors
+// - Invalid LLM response format (garbage output that may succeed on retry)
+// - JSON unmarshal errors (LLM may return valid JSON on retry)
 func isRetryableError(err error) bool {
 	if err == nil {
 		return false
@@ -332,6 +338,23 @@ func isRetryableError(err error) bool {
 	// Check for network timeout errors using type assertion (more robust than string matching)
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	// Invalid LLM response format - retry as LLM may return valid response on next attempt
+	if errors.Is(err, errInvalidLLMResponse) {
+		return true
+	}
+
+	// JSON unmarshal errors from garbage LLM output - retry
+	var jsonErr *json.SyntaxError
+	if errors.As(err, &jsonErr) {
+		return true
+	}
+
+	// Also check for unmarshal errors wrapped in other errors
+	errStr := err.Error()
+	if strings.Contains(errStr, errStrUnmarshal) || strings.Contains(errStr, errStrInvalidChar) {
 		return true
 	}
 
