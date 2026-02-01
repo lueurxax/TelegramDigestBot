@@ -418,6 +418,7 @@ func countWordFrequencies(text string) map[string]int {
 }
 
 // sortByFrequency sorts words by their frequency in descending order.
+// Ties are broken alphabetically for deterministic results.
 func sortByFrequency(freq map[string]int) []wordFreq {
 	sorted := make([]wordFreq, 0, len(freq))
 	for w, c := range freq {
@@ -426,7 +427,9 @@ func sortByFrequency(freq map[string]int) []wordFreq {
 
 	for i := range sorted {
 		for j := i + 1; j < len(sorted); j++ {
-			if sorted[j].count > sorted[i].count {
+			// Sort by count descending, then alphabetically ascending for ties
+			if sorted[j].count > sorted[i].count ||
+				(sorted[j].count == sorted[i].count && sorted[j].word < sorted[i].word) {
 				sorted[i], sorted[j] = sorted[j], sorted[i]
 			}
 		}

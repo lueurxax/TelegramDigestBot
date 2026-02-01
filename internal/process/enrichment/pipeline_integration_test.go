@@ -210,7 +210,7 @@ func TestQueryGeneration_Integration(t *testing.T) {
 			channelTitle:   "Russian Cyprus News",
 			expectQueries:  true,
 			minQueries:     1,
-			expectKeywords: []string{"marina"}, // stable keyword appearing in both summary and text
+			expectKeywords: []string{"development"}, // "development" is in topic query due to being first keyword alphabetically
 		},
 		{
 			name:           "summary with entities and numbers",
