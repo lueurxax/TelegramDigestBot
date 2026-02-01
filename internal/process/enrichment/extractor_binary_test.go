@@ -90,8 +90,6 @@ const (
 func newIPv4TestServer(t *testing.T, handler http.Handler) *httptest.Server {
 	t.Helper()
 
-	server := httptest.NewUnstartedServer(handler)
-
 	lc := &net.ListenConfig{}
 
 	listener, err := lc.Listen(context.Background(), "tcp4", "127.0.0.1:0")
@@ -99,7 +97,13 @@ func newIPv4TestServer(t *testing.T, handler http.Handler) *httptest.Server {
 		t.Fatalf("listen on tcp4: %v", err)
 	}
 
-	server.Listener = listener
+	server := &httptest.Server{
+		Listener: listener,
+		Config: &http.Server{
+			Handler:           handler,
+			ReadHeaderTimeout: time.Second,
+		},
+	}
 	server.Start()
 
 	return server

@@ -45,6 +45,8 @@ func (p *Pipeline) extractBullets(ctx context.Context, logger zerolog.Logger, c 
 		return nil
 	}
 
+	extracted.Bullets = p.translateBulletsIfNeeded(ctx, logger, c.ID, extracted.Bullets, digestLanguage)
+
 	logger.Debug().Str(LogFieldMsgID, c.ID).Int(LogFieldCount, len(extracted.Bullets)).Msg("bullets extracted")
 
 	return dedupeExtractedBullets(extracted.Bullets)
@@ -84,6 +86,36 @@ func truncateLinkContext(text string, max int) string {
 	runes := []rune(text)
 
 	return string(runes[:max])
+}
+
+func (p *Pipeline) translateBulletsIfNeeded(ctx context.Context, logger zerolog.Logger, msgID string, bullets []llm.ExtractedBullet, targetLanguage string) []llm.ExtractedBullet {
+	targetLang := normalizeLanguage(targetLanguage)
+	if targetLang == "" || len(bullets) == 0 {
+		return bullets
+	}
+
+	translated := make([]llm.ExtractedBullet, 0, len(bullets))
+
+	for _, b := range bullets {
+		text := strings.TrimSpace(b.Text)
+		if text == "" {
+			continue
+		}
+
+		detected := detectSummaryLanguage(text, "")
+		if detected == "" || detected != targetLang {
+			out, err := p.llmClient.TranslateText(ctx, text, targetLang, "")
+			if err != nil {
+				logger.Warn().Err(err).Str(LogFieldMsgID, msgID).Msg("failed to translate bullet")
+			} else if strings.TrimSpace(out) != "" {
+				b.Text = out
+			}
+		}
+
+		translated = append(translated, b)
+	}
+
+	return translated
 }
 
 // storeBullets saves extracted bullets to the database and generates embeddings.
