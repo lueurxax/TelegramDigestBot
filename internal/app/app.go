@@ -43,7 +43,7 @@ const (
 	logFieldItems                    = "items"
 	researchRefreshInterval          = time.Hour
 	researchRefreshLockID            = int64(94231)
-	researchRefreshTimeout           = 10 * time.Minute
+	researchRefreshTimeout           = 15 * time.Minute
 	researchClusterLookbackDays      = 14
 	researchClusterItemLimit         = 2000
 )

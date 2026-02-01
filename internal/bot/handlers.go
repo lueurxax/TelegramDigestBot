@@ -2903,7 +2903,7 @@ func (b *Bot) handleResearch(ctx context.Context, msg *tgbotapi.Message) {
 const (
 	researchRebuildLookbackDays = 14
 	researchRebuildItemLimit    = 2000
-	researchRebuildTimeout      = 10 * time.Minute
+	researchRebuildTimeout      = 15 * time.Minute
 	researchRebuildLockID       = int64(94231)
 )
 

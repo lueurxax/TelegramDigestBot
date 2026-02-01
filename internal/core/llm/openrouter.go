@@ -32,7 +32,7 @@ const (
 	openRouterRateLimiterBurst = 5
 
 	// Default timeout for OpenRouter API requests.
-	openRouterDefaultTimeout = 60 * time.Second
+	openRouterDefaultTimeout = 90 * time.Second
 
 	// Max tokens defaults.
 	openRouterMaxTokensDefault = 4096

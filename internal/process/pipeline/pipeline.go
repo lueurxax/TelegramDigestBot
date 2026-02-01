@@ -1153,6 +1153,16 @@ func (p *Pipeline) processBullets(ctx context.Context, logger zerolog.Logger, ca
 		return nil, bulletScoreSummary{}
 	}
 
+	messageText := strings.TrimSpace(candidate.Text)
+	if messageText == "" {
+		messageText = strings.TrimSpace(candidate.PreviewText)
+	}
+
+	extractedBullets = applyBulletLengthRules(extractedBullets, messageText)
+	if len(extractedBullets) == 0 {
+		return nil, bulletScoreSummary{}
+	}
+
 	bulletSummary := summarizeBullets(extractedBullets, s.bulletMinImportance)
 	res.RelevanceScore = bulletSummary.maxRelevance
 	res.ImportanceScore = bulletSummary.maxImportance

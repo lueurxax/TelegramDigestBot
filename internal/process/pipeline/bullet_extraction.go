@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -159,8 +161,96 @@ func normalizeBulletText(text string) string {
 	return strings.Join(strings.Fields(normalized), " ")
 }
 
+func applyBulletLengthRules(bullets []llm.ExtractedBullet, messageText string) []llm.ExtractedBullet {
+	if len(bullets) == 0 {
+		return bullets
+	}
+
+	messageLen := textRuneLength(messageText)
+	if messageLen == 0 {
+		return nil
+	}
+
+	if messageLen < minMessageLengthForMultiBullets {
+		return limitToSingleBullet(bullets, messageLen)
+	}
+
+	return limitBulletsToMessageLength(bullets, messageLen)
+}
+
+func limitToSingleBullet(bullets []llm.ExtractedBullet, messageLen int) []llm.ExtractedBullet {
+	best, ok := pickBestBullet(bullets)
+	if !ok || textRuneLength(best.Text) > messageLen {
+		return nil
+	}
+
+	return []llm.ExtractedBullet{best}
+}
+
+func limitBulletsToMessageLength(bullets []llm.ExtractedBullet, messageLen int) []llm.ExtractedBullet {
+	totalLen := 0
+	trimmed := make([]llm.ExtractedBullet, 0, len(bullets))
+
+	for _, b := range bullets {
+		bulletLen := textRuneLength(b.Text)
+		if bulletLen == 0 {
+			continue
+		}
+
+		if totalLen+bulletLen > messageLen {
+			if len(trimmed) == 0 {
+				return nil
+			}
+
+			break
+		}
+
+		totalLen += bulletLen
+
+		trimmed = append(trimmed, b)
+	}
+
+	if len(trimmed) == 0 {
+		return nil
+	}
+
+	return trimmed
+}
+
+func pickBestBullet(bullets []llm.ExtractedBullet) (llm.ExtractedBullet, bool) {
+	if len(bullets) == 0 {
+		return llm.ExtractedBullet{}, false
+	}
+
+	best := bullets[0]
+	for i := 1; i < len(bullets); i++ {
+		current := bullets[i]
+		if current.ImportanceScore > best.ImportanceScore {
+			best = current
+			continue
+		}
+
+		if current.ImportanceScore == best.ImportanceScore && current.RelevanceScore > best.RelevanceScore {
+			best = current
+		}
+	}
+
+	return best, true
+}
+
+func textRuneLength(text string) int {
+	plain := htmlutils.StripHTMLTags(text)
+	if plain == "" {
+		return 0
+	}
+
+	return utf8.RuneCountInString(plain)
+}
+
 // defaultMaxBullets is the default number of bullets to extract per message.
 const defaultMaxBullets = 3
+
+const minMessageLengthForMultiBullets = 70
 
 type bulletScoreSummary struct {
 	maxImportance float32
