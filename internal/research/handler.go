@@ -850,7 +850,7 @@ func (h *Handler) handleChannelOverlap(w http.ResponseWriter, r *http.Request) (
 
 	edges, err := h.db.GetChannelOverlap(r.Context(), from, to, limit)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("get channel overlap failed")
+		h.logQueryError(err, "get channel overlap failed")
 		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load overlap."), 0
 	}
 
@@ -904,7 +904,7 @@ func (h *Handler) handleTopicTimeline(w http.ResponseWriter, r *http.Request) (i
 
 	points, err := h.db.GetTopicTimeline(r.Context(), bucket, from, to, limit)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("get topic timeline failed")
+		h.logQueryError(err, "get topic timeline failed")
 
 		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load timeline."), 0
 	}
@@ -981,7 +981,7 @@ func (h *Handler) handleTopicDrift(w http.ResponseWriter, r *http.Request) (int,
 
 	entries, err := h.db.GetTopicDrift(r.Context(), from, to, limit)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("get topic drift failed")
+		h.logQueryError(err, "get topic drift failed")
 		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load topic drift."), 0
 	}
 
@@ -1028,7 +1028,7 @@ func (h *Handler) handleLanguageCoverage(w http.ResponseWriter, r *http.Request)
 
 	entries, err := h.db.GetLanguageCoverage(r.Context(), from, to, limit)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("get language coverage failed")
+		h.logQueryError(err, "get language coverage failed")
 		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load language coverage."), 0
 	}
 
@@ -1086,7 +1086,7 @@ func (h *Handler) handleChannelQualitySummary(w http.ResponseWriter, r *http.Req
 
 	entries, err := h.db.GetChannelQualitySummary(r.Context(), from, to, limit)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("get channel quality summary failed")
+		h.logQueryError(err, "get channel quality summary failed")
 		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load channel quality summary."), 0
 	}
 
@@ -1327,7 +1327,7 @@ func (h *Handler) handleChannelQuality(w http.ResponseWriter, r *http.Request, c
 
 	entries, err := h.db.GetChannelQualityHistory(r.Context(), channelID, from, to)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("get channel quality failed")
+		h.logQueryError(err, "get channel quality failed")
 
 		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load channel quality."), 0
 	}
@@ -1419,7 +1419,7 @@ func (h *Handler) handleChannelOriginStats(w http.ResponseWriter, r *http.Reques
 
 	stats, err := h.db.GetOriginStats(r.Context(), channelID, from, to)
 	if err != nil {
-		h.logger.Error().Err(err).Msg("get origin stats failed")
+		h.logQueryError(err, "get origin stats failed")
 		return h.writeError(w, r, http.StatusInternalServerError, errTitleError, "Failed to load origin stats."), 0
 	}
 
@@ -2590,6 +2590,18 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, status int,
 	}
 
 	return h.writeJSON(w, status, map[string]string{"error": message})
+}
+
+// logQueryError logs database query errors at the appropriate level.
+// Context cancellation (client disconnect) is logged at Debug level since it's expected.
+// Other errors are logged at Error level.
+func (h *Handler) logQueryError(err error, msg string) {
+	if errors.Is(err, context.Canceled) {
+		h.logger.Debug().Err(err).Msg(msg + " (client disconnected)")
+		return
+	}
+
+	h.logger.Error().Err(err).Msg(msg)
 }
 
 func buildChannelDiffRows(entries []db.ResearchWeeklyChannelDiff) [][]string {
