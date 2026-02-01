@@ -133,6 +133,10 @@ func (m *mockRouterRepo) SaveTranslation(ctx context.Context, q, l, t string, tt
 	return nil
 }
 
+func (m *mockRouterRepo) AddItemLinkLangQueries(_ context.Context, _ string, _ int) error {
+	return nil
+}
+
 func (m *mockRouterRepo) RecoverStuckEnrichmentItems(_ context.Context, _ time.Duration) (int64, error) {
 	return 0, nil
 }

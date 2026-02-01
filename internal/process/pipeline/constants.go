@@ -49,6 +49,12 @@ const (
 	LogFieldBulletID      = "bullet_id"
 	LogFieldReady         = "ready"
 	LogFieldDuplicate     = "duplicate"
+	LogFieldSimilarity    = "similarity"
+)
+
+const (
+	DefaultCanonicalSimilarityThreshold = 0.85
+	MinSameChannelSimilarityThreshold   = DefaultCanonicalSimilarityThreshold
 )
 
 // Setting key constants

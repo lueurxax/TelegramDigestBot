@@ -44,6 +44,9 @@ const (
 
 	// Relevance gate default confidence.
 	cohereDefaultConfidence = 0.5
+
+	// Finish reason indicating truncation due to token limit.
+	cohereFinishReasonMaxTokens = "MAX_TOKENS"
 )
 
 // Cohere errors.
@@ -220,6 +223,7 @@ type cohereResult struct {
 	Text             string
 	PromptTokens     int
 	CompletionTokens int
+	FinishReason     string
 }
 
 // extractResponseText extracts the text content and usage from Cohere response.
@@ -245,7 +249,19 @@ func (p *cohereProvider) extractResponseText(body []byte) (cohereResult, error) 
 		Text:             result.String(),
 		PromptTokens:     resp.Usage.Tokens.InputTokens,
 		CompletionTokens: resp.Usage.Tokens.OutputTokens,
+		FinishReason:     resp.FinishReason,
 	}, nil
+}
+
+// logTruncationWarning logs a warning if the response was truncated due to max_tokens limit.
+func (p *cohereProvider) logTruncationWarning(result cohereResult, task string, maxTokens int) {
+	if result.FinishReason == cohereFinishReasonMaxTokens {
+		p.logger.Warn().
+			Str(logKeyTask, task).
+			Int(logKeyMaxTokens, maxTokens).
+			Int(logKeyOutputTokens, result.CompletionTokens).
+			Msg(logMsgTruncated)
+	}
 }
 
 // ProcessBatch implements Provider interface.
@@ -406,7 +422,7 @@ func (p *cohereProvider) SummarizeCluster(ctx context.Context, items []domain.It
 	prompt := buildClusterSummaryPrompt(items, nil, targetLanguage, tone, defaultClusterSummaryPrompt)
 	resolvedModel := p.resolveModel(model)
 
-	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensTiny)
+	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensShort)
 	if err != nil {
 		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, 0, 0, false)
 
@@ -414,11 +430,14 @@ func (p *cohereProvider) SummarizeCluster(ctx context.Context, items []domain.It
 	}
 
 	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true)
+	p.logTruncationWarning(result, TaskCluster, cohereMaxTokensShort)
 
 	return strings.TrimSpace(result.Text), nil
 }
 
 // SummarizeClusterWithEvidence implements Provider interface.
+//
+//nolint:dupl // mirrored implementation across providers
 func (p *cohereProvider) SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, model, tone string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
@@ -431,7 +450,7 @@ func (p *cohereProvider) SummarizeClusterWithEvidence(ctx context.Context, items
 	prompt := buildClusterSummaryPrompt(items, evidence, targetLanguage, tone, defaultClusterSummaryPrompt)
 	resolvedModel := p.resolveModel(model)
 
-	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensTiny)
+	result, err := p.callCohereAPI(ctx, prompt, model, cohereMaxTokensShort)
 	if err != nil {
 		p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, 0, 0, false)
 
@@ -439,6 +458,7 @@ func (p *cohereProvider) SummarizeClusterWithEvidence(ctx context.Context, items
 	}
 
 	p.usageRecorder.RecordTokenUsage(string(ProviderCohere), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true)
+	p.logTruncationWarning(result, TaskCluster, cohereMaxTokensShort)
 
 	return strings.TrimSpace(result.Text), nil
 }

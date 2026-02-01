@@ -42,22 +42,26 @@ var templateFuncs = template.FuncMap{
 	"stripHTML": htmlutils.StripHTMLTags,
 	// escapeHTML escapes HTML special characters for safe display
 	"escapeHTML": html.EscapeString,
-	// isImageMedia checks if the binary data is a valid image that can be displayed
+	// isImageMedia checks if the binary data is a valid image that can be displayed.
+	// Requires minimum size to avoid rendering incomplete/corrupted data.
 	"isImageMedia": func(data []byte) bool {
-		if len(data) == 0 {
+		const minImageSize = 1024 // Minimum 1KB to be a valid image
+		if len(data) < minImageSize {
 			return false
 		}
 		mimeType := http.DetectContentType(data)
 		return strings.HasPrefix(mimeType, "image/")
 	},
-	// mediaDataURL converts binary image data to a base64 data URL for inline display
-	"mediaDataURL": func(data []byte) string {
+	// mediaDataURL converts binary image data to a base64 data URL for inline display.
+	// Returns template.URL to allow data: URLs in src attributes (safe for admin-only page).
+	"mediaDataURL": func(data []byte) template.URL {
 		if len(data) == 0 {
 			return ""
 		}
 		// Detect MIME type from magic bytes
 		mimeType := http.DetectContentType(data)
-		return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
+		//nolint:gosec // data URLs are safe here - image data from Telegram, admin-only page
+		return template.URL(fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data)))
 	},
 	// safeURL marks a URL as safe (for shortcuts:// and other custom schemes)
 	"safeURL": func(s string) template.URL {

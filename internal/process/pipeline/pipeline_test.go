@@ -113,6 +113,10 @@ func (m *mockRepo) SaveEmbedding(_ context.Context, _ string, _ []float32) error
 	return nil
 }
 
+func (m *mockRepo) GetItemEmbedding(_ context.Context, _ string) ([]float32, error) {
+	return nil, nil
+}
+
 func (m *mockRepo) EnqueueFactCheck(_ context.Context, _, _, _ string) error {
 	return nil
 }
@@ -154,6 +158,14 @@ func (m *mockRepo) GetSummaryCache(_ context.Context, _, _ string) (*db.SummaryC
 }
 
 func (m *mockRepo) UpsertSummaryCache(_ context.Context, _ *db.SummaryCacheEntry) error {
+	return nil
+}
+
+func (m *mockRepo) UpsertItemCanonicalLink(_ context.Context, _, _, _ string, _ float32) error {
+	return nil
+}
+
+func (m *mockRepo) UpsertItemLinkDebug(_ context.Context, _ string, _ bool, _ int, _ bool) error {
 	return nil
 }
 

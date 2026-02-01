@@ -435,6 +435,47 @@ WHERE lc.canonical_url = $1
 ORDER BY i.importance_score DESC
 LIMIT 1;
 
+-- name: UpsertItemLinkDebug :exec
+INSERT INTO item_link_debug (
+    item_id,
+    link_context_used,
+    link_content_len,
+    canonical_source_detected
+) VALUES (
+    $1, $2, $3, $4
+)
+ON CONFLICT (item_id) DO UPDATE SET
+    link_context_used = EXCLUDED.link_context_used,
+    link_content_len = EXCLUDED.link_content_len,
+    canonical_source_detected = EXCLUDED.canonical_source_detected,
+    updated_at = now();
+
+-- name: AddItemLinkLangQueries :exec
+INSERT INTO item_link_debug (
+    item_id,
+    link_lang_queries
+) VALUES (
+    $1, $2
+)
+ON CONFLICT (item_id) DO UPDATE SET
+    link_lang_queries = item_link_debug.link_lang_queries + EXCLUDED.link_lang_queries,
+    updated_at = now();
+
+-- name: UpsertItemCanonicalLink :exec
+INSERT INTO item_canonical_links (
+    item_id,
+    canonical_item_id,
+    canonical_url,
+    similarity
+) VALUES (
+    $1, $2, $3, $4
+)
+ON CONFLICT (item_id) DO UPDATE SET
+    canonical_item_id = EXCLUDED.canonical_item_id,
+    canonical_url = EXCLUDED.canonical_url,
+    similarity = EXCLUDED.similarity,
+    updated_at = now();
+
 -- name: GetChannelByPeerID :one
 SELECT id, tg_peer_id, username, title, is_active, added_at, added_by_tg_user, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at, weight_updated_by, auto_relevance_enabled, relevance_threshold_delta FROM channels WHERE tg_peer_id = $1;
 

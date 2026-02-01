@@ -150,6 +150,43 @@ func (db *DB) GetItemByCanonicalURL(ctx context.Context, canonicalURL, excludeRa
 	}, nil
 }
 
+func (db *DB) UpsertItemLinkDebug(ctx context.Context, itemID string, linkContextUsed bool, linkContentLen int, canonicalDetected bool) error {
+	if err := db.Queries.UpsertItemLinkDebug(ctx, sqlc.UpsertItemLinkDebugParams{
+		ItemID:                  toUUID(itemID),
+		LinkContextUsed:         linkContextUsed,
+		LinkContentLen:          safeIntToInt32(linkContentLen),
+		CanonicalSourceDetected: canonicalDetected,
+	}); err != nil {
+		return fmt.Errorf("upsert item link debug: %w", err)
+	}
+
+	return nil
+}
+
+func (db *DB) AddItemLinkLangQueries(ctx context.Context, itemID string, count int) error {
+	if err := db.Queries.AddItemLinkLangQueries(ctx, sqlc.AddItemLinkLangQueriesParams{
+		ItemID:          toUUID(itemID),
+		LinkLangQueries: safeIntToInt32(count),
+	}); err != nil {
+		return fmt.Errorf("add item link lang queries: %w", err)
+	}
+
+	return nil
+}
+
+func (db *DB) UpsertItemCanonicalLink(ctx context.Context, itemID, canonicalItemID, canonicalURL string, similarity float32) error {
+	if err := db.Queries.UpsertItemCanonicalLink(ctx, sqlc.UpsertItemCanonicalLinkParams{
+		ItemID:          toUUID(itemID),
+		CanonicalItemID: toUUID(canonicalItemID),
+		CanonicalUrl:    SanitizeUTF8(canonicalURL),
+		Similarity:      toFloat4(similarity),
+	}); err != nil {
+		return fmt.Errorf("upsert item canonical link: %w", err)
+	}
+
+	return nil
+}
+
 func (db *DB) FindSimilarIrrelevantItem(ctx context.Context, embedding []float32, since time.Time) (*SimilarIrrelevantItem, error) {
 	var (
 		itemID     pgtype.UUID

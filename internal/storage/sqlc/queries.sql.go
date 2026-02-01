@@ -76,6 +76,28 @@ func (q *Queries) AddFilter(ctx context.Context, arg AddFilterParams) error {
 	return err
 }
 
+const addItemLinkLangQueries = `-- name: AddItemLinkLangQueries :exec
+INSERT INTO item_link_debug (
+    item_id,
+    link_lang_queries
+) VALUES (
+    $1, $2
+)
+ON CONFLICT (item_id) DO UPDATE SET
+    link_lang_queries = item_link_debug.link_lang_queries + EXCLUDED.link_lang_queries,
+    updated_at = now()
+`
+
+type AddItemLinkLangQueriesParams struct {
+	ItemID          pgtype.UUID `json:"item_id"`
+	LinkLangQueries int32       `json:"link_lang_queries"`
+}
+
+func (q *Queries) AddItemLinkLangQueries(ctx context.Context, arg AddItemLinkLangQueriesParams) error {
+	_, err := q.db.Exec(ctx, addItemLinkLangQueries, arg.ItemID, arg.LinkLangQueries)
+	return err
+}
+
 const addSettingHistory = `-- name: AddSettingHistory :exec
 INSERT INTO setting_history (key, old_value, new_value, changed_by)
 VALUES ($1, $2, $3, $4)
@@ -3953,6 +3975,72 @@ func (q *Queries) UpsertGlobalRatingStats(ctx context.Context, arg UpsertGlobalR
 		arg.WeightedIrrelevant,
 		arg.WeightedTotal,
 		arg.RatingCount,
+	)
+	return err
+}
+
+const upsertItemCanonicalLink = `-- name: UpsertItemCanonicalLink :exec
+INSERT INTO item_canonical_links (
+    item_id,
+    canonical_item_id,
+    canonical_url,
+    similarity
+) VALUES (
+    $1, $2, $3, $4
+)
+ON CONFLICT (item_id) DO UPDATE SET
+    canonical_item_id = EXCLUDED.canonical_item_id,
+    canonical_url = EXCLUDED.canonical_url,
+    similarity = EXCLUDED.similarity,
+    updated_at = now()
+`
+
+type UpsertItemCanonicalLinkParams struct {
+	ItemID          pgtype.UUID   `json:"item_id"`
+	CanonicalItemID pgtype.UUID   `json:"canonical_item_id"`
+	CanonicalUrl    string        `json:"canonical_url"`
+	Similarity      pgtype.Float4 `json:"similarity"`
+}
+
+func (q *Queries) UpsertItemCanonicalLink(ctx context.Context, arg UpsertItemCanonicalLinkParams) error {
+	_, err := q.db.Exec(ctx, upsertItemCanonicalLink,
+		arg.ItemID,
+		arg.CanonicalItemID,
+		arg.CanonicalUrl,
+		arg.Similarity,
+	)
+	return err
+}
+
+const upsertItemLinkDebug = `-- name: UpsertItemLinkDebug :exec
+INSERT INTO item_link_debug (
+    item_id,
+    link_context_used,
+    link_content_len,
+    canonical_source_detected
+) VALUES (
+    $1, $2, $3, $4
+)
+ON CONFLICT (item_id) DO UPDATE SET
+    link_context_used = EXCLUDED.link_context_used,
+    link_content_len = EXCLUDED.link_content_len,
+    canonical_source_detected = EXCLUDED.canonical_source_detected,
+    updated_at = now()
+`
+
+type UpsertItemLinkDebugParams struct {
+	ItemID                  pgtype.UUID `json:"item_id"`
+	LinkContextUsed         bool        `json:"link_context_used"`
+	LinkContentLen          int32       `json:"link_content_len"`
+	CanonicalSourceDetected bool        `json:"canonical_source_detected"`
+}
+
+func (q *Queries) UpsertItemLinkDebug(ctx context.Context, arg UpsertItemLinkDebugParams) error {
+	_, err := q.db.Exec(ctx, upsertItemLinkDebug,
+		arg.ItemID,
+		arg.LinkContextUsed,
+		arg.LinkContentLen,
+		arg.CanonicalSourceDetected,
 	)
 	return err
 }

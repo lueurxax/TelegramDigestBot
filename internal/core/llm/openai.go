@@ -464,7 +464,12 @@ func (c *openaiClient) buildResolvedLinksText(links []domain.ResolvedLink) strin
 				limit = truncateLengthLong
 			}
 
-			text += fmt.Sprintf("[Web] %s Title: %s Content: %s ", link.Domain, link.Title, truncate(link.Content, limit))
+			content := strings.TrimSpace(link.Content)
+			if content == "" {
+				content = strings.TrimSpace(strings.Join([]string{link.Title, link.Description}, " "))
+			}
+
+			text += fmt.Sprintf("[Web] %s Title: %s Content: %s ", link.Domain, link.Title, truncate(content, limit))
 		}
 	}
 

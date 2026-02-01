@@ -208,6 +208,10 @@ func (m *mockRepository) GetClaimsForSource(_ context.Context, _ string) ([]db.E
 	return nil, nil
 }
 
+func (m *mockRepository) AddItemLinkLangQueries(_ context.Context, _ string, _ int) error {
+	return nil
+}
+
 func TestWorker_generateClaimEmbedding(t *testing.T) {
 	logger := zerolog.Nop()
 

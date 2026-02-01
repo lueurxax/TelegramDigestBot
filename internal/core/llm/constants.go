@@ -45,8 +45,15 @@ const (
 
 // Log key strings
 const (
-	logKeyTask  = "task"
-	logKeyModel = "model"
+	logKeyTask         = "task"
+	logKeyModel        = "model"
+	logKeyMaxTokens    = "max_tokens"
+	logKeyOutputTokens = "output_tokens"
+)
+
+// Log message strings
+const (
+	logMsgTruncated = "LLM output truncated due to max_tokens limit"
 )
 
 // Default topic when none is available

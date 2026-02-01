@@ -206,6 +206,7 @@ type apiCallResult struct {
 	Text             string
 	PromptTokens     int
 	CompletionTokens int
+	FinishReason     string
 }
 
 // bulletExtractionHelper handles common bullet extraction logic across providers.

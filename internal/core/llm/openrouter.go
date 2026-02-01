@@ -46,6 +46,9 @@ const (
 
 	// Priority constant for OpenRouter.
 	PriorityFourthFallback = 5
+
+	// Finish reason indicating truncation due to token limit (OpenAI-compatible).
+	openRouterFinishReasonLength = "length"
 )
 
 // OpenRouter errors.
@@ -222,6 +225,7 @@ type openRouterResult struct {
 	Text             string
 	PromptTokens     int
 	CompletionTokens int
+	FinishReason     string
 }
 
 // extractResponseText extracts the text content and usage from OpenRouter response.
@@ -239,7 +243,19 @@ func (p *openRouterProvider) extractResponseText(body []byte) (openRouterResult,
 		Text:             resp.Choices[0].Message.Content,
 		PromptTokens:     resp.Usage.PromptTokens,
 		CompletionTokens: resp.Usage.CompletionTokens,
+		FinishReason:     resp.Choices[0].FinishReason,
 	}, nil
+}
+
+// logTruncationWarning logs a warning if the response was truncated due to max_tokens limit.
+func (p *openRouterProvider) logTruncationWarning(result openRouterResult, task string, maxTokens int) {
+	if result.FinishReason == openRouterFinishReasonLength {
+		p.logger.Warn().
+			Str(logKeyTask, task).
+			Int(logKeyMaxTokens, maxTokens).
+			Int(logKeyOutputTokens, result.CompletionTokens).
+			Msg(logMsgTruncated)
+	}
 }
 
 // ProcessBatch implements Provider interface.
@@ -400,7 +416,7 @@ func (p *openRouterProvider) SummarizeCluster(ctx context.Context, items []domai
 	prompt := buildClusterSummaryPrompt(items, nil, targetLanguage, tone, defaultClusterSummaryPrompt)
 	resolvedModel := p.resolveModel(model)
 
-	result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensTiny)
+	result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensShort)
 	if err != nil {
 		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, 0, 0, false)
 
@@ -408,11 +424,14 @@ func (p *openRouterProvider) SummarizeCluster(ctx context.Context, items []domai
 	}
 
 	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true)
+	p.logTruncationWarning(result, TaskCluster, openRouterMaxTokensShort)
 
 	return strings.TrimSpace(result.Text), nil
 }
 
 // SummarizeClusterWithEvidence implements Provider interface.
+//
+//nolint:dupl // mirrored implementation across providers
 func (p *openRouterProvider) SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, model, tone string) (string, error) {
 	if len(items) == 0 {
 		return "", nil
@@ -425,7 +444,7 @@ func (p *openRouterProvider) SummarizeClusterWithEvidence(ctx context.Context, i
 	prompt := buildClusterSummaryPrompt(items, evidence, targetLanguage, tone, defaultClusterSummaryPrompt)
 	resolvedModel := p.resolveModel(model)
 
-	result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensTiny)
+	result, err := p.callOpenRouterAPI(ctx, prompt, model, openRouterMaxTokensShort)
 	if err != nil {
 		p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, 0, 0, false)
 
@@ -433,6 +452,7 @@ func (p *openRouterProvider) SummarizeClusterWithEvidence(ctx context.Context, i
 	}
 
 	p.usageRecorder.RecordTokenUsage(string(ProviderOpenRouter), resolvedModel, TaskCluster, result.PromptTokens, result.CompletionTokens, true)
+	p.logTruncationWarning(result, TaskCluster, openRouterMaxTokensShort)
 
 	return strings.TrimSpace(result.Text), nil
 }

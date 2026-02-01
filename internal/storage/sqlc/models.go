@@ -347,6 +347,15 @@ type ItemBullet struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type ItemCanonicalLink struct {
+	ItemID          pgtype.UUID        `json:"item_id"`
+	CanonicalItemID pgtype.UUID        `json:"canonical_item_id"`
+	CanonicalUrl    string             `json:"canonical_url"`
+	Similarity      pgtype.Float4      `json:"similarity"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ItemEvidence struct {
 	ID                pgtype.UUID        `json:"id"`
 	ItemID            pgtype.UUID        `json:"item_id"`
@@ -366,6 +375,15 @@ type ItemFactCheck struct {
 	Rating    pgtype.Text        `json:"rating"`
 	MatchedAt pgtype.Timestamptz `json:"matched_at"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type ItemLinkDebug struct {
+	ItemID                  pgtype.UUID        `json:"item_id"`
+	LinkContextUsed         bool               `json:"link_context_used"`
+	LinkContentLen          int32              `json:"link_content_len"`
+	LinkLangQueries         int32              `json:"link_lang_queries"`
+	CanonicalSourceDetected bool               `json:"canonical_source_detected"`
+	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ItemRating struct {

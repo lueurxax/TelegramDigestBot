@@ -34,6 +34,9 @@ const (
 
 	// Relevance gate default confidence.
 	anthropicDefaultConfidence = 0.5
+
+	// Stop reasons from Anthropic API.
+	stopReasonMaxTokens = "max_tokens"
 )
 
 // anthropicProvider implements the Provider interface for Anthropic Claude.
@@ -119,6 +122,15 @@ func (p *anthropicProvider) completeWithMetrics(ctx context.Context, prompt, mod
 	}
 
 	p.usageRecorder.RecordTokenUsage(string(ProviderAnthropic), string(resolvedModel), task, int(resp.Usage.InputTokens), int(resp.Usage.OutputTokens), true)
+
+	// Check for truncation due to max_tokens limit
+	if resp.StopReason == stopReasonMaxTokens {
+		p.logger.Warn().
+			Str(logKeyTask, task).
+			Int64(logKeyMaxTokens, maxTokens).
+			Int(logKeyOutputTokens, int(resp.Usage.OutputTokens)).
+			Msg(logMsgTruncated)
+	}
 
 	return strings.TrimSpace(extractTextFromResponse(resp)), nil
 }
@@ -288,7 +300,7 @@ func (p *anthropicProvider) SummarizeCluster(ctx context.Context, items []domain
 
 	prompt := buildClusterSummaryPrompt(items, nil, targetLanguage, tone, defaultClusterSummaryPrompt)
 
-	return p.completeWithMetrics(ctx, prompt, model, TaskCluster, anthropicMaxTokensTiny, "anthropic cluster summary")
+	return p.completeWithMetrics(ctx, prompt, model, TaskCluster, anthropicMaxTokensShort, "anthropic cluster summary")
 }
 
 // SummarizeClusterWithEvidence implements Provider interface.
@@ -303,7 +315,7 @@ func (p *anthropicProvider) SummarizeClusterWithEvidence(ctx context.Context, it
 
 	prompt := buildClusterSummaryPrompt(items, evidence, targetLanguage, tone, defaultClusterSummaryPrompt)
 
-	return p.completeWithMetrics(ctx, prompt, model, TaskCluster, anthropicMaxTokensTiny, "anthropic cluster summary with evidence")
+	return p.completeWithMetrics(ctx, prompt, model, TaskCluster, anthropicMaxTokensShort, "anthropic cluster summary with evidence")
 }
 
 // GenerateClusterTopic implements Provider interface.

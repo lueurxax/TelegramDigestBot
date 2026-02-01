@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -41,6 +42,7 @@ type Repository interface {
 	SaveRelevanceGateLog(ctx context.Context, rawMsgID string, decision string, confidence *float32, reason, model, gateVersion string) error
 	SaveRawMessageDropLog(ctx context.Context, rawMsgID, reason, detail string) error
 	SaveEmbedding(ctx context.Context, itemID string, embedding []float32) error
+	GetItemEmbedding(ctx context.Context, itemID string) ([]float32, error)
 	EnqueueFactCheck(ctx context.Context, itemID, claim, normalizedClaim string) error
 	CountPendingFactChecks(ctx context.Context) (int, error)
 	EnqueueEnrichment(ctx context.Context, itemID, summary string) error
@@ -53,6 +55,8 @@ type Repository interface {
 	GetSummaryCache(ctx context.Context, canonicalHash, digestLanguage string) (*db.SummaryCacheEntry, error)
 	UpsertSummaryCache(ctx context.Context, entry *db.SummaryCacheEntry) error
 	GetItemByCanonicalURL(ctx context.Context, canonicalURL, excludeRawMsgID string) (*db.CanonicalItem, error)
+	UpsertItemCanonicalLink(ctx context.Context, itemID, canonicalItemID, canonicalURL string, similarity float32) error
+	UpsertItemLinkDebug(ctx context.Context, itemID string, linkContextUsed bool, linkContentLen int, canonicalDetected bool) error
 	LinkMessageToLink(ctx context.Context, rawMsgID, linkCacheID string, position int) error
 	// Bullet extraction
 	InsertBullet(ctx context.Context, bullet *db.Bullet) error
@@ -829,8 +833,8 @@ func (p *Pipeline) checkSameChannelDuplicate(ctx context.Context, logger zerolog
 	}
 
 	threshold := p.cfg.ClusterSimilarityThreshold
-	if threshold < 0.85 {
-		threshold = 0.85
+	if threshold < MinSameChannelSimilarityThreshold {
+		threshold = MinSameChannelSimilarityThreshold
 	}
 
 	dupID, err := p.database.FindSimilarItemForChannel(ctx, emb, m.ChannelID, threshold, minCreatedAt)
@@ -1101,12 +1105,15 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 	rejectedCount := 0
 
 	for i, res := range results {
+		debugInfo := p.buildLinkDebug(candidates[i], s)
+		canonicalMatch := p.resolveCanonicalMatch(ctx, logger, candidates[i], embeddings[candidates[i].ID], debugInfo.canonicalURL)
+
 		lang, langSource := resolveItemLanguage(candidates[i], res)
 		res.Language = lang
 		stripPhrases := s.summaryStripPhrasesFor(lang)
 
 		res.Summary = postProcessSummary(res.Summary, stripPhrases)
-		p.applyCanonicalSummary(ctx, logger, candidates[i], &res, stripPhrases, s)
+		p.applyCanonicalSummary(logger, &res, stripPhrases, canonicalMatch, p.canonicalSimilarityThreshold())
 		res.Summary = p.tryFallbackSummary(res.Summary, candidates[i].Text, stripPhrases)
 
 		if res.Summary == "" {
@@ -1133,6 +1140,8 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 		}
 
 		ready, rejected := p.storeAndCount(ctx, logger, candidates[i], item, embeddings, extractedBullets, s)
+		p.persistLinkDebug(ctx, logger, item, debugInfo, canonicalMatch)
+
 		readyCount += ready
 		rejectedCount += rejected
 	}
@@ -1155,54 +1164,93 @@ func (p *Pipeline) tryFallbackSummary(summary, text string, stripPhrases []strin
 	return summary
 }
 
-func (p *Pipeline) applyCanonicalSummary(ctx context.Context, logger zerolog.Logger, candidate llm.MessageInput, res *llm.BatchResult, stripPhrases []string, s *pipelineSettings) {
-	if res == nil || s == nil {
+type linkDebugInfo struct {
+	linkContextUsed   bool
+	linkContentLen    int
+	canonicalDetected bool
+	canonicalURL      string
+}
+
+type canonicalMatch struct {
+	url        string
+	item       *db.CanonicalItem
+	similarity float32
+}
+
+func (p *Pipeline) applyCanonicalSummary(logger zerolog.Logger, res *llm.BatchResult, stripPhrases []string, match *canonicalMatch, similarityThreshold float32) {
+	if res == nil || match == nil || match.item == nil {
 		return
 	}
 
-	canonicalURL := p.selectTrustedCanonicalURL(candidate, s)
-	if canonicalURL == "" {
+	if strings.TrimSpace(match.item.Summary) == "" {
 		return
 	}
 
-	observability.CanonicalSourceDetectedTotal.Inc()
-
-	if !isWeakSummary(res.Summary) {
+	if !isWeakSummary(res.Summary) && match.similarity < similarityThreshold {
 		return
 	}
 
-	canonicalItem, err := p.database.GetItemByCanonicalURL(ctx, canonicalURL, candidate.ID)
-	if err != nil {
-		logger.Warn().Err(err).Str(LogFieldMsgID, candidate.ID).Msg("failed to resolve canonical item")
-		return
+	res.Summary = postProcessSummary(match.item.Summary, stripPhrases)
+	if match.item.Topic != "" {
+		res.Topic = match.item.Topic
 	}
 
-	if canonicalItem == nil || strings.TrimSpace(canonicalItem.Summary) == "" {
-		return
-	}
-
-	res.Summary = postProcessSummary(canonicalItem.Summary, stripPhrases)
-	if canonicalItem.Topic != "" {
-		res.Topic = canonicalItem.Topic
-	}
-
-	if canonicalItem.Language != "" {
-		res.Language = canonicalItem.Language
+	if match.item.Language != "" {
+		res.Language = match.item.Language
 	}
 
 	logger.Info().
-		Str(LogFieldMsgID, candidate.ID).
-		Str("canonical_url", canonicalURL).
-		Str("canonical_item_id", canonicalItem.ItemID).
+		Str("canonical_url", match.url).
+		Str("canonical_item_id", match.item.ItemID).
+		Float32(LogFieldSimilarity, match.similarity).
 		Msg("reused canonical item summary")
 }
 
-func (p *Pipeline) selectTrustedCanonicalURL(candidate llm.MessageInput, s *pipelineSettings) string {
-	if len(candidate.ResolvedLinks) == 0 {
-		return ""
+func (p *Pipeline) canonicalSimilarityThreshold() float32 {
+	threshold := p.cfg.ClusterSimilarityThreshold
+	if threshold <= 0 {
+		return DefaultCanonicalSimilarityThreshold
 	}
 
-	linkCfg := linkscore.LinkContextConfig{
+	return threshold
+}
+
+func (p *Pipeline) buildLinkDebug(candidate llm.MessageInput, s *pipelineSettings) linkDebugInfo {
+	if s == nil || len(candidate.ResolvedLinks) == 0 {
+		return linkDebugInfo{}
+	}
+
+	linkCfg := buildLinkContextConfig(s)
+	primary, supplemental := linkscore.SelectLinkContexts(candidate.Text, candidate.PreviewText, candidate.ResolvedLinks, linkCfg)
+	useContext := shouldIncludeLinkContextForSummary(candidate.Text, s) && (primary != nil || supplemental != nil)
+
+	contentLen := 0
+
+	if useContext {
+		contentLen = linkContextContentLength(primary, supplemental)
+	}
+
+	canonicalURL := findTrustedCanonicalURL(candidate.ResolvedLinks, primary, supplemental, s)
+
+	canonicalDetected := canonicalURL != ""
+	if canonicalDetected {
+		observability.CanonicalSourceDetectedTotal.Inc()
+	}
+
+	return linkDebugInfo{
+		linkContextUsed:   useContext,
+		linkContentLen:    contentLen,
+		canonicalDetected: canonicalDetected,
+		canonicalURL:      canonicalURL,
+	}
+}
+
+func buildLinkContextConfig(s *pipelineSettings) linkscore.LinkContextConfig {
+	if s == nil {
+		return linkscore.LinkContextConfig{}
+	}
+
+	return linkscore.LinkContextConfig{
 		PrimaryMinWords:      s.linkPrimaryMinWords,
 		PrimaryShortMsgChars: s.linkPrimaryShortMsgChars,
 		PrimaryAllowlist:     s.linkPrimaryAllowlist,
@@ -1210,17 +1258,102 @@ func (p *Pipeline) selectTrustedCanonicalURL(candidate llm.MessageInput, s *pipe
 		PrimaryMaxLinks:      s.linkPrimaryMaxLinks,
 		DonationDenylist:     s.linkPrimaryDonationDeny,
 	}
+}
 
-	primary, supplemental := linkscore.SelectLinkContexts(candidate.Text, candidate.PreviewText, candidate.ResolvedLinks, linkCfg)
-	candidates := buildCanonicalLinkCandidates(candidate.ResolvedLinks, primary, supplemental)
+func linkContextContentLength(primary, supplemental *linkscore.LinkContext) int {
+	if primary != nil {
+		return textRuneLength(primary.Content)
+	}
 
-	for _, link := range candidates {
-		if canonicalURL, _ := linkscore.TrustedCanonical(link, s.linkCanonicalAllowlist, s.linkCanonicalTrusted, s.linkCanonicalDenylist); canonicalURL != "" {
-			return canonicalURL
+	if supplemental != nil {
+		return textRuneLength(supplemental.Content)
+	}
+
+	return 0
+}
+
+func findTrustedCanonicalURL(links []domain.ResolvedLink, primary, supplemental *linkscore.LinkContext, s *pipelineSettings) string {
+	if s == nil {
+		return ""
+	}
+
+	for _, link := range buildCanonicalLinkCandidates(links, primary, supplemental) {
+		if url, _ := linkscore.TrustedCanonical(link, s.linkCanonicalAllowlist, s.linkCanonicalTrusted, s.linkCanonicalDenylist); url != "" {
+			return url
 		}
 	}
 
 	return ""
+}
+
+func (p *Pipeline) resolveCanonicalMatch(ctx context.Context, logger zerolog.Logger, candidate llm.MessageInput, embedding []float32, canonicalURL string) *canonicalMatch {
+	if canonicalURL == "" {
+		return nil
+	}
+
+	canonicalItem, err := p.database.GetItemByCanonicalURL(ctx, canonicalURL, candidate.ID)
+	if err != nil {
+		logger.Warn().Err(err).Str(LogFieldMsgID, candidate.ID).Msg("failed to resolve canonical item")
+		return &canonicalMatch{url: canonicalURL}
+	}
+
+	if canonicalItem == nil {
+		return &canonicalMatch{url: canonicalURL}
+	}
+
+	similarity := float32(-1)
+
+	if len(embedding) > 0 {
+		canonicalEmbedding, embErr := p.database.GetItemEmbedding(ctx, canonicalItem.ItemID)
+		if embErr != nil {
+			logger.Warn().Err(embErr).Str(LogFieldMsgID, candidate.ID).Msg("failed to load canonical embedding")
+		} else if len(canonicalEmbedding) > 0 {
+			similarity = float32(dedup.CosineSimilarity(embedding, canonicalEmbedding))
+		}
+	}
+
+	return &canonicalMatch{
+		url:        canonicalURL,
+		item:       canonicalItem,
+		similarity: similarity,
+	}
+}
+
+func (p *Pipeline) persistLinkDebug(ctx context.Context, logger zerolog.Logger, item *db.Item, debugInfo linkDebugInfo, match *canonicalMatch) {
+	if item == nil || item.ID == "" {
+		return
+	}
+
+	if err := p.database.UpsertItemLinkDebug(ctx, item.ID, debugInfo.linkContextUsed, debugInfo.linkContentLen, debugInfo.canonicalDetected); err != nil {
+		logger.Warn().Err(err).Str(LogFieldItemID, item.ID).Msg("failed to upsert item link debug")
+	}
+
+	if match == nil || match.item == nil {
+		return
+	}
+
+	if err := p.database.UpsertItemCanonicalLink(ctx, item.ID, match.item.ItemID, match.url, match.similarity); err != nil {
+		logger.Warn().Err(err).Str(LogFieldItemID, item.ID).Msg("failed to upsert canonical link")
+	}
+}
+
+func shouldIncludeLinkContextForSummary(text string, s *pipelineSettings) bool {
+	scope := strings.ToLower(strings.TrimSpace(s.linkEnrichmentScope))
+	if scope == "" || strings.Contains(scope, domain.ScopeSummary) {
+		return true
+	}
+
+	shortThreshold := s.linkPrimaryShortMsgChars
+	if shortThreshold <= 0 {
+		shortThreshold = 120
+	}
+
+	isShort := utf8.RuneCountInString(strings.TrimSpace(text)) < shortThreshold
+	if !isShort {
+		return false
+	}
+
+	return strings.Contains(scope, domain.ScopeTopic) || strings.Contains(scope, domain.ScopeRelevance)
 }
 
 func buildCanonicalLinkCandidates(links []domain.ResolvedLink, primary, supplemental *linkscore.LinkContext) []domain.ResolvedLink {

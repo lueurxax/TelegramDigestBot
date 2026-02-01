@@ -16,6 +16,7 @@ type Querier interface {
 	AddChannelByInviteLink(ctx context.Context, inviteLink pgtype.Text) error
 	AddChannelByUsername(ctx context.Context, username pgtype.Text) error
 	AddFilter(ctx context.Context, arg AddFilterParams) error
+	AddItemLinkLangQueries(ctx context.Context, arg AddItemLinkLangQueriesParams) error
 	AddSettingHistory(ctx context.Context, arg AddSettingHistoryParams) error
 	AddToCluster(ctx context.Context, arg AddToClusterParams) error
 	CheckAndMarkDiscoveriesExtracted(ctx context.Context, arg CheckAndMarkDiscoveriesExtractedParams) (pgtype.UUID, error)
@@ -168,6 +169,8 @@ type Querier interface {
 	// Channel Discovery queries
 	UpsertDiscoveredChannelByUsername(ctx context.Context, arg UpsertDiscoveredChannelByUsernameParams) error
 	UpsertGlobalRatingStats(ctx context.Context, arg UpsertGlobalRatingStatsParams) error
+	UpsertItemCanonicalLink(ctx context.Context, arg UpsertItemCanonicalLinkParams) error
+	UpsertItemLinkDebug(ctx context.Context, arg UpsertItemLinkDebugParams) error
 	UpsertSummaryCache(ctx context.Context, arg UpsertSummaryCacheParams) error
 }
 

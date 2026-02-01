@@ -95,6 +95,7 @@ type Repository interface {
 	GetRecentMessagesForChannel(ctx context.Context, channelID string, before time.Time, limit int) ([]string, error)
 	// Claims retrieval for cached sources
 	GetClaimsForSource(ctx context.Context, sourceID string) ([]db.EvidenceClaim, error)
+	AddItemLinkLangQueries(ctx context.Context, itemID string, count int) error
 }
 
 // EmbeddingClient provides embedding generation for semantic deduplication.
@@ -381,11 +382,11 @@ func (w *Worker) generateQueries(ctx context.Context, item *db.EnrichmentQueueIt
 	// Always try LLM query generation when LLM client is available
 	if w.queryLLM != nil {
 		if queries := w.generateQueriesWithLLM(ctx, item, links); len(queries) > 0 {
-			return w.appendLinkLanguageQueries(queries, links)
+			return w.appendLinkLanguageQueries(ctx, queries, links, item.ItemID)
 		}
 	}
 
-	return w.appendLinkLanguageQueries(w.generateQueriesHeuristic(item, links), links)
+	return w.appendLinkLanguageQueries(ctx, w.generateQueriesHeuristic(item, links), links, item.ItemID)
 }
 
 func (w *Worker) generateQueriesHeuristic(item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []GeneratedQuery {
@@ -397,7 +398,7 @@ func (w *Worker) generateQueriesHeuristic(item *db.EnrichmentQueueItem, links []
 	return queries
 }
 
-func (w *Worker) appendLinkLanguageQueries(queries []GeneratedQuery, links []domain.ResolvedLink) []GeneratedQuery {
+func (w *Worker) appendLinkLanguageQueries(ctx context.Context, queries []GeneratedQuery, links []domain.ResolvedLink, itemID string) []GeneratedQuery {
 	if len(links) == 0 {
 		return queries
 	}
@@ -411,8 +412,19 @@ func (w *Worker) appendLinkLanguageQueries(queries []GeneratedQuery, links []dom
 	}
 
 	observability.LinkLanguageQueriesTotal.Add(float64(len(linkQueries)))
+	w.recordLinkLanguageQueries(ctx, itemID, len(linkQueries))
 
 	return append(linkQueries, queries...)
+}
+
+func (w *Worker) recordLinkLanguageQueries(ctx context.Context, itemID string, count int) {
+	if itemID == "" || count <= 0 || w.db == nil {
+		return
+	}
+
+	if err := w.db.AddItemLinkLangQueries(ctx, itemID, count); err != nil {
+		w.logger.Warn().Err(err).Str(logKeyItemID, itemID).Msg("failed to record link-language query count")
+	}
 }
 
 func (w *Worker) limitLinks(links []domain.ResolvedLink) []domain.ResolvedLink {

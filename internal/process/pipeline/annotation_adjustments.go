@@ -111,7 +111,7 @@ func (p *Pipeline) applyIrrelevantSuppression(
 		res.ImportanceScore = 0
 		res.RelevanceScore = 0
 
-		logger.Debug().Str(LogFieldMsgID, msgID).Float64("similarity", match.Similarity).Msg("rejected due to irrelevant similarity")
+		logger.Debug().Str(LogFieldMsgID, msgID).Float64(LogFieldSimilarity, match.Similarity).Msg("rejected due to irrelevant similarity")
 
 		return true, match.Similarity
 	}
