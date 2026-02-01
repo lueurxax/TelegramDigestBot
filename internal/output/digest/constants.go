@@ -106,6 +106,14 @@ const (
 	DigestSourceVia            = "\n    ↳ <i>via %s</i>"
 )
 
+// Low reliability badge constants (no config overrides).
+const (
+	LowReliabilityLookbackDays   = 14
+	LowReliabilityHalfLifeDays   = 7
+	LowReliabilityMinRatings     = 10
+	LowReliabilityScoreThreshold = -0.25
+)
+
 // Magic number constants for auto-weight calculation
 const (
 	AutoWeightDefaultMinMessages       = 10

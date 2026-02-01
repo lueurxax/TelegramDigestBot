@@ -68,6 +68,7 @@ type Repository interface {
 	GetScoreDebugStats(ctx context.Context, since time.Time) (db.ScoreDebugStats, error)
 	GetItemStatusStats(ctx context.Context, since time.Time) (db.ItemStatusStats, error)
 	GetItemRatingSummary(ctx context.Context, since time.Time) ([]db.RatingSummary, error)
+	GetWeightedChannelRatingSummary(ctx context.Context, since time.Time, halfLifeDays float64) ([]db.WeightedRatingSummary, error)
 }
 
 // Compile-time assertion that *db.DB implements Repository.

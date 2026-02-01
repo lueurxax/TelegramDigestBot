@@ -112,6 +112,37 @@ var (
 		Help: "Total number of item ratings by rating value",
 	}, []string{"rating"})
 
+	AnnotationBiasAppliedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_annotation_bias_applied_total",
+		Help: "Total number of items adjusted by annotation-driven channel bias",
+	}, []string{"channel"})
+
+	IrrelevantSimilarityHitsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_irrelevant_similarity_hits_total",
+		Help: "Total number of items with similarity to irrelevant-rated items",
+	})
+
+	IrrelevantSimilarityRejectsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_irrelevant_similarity_rejects_total",
+		Help: "Total number of items rejected due to irrelevant similarity",
+	})
+
+	IrrelevantSimilarityScore = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "digest_irrelevant_similarity_score",
+		Help:    "Similarity scores for items matched against irrelevant ratings",
+		Buckets: []float64{0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.92, 0.94, 0.96, 0.98, 1.0},
+	})
+
+	UncertaintyFlaggedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_uncertainty_flagged_total",
+		Help: "Total number of items flagged as needs-review",
+	})
+
+	LowReliabilityBadgeTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_low_reliability_badge_total",
+		Help: "Total number of items marked with low-reliability badges",
+	})
+
 	LowSignalRate = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "digest_low_signal_rate",
 		Help: "Estimated low-signal rate in recent windows",

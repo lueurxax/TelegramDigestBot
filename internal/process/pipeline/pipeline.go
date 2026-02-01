@@ -47,6 +47,8 @@ type Repository interface {
 	CheckStrictDuplicate(ctx context.Context, hash string, id string) (bool, error)
 	FindSimilarItem(ctx context.Context, embedding []float32, threshold float32, minCreatedAt time.Time) (string, error)
 	FindSimilarItemForChannel(ctx context.Context, embedding []float32, channelID string, threshold float32, minCreatedAt time.Time) (string, error)
+	FindSimilarIrrelevantItem(ctx context.Context, embedding []float32, since time.Time) (*db.SimilarIrrelevantItem, error)
+	GetWeightedChannelRatingSummary(ctx context.Context, since time.Time, halfLifeDays float64) ([]db.WeightedRatingSummary, error)
 	GetSummaryCache(ctx context.Context, canonicalHash, digestLanguage string) (*db.SummaryCacheEntry, error)
 	UpsertSummaryCache(ctx context.Context, entry *db.SummaryCacheEntry) error
 	LinkMessageToLink(ctx context.Context, rawMsgID, linkCacheID string, position int) error
@@ -1082,6 +1084,8 @@ func applyTieredResults(results []llm.BatchResult, tieredResults []llm.BatchResu
 func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, candidates []llm.MessageInput, results []llm.BatchResult, embeddings map[string][]float32, s *pipelineSettings) error {
 	p.normalizeResults(candidates, results, s)
 
+	channelBiases := p.loadChannelBias(ctx, logger)
+
 	readyCount := 0
 	rejectedCount := 0
 
@@ -1100,11 +1104,17 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 		}
 
 		extractedBullets, bulletSummary := p.processBullets(ctx, logger, candidates[i], &res, s)
+		bias := p.applyChannelBias(candidates[i], &res, channelBiases)
+		forceReject, _ := p.applyIrrelevantSuppression(ctx, logger, candidates[i].ID, embeddings[candidates[i].ID], &res)
 
-		item := p.createItem(logger, candidates[i], res, s)
+		item := p.createItem(logger, candidates[i], res, bias, s)
 		item.Language = lang
 		item.LanguageSource = langSource
 		p.applyBulletMetadata(item, extractedBullets, bulletSummary)
+
+		if forceReject {
+			item.Status = StatusRejected
+		}
 
 		if item.Status == StatusReady {
 			p.finalizeReadyItem(ctx, logger, candidates[i].ID, item, s)
@@ -1258,8 +1268,8 @@ func (p *Pipeline) handleEmptySummary(ctx context.Context, logger zerolog.Logger
 	p.markProcessed(ctx, logger, msgID)
 }
 
-func (p *Pipeline) createItem(logger zerolog.Logger, c llm.MessageInput, res llm.BatchResult, s *pipelineSettings) *db.Item {
-	importance := p.calculateImportance(logger, c, res, s)
+func (p *Pipeline) createItem(logger zerolog.Logger, c llm.MessageInput, res llm.BatchResult, bias float32, s *pipelineSettings) *db.Item {
+	importance := p.calculateImportance(logger, c, res, bias, s)
 	status := p.determineStatus(c, res.RelevanceScore, s)
 
 	return &db.Item{
@@ -1273,7 +1283,7 @@ func (p *Pipeline) createItem(logger zerolog.Logger, c llm.MessageInput, res llm
 	}
 }
 
-func (p *Pipeline) calculateImportance(logger zerolog.Logger, c llm.MessageInput, res llm.BatchResult, s *pipelineSettings) float32 {
+func (p *Pipeline) calculateImportance(logger zerolog.Logger, c llm.MessageInput, res llm.BatchResult, bias float32, s *pipelineSettings) float32 {
 	channelWeight := c.ImportanceWeight
 	if channelWeight < MinChannelWeight {
 		channelWeight = MaxImportanceScore
@@ -1296,6 +1306,10 @@ func (p *Pipeline) calculateImportance(logger zerolog.Logger, c llm.MessageInput
 	}
 
 	importance = applyDomainBias(importance, c, s)
+
+	if bias != 0 {
+		importance = clampScore(importance + bias)
+	}
 
 	return importance
 }

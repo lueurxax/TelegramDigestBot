@@ -257,7 +257,7 @@ func TestFormatSummaryLine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := formatSummaryLine(tt.group, tt.includeTopic, tt.prefix, tt.summary)
+			got := formatSummaryLine(tt.group, tt.includeTopic, tt.prefix, tt.summary, false)
 
 			if !strings.Contains(got, tt.wantContains) {
 				t.Errorf("formatSummaryLine() = %q, want to contain %q", got, tt.wantContains)
@@ -1420,7 +1420,7 @@ func TestFormatSummaryLineMultipleTopics(t *testing.T) {
 			items: []db.Item{{Topic: "Technology"}},
 		}
 
-		got := formatSummaryLine(group, true, testPrefixLabel, testSummaryLabel)
+		got := formatSummaryLine(group, true, testPrefixLabel, testSummaryLabel, false)
 
 		if !strings.Contains(got, testTopicTechnology) {
 			t.Errorf("formatSummaryLine() should contain topic, got %q", got)
@@ -1432,7 +1432,7 @@ func TestFormatSummaryLineMultipleTopics(t *testing.T) {
 			items: []db.Item{{Topic: ""}},
 		}
 
-		got := formatSummaryLine(group, true, testPrefixLabel, testSummaryLabel)
+		got := formatSummaryLine(group, true, testPrefixLabel, testSummaryLabel, false)
 		// Should not include topic formatting when topic is empty
 
 		if strings.Contains(got, "<b>") {
@@ -1617,7 +1617,7 @@ func TestFormatSummaryLineAllTopics(t *testing.T) {
 				items: []db.Item{{Topic: topic}},
 			}
 
-			got := formatSummaryLine(group, true, EmojiStandard, "test summary")
+			got := formatSummaryLine(group, true, EmojiStandard, "test summary", false)
 
 			// Should contain the topic name
 
@@ -3044,7 +3044,7 @@ func TestFormatSummaryLineWithAllFields(t *testing.T) {
 
 	// Test with topic
 
-	got := formatSummaryLine(group, true, EmojiBreaking, group.summary)
+	got := formatSummaryLine(group, true, EmojiBreaking, group.summary, false)
 
 	if !strings.Contains(got, "Finance") {
 		t.Errorf("should contain topic, got %q", got)
@@ -3056,7 +3056,7 @@ func TestFormatSummaryLineWithAllFields(t *testing.T) {
 
 	// Test without topic
 
-	got2 := formatSummaryLine(group, false, EmojiNotable, group.summary)
+	got2 := formatSummaryLine(group, false, EmojiNotable, group.summary, false)
 
 	if strings.Contains(got2, "<b>Finance</b>") {
 		t.Errorf("should not contain topic when includeTopic=false, got %q", got2)

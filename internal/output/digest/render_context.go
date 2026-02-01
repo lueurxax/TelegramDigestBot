@@ -35,6 +35,7 @@ type digestRenderContext struct {
 	clusterSummaryCacheLoaded bool
 	expandLinksEnabled        bool
 	expandBaseURL             string
+	lowReliability            lowReliabilityIndex
 	logger                    *zerolog.Logger
 }
 
@@ -49,6 +50,7 @@ func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSetting
 
 	// Check if expanded view links are enabled (requires signing secret and base URL)
 	expandLinksEnabled := s.expandLinkGenerator != nil && s.cfg.ExpandedViewBaseURL != ""
+	lowReliability := s.loadLowReliabilityIndex(ctx, logger)
 
 	return &digestRenderContext{
 		scheduler:          s,
@@ -65,6 +67,7 @@ func (s *Scheduler) newRenderContext(ctx context.Context, settings digestSetting
 		evidence:           evidence,
 		expandLinksEnabled: expandLinksEnabled,
 		expandBaseURL:      s.cfg.ExpandedViewBaseURL,
+		lowReliability:     lowReliability,
 		logger:             logger,
 	}
 }

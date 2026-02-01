@@ -189,6 +189,21 @@
         gap: 6px;
         flex-direction: column;
       }
+      .review-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+      .review-toggle input { accent-color: var(--accent); }
+      .annotate-badge.needs-review {
+        background: rgba(240, 93, 94, 0.12);
+        border-color: rgba(240, 93, 94, 0.35);
+        color: var(--accent);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
       .annotate-btn {
         width: 32px;
         height: 32px;
@@ -347,6 +362,10 @@
         {{if .Items}}
         <div class="annotate-toolbar">
           <span class="muted">Selected: <span id="selected-count">0</span></span>
+          <label class="review-toggle">
+            <input type="checkbox" id="needs-review-toggle" />
+            Needs review only
+          </label>
           <button class="btn" type="button" data-batch="good">✅</button>
           <button class="btn" type="button" data-batch="bad">⚠️</button>
           <button class="btn" type="button" data-batch="irrelevant">🚫</button>
@@ -370,7 +389,7 @@
           </thead>
           <tbody>
             {{range .Items}}
-            <tr class="annotate-row" data-item-id="{{.ID}}" tabindex="0">
+            <tr class="annotate-row" data-item-id="{{.ID}}" data-needs-review="{{.NeedsReview}}" tabindex="0">
               <td><input type="checkbox" class="annotate-select" /></td>
               <td>{{truncate .Summary 160}}</td>
               <td>{{.Topic}}</td>
@@ -394,6 +413,8 @@
               <td>
                 {{if .LastRating}}
                 <span class="annotate-badge">{{.LastRating}}{{if .LastRatedAt}} • {{formatTimePtr .LastRatedAt}}{{end}}</span>
+                {{else if .NeedsReview}}
+                <span class="annotate-badge needs-review">Needs review</span>
                 {{else}}
                 -
                 {{end}}
@@ -458,11 +479,21 @@
     </main>
     <script>
       const selectedCount = document.getElementById("selected-count");
+      const needsReviewToggle = document.getElementById("needs-review-toggle");
       const rows = Array.from(document.querySelectorAll(".annotate-row"));
 
       function updateSelectedCount() {
         const count = rows.filter(r => r.querySelector(".annotate-select")?.checked).length;
         selectedCount.textContent = String(count);
+      }
+
+      function applyNeedsReviewFilter() {
+        if (!needsReviewToggle) return;
+        const onlyReview = needsReviewToggle.checked;
+        rows.forEach(row => {
+          const flag = row.dataset.needsReview === "true";
+          row.style.display = !onlyReview || flag ? "" : "none";
+        });
       }
 
       function setRowError(row, message) {
@@ -534,6 +565,11 @@
         const select = row.querySelector(".annotate-select");
         if (select) select.addEventListener("change", updateSelectedCount);
       });
+
+      if (needsReviewToggle) {
+        needsReviewToggle.addEventListener("change", applyNeedsReviewFilter);
+        applyNeedsReviewFilter();
+      }
 
       document.querySelectorAll("[data-batch]").forEach(btn => {
         btn.addEventListener("click", async () => {

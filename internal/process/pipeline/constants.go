@@ -78,6 +78,19 @@ const (
 	// Deduplication window defaults
 	DefaultDedupWindowHours            = 36
 	DefaultDedupSameChannelWindowHours = 6
+
+	// Annotation-driven processing defaults (no config overrides)
+	AnnotationBiasLookbackDays       = 14
+	AnnotationBiasHalfLifeDays       = 7
+	AnnotationBiasMinRatings         = 10
+	AnnotationBiasScale              = 0.12
+	AnnotationBiasMax                = 0.12
+	AnnotationBiasRelevanceFactor    = 0.5
+	IrrelevantSimilarityLookbackDays = 7
+	IrrelevantSimilarityPenaltyMin   = 0.92
+	IrrelevantSimilarityRejectMin    = 0.96
+	IrrelevantSimilarityPenaltyImp   = 0.15
+	IrrelevantSimilarityPenaltyRel   = 0.10
 )
 
 // Recovery constants for stuck message handling

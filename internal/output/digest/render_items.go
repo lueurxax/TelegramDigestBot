@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -82,9 +83,14 @@ func groupItemsBySummary(items []db.Item, seenSummaries map[string]bool) []summa
 func (rc *digestRenderContext) formatSummaryGroup(sb *strings.Builder, g summaryGroup, includeTopic bool) {
 	sanitizedSummary := htmlutils.SanitizeHTML(g.summary)
 	prefix := getImportancePrefix(g.importanceScore)
+	lowReliability := rc.isLowReliabilityGroup(g.items)
+
+	if lowReliability {
+		observability.LowReliabilityBadgeTotal.Inc()
+	}
 
 	sb.WriteString(htmlutils.ItemStart)
-	sb.WriteString(formatSummaryLine(g, includeTopic, prefix, sanitizedSummary))
+	sb.WriteString(formatSummaryLine(g, includeTopic, prefix, sanitizedSummary, lowReliability))
 	fmt.Fprintf(sb, DigestSourceVia, strings.Join(rc.formatItemLinks(g.items), DigestSourceSeparator))
 
 	if rc.factChecks != nil {
@@ -114,7 +120,11 @@ func (rc *digestRenderContext) formatSummaryGroup(sb *strings.Builder, g summary
 }
 
 // formatSummaryLine formats the summary line with optional topic.
-func formatSummaryLine(g summaryGroup, includeTopic bool, prefix, sanitizedSummary string) string {
+func formatSummaryLine(g summaryGroup, includeTopic bool, prefix, sanitizedSummary string, lowReliability bool) string {
+	if lowReliability {
+		prefix += " ⚠️"
+	}
+
 	if !includeTopic || g.items[0].Topic == "" {
 		return fmt.Sprintf(FormatPrefixSummary, prefix, sanitizedSummary)
 	}

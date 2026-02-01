@@ -501,6 +501,8 @@ func (h *Handler) renderSearchResults(
 ) (int, int) {
 	resultSize := len(items) + len(evidence)
 
+	h.applyNeedsReview(items)
+
 	if wantsHTML(r) {
 		data := SearchViewData{
 			Title:         "Search Results",
@@ -527,6 +529,16 @@ func (h *Handler) renderSearchResults(
 	}
 
 	return h.writeJSON(w, http.StatusOK, resp), resultSize
+}
+
+func (h *Handler) applyNeedsReview(items []db.ResearchItemSearchResult) {
+	for i := range items {
+		if needsReview(items[i], h.cfg) {
+			items[i].NeedsReview = true
+
+			observability.UncertaintyFlaggedTotal.Inc()
+		}
+	}
 }
 
 func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request, itemID string) int {

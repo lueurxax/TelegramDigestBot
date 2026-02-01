@@ -141,6 +141,14 @@ func (m *mockRepo) FindSimilarItemForChannel(_ context.Context, _ []float32, _ s
 	return "", nil
 }
 
+func (m *mockRepo) FindSimilarIrrelevantItem(_ context.Context, _ []float32, _ time.Time) (*db.SimilarIrrelevantItem, error) {
+	return nil, db.ErrSimilarIrrelevantItemNotFound
+}
+
+func (m *mockRepo) GetWeightedChannelRatingSummary(_ context.Context, _ time.Time, _ float64) ([]db.WeightedRatingSummary, error) {
+	return nil, nil
+}
+
 func (m *mockRepo) GetSummaryCache(_ context.Context, _, _ string) (*db.SummaryCacheEntry, error) {
 	return nil, db.ErrSummaryCacheNotFound
 }
@@ -1079,7 +1087,7 @@ func TestCalculateImportance(t *testing.T) {
 				Summary:         tt.summary,
 			}
 
-			got := p.calculateImportance(logger, c, res, s)
+			got := p.calculateImportance(logger, c, res, 0, s)
 
 			if got < tt.expectedMin || got > tt.expectedMax {
 				t.Errorf("calculateImportance() = %v, want between %v and %v", got, tt.expectedMin, tt.expectedMax)
@@ -1486,7 +1494,7 @@ func TestCreateItem(t *testing.T) {
 				relevanceThreshold: tt.threshold,
 			}
 
-			item := p.createItem(logger, c, res, s)
+			item := p.createItem(logger, c, res, 0, s)
 
 			if item.Status != tt.expectedStatus {
 				t.Errorf("createItem() status = %q, want %q", item.Status, tt.expectedStatus)

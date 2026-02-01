@@ -115,6 +115,7 @@ type ExpandedViewData struct {
 	LastRating      string
 	LastRatedAt     *time.Time
 	LastFeedback    string
+	LowReliability  bool
 
 	// Apple Shortcuts integration
 	ShortcutEnabled   bool   // Whether shortcut button should be shown

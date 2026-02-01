@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
@@ -283,6 +284,12 @@ func (rc *digestRenderContext) formatSingleBullet(sb *strings.Builder, b db.Bull
 
 	sb.WriteString(prefix)
 	sb.WriteString(" ")
+
+	if rc.lowReliability.byUsername[b.SourceChannel] {
+		observability.LowReliabilityBadgeTotal.Inc()
+		sb.WriteString("⚠️ ")
+	}
+
 	sb.WriteString(BulletItemPrefix)
 	sb.WriteString(sanitizedText)
 

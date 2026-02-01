@@ -207,6 +207,7 @@ type ResearchItemSearchResult struct {
 	LastSource      string
 	LastRatedAt     *time.Time
 	Score           float64
+	NeedsReview     bool
 }
 
 // ResearchEvidenceSearchResult is an evidence search result with optional item context.

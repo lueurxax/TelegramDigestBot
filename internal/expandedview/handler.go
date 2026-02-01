@@ -216,6 +216,8 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		lastRatedAt = &ratings[0].CreatedAt
 	}
 
+	lowReliability := h.isLowReliabilityChannel(ctx, item.ChannelID)
+
 	// Determine if HTML rendering is safe
 	// Only allow safeHTML when admin-only mode is enforced (no public system tokens)
 	allowSafeHTML := h.cfg.ExpandedViewRequireAdmin && !h.cfg.ExpandedViewAllowSystemTokens
@@ -232,6 +234,7 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		LastRating:      lastRating,
 		LastRatedAt:     lastRatedAt,
 		LastFeedback:    lastFeedback,
+		LowReliability:  lowReliability,
 
 		// Apple Shortcuts
 		ShortcutEnabled:   true,

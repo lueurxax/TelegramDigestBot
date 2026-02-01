@@ -16,8 +16,16 @@ import (
 
 const errSaveItemRating = "save item rating: %w"
 
+// ErrSimilarIrrelevantItemNotFound is returned when no similar irrelevant item exists.
+var ErrSimilarIrrelevantItemNotFound = errors.New("similar irrelevant item not found")
+
 // Item is an alias for the domain type.
 type Item = domain.Item
+
+type SimilarIrrelevantItem struct {
+	ItemID     string
+	Similarity float64
+}
 
 // ItemWithMedia extends Item with media data for inline image support.
 type ItemWithMedia struct {
@@ -112,6 +120,40 @@ func (db *DB) FindSimilarItemForChannel(ctx context.Context, embedding []float32
 	}
 
 	return fromUUID(id), nil
+}
+
+func (db *DB) FindSimilarIrrelevantItem(ctx context.Context, embedding []float32, since time.Time) (*SimilarIrrelevantItem, error) {
+	var (
+		itemID     pgtype.UUID
+		similarity float64
+	)
+
+	err := db.Pool.QueryRow(ctx, `
+		SELECT e.item_id,
+		       1 - (e.embedding <=> $1::vector) AS similarity
+		FROM embeddings e
+		WHERE EXISTS (
+			SELECT 1
+			FROM item_ratings ir
+			WHERE ir.item_id = e.item_id
+			  AND ir.rating = 'irrelevant'
+			  AND ir.created_at >= $2
+		)
+		ORDER BY e.embedding <=> $1::vector
+		LIMIT 1
+	`, pgvector.NewVector(embedding), toTimestamptz(since)).Scan(&itemID, &similarity)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrSimilarIrrelevantItemNotFound
+		}
+
+		return nil, fmt.Errorf("find similar irrelevant item: %w", err)
+	}
+
+	return &SimilarIrrelevantItem{
+		ItemID:     fromUUID(itemID),
+		Similarity: similarity,
+	}, nil
 }
 
 func (db *DB) MarkItemsAsDigested(ctx context.Context, ids []string) error {
