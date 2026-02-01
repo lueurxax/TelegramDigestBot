@@ -161,7 +161,7 @@ func normalizeBulletText(text string) string {
 	return strings.Join(strings.Fields(normalized), " ")
 }
 
-func applyBulletLengthRules(bullets []llm.ExtractedBullet, messageText string) []llm.ExtractedBullet {
+func applyBulletLengthRules(bullets []llm.ExtractedBullet, messageText string, links []domain.ResolvedLink, previewText string) []llm.ExtractedBullet {
 	if len(bullets) == 0 {
 		return bullets
 	}
@@ -170,6 +170,8 @@ func applyBulletLengthRules(bullets []llm.ExtractedBullet, messageText string) [
 	if messageLen == 0 {
 		return nil
 	}
+
+	messageLen += resolvedLinkTextLength(links, previewText, messageText)
 
 	if messageLen < minMessageLengthForMultiBullets {
 		return limitToSingleBullet(bullets, messageLen)
@@ -236,6 +238,33 @@ func pickBestBullet(bullets []llm.ExtractedBullet) (llm.ExtractedBullet, bool) {
 	}
 
 	return best, true
+}
+
+func resolvedLinkTextLength(links []domain.ResolvedLink, previewText, messageText string) int {
+	if len(links) == 0 {
+		if previewText != "" && previewText != messageText {
+			return textRuneLength(previewText)
+		}
+
+		return 0
+	}
+
+	total := 0
+
+	for _, link := range links {
+		linkText := strings.TrimSpace(link.Content)
+		if linkText == "" {
+			linkText = strings.TrimSpace(strings.Join([]string{link.Title, link.Description}, " "))
+		}
+
+		if linkText == "" {
+			continue
+		}
+
+		total += textRuneLength(linkText)
+	}
+
+	return total
 }
 
 func textRuneLength(text string) int {

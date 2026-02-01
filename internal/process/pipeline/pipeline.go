@@ -1158,7 +1158,7 @@ func (p *Pipeline) processBullets(ctx context.Context, logger zerolog.Logger, ca
 		messageText = strings.TrimSpace(candidate.PreviewText)
 	}
 
-	extractedBullets = applyBulletLengthRules(extractedBullets, messageText)
+	extractedBullets = applyBulletLengthRules(extractedBullets, messageText, candidate.ResolvedLinks, candidate.PreviewText)
 	if len(extractedBullets) == 0 {
 		return nil, bulletScoreSummary{}
 	}
