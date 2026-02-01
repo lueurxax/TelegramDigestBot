@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{.Title}}</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap");
+      :root {
+        --bg: #f7f1e7;
+        --bg-2: #ecf7f4;
+        --card: #fffaf4;
+        --ink: #0f172a;
+        --ink-2: #334155;
+        --muted: #64748b;
+        --border: rgba(15, 23, 42, 0.08);
+        --accent: #f05d5e;
+        --accent-2: #2f8c9f;
+        --shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+        --font-body: "IBM Plex Sans", "Noto Sans", sans-serif;
+        --font-display: "Space Grotesk", "IBM Plex Sans", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: var(--font-body);
+        color: var(--ink);
+        background:
+          radial-gradient(900px 400px at 8% -10%, rgba(240, 93, 94, 0.18), transparent 60%),
+          radial-gradient(800px 380px at 92% 0%, rgba(47, 140, 159, 0.16), transparent 55%),
+          linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+        min-height: 100vh;
+      }
+      a { color: var(--accent-2); text-decoration: none; }
+      a:hover { color: var(--accent); }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: rgba(15, 23, 42, 0.94);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(10px);
+      }
+      .nav {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 12px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-family: var(--font-display);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.8rem;
+        color: #f8fafc;
+      }
+      .brand-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 4px rgba(240, 93, 94, 0.2);
+      }
+      .nav-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .nav-link {
+        color: #e2e8f0;
+        background: rgba(148, 163, 184, 0.15);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 0.85rem;
+      }
+      .nav-link:hover {
+        color: #fff;
+        border-color: rgba(240, 93, 94, 0.6);
+        background: rgba(240, 93, 94, 0.25);
+      }
+      main {
+        padding: 32px 20px 80px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-family: var(--font-display);
+        color: var(--ink);
+        font-size: clamp(2rem, 3vw, 3rem);
+        margin: 0 0 8px;
+      }
+      .hint { color: var(--muted); font-size: 0.95rem; }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--card);
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: var(--shadow);
+        margin-top: 16px;
+      }
+      th, td {
+        border-bottom: 1px solid var(--border);
+        padding: 12px 14px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        background: rgba(15, 23, 42, 0.05);
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--ink-2);
+      }
+      tbody tr:hover td { background: rgba(240, 93, 94, 0.08); }
+      tbody tr:last-child td { border-bottom: none; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; color: var(--ink-2); }
+      .cluster-link { font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="nav">
+        <div class="brand"><span class="brand-dot"></span>IDigest Research</div>
+        <nav class="nav-links">
+          <a class="nav-link" href="/research/">Home</a>
+          <a class="nav-link" href="/research/search">Search</a>
+          <a class="nav-link" href="/research/settings">Settings</a>
+          <a class="nav-link" href="/research/claims">Claims</a>
+          <a class="nav-link" href="/research/channels/overlap">Overlap</a>
+          <a class="nav-link" href="/research/topics/timeline?bucket=week">Timeline</a>
+          <a class="nav-link" href="/research/topics/drift">Drift</a>
+          <a class="nav-link" href="/research/languages/coverage">Cross-Lang</a>
+          <a class="nav-link" href="/research/channels/quality">Quality</a>
+          <a class="nav-link" href="/research/channels/bias">Bias</a>
+          <a class="nav-link" href="/research/diff/weekly">Weekly Diff</a>
+        </nav>
+      </div>
+    </header>
+    <main>
+      <h1>{{.Title}}</h1>
+      {{if .Description}}<p class="hint">{{.Description}}</p>{{end}}
+
+      {{if .Rows}}
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Claim</th>
+            <th>First Seen</th>
+            <th>Origin Cluster</th>
+            <th>Clusters</th>
+            <th>Contradicted</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Rows}}
+          <tr>
+            <td class="mono">{{.ID}}</td>
+            <td>{{.ClaimText}}</td>
+            <td class="mono">{{formatRFC3339 .FirstSeenAt}}</td>
+            <td>
+              {{if .OriginClusterID}}
+                <a class="cluster-link" href="/research/cluster/{{.OriginClusterID}}">{{.OriginClusterID}}</a>
+              {{else}}
+                -
+              {{end}}
+            </td>
+            <td class="mono">{{.ClusterCount}}</td>
+            <td class="mono">{{.ContradictedCount}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      {{if not .Description}}<p class="hint">No data available.</p>{{end}}
+      {{end}}
+    </main>
+  </body>
+</html>

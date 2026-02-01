@@ -1523,15 +1523,15 @@ func (h *Handler) handleClaims(w http.ResponseWriter, r *http.Request) (int, int
 	}
 
 	if wantsHTML(r) {
-		rows := make([][]string, 0, len(claims))
+		rows := make([]ClaimLedgerRow, 0, len(claims))
 		for _, c := range claims {
-			rows = append(rows, []string{
-				c.ID,
-				c.ClaimText,
-				c.FirstSeenAt.Format(time.RFC3339),
-				c.OriginClusterID,
-				strconv.Itoa(len(c.ClusterIDs)),
-				strconv.Itoa(len(c.ContradictedBy)),
+			rows = append(rows, ClaimLedgerRow{
+				ID:                c.ID,
+				ClaimText:         c.ClaimText,
+				FirstSeenAt:       c.FirstSeenAt,
+				OriginClusterID:   c.OriginClusterID,
+				ClusterCount:      len(c.ClusterIDs),
+				ContradictedCount: len(c.ContradictedBy),
 			})
 		}
 
@@ -1540,13 +1540,12 @@ func (h *Handler) handleClaims(w http.ResponseWriter, r *http.Request) (int, int
 			description = h.getClaimsEmptyDescription(r.Context())
 		}
 
-		data := TableViewData{
+		data := ClaimLedgerViewData{
 			Title:       "Claim Ledger",
-			Headers:     []string{"ID", "Claim", "First Seen", "Origin Cluster", "Clusters", "Contradicted"},
 			Rows:        rows,
 			Description: description,
 		}
-		if err := h.renderHTML(w, tmplTable, data); err != nil {
+		if err := h.renderHTML(w, "claims.html", data); err != nil {
 			return h.writeError(w, r, http.StatusInternalServerError, errTitleError, errMsgRenderTable), 0
 		}
 
@@ -2674,6 +2673,21 @@ type TableViewData struct {
 	SecondaryRows    [][]string
 	Description      string
 	Actions          []TableAction
+}
+
+type ClaimLedgerViewData struct {
+	Title       string
+	Rows        []ClaimLedgerRow
+	Description string
+}
+
+type ClaimLedgerRow struct {
+	ID                string
+	ClaimText         string
+	FirstSeenAt       time.Time
+	OriginClusterID   string
+	ClusterCount      int
+	ContradictedCount int
 }
 
 // TableAction defines an action button for table views.
