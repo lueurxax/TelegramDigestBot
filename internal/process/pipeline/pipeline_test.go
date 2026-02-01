@@ -199,6 +199,10 @@ func (m *mockRepo) GetRawMessagesForLinkBackfill(_ context.Context, _ time.Time,
 	return nil, nil
 }
 
+func (m *mockRepo) GetItemByCanonicalURL(_ context.Context, _, _ string) (*db.CanonicalItem, error) {
+	return nil, nil //nolint:nilnil // mock: not found is intentional
+}
+
 type mockEmbeddingClient struct {
 	embeddings.Client
 }

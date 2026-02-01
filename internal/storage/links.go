@@ -15,7 +15,9 @@ type ResolvedLink = domain.ResolvedLink
 
 func resolvedLinkFromRow(
 	id pgtype.UUID,
-	url, domain, linkType string,
+	url string,
+	canonicalURL, canonicalDomain pgtype.Text,
+	domain, linkType string,
 	title, content, author pgtype.Text,
 	publishedAt pgtype.Timestamptz,
 	description, imageUrl pgtype.Text,
@@ -32,6 +34,8 @@ func resolvedLinkFromRow(
 	return ResolvedLink{
 		ID:              fromUUID(id),
 		URL:             url,
+		CanonicalURL:    canonicalURL.String,
+		CanonicalDomain: canonicalDomain.String,
 		Domain:          domain,
 		LinkType:        linkType,
 		Title:           title.String,
@@ -65,7 +69,7 @@ func (db *DB) GetLinkCache(ctx context.Context, url string) (*ResolvedLink, erro
 	}
 
 	link := resolvedLinkFromRow(
-		c.ID, c.Url, c.Domain, c.LinkType,
+		c.ID, c.Url, c.CanonicalUrl, c.CanonicalDomain, c.Domain, c.LinkType,
 		c.Title, c.Content, c.Author,
 		c.PublishedAt,
 		c.Description, c.ImageUrl,
@@ -86,6 +90,8 @@ func (db *DB) GetLinkCache(ctx context.Context, url string) (*ResolvedLink, erro
 func (db *DB) SaveLinkCache(ctx context.Context, link *ResolvedLink) (string, error) {
 	id, err := db.Queries.SaveLinkCache(ctx, sqlc.SaveLinkCacheParams{
 		Url:             SanitizeUTF8(link.URL),
+		CanonicalUrl:    toText(link.CanonicalURL),
+		CanonicalDomain: toText(link.CanonicalDomain),
 		Domain:          SanitizeUTF8(link.Domain),
 		LinkType:        SanitizeUTF8(link.LinkType),
 		Title:           toText(link.Title),
@@ -138,7 +144,7 @@ func (db *DB) GetLinksForMessage(ctx context.Context, rawMsgID string) ([]Resolv
 
 	for i, c := range sqlcLinks {
 		links[i] = resolvedLinkFromRow(
-			c.ID, c.Url, c.Domain, c.LinkType,
+			c.ID, c.Url, c.CanonicalUrl, c.CanonicalDomain, c.Domain, c.LinkType,
 			c.Title, c.Content, c.Author,
 			c.PublishedAt,
 			c.Description, c.ImageUrl,

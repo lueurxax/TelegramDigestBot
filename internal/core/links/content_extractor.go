@@ -16,14 +16,16 @@ import (
 )
 
 type WebContent struct {
-	Title       string
-	Description string
-	Content     string
-	Author      string
-	PublishedAt time.Time
-	ImageURL    string
-	WordCount   int
-	Language    string
+	Title           string
+	Description     string
+	Content         string
+	Author          string
+	PublishedAt     time.Time
+	ImageURL        string
+	WordCount       int
+	Language        string
+	CanonicalURL    string
+	CanonicalDomain string
 }
 
 func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent, error) {
@@ -41,16 +43,19 @@ func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent
 	if err != nil || article.Node == nil {
 		meta := extractMetaTags(htmlBytes)
 		jsonLD := extractJSONLD(htmlBytes)
+		canonicalURL, canonicalDomain := extractCanonicalURL(rawURL, jsonLD.URL, meta.CanonicalURL, meta.OGURL)
 		lang := DetectLanguage(meta.Title + " " + meta.Description)
 
 		//nolint:nilerr // fallback to meta tags when readability fails
 		return &WebContent{
-			Title:       coalesce(jsonLD.Title, meta.OGTitle, meta.Title),
-			Description: coalesce(jsonLD.Description, meta.OGDescription, meta.Description),
-			Author:      coalesce(jsonLD.Author, meta.Author),
-			PublishedAt: coalesceTime(parseDate(jsonLD.PublishedAt), parseDate(meta.PublishedTime)),
-			ImageURL:    coalesce(jsonLD.Image, meta.OGImage),
-			Language:    lang,
+			Title:           coalesce(jsonLD.Title, meta.OGTitle, meta.Title),
+			Description:     coalesce(jsonLD.Description, meta.OGDescription, meta.Description),
+			Author:          coalesce(jsonLD.Author, meta.Author),
+			PublishedAt:     coalesceTime(parseDate(jsonLD.PublishedAt), parseDate(meta.PublishedTime)),
+			ImageURL:        coalesce(jsonLD.Image, meta.OGImage),
+			Language:        lang,
+			CanonicalURL:    canonicalURL,
+			CanonicalDomain: canonicalDomain,
 		}, nil
 	}
 
@@ -60,20 +65,24 @@ func ExtractWebContent(htmlBytes []byte, rawURL string, maxLen int) (*WebContent
 	// Extract text content using v2 API
 	textContent := extractArticleText(article)
 
+	canonicalURL, canonicalDomain := extractCanonicalURL(rawURL, jsonLD.URL, meta.CanonicalURL, meta.OGURL)
+
 	lang := DetectLanguage(textContent)
 	if lang == "" {
 		lang = DetectLanguage(meta.Title + " " + meta.Description)
 	}
 
 	return &WebContent{
-		Title:       coalesce(jsonLD.Title, article.Title(), meta.OGTitle, meta.Title),
-		Description: coalesce(jsonLD.Description, meta.OGDescription, meta.Description),
-		Content:     truncate(textContent, maxLen),
-		Author:      coalesce(jsonLD.Author, article.Byline(), meta.Author),
-		PublishedAt: coalesceTime(parseDate(jsonLD.PublishedAt), parseDate(meta.PublishedTime)),
-		ImageURL:    coalesce(jsonLD.Image, meta.OGImage),
-		WordCount:   countWords(textContent),
-		Language:    lang,
+		Title:           coalesce(jsonLD.Title, article.Title(), meta.OGTitle, meta.Title),
+		Description:     coalesce(jsonLD.Description, meta.OGDescription, meta.Description),
+		Content:         truncate(textContent, maxLen),
+		Author:          coalesce(jsonLD.Author, article.Byline(), meta.Author),
+		PublishedAt:     coalesceTime(parseDate(jsonLD.PublishedAt), parseDate(meta.PublishedTime)),
+		ImageURL:        coalesce(jsonLD.Image, meta.OGImage),
+		WordCount:       countWords(textContent),
+		Language:        lang,
+		CanonicalURL:    canonicalURL,
+		CanonicalDomain: canonicalDomain,
 	}, nil
 }
 
@@ -152,6 +161,7 @@ type JSONLD struct {
 	Author      string
 	PublishedAt string
 	Image       string
+	URL         string
 }
 
 func extractJSONLD(htmlBytes []byte) JSONLD {
@@ -213,15 +223,24 @@ func processLDValue(v interface{}, ld *JSONLD) {
 }
 
 func extractFromLDMap(m map[string]interface{}, ld *JSONLD) {
+	if !isArticleType(m) {
+		return
+	}
+
+	extractLDTextFields(m, ld)
+	extractLDRichFields(m, ld)
+}
+
+func isArticleType(m map[string]interface{}) bool {
 	t, ok := m["@type"].(string)
 	if !ok {
-		return
+		return false
 	}
 
-	if t != "NewsArticle" && t != "Article" && t != "BlogPosting" {
-		return
-	}
+	return t == "NewsArticle" || t == "Article" || t == "BlogPosting"
+}
 
+func extractLDTextFields(m map[string]interface{}, ld *JSONLD) {
 	if title, ok := m["headline"].(string); ok {
 		ld.Title = title
 	}
@@ -233,7 +252,9 @@ func extractFromLDMap(m map[string]interface{}, ld *JSONLD) {
 	if date, ok := m["datePublished"].(string); ok {
 		ld.PublishedAt = date
 	}
+}
 
+func extractLDRichFields(m map[string]interface{}, ld *JSONLD) {
 	if author, ok := m["author"]; ok {
 		ld.Author = extractLDAuthor(author)
 	}
@@ -241,6 +262,48 @@ func extractFromLDMap(m map[string]interface{}, ld *JSONLD) {
 	if image, ok := m["image"]; ok {
 		ld.Image = extractLDImage(image)
 	}
+
+	if url, ok := extractLDURL(m); ok {
+		ld.URL = url
+	}
+}
+
+func extractLDURL(m map[string]interface{}) (string, bool) {
+	if url, ok := m["url"].(string); ok && strings.TrimSpace(url) != "" {
+		return url, true
+	}
+
+	me, ok := m["mainEntityOfPage"]
+	if !ok {
+		return "", false
+	}
+
+	return extractURLFromMainEntity(me)
+}
+
+func extractURLFromMainEntity(me interface{}) (string, bool) {
+	switch v := me.(type) {
+	case string:
+		if strings.TrimSpace(v) != "" {
+			return v, true
+		}
+	case map[string]interface{}:
+		return extractURLFromEntityMap(v)
+	}
+
+	return "", false
+}
+
+func extractURLFromEntityMap(v map[string]interface{}) (string, bool) {
+	if id, ok := v["@id"].(string); ok && strings.TrimSpace(id) != "" {
+		return id, true
+	}
+
+	if url, ok := v["url"].(string); ok && strings.TrimSpace(url) != "" {
+		return url, true
+	}
+
+	return "", false
 }
 
 func extractLDAuthor(v interface{}) string {
@@ -293,8 +356,10 @@ type MetaTags struct {
 	OGTitle       string
 	OGDescription string
 	OGImage       string
+	OGURL         string
 	Author        string
 	PublishedTime string
+	CanonicalURL  string
 }
 
 func extractMetaTags(htmlBytes []byte) MetaTags {
@@ -330,6 +395,8 @@ func processMetaElement(n *html.Node, meta *MetaTags) {
 		}
 	case "meta":
 		applyMetaTag(n, meta)
+	case "link":
+		applyLinkTag(n, meta)
 	}
 }
 
@@ -341,6 +408,8 @@ func applyMetaTag(n *html.Node, meta *MetaTags) {
 		meta.Description = content
 	case "author":
 		meta.Author = content
+	case "og:url":
+		meta.OGURL = content
 	case "og:title":
 		meta.OGTitle = content
 	case "og:description":
@@ -350,6 +419,71 @@ func applyMetaTag(n *html.Node, meta *MetaTags) {
 	case "article:published_time":
 		meta.PublishedTime = content
 	}
+}
+
+func applyLinkTag(n *html.Node, meta *MetaTags) {
+	var rel, href string
+
+	for _, attr := range n.Attr {
+		switch strings.ToLower(attr.Key) {
+		case "rel":
+			rel = strings.ToLower(strings.TrimSpace(attr.Val))
+		case "href":
+			href = strings.TrimSpace(attr.Val)
+		}
+	}
+
+	if rel == "canonical" && href != "" {
+		meta.CanonicalURL = href
+	}
+}
+
+func extractCanonicalURL(baseURL, jsonLDURL, canonicalURL, ogURL string) (string, string) {
+	candidate := coalesce(strings.TrimSpace(jsonLDURL), strings.TrimSpace(canonicalURL), strings.TrimSpace(ogURL))
+	if candidate == "" {
+		return "", ""
+	}
+
+	absolute := resolveCanonicalURL(baseURL, candidate)
+	if absolute == "" {
+		return "", ""
+	}
+
+	domain := domainFromURL(absolute)
+
+	return absolute, domain
+}
+
+func resolveCanonicalURL(baseURL, candidate string) string {
+	parsed, err := url.Parse(candidate)
+	if err != nil {
+		return ""
+	}
+
+	if !parsed.IsAbs() {
+		base, err := url.Parse(baseURL)
+		if err != nil {
+			return ""
+		}
+
+		parsed = base.ResolveReference(parsed)
+	}
+
+	parsed.Fragment = ""
+
+	return parsed.String()
+}
+
+func domainFromURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+
+	host := strings.ToLower(parsed.Host)
+	host = strings.TrimPrefix(host, "www.")
+
+	return host
 }
 
 func getMetaAttrs(n *html.Node) (string, string) {

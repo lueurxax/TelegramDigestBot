@@ -363,19 +363,21 @@ SELECT * FROM link_cache WHERE url = $1;
 
 -- name: SaveLinkCache :one
 INSERT INTO link_cache (
-    url, domain, link_type, title, content, author, published_at,
+    url, canonical_url, canonical_domain, domain, link_type, title, content, author, published_at,
     description, image_url, word_count,
     channel_username, channel_title, channel_id, message_id,
     views, forwards, has_media, media_type,
     status, error_message, language, resolved_at, expires_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10,
-    $11, $12, $13, $14,
-    $15, $16, $17, $18,
-    $19, $20, $21, $22, $23
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    $9, $10, $11, $12,
+    $13, $14, $15, $16,
+    $17, $18, $19, $20,
+    $21, $22, $23, $24, $25
 )
 ON CONFLICT (url) DO UPDATE SET
+    canonical_url = EXCLUDED.canonical_url,
+    canonical_domain = EXCLUDED.canonical_domain,
     title = EXCLUDED.title,
     content = EXCLUDED.content,
     author = EXCLUDED.author,
@@ -416,11 +418,22 @@ ORDER BY i.importance_score DESC, i.relevance_score DESC
 LIMIT 1;
 
 -- name: GetLinksForMessage :many
-SELECT lc.* 
+SELECT lc.*
 FROM link_cache lc
 JOIN message_links ml ON lc.id = ml.link_cache_id
 WHERE ml.raw_message_id = $1
 ORDER BY ml.position;
+
+-- name: GetItemByCanonicalURL :one
+SELECT i.id, i.summary, i.topic, i.language
+FROM items i
+JOIN message_links ml ON ml.raw_message_id = i.raw_message_id
+JOIN link_cache lc ON lc.id = ml.link_cache_id
+WHERE lc.canonical_url = $1
+  AND i.raw_message_id != $2
+  AND i.status = 'ready'
+ORDER BY i.importance_score DESC
+LIMIT 1;
 
 -- name: GetChannelByPeerID :one
 SELECT id, tg_peer_id, username, title, is_active, added_at, added_by_tg_user, access_hash, invite_link, context, description, last_tg_message_id, category, tone, update_freq, relevance_threshold, importance_threshold, importance_weight, auto_weight_enabled, weight_override, weight_override_reason, weight_updated_at, weight_updated_by, auto_relevance_enabled, relevance_threshold_delta FROM channels WHERE tg_peer_id = $1;

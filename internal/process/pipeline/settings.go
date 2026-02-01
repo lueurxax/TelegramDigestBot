@@ -3,6 +3,8 @@ package pipeline
 import (
 	"strings"
 	"time"
+
+	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 )
 
 func (s *pipelineSettings) normalizeMinLengthSettings() {
@@ -35,10 +37,6 @@ func (s *pipelineSettings) minLengthForLanguage(lang string) int {
 }
 
 func (s *pipelineSettings) normalizeSummarySettings() {
-	if s.summaryMaxChars <= 0 {
-		s.summaryMaxChars = 220
-	}
-
 	if len(s.summaryStripPhrasesDefault) == 0 {
 		s.summaryStripPhrasesDefault = defaultSummaryStripPhrases
 	}
@@ -78,6 +76,40 @@ func parseDomainList(raw string) map[string]struct{} {
 	}
 
 	return out
+}
+
+func parseCSVList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		part = strings.TrimSpace(strings.ToLower(part))
+		if part == "" {
+			continue
+		}
+
+		out = append(out, part)
+	}
+
+	return out
+}
+
+func (s *pipelineSettings) normalizeLinkSettings() {
+	if s.linkPrimaryMinWords <= 0 {
+		s.linkPrimaryMinWords = 200
+	}
+
+	if s.linkPrimaryShortMsgChars <= 0 {
+		s.linkPrimaryShortMsgChars = domain.ShortMessageThreshold
+	}
+
+	if s.linkPrimaryMaxLinks <= 0 {
+		s.linkPrimaryMaxLinks = s.maxLinks
+	}
 }
 
 func (s *pipelineSettings) summaryStripPhrasesFor(lang string) []string {

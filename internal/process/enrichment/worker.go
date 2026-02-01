@@ -123,6 +123,9 @@ type Worker struct {
 	domainFilter      *DomainFilter
 	urlFilter         *URLFilter
 	filterMu          sync.RWMutex // protects domainFilter, languageRouter, and urlFilter
+	canonicalAllow    map[string]struct{}
+	canonicalTrusted  map[string]struct{}
+	canonicalDeny     map[string]struct{}
 	lastDomainReload  time.Time
 	lastPolicyReload  time.Time
 	logger            *zerolog.Logger
@@ -139,17 +142,20 @@ func NewWorker(cfg *config.Config, database Repository, embeddingClient Embeddin
 	// The actual wiring of LLM client happens in app.go.
 
 	w := &Worker{
-		cfg:             cfg,
-		db:              database,
-		embeddingClient: embeddingClient,
-		registry:        registry,
-		extractor:       extractor,
-		scorer:          NewScorer(),
-		queryGenerator:  NewQueryGenerator(),
-		languageRouter:  NewLanguageRouter(domain.LanguageRoutingPolicy{Default: []string{"en"}}, database),
-		domainFilter:    NewDomainFilterWithOptions(cfg.EnrichmentAllowlistDomains, cfg.EnrichmentDenylistDomains, cfg.EnrichmentSkipSocialMedia),
-		urlFilter:       NewURLFilter(cfg.EnrichmentSkipNavigationPages),
-		logger:          logger,
+		cfg:              cfg,
+		db:               database,
+		embeddingClient:  embeddingClient,
+		registry:         registry,
+		extractor:        extractor,
+		scorer:           NewScorer(),
+		queryGenerator:   NewQueryGenerator(),
+		languageRouter:   NewLanguageRouter(domain.LanguageRoutingPolicy{Default: []string{"en"}}, database),
+		domainFilter:     NewDomainFilterWithOptions(cfg.EnrichmentAllowlistDomains, cfg.EnrichmentDenylistDomains, cfg.EnrichmentSkipSocialMedia),
+		urlFilter:        NewURLFilter(cfg.EnrichmentSkipNavigationPages),
+		canonicalAllow:   parseDomainSet(cfg.LinkCanonicalAllowlist),
+		canonicalTrusted: parseDomainSet(cfg.LinkCanonicalTrusted),
+		canonicalDeny:    parseDomainSet(cfg.LinkCanonicalDenylist),
+		logger:           logger,
 	}
 
 	// Initialize Solr client for language updates if configured
@@ -375,11 +381,11 @@ func (w *Worker) generateQueries(ctx context.Context, item *db.EnrichmentQueueIt
 	// Always try LLM query generation when LLM client is available
 	if w.queryLLM != nil {
 		if queries := w.generateQueriesWithLLM(ctx, item, links); len(queries) > 0 {
-			return queries
+			return w.appendLinkLanguageQueries(queries, links)
 		}
 	}
 
-	return w.generateQueriesHeuristic(item, links)
+	return w.appendLinkLanguageQueries(w.generateQueriesHeuristic(item, links), links)
 }
 
 func (w *Worker) generateQueriesHeuristic(item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []GeneratedQuery {
@@ -389,6 +395,89 @@ func (w *Worker) generateQueriesHeuristic(item *db.EnrichmentQueueItem, links []
 	}
 
 	return queries
+}
+
+func (w *Worker) appendLinkLanguageQueries(queries []GeneratedQuery, links []domain.ResolvedLink) []GeneratedQuery {
+	if len(links) == 0 {
+		return queries
+	}
+
+	links = w.limitLinks(links)
+	seen := buildQuerySet(queries)
+	linkQueries := w.generateQueriesFromLinks(links, seen)
+
+	if len(linkQueries) == 0 {
+		return queries
+	}
+
+	observability.LinkLanguageQueriesTotal.Add(float64(len(linkQueries)))
+
+	return append(linkQueries, queries...)
+}
+
+func (w *Worker) limitLinks(links []domain.ResolvedLink) []domain.ResolvedLink {
+	maxLinks := w.cfg.LinkPrimaryMaxLinks
+	if maxLinks <= 0 || maxLinks >= len(links) {
+		return links
+	}
+
+	return links[:maxLinks]
+}
+
+func buildQuerySet(queries []GeneratedQuery) map[string]struct{} {
+	seen := make(map[string]struct{}, len(queries))
+
+	for _, q := range queries {
+		seen[strings.ToLower(q.Query)] = struct{}{}
+	}
+
+	return seen
+}
+
+func (w *Worker) generateQueriesFromLinks(links []domain.ResolvedLink, seen map[string]struct{}) []GeneratedQuery {
+	linkQueries := make([]GeneratedQuery, 0, len(links)*2) //nolint:mnd // rough estimate: ~2 queries per link
+
+	for _, link := range links {
+		queries := w.generateQueriesFromLink(link, seen)
+		linkQueries = append(linkQueries, queries...)
+	}
+
+	return linkQueries
+}
+
+func (w *Worker) generateQueriesFromLink(link domain.ResolvedLink, seen map[string]struct{}) []GeneratedQuery {
+	if strings.TrimSpace(link.Content) == "" {
+		return nil
+	}
+
+	linkText := strings.TrimSpace(link.Title + ". " + link.Content)
+	if linkText == "" {
+		return nil
+	}
+
+	generated := w.queryGenerator.Generate(link.Title, linkText, "", "", nil)
+	result := make([]GeneratedQuery, 0, len(generated))
+
+	for _, q := range generated {
+		if q.Query == "" {
+			continue
+		}
+
+		if link.Language != "" {
+			q.Language = link.Language
+		}
+
+		key := strings.ToLower(q.Query)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+
+		seen[key] = struct{}{}
+
+		result = append(result, q)
+	}
+
+	return result
 }
 
 func (w *Worker) buildFallbackQuery(item *db.EnrichmentQueueItem) []GeneratedQuery {
@@ -498,7 +587,7 @@ func (w *Worker) buildLLMQueryPrompt(item *db.EnrichmentQueueItem, links []domai
 		sb.WriteString("\n")
 	}
 
-	linkHints := buildLinkHints(links, llmQueryLinksLimit)
+	linkHints := buildLinkHints(links, llmQueryLinksLimit, w.canonicalAllow, w.canonicalTrusted, w.canonicalDeny)
 	if linkHints != "" {
 		sb.WriteString("Links: ")
 		sb.WriteString(linkHints)
@@ -510,7 +599,7 @@ func (w *Worker) buildLLMQueryPrompt(item *db.EnrichmentQueueItem, links []domai
 	return sb.String()
 }
 
-func buildLinkHints(links []domain.ResolvedLink, limit int) string {
+func buildLinkHints(links []domain.ResolvedLink, limit int, allow, trusted, deny map[string]struct{}) string {
 	if len(links) == 0 || limit <= 0 {
 		return ""
 	}
@@ -530,6 +619,10 @@ func buildLinkHints(links []domain.ResolvedLink, limit int) string {
 
 		if label == "" {
 			continue
+		}
+
+		if _, canonicalDomain := linkscore.TrustedCanonical(link, allow, trusted, deny); canonicalDomain != "" && canonicalDomain != link.Domain {
+			label = fmt.Sprintf("%s (canonical: %s)", label, canonicalDomain)
 		}
 
 		label = strings.ReplaceAll(label, "\n", " ")
@@ -712,24 +805,15 @@ func isLLMQueryRefusal(query string) bool {
 
 const maxLLMQueryLength = 200
 
-func (w *Worker) filterLinksForQueries(item *db.EnrichmentQueueItem, links []domain.ResolvedLink) []domain.ResolvedLink {
+func (w *Worker) filterLinksForQueries(_ *db.EnrichmentQueueItem, links []domain.ResolvedLink) []domain.ResolvedLink {
 	if len(links) == 0 {
 		return links
-	}
-
-	msgLang := linkscore.DetectLanguage(item.Summary)
-	if msgLang == "" {
-		msgLang = linkscore.DetectLanguage(item.Text)
 	}
 
 	filtered := make([]domain.ResolvedLink, 0, len(links))
 
 	for _, link := range links {
 		if len(strings.Fields(link.Content)) < w.cfg.LinkMinWords {
-			continue
-		}
-
-		if msgLang != "" && link.Language != "" && msgLang != link.Language {
 			continue
 		}
 
@@ -761,6 +845,24 @@ func (w *Worker) getMaxQueriesPerItem() int {
 	}
 
 	return defaultMaxQueriesPerItem
+}
+
+func parseDomainSet(raw string) map[string]struct{} {
+	out := make(map[string]struct{})
+	if strings.TrimSpace(raw) == "" {
+		return out
+	}
+
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(strings.ToLower(part))
+		part = strings.TrimPrefix(part, "www.")
+
+		if part != "" {
+			out[part] = struct{}{}
+		}
+	}
+
+	return out
 }
 
 // logGeneratedQueries logs each generated query with its details.

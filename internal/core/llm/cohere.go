@@ -254,7 +254,7 @@ func (p *cohereProvider) ProcessBatch(ctx context.Context, messages []MessageInp
 		return nil, fmt.Errorf(errRateLimiterSimple, err)
 	}
 
-	promptContent := buildBatchPromptContent(messages, targetLanguage, tone)
+	promptContent := buildBatchPromptContent(p.cfg, messages, targetLanguage, tone)
 	resolvedModel := p.resolveModel(model)
 
 	result, err := p.callCohereAPI(ctx, promptContent, model, cohereMaxTokensDefault)

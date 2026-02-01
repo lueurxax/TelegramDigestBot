@@ -1862,10 +1862,9 @@ func TestBuildMessageTextPartWithAllFields(t *testing.T) {
 		"(Channel Frequency: Daily)",
 		"[BACKGROUND CONTEXT",
 		"Previous context 1",
-		"[Referenced Content:",
-		"[Telegram]",
-		"Source Channel",
-		"5000 views",
+		"[PRIMARY ARTICLE]",  // New link context format
+		"Content:",           // New format uses "Content:" label
+		"Referenced content", // The link content is still present
 		">>> MESSAGE TO SUMMARIZE <<<",
 		"Main message text",
 	}

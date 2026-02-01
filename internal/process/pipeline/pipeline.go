@@ -16,6 +16,7 @@ import (
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/embeddings"
+	linkscore "github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
@@ -51,6 +52,7 @@ type Repository interface {
 	GetWeightedChannelRatingSummary(ctx context.Context, since time.Time, halfLifeDays float64) ([]db.WeightedRatingSummary, error)
 	GetSummaryCache(ctx context.Context, canonicalHash, digestLanguage string) (*db.SummaryCacheEntry, error)
 	UpsertSummaryCache(ctx context.Context, entry *db.SummaryCacheEntry) error
+	GetItemByCanonicalURL(ctx context.Context, canonicalURL, excludeRawMsgID string) (*db.CanonicalItem, error)
 	LinkMessageToLink(ctx context.Context, rawMsgID, linkCacheID string, position int) error
 	// Bullet extraction
 	InsertBullet(ctx context.Context, bullet *db.Bullet) error
@@ -109,7 +111,6 @@ type pipelineSettings struct {
 	adsFilterEnabled           bool
 	minLengthDefault           int
 	minLengthByLang            map[string]int
-	summaryMaxChars            int
 	summaryStripPhrasesByLang  map[string][]string
 	summaryStripPhrasesDefault []string
 	domainAllowlist            map[string]struct{}
@@ -139,6 +140,15 @@ type pipelineSettings struct {
 	linkMinWords               int
 	linkSnippetMaxChars        int
 	linkEmbeddingMaxMsgLen     int
+	linkPrimaryMinWords        int
+	linkPrimaryShortMsgChars   int
+	linkPrimaryMaxLinks        int
+	linkPrimaryAllowlist       map[string]struct{}
+	linkPrimaryDonationDeny    map[string]struct{}
+	linkPrimaryCTATerms        []string
+	linkCanonicalAllowlist     map[string]struct{}
+	linkCanonicalTrusted       map[string]struct{}
+	linkCanonicalDenylist      map[string]struct{}
 	summaryCachePromptVersion  string
 	bulletModeEnabled          bool
 	bulletMinImportance        float32
@@ -382,6 +392,15 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 		linkMinWords:              p.cfg.LinkMinWords,
 		linkSnippetMaxChars:       p.cfg.LinkSnippetMaxChars,
 		linkEmbeddingMaxMsgLen:    p.cfg.LinkEmbeddingMaxMsgLen,
+		linkPrimaryMinWords:       p.cfg.LinkPrimaryMinWords,
+		linkPrimaryShortMsgChars:  p.cfg.LinkPrimaryShortMsg,
+		linkPrimaryMaxLinks:       p.cfg.LinkPrimaryMaxLinks,
+		linkPrimaryAllowlist:      parseDomainList(p.cfg.LinkPrimaryAllowlist),
+		linkPrimaryDonationDeny:   parseDomainList(p.cfg.LinkPrimaryDonationDL),
+		linkPrimaryCTATerms:       parseCSVList(p.cfg.LinkPrimaryCTATerms),
+		linkCanonicalAllowlist:    parseDomainList(p.cfg.LinkCanonicalAllowlist),
+		linkCanonicalTrusted:      parseDomainList(p.cfg.LinkCanonicalTrusted),
+		linkCanonicalDenylist:     parseDomainList(p.cfg.LinkCanonicalDenylist),
 		summaryCachePromptVersion: defaultPromptVersion,
 		bulletModeEnabled:         true,
 		bulletMinImportance:       p.cfg.BulletMinImportance,
@@ -396,7 +415,6 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 			"uk": p.cfg.FilterMinLengthUk,
 			"en": p.cfg.FilterMinLengthEn,
 		},
-		summaryMaxChars:            p.cfg.SummaryMaxChars,
 		summaryStripPhrasesDefault: parseSummaryStripPhrases(p.cfg.SummaryStripPhrases),
 		summaryStripPhrasesByLang: map[string][]string{
 			"ru": parseSummaryStripPhrases(p.cfg.SummaryStripPhrasesRu),
@@ -415,6 +433,7 @@ func (p *Pipeline) loadPipelineSettings(ctx context.Context, logger zerolog.Logg
 	s.normalizeMinLengthSettings()
 	s.normalizeSummarySettings()
 	s.normalizeDedupWindows()
+	s.normalizeLinkSettings()
 
 	if s.bulletModeEnabled && s.batchSize > bulletLLMBatchSizeLimit {
 		s.batchSize = bulletLLMBatchSizeLimit
@@ -1014,15 +1033,7 @@ func (p *Pipeline) processModelBatch(ctx context.Context, logger zerolog.Logger,
 	return nil
 }
 
-func (p *Pipeline) augmentTextForLLM(c llm.MessageInput, s *pipelineSettings) string {
-	if strings.Contains(s.linkEnrichmentScope, domain.ScopeSummary) {
-		return p.augmentTextWithLinks(&c, s, domain.ScopeSummary)
-	}
-
-	if strings.Contains(s.linkEnrichmentScope, domain.ScopeTopic) {
-		return p.augmentTextWithLinks(&c, s, domain.ScopeTopic)
-	}
-
+func (p *Pipeline) augmentTextForLLM(c llm.MessageInput, _ *pipelineSettings) string {
 	return c.Text
 }
 
@@ -1094,8 +1105,9 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 		res.Language = lang
 		stripPhrases := s.summaryStripPhrasesFor(lang)
 
-		res.Summary = postProcessSummary(res.Summary, s.summaryMaxChars, stripPhrases)
-		res.Summary = p.tryFallbackSummary(res.Summary, candidates[i].Text, s.summaryMaxChars, stripPhrases)
+		res.Summary = postProcessSummary(res.Summary, stripPhrases)
+		p.applyCanonicalSummary(ctx, logger, candidates[i], &res, stripPhrases, s)
+		res.Summary = p.tryFallbackSummary(res.Summary, candidates[i].Text, stripPhrases)
 
 		if res.Summary == "" {
 			p.handleEmptySummary(ctx, logger, candidates[i].ID, i)
@@ -1130,17 +1142,113 @@ func (p *Pipeline) storeResults(ctx context.Context, logger zerolog.Logger, cand
 	return nil
 }
 
-func (p *Pipeline) tryFallbackSummary(summary, text string, maxChars int, stripPhrases []string) string {
+func (p *Pipeline) tryFallbackSummary(summary, text string, stripPhrases []string) string {
 	if summary != "" && !isWeakSummary(summary) {
 		return summary
 	}
 
 	lead := selectLeadSentence(text)
 	if lead != "" && !isMostlySymbols(lead) {
-		return postProcessSummary(lead, maxChars, stripPhrases)
+		return postProcessSummary(lead, stripPhrases)
 	}
 
 	return summary
+}
+
+func (p *Pipeline) applyCanonicalSummary(ctx context.Context, logger zerolog.Logger, candidate llm.MessageInput, res *llm.BatchResult, stripPhrases []string, s *pipelineSettings) {
+	if res == nil || s == nil {
+		return
+	}
+
+	canonicalURL := p.selectTrustedCanonicalURL(candidate, s)
+	if canonicalURL == "" {
+		return
+	}
+
+	observability.CanonicalSourceDetectedTotal.Inc()
+
+	if !isWeakSummary(res.Summary) {
+		return
+	}
+
+	canonicalItem, err := p.database.GetItemByCanonicalURL(ctx, canonicalURL, candidate.ID)
+	if err != nil {
+		logger.Warn().Err(err).Str(LogFieldMsgID, candidate.ID).Msg("failed to resolve canonical item")
+		return
+	}
+
+	if canonicalItem == nil || strings.TrimSpace(canonicalItem.Summary) == "" {
+		return
+	}
+
+	res.Summary = postProcessSummary(canonicalItem.Summary, stripPhrases)
+	if canonicalItem.Topic != "" {
+		res.Topic = canonicalItem.Topic
+	}
+
+	if canonicalItem.Language != "" {
+		res.Language = canonicalItem.Language
+	}
+
+	logger.Info().
+		Str(LogFieldMsgID, candidate.ID).
+		Str("canonical_url", canonicalURL).
+		Str("canonical_item_id", canonicalItem.ItemID).
+		Msg("reused canonical item summary")
+}
+
+func (p *Pipeline) selectTrustedCanonicalURL(candidate llm.MessageInput, s *pipelineSettings) string {
+	if len(candidate.ResolvedLinks) == 0 {
+		return ""
+	}
+
+	linkCfg := linkscore.LinkContextConfig{
+		PrimaryMinWords:      s.linkPrimaryMinWords,
+		PrimaryShortMsgChars: s.linkPrimaryShortMsgChars,
+		PrimaryAllowlist:     s.linkPrimaryAllowlist,
+		PrimaryCTATerms:      s.linkPrimaryCTATerms,
+		PrimaryMaxLinks:      s.linkPrimaryMaxLinks,
+		DonationDenylist:     s.linkPrimaryDonationDeny,
+	}
+
+	primary, supplemental := linkscore.SelectLinkContexts(candidate.Text, candidate.PreviewText, candidate.ResolvedLinks, linkCfg)
+	candidates := buildCanonicalLinkCandidates(candidate.ResolvedLinks, primary, supplemental)
+
+	for _, link := range candidates {
+		if canonicalURL, _ := linkscore.TrustedCanonical(link, s.linkCanonicalAllowlist, s.linkCanonicalTrusted, s.linkCanonicalDenylist); canonicalURL != "" {
+			return canonicalURL
+		}
+	}
+
+	return ""
+}
+
+func buildCanonicalLinkCandidates(links []domain.ResolvedLink, primary, supplemental *linkscore.LinkContext) []domain.ResolvedLink {
+	if len(links) == 0 {
+		return nil
+	}
+
+	urls := make(map[string]struct{})
+	if primary != nil && primary.URL != "" {
+		urls[primary.URL] = struct{}{}
+	}
+
+	if supplemental != nil && supplemental.URL != "" {
+		urls[supplemental.URL] = struct{}{}
+	}
+
+	if len(urls) == 0 {
+		return nil
+	}
+
+	candidates := make([]domain.ResolvedLink, 0, len(urls))
+	for _, link := range links {
+		if _, ok := urls[link.URL]; ok {
+			candidates = append(candidates, link)
+		}
+	}
+
+	return candidates
 }
 
 func (p *Pipeline) processBullets(ctx context.Context, logger zerolog.Logger, candidate llm.MessageInput, res *llm.BatchResult, s *pipelineSettings) ([]llm.ExtractedBullet, bulletScoreSummary) {
@@ -1148,7 +1256,7 @@ func (p *Pipeline) processBullets(ctx context.Context, logger zerolog.Logger, ca
 		return nil, bulletScoreSummary{}
 	}
 
-	extractedBullets := p.extractBullets(ctx, logger, candidate, res.Summary, s.digestLanguage)
+	extractedBullets := p.extractBullets(ctx, logger, candidate, res.Summary, s.digestLanguage, s)
 	if len(extractedBullets) == 0 {
 		return nil, bulletScoreSummary{}
 	}
@@ -1187,7 +1295,7 @@ func (p *Pipeline) finalizeReadyItem(ctx context.Context, logger zerolog.Logger,
 	detectedLang := detectSummaryLanguage(item.Summary, item.Language)
 	item.Summary = p.translateSummaryIfNeeded(ctx, logger, msgID, item.Summary, detectedLang, s)
 	targetLang := normalizeLanguage(s.digestLanguage)
-	item.Summary = postProcessSummary(item.Summary, s.summaryMaxChars, s.summaryStripPhrasesFor(targetLang))
+	item.Summary = postProcessSummary(item.Summary, s.summaryStripPhrasesFor(targetLang))
 }
 
 func (p *Pipeline) storeAndCount(ctx context.Context, logger zerolog.Logger, candidate llm.MessageInput, item *db.Item, embeddings map[string][]float32, extractedBullets []llm.ExtractedBullet, s *pipelineSettings) (ready, rejected int) {

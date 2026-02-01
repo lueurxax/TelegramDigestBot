@@ -248,7 +248,7 @@ func (p *openRouterProvider) ProcessBatch(ctx context.Context, messages []Messag
 		return nil, fmt.Errorf(errRateLimiterSimple, err)
 	}
 
-	promptContent := buildBatchPromptContent(messages, targetLanguage, tone)
+	promptContent := buildBatchPromptContent(p.cfg, messages, targetLanguage, tone)
 	resolvedModel := p.resolveModel(model)
 
 	result, err := p.callOpenRouterAPI(ctx, promptContent, model, openRouterMaxTokensDefault)

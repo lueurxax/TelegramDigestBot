@@ -51,7 +51,7 @@ func parseSummaryStripPhrases(raw string) []string {
 	return out
 }
 
-func postProcessSummary(summary string, maxChars int, stripPhrases []string) string {
+func postProcessSummary(summary string, stripPhrases []string) string {
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return summary
@@ -60,7 +60,9 @@ func postProcessSummary(summary string, maxChars int, stripPhrases []string) str
 	summary = stripSummaryPrefixes(summary, stripPhrases)
 	summary = normalizeWhitespace(summary)
 	summary = enforceSentenceLimit(summary)
-	summary = truncateSummary(summary, maxChars)
+
+	// Note: truncateSummary removed - it caused mid-sentence cuts that made summaries unreadable.
+	// LLM-generated summaries should be the appropriate length without artificial truncation.
 
 	return summary
 }
@@ -110,24 +112,6 @@ func enforceSentenceLimit(summary string) string {
 	}
 
 	return first
-}
-
-func truncateSummary(summary string, maxChars int) string {
-	if maxChars <= 0 {
-		return summary
-	}
-
-	runes := []rune(summary)
-	if len(runes) <= maxChars {
-		return summary
-	}
-
-	cut := string(runes[:maxChars])
-	if idx := strings.LastIndex(cut, " "); idx > 0 {
-		cut = cut[:idx]
-	}
-
-	return strings.TrimSpace(cut)
 }
 
 func isWeakSummary(summary string) bool {

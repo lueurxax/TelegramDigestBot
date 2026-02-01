@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 )
 
 const (
@@ -16,6 +17,10 @@ const (
 	promptDefaultVersion    = "v1"
 	promptLangPlaceholder   = "{{LANG_INSTRUCTION}}"
 	promptCountPlaceholder  = "{{MESSAGE_COUNT}}"
+
+	// Context types for language instruction.
+	contextTypeSummary   = "summary"
+	contextTypeNarrative = "narrative"
 )
 
 const defaultSummarizePrompt = `Summarize these {{MESSAGE_COUNT}} Telegram messages and return a JSON object with a 'results' array of length {{MESSAGE_COUNT}} (one object per input message, in the same order).
@@ -39,11 +44,11 @@ Each result object should include:
 
 Important: Each input will have a ">>> MESSAGE TO SUMMARIZE <<<" section. Only summarize that section. DO NOT summarize any "BACKGROUND CONTEXT" (which is provided only to help you understand the channel’s tone).
 
-If "Referenced Content" (a link or forwarded post) is provided for a message:
-1. Use that content as the primary source for the summary (the message text may just be commentary on it).
-2. If it’s a Telegram link, consider the source channel’s identity and the view count for importance; if it’s a web link, incorporate key details from the article’s title and content.
-3. Increase the importance_score if the referenced content contains breaking news.
-4. If you include facts from the referenced content, mention or credit the original source as appropriate.
+If link context is provided:
+1. If a [PRIMARY ARTICLE] section exists, summarize that content as the main source. Use MESSAGE only for context.
+2. If only a [SUPPLEMENTAL LINK] section exists, summarize MESSAGE as primary and use the link only to clarify or add facts.
+3. For Telegram links, consider the source channel identity and view count when assessing importance. For web links, use article title/content.
+4. If you include facts from a link, mention or credit the original source as appropriate.
 
 Messages:
 `
@@ -134,7 +139,7 @@ func applyPromptTokens(prompt string, langInstruction string, count int) string 
 
 // buildNarrativePrompt builds a prompt for narrative generation.
 func buildNarrativePrompt(items []domain.Item, evidence ItemEvidence, targetLanguage, tone, promptTemplate string) string {
-	langInstruction := buildPromptLangInstruction(targetLanguage, tone, "narrative")
+	langInstruction := buildPromptLangInstruction(targetLanguage, tone, contextTypeNarrative)
 
 	var sb strings.Builder
 
@@ -162,7 +167,7 @@ func buildNarrativePrompt(items []domain.Item, evidence ItemEvidence, targetLang
 
 // buildClusterSummaryPrompt builds a prompt for cluster summarization.
 func buildClusterSummaryPrompt(items []domain.Item, evidence ItemEvidence, targetLanguage, tone, promptTemplate string) string {
-	langInstruction := buildPromptLangInstruction(targetLanguage, tone, "summary")
+	langInstruction := buildPromptLangInstruction(targetLanguage, tone, contextTypeSummary)
 
 	var sb strings.Builder
 
@@ -229,7 +234,7 @@ func buildPromptLangInstruction(targetLanguage, tone, context string) string {
 }
 
 // buildBatchPromptContent builds the prompt content for ProcessBatch operations.
-func buildBatchPromptContent(messages []MessageInput, targetLanguage, tone string) string {
+func buildBatchPromptContent(cfg *config.Config, messages []MessageInput, targetLanguage, tone string) string {
 	langInstruction := buildLangInstructionSimple(targetLanguage, tone)
 	promptTemplate := defaultSummarizePrompt
 	promptText := applyPromptTokens(promptTemplate, langInstruction, len(messages))
@@ -250,6 +255,11 @@ func buildBatchPromptContent(messages []MessageInput, targetLanguage, tone strin
 			content.WriteString(") ")
 		}
 
+		if cfg != nil {
+			content.WriteString(buildLinkContextString(cfg, m))
+		}
+
+		content.WriteString(">>> MESSAGE TO SUMMARIZE <<< ")
 		content.WriteString(m.Text)
 		content.WriteString("\n\n")
 	}

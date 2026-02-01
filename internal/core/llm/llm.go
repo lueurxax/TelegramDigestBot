@@ -44,10 +44,12 @@ type ItemEvidence map[string][]EvidenceSource
 
 // BulletExtractionInput contains the input for bullet extraction.
 type BulletExtractionInput struct {
-	Text        string // Raw message text
-	PreviewText string // Preview/link content if available
-	Summary     string // Existing summary for context
-	MaxBullets  int    // Maximum number of bullets to extract (0 = default)
+	Text            string // Raw message text
+	PreviewText     string // Preview/link content if available
+	Summary         string // Existing summary for context
+	MaxBullets      int    // Maximum number of bullets to extract (0 = default)
+	LinkContext     string // Resolved link content (if available)
+	LinkContextRole string // "primary" or "supplemental" - how to use LinkContext
 }
 
 // ExtractedBullet represents a single bullet point extracted from a message.

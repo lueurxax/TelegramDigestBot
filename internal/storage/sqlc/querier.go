@@ -66,6 +66,7 @@ type Querier interface {
 	GetEnrichmentErrors(ctx context.Context, limit int32) ([]GetEnrichmentErrorsRow, error)
 	GetEnrichmentQueueStats(ctx context.Context) ([]GetEnrichmentQueueStatsRow, error)
 	GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context, limit int32) ([]GetInviteLinkDiscoveriesNeedingResolutionRow, error)
+	GetItemByCanonicalURL(ctx context.Context, arg GetItemByCanonicalURLParams) (GetItemByCanonicalURLRow, error)
 	GetItemByID(ctx context.Context, id pgtype.UUID) (GetItemByIDRow, error)
 	GetItemEmbedding(ctx context.Context, itemID pgtype.UUID) (string, error)
 	GetItemRatingsByItem(ctx context.Context, arg GetItemRatingsByItemParams) ([]GetItemRatingsByItemRow, error)

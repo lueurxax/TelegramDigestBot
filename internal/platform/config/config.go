@@ -95,6 +95,15 @@ type Config struct {
 	LinkSnippetMaxChars    int           `env:"LINK_SNIPPET_MAX_CHARS" envDefault:"1200"`
 	LinkEmbeddingMaxMsgLen int           `env:"LINK_EMBEDDING_MAX_MSG_LEN" envDefault:"200"`
 	LinkDenylistDomains    string        `env:"LINK_DENYLIST_DOMAINS" envDefault:""`
+	LinkPrimaryMinWords    int           `env:"LINK_PRIMARY_MIN_WORDS" envDefault:"200"`
+	LinkPrimaryShortMsg    int           `env:"LINK_PRIMARY_SHORT_MSG_CHARS" envDefault:"120"`
+	LinkPrimaryAllowlist   string        `env:"LINK_PRIMARY_ALLOWLIST" envDefault:""`
+	LinkPrimaryCTATerms    string        `env:"LINK_PRIMARY_CTA_TERMS" envDefault:"donate,patreon,subscribe,support us,подпишись,поддержи,донат"`
+	LinkPrimaryMaxLinks    int           `env:"LINK_PRIMARY_MAX_LINKS_CONSIDERED" envDefault:"3"`
+	LinkPrimaryDonationDL  string        `env:"LINK_PRIMARY_DONATION_DENYLIST" envDefault:""`
+	LinkCanonicalAllowlist string        `env:"LINK_CANONICAL_ALLOWLIST" envDefault:""`
+	LinkCanonicalTrusted   string        `env:"LINK_CANONICAL_TRUSTED_DOMAINS" envDefault:""`
+	LinkCanonicalDenylist  string        `env:"LINK_CANONICAL_DENYLIST" envDefault:""`
 
 	// Source enrichment (Phase 2)
 	EnrichmentEnabled             bool          `env:"ENRICHMENT_ENABLED" envDefault:"false"`

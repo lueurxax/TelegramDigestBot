@@ -57,6 +57,8 @@ type Item struct {
 type ResolvedLink struct {
 	ID              string
 	URL             string
+	CanonicalURL    string
+	CanonicalDomain string
 	Domain          string
 	LinkType        string
 	Title           string

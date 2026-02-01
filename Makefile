@@ -6,7 +6,12 @@ build:
 
 # Run all tests
 test:
-	go test -race -cover ./...
+	@if go tool covdata >/dev/null 2>&1; then \
+		go test -race -cover ./...; \
+	else \
+		echo "go tool covdata not available; running tests without -cover"; \
+		go test -race ./...; \
+	fi
 
 # Run linter
 lint:

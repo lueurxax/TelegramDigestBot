@@ -210,20 +210,22 @@ func (r *Resolver) resolveWebLink(ctx context.Context, link *linkextract.Link, t
 	}
 
 	return &domain.ResolvedLink{
-		URL:         link.URL,
-		Domain:      link.Domain,
-		LinkType:    string(linkextract.LinkTypeWeb),
-		Title:       content.Title,
-		Content:     content.Content,
-		Author:      content.Author,
-		PublishedAt: content.PublishedAt,
-		Description: content.Description,
-		ImageURL:    content.ImageURL,
-		WordCount:   content.WordCount,
-		Language:    content.Language,
-		Status:      domain.LinkStatusSuccess,
-		ResolvedAt:  time.Now(),
-		ExpiresAt:   time.Now().Add(ttl),
+		URL:             link.URL,
+		CanonicalURL:    content.CanonicalURL,
+		CanonicalDomain: content.CanonicalDomain,
+		Domain:          link.Domain,
+		LinkType:        string(linkextract.LinkTypeWeb),
+		Title:           content.Title,
+		Content:         content.Content,
+		Author:          content.Author,
+		PublishedAt:     content.PublishedAt,
+		Description:     content.Description,
+		ImageURL:        content.ImageURL,
+		WordCount:       content.WordCount,
+		Language:        content.Language,
+		Status:          domain.LinkStatusSuccess,
+		ResolvedAt:      time.Now(),
+		ExpiresAt:       time.Now().Add(ttl),
 	}, nil
 }
 

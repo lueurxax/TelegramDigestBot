@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/lueurxax/telegram-digest-bot/internal/core/domain"
+	linkscore "github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
@@ -17,17 +18,21 @@ import (
 
 // extractBullets extracts bullet candidates from a message for scoring.
 // This is a non-fatal operation - failures are logged but don't block the pipeline.
-func (p *Pipeline) extractBullets(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, summary, digestLanguage string) []llm.ExtractedBullet {
+func (p *Pipeline) extractBullets(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, summary, digestLanguage string, s *pipelineSettings) []llm.ExtractedBullet {
 	maxBullets := p.cfg.BulletBatchSize
 	if maxBullets <= 0 {
 		maxBullets = defaultMaxBullets
 	}
 
+	linkContext, linkRole := p.buildLinkContext(c, s)
+
 	input := llm.BulletExtractionInput{
-		Text:        c.Text,
-		PreviewText: c.PreviewText,
-		Summary:     summary,
-		MaxBullets:  maxBullets,
+		Text:            c.Text,
+		PreviewText:     c.PreviewText,
+		Summary:         summary,
+		MaxBullets:      maxBullets,
+		LinkContext:     linkContext,
+		LinkContextRole: linkRole,
 	}
 
 	extracted, err := p.llmClient.ExtractBullets(ctx, input, digestLanguage, "")
@@ -43,6 +48,42 @@ func (p *Pipeline) extractBullets(ctx context.Context, logger zerolog.Logger, c 
 	logger.Debug().Str(LogFieldMsgID, c.ID).Int(LogFieldCount, len(extracted.Bullets)).Msg("bullets extracted")
 
 	return dedupeExtractedBullets(extracted.Bullets)
+}
+
+func (p *Pipeline) buildLinkContext(c llm.MessageInput, s *pipelineSettings) (string, string) {
+	if s == nil || len(c.ResolvedLinks) == 0 {
+		return "", ""
+	}
+
+	cfg := linkscore.LinkContextConfig{
+		PrimaryMinWords:      s.linkPrimaryMinWords,
+		PrimaryShortMsgChars: s.linkPrimaryShortMsgChars,
+		PrimaryAllowlist:     s.linkPrimaryAllowlist,
+		PrimaryCTATerms:      s.linkPrimaryCTATerms,
+		PrimaryMaxLinks:      s.linkPrimaryMaxLinks,
+		DonationDenylist:     s.linkPrimaryDonationDeny,
+	}
+
+	primary, supplemental := linkscore.SelectLinkContexts(c.Text, c.PreviewText, c.ResolvedLinks, cfg)
+	if primary != nil {
+		return truncateLinkContext(primary.Content, s.linkSnippetMaxChars), string(primary.Role)
+	}
+
+	if supplemental != nil {
+		return truncateLinkContext(supplemental.Content, s.linkSnippetMaxChars), string(supplemental.Role)
+	}
+
+	return "", ""
+}
+
+func truncateLinkContext(text string, max int) string {
+	if max <= 0 || utf8.RuneCountInString(text) <= max {
+		return text
+	}
+
+	runes := []rune(text)
+
+	return string(runes[:max])
 }
 
 // storeBullets saves extracted bullets to the database and generates embeddings.

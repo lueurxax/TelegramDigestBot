@@ -1512,6 +1512,42 @@ func (q *Queries) GetInviteLinkDiscoveriesNeedingResolution(ctx context.Context,
 	return items, nil
 }
 
+const getItemByCanonicalURL = `-- name: GetItemByCanonicalURL :one
+SELECT i.id, i.summary, i.topic, i.language
+FROM items i
+JOIN message_links ml ON ml.raw_message_id = i.raw_message_id
+JOIN link_cache lc ON lc.id = ml.link_cache_id
+WHERE lc.canonical_url = $1
+  AND i.raw_message_id != $2
+  AND i.status = 'ready'
+ORDER BY i.importance_score DESC
+LIMIT 1
+`
+
+type GetItemByCanonicalURLParams struct {
+	CanonicalUrl pgtype.Text `json:"canonical_url"`
+	RawMessageID pgtype.UUID `json:"raw_message_id"`
+}
+
+type GetItemByCanonicalURLRow struct {
+	ID       pgtype.UUID `json:"id"`
+	Summary  pgtype.Text `json:"summary"`
+	Topic    pgtype.Text `json:"topic"`
+	Language pgtype.Text `json:"language"`
+}
+
+func (q *Queries) GetItemByCanonicalURL(ctx context.Context, arg GetItemByCanonicalURLParams) (GetItemByCanonicalURLRow, error) {
+	row := q.db.QueryRow(ctx, getItemByCanonicalURL, arg.CanonicalUrl, arg.RawMessageID)
+	var i GetItemByCanonicalURLRow
+	err := row.Scan(
+		&i.ID,
+		&i.Summary,
+		&i.Topic,
+		&i.Language,
+	)
+	return i, err
+}
+
 const getItemByID = `-- name: GetItemByID :one
 SELECT id, raw_message_id, relevance_score, importance_score, topic, summary, language, status, error_json, created_at, first_seen_at, digested_at
 FROM items WHERE id = $1
@@ -1563,40 +1599,6 @@ func (q *Queries) GetItemEmbedding(ctx context.Context, itemID pgtype.UUID) (str
 	return embedding, err
 }
 
-const getItemRatingsSince = `-- name: GetItemRatingsSince :many
-SELECT rm.channel_id, ir.rating, ir.created_at
-FROM item_ratings ir
-JOIN items i ON ir.item_id = i.id
-JOIN raw_messages rm ON i.raw_message_id = rm.id
-WHERE ir.created_at >= $1
-`
-
-type GetItemRatingsSinceRow struct {
-	ChannelID pgtype.UUID        `json:"channel_id"`
-	Rating    string             `json:"rating"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) GetItemRatingsSince(ctx context.Context, createdAt pgtype.Timestamptz) ([]GetItemRatingsSinceRow, error) {
-	rows, err := q.db.Query(ctx, getItemRatingsSince, createdAt)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GetItemRatingsSinceRow
-	for rows.Next() {
-		var i GetItemRatingsSinceRow
-		if err := rows.Scan(&i.ChannelID, &i.Rating, &i.CreatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getItemRatingsByItem = `-- name: GetItemRatingsByItem :many
 SELECT user_id, rating, feedback, source, created_at
 FROM item_ratings
@@ -1627,7 +1629,47 @@ func (q *Queries) GetItemRatingsByItem(ctx context.Context, arg GetItemRatingsBy
 	var items []GetItemRatingsByItemRow
 	for rows.Next() {
 		var i GetItemRatingsByItemRow
-		if err := rows.Scan(&i.UserID, &i.Rating, &i.Feedback, &i.Source, &i.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&i.UserID,
+			&i.Rating,
+			&i.Feedback,
+			&i.Source,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getItemRatingsSince = `-- name: GetItemRatingsSince :many
+SELECT rm.channel_id, ir.rating, ir.created_at
+FROM item_ratings ir
+JOIN items i ON ir.item_id = i.id
+JOIN raw_messages rm ON i.raw_message_id = rm.id
+WHERE ir.created_at >= $1
+`
+
+type GetItemRatingsSinceRow struct {
+	ChannelID pgtype.UUID        `json:"channel_id"`
+	Rating    string             `json:"rating"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) GetItemRatingsSince(ctx context.Context, createdAt pgtype.Timestamptz) ([]GetItemRatingsSinceRow, error) {
+	rows, err := q.db.Query(ctx, getItemRatingsSince, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetItemRatingsSinceRow
+	for rows.Next() {
+		var i GetItemRatingsSinceRow
+		if err := rows.Scan(&i.ChannelID, &i.Rating, &i.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1921,7 +1963,7 @@ func (q *Queries) GetLatestGlobalRatingStats(ctx context.Context) (GetLatestGlob
 }
 
 const getLinkCache = `-- name: GetLinkCache :one
-SELECT id, url, domain, link_type, title, content, author, published_at, description, image_url, word_count, channel_username, channel_title, channel_id, message_id, views, forwards, has_media, media_type, status, error_message, language, resolved_at, created_at, expires_at FROM link_cache WHERE url = $1
+SELECT id, url, domain, link_type, title, content, author, published_at, description, image_url, word_count, channel_username, channel_title, channel_id, message_id, views, forwards, has_media, media_type, status, error_message, language, resolved_at, created_at, expires_at, canonical_url, canonical_domain FROM link_cache WHERE url = $1
 `
 
 func (q *Queries) GetLinkCache(ctx context.Context, url string) (LinkCache, error) {
@@ -1953,12 +1995,14 @@ func (q *Queries) GetLinkCache(ctx context.Context, url string) (LinkCache, erro
 		&i.ResolvedAt,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.CanonicalUrl,
+		&i.CanonicalDomain,
 	)
 	return i, err
 }
 
 const getLinksForMessage = `-- name: GetLinksForMessage :many
-SELECT lc.id, lc.url, lc.domain, lc.link_type, lc.title, lc.content, lc.author, lc.published_at, lc.description, lc.image_url, lc.word_count, lc.channel_username, lc.channel_title, lc.channel_id, lc.message_id, lc.views, lc.forwards, lc.has_media, lc.media_type, lc.status, lc.error_message, lc.language, lc.resolved_at, lc.created_at, lc.expires_at 
+SELECT lc.id, lc.url, lc.domain, lc.link_type, lc.title, lc.content, lc.author, lc.published_at, lc.description, lc.image_url, lc.word_count, lc.channel_username, lc.channel_title, lc.channel_id, lc.message_id, lc.views, lc.forwards, lc.has_media, lc.media_type, lc.status, lc.error_message, lc.language, lc.resolved_at, lc.created_at, lc.expires_at, lc.canonical_url, lc.canonical_domain
 FROM link_cache lc
 JOIN message_links ml ON lc.id = ml.link_cache_id
 WHERE ml.raw_message_id = $1
@@ -2000,6 +2044,8 @@ func (q *Queries) GetLinksForMessage(ctx context.Context, rawMessageID pgtype.UU
 			&i.ResolvedAt,
 			&i.CreatedAt,
 			&i.ExpiresAt,
+			&i.CanonicalUrl,
+			&i.CanonicalDomain,
 		); err != nil {
 			return nil, err
 		}
@@ -3042,19 +3088,21 @@ func (q *Queries) SaveItemRating(ctx context.Context, arg SaveItemRatingParams) 
 
 const saveLinkCache = `-- name: SaveLinkCache :one
 INSERT INTO link_cache (
-    url, domain, link_type, title, content, author, published_at,
+    url, canonical_url, canonical_domain, domain, link_type, title, content, author, published_at,
     description, image_url, word_count,
     channel_username, channel_title, channel_id, message_id,
     views, forwards, has_media, media_type,
     status, error_message, language, resolved_at, expires_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10,
-    $11, $12, $13, $14,
-    $15, $16, $17, $18,
-    $19, $20, $21, $22, $23
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    $9, $10, $11, $12,
+    $13, $14, $15, $16,
+    $17, $18, $19, $20,
+    $21, $22, $23, $24, $25
 )
 ON CONFLICT (url) DO UPDATE SET
+    canonical_url = EXCLUDED.canonical_url,
+    canonical_domain = EXCLUDED.canonical_domain,
     title = EXCLUDED.title,
     content = EXCLUDED.content,
     author = EXCLUDED.author,
@@ -3080,6 +3128,8 @@ RETURNING id
 
 type SaveLinkCacheParams struct {
 	Url             string             `json:"url"`
+	CanonicalUrl    pgtype.Text        `json:"canonical_url"`
+	CanonicalDomain pgtype.Text        `json:"canonical_domain"`
 	Domain          string             `json:"domain"`
 	LinkType        string             `json:"link_type"`
 	Title           pgtype.Text        `json:"title"`
@@ -3107,6 +3157,8 @@ type SaveLinkCacheParams struct {
 func (q *Queries) SaveLinkCache(ctx context.Context, arg SaveLinkCacheParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, saveLinkCache,
 		arg.Url,
+		arg.CanonicalUrl,
+		arg.CanonicalDomain,
 		arg.Domain,
 		arg.LinkType,
 		arg.Title,

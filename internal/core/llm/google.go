@@ -30,6 +30,9 @@ const (
 
 	// Relevance gate default confidence.
 	googleDefaultConfidence = 0.5
+
+	// supplementalLinkRole is the default role for link context.
+	supplementalLinkRole = "SUPPLEMENTAL LINK"
 )
 
 // sanitizeUTF8 removes or replaces invalid UTF-8 sequences from a string.
@@ -254,29 +257,10 @@ func (p *googleProvider) ProcessBatch(ctx context.Context, messages []MessageInp
 		return nil, fmt.Errorf(errRateLimiterSimple, err)
 	}
 
-	langInstruction := buildLangInstructionSimple(targetLanguage, tone)
-	promptTemplate := defaultSummarizePrompt
-	promptText := applyPromptTokens(promptTemplate, langInstruction, len(messages))
-
-	// Build message content
-	var content strings.Builder
-	content.WriteString(promptText)
-	content.WriteString("\n\n")
-
-	for i, m := range messages {
-		content.WriteString(fmt.Sprintf(indexedPrefixFormat, i))
-
-		if m.ChannelTitle != "" {
-			content.WriteString(fmt.Sprintf(sourceChannelFormat, m.ChannelTitle))
-		}
-
-		content.WriteString(m.Text)
-		content.WriteString("\n\n")
-	}
-
+	contentText := buildBatchPromptContent(p.cfg, messages, targetLanguage, tone)
 	resolvedModel := p.resolveModel(model)
 
-	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(content.String())))
+	resp, err := p.generateContent(ctx, model, genai.Text(sanitizeUTF8(contentText)))
 	if err != nil {
 		p.usageRecorder.RecordTokenUsage(string(ProviderGoogle), resolvedModel, TaskSummarize, 0, 0, false)
 
@@ -601,8 +585,21 @@ func buildBulletExtractionPrompt(input BulletExtractionInput, targetLanguage str
 	}
 
 	var contextSection string
-	if input.PreviewText != "" {
-		contextSection = fmt.Sprintf(bulletContextFormat, input.PreviewText)
+
+	contextText := strings.TrimSpace(input.LinkContext)
+	role := strings.TrimSpace(strings.ToUpper(input.LinkContextRole))
+
+	if contextText == "" && input.PreviewText != "" {
+		contextText = strings.TrimSpace(input.PreviewText)
+		role = supplementalLinkRole
+	}
+
+	if contextText != "" {
+		if role == "" {
+			role = supplementalLinkRole
+		}
+
+		contextSection = fmt.Sprintf(bulletContextFormat, role, contextText)
 	}
 
 	return fmt.Sprintf(bulletExtractionPrompt, maxBullets, targetLanguage, sanitizeUTF8(input.Text), contextSection)

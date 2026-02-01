@@ -119,6 +119,7 @@ type Cluster struct {
 	WindowEnd   pgtype.Timestamptz `json:"window_end"`
 	Topic       pgtype.Text        `json:"topic"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	Source      string             `json:"source"`
 }
 
 type ClusterFirstAppearance struct {
@@ -308,25 +309,27 @@ type GlobalRatingStat struct {
 }
 
 type Item struct {
-	ID              pgtype.UUID        `json:"id"`
-	RawMessageID    pgtype.UUID        `json:"raw_message_id"`
-	RelevanceScore  float32            `json:"relevance_score"`
-	ImportanceScore float32            `json:"importance_score"`
-	Topic           pgtype.Text        `json:"topic"`
-	Summary         pgtype.Text        `json:"summary"`
-	Language        pgtype.Text        `json:"language"`
-	Status          string             `json:"status"`
-	ErrorJson       []byte             `json:"error_json"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	DigestedAt      pgtype.Timestamptz `json:"digested_at"`
-	RetryCount      int32              `json:"retry_count"`
-	NextRetryAt     pgtype.Timestamptz `json:"next_retry_at"`
-	FactCheckScore  pgtype.Float4      `json:"fact_check_score"`
-	FactCheckTier   pgtype.Text        `json:"fact_check_tier"`
-	FactCheckNotes  pgtype.Text        `json:"fact_check_notes"`
-	LanguageSource  pgtype.Text        `json:"language_source"`
-	FirstSeenAt     pgtype.Timestamptz `json:"first_seen_at"`
-	SearchVector    interface{}        `json:"search_vector"`
+	ID                  pgtype.UUID        `json:"id"`
+	RawMessageID        pgtype.UUID        `json:"raw_message_id"`
+	RelevanceScore      float32            `json:"relevance_score"`
+	ImportanceScore     float32            `json:"importance_score"`
+	Topic               pgtype.Text        `json:"topic"`
+	Summary             pgtype.Text        `json:"summary"`
+	Language            pgtype.Text        `json:"language"`
+	Status              string             `json:"status"`
+	ErrorJson           []byte             `json:"error_json"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	DigestedAt          pgtype.Timestamptz `json:"digested_at"`
+	RetryCount          int32              `json:"retry_count"`
+	NextRetryAt         pgtype.Timestamptz `json:"next_retry_at"`
+	FactCheckScore      pgtype.Float4      `json:"fact_check_score"`
+	FactCheckTier       pgtype.Text        `json:"fact_check_tier"`
+	FactCheckNotes      pgtype.Text        `json:"fact_check_notes"`
+	LanguageSource      pgtype.Text        `json:"language_source"`
+	FirstSeenAt         pgtype.Timestamptz `json:"first_seen_at"`
+	SearchVector        interface{}        `json:"search_vector"`
+	BulletTotalCount    int32              `json:"bullet_total_count"`
+	BulletIncludedCount int32              `json:"bullet_included_count"`
 }
 
 type ItemBullet struct {
@@ -372,6 +375,7 @@ type ItemRating struct {
 	Rating    string             `json:"rating"`
 	Feedback  pgtype.Text        `json:"feedback"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Source    string             `json:"source"`
 }
 
 type LinkCache struct {
@@ -400,6 +404,8 @@ type LinkCache struct {
 	ResolvedAt      pgtype.Timestamptz `json:"resolved_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CanonicalUrl    pgtype.Text        `json:"canonical_url"`
+	CanonicalDomain pgtype.Text        `json:"canonical_domain"`
 }
 
 type LlmUsage struct {

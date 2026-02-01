@@ -27,6 +27,13 @@ type SimilarIrrelevantItem struct {
 	Similarity float64
 }
 
+type CanonicalItem struct {
+	ItemID   string
+	Summary  string
+	Topic    string
+	Language string
+}
+
 // ItemWithMedia extends Item with media data for inline image support.
 type ItemWithMedia struct {
 	Item
@@ -120,6 +127,27 @@ func (db *DB) FindSimilarItemForChannel(ctx context.Context, embedding []float32
 	}
 
 	return fromUUID(id), nil
+}
+
+func (db *DB) GetItemByCanonicalURL(ctx context.Context, canonicalURL, excludeRawMsgID string) (*CanonicalItem, error) {
+	row, err := db.Queries.GetItemByCanonicalURL(ctx, sqlc.GetItemByCanonicalURLParams{
+		CanonicalUrl: toText(canonicalURL),
+		RawMessageID: toUUID(excludeRawMsgID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil //nolint:nilnil // intentional: not found is not an error
+		}
+
+		return nil, fmt.Errorf("get item by canonical url: %w", err)
+	}
+
+	return &CanonicalItem{
+		ItemID:   fromUUID(row.ID),
+		Summary:  row.Summary.String,
+		Topic:    row.Topic.String,
+		Language: row.Language.String,
+	}, nil
 }
 
 func (db *DB) FindSimilarIrrelevantItem(ctx context.Context, embedding []float32, since time.Time) (*SimilarIrrelevantItem, error) {

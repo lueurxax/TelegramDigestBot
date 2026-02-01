@@ -107,6 +107,21 @@ var (
 		Help: "Total number of dropped messages by reason",
 	}, []string{"reason"})
 
+	LinkContextUsedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_link_context_used_total",
+		Help: "Total number of items that used resolved link context in summarization",
+	})
+
+	LinkLanguageQueriesTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_link_language_queries_total",
+		Help: "Total number of enrichment queries generated from link language content",
+	})
+
+	CanonicalSourceDetectedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_canonical_source_detected_total",
+		Help: "Total number of items with a trusted canonical source detected",
+	})
+
 	ItemRatingsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "digest_item_ratings_total",
 		Help: "Total number of item ratings by rating value",

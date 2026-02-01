@@ -111,13 +111,16 @@ const (
 
 // Bullet extraction prompts
 const (
-	bulletContextFormat = "\nAdditional context from links:\n%s"
+	bulletContextFormat = "\n[%s]\n%s"
 
-	bulletExtractionPrompt = `Identify the %d most important self-contained claims in this text.
+	bulletExtractionPrompt = `Identify the %d most important self-contained claims.
 Each claim must be understandable without additional context.
 Target language for output: %s
 
-Text: %s%s
+If [PRIMARY ARTICLE] is provided, extract claims from it and use MESSAGE only for context.
+If only [SUPPLEMENTAL LINK] is provided, extract claims from MESSAGE and use the link only to clarify details.
+
+MESSAGE: %s%s
 
 Return ONLY a JSON array (no markdown, no explanation):
 [{"text": "claim text", "relevance_score": 0.0-1.0, "importance_score": 0.0-1.0, "topic": "short topic"}]
