@@ -53,8 +53,16 @@ jobs:
           go-version: '1.25'
           cache: true
 
-      - name: Run tests
-        run: go test ${{ matrix.packages }}
+      - name: Run tests with coverage
+        run: go test -coverprofile=coverage-${{ matrix.name }}.out -covermode=atomic ${{ matrix.packages }}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage-${{ matrix.name }}.out
+          flags: ${{ matrix.name }}
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   test-eval:
     name: Test (Eval)
