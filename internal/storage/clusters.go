@@ -160,6 +160,8 @@ func (db *DB) GetClusterForItem(ctx context.Context, itemID string) (*ClusterWit
 
 	var items []ClusterItemInfo
 
+	seenItems := make(map[string]struct{})
+
 	for rows.Next() {
 		var (
 			clusterIDRaw pgtype.UUID
@@ -186,6 +188,12 @@ func (db *DB) GetClusterForItem(ctx context.Context, itemID string) (*ClusterWit
 		iID := fromUUID(itemIDRaw)
 		// Skip the item we're looking up (we don't want to show it in "related items")
 		if iID != itemID {
+			if _, ok := seenItems[iID]; ok {
+				continue
+			}
+
+			seenItems[iID] = struct{}{}
+
 			items = append(items, ClusterItemInfo{
 				ID:              iID,
 				Summary:         summary.String,

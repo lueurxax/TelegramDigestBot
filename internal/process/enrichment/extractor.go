@@ -926,9 +926,13 @@ func sanitizeJSONResponse(s string) string {
 
 	for _, r := range s {
 		switch {
-		case r == '\n' || r == '\r' || r == '\t':
-			// Keep standard whitespace
+		case r == '\n' || r == '\r':
+			// Keep newlines and carriage returns
 			result.WriteRune(r)
+		case r == '\t':
+			// Replace tabs with spaces to avoid "invalid character '\t' in string literal" errors
+			// when tabs appear inside JSON string values (common LLM garbage output issue)
+			result.WriteRune(' ')
 		case r < asciiControlMax:
 			// Skip other control characters (0x00-0x1F except newline/tab/cr)
 			continue

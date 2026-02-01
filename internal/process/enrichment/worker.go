@@ -22,8 +22,10 @@ import (
 )
 
 const (
-	maxEnrichmentAttempts            = 3
-	defaultRetryDelay                = 10 * time.Minute
+	maxEnrichmentAttempts = 3
+	defaultRetryDelay     = 10 * time.Minute
+	// maxRetryDelayMultiplier is the cap for exponential backoff (delay * 2^attempts, max 4x = 40 min).
+	maxRetryDelayMultiplier          = 4
 	defaultEnrichmentCacheTTL        = 7 * 24 * time.Hour
 	defaultTranslationCacheTTL       = 24 * time.Hour
 	defaultEnrichmentPollInterval    = 10 * time.Second
@@ -1829,12 +1831,46 @@ func (w *Worker) getEvidenceCacheTTL() time.Duration {
 }
 
 func (w *Worker) handleError(ctx context.Context, item *db.EnrichmentQueueItem, err error) {
-	if item.AttemptCount >= maxEnrichmentAttempts {
-		w.updateStatus(ctx, item.ID, db.EnrichmentStatusError, err.Error(), nil)
+	// If no evidence was extracted from search results, don't retry -
+	// the search succeeded but no corroborating sources were found.
+	// Retrying won't help in this case.
+	if errors.Is(err, errNoEvidenceExtracted) {
+		w.logger.Info().
+			Str(logKeyItemID, item.ItemID).
+			Int(fieldAttempt, item.AttemptCount).
+			Msg("no evidence extracted, marking as done (no corroboration available)")
+		w.updateStatus(ctx, item.ID, db.EnrichmentStatusDone, "", nil)
+
 		return
 	}
 
-	retryAt := time.Now().Add(defaultRetryDelay)
+	if item.AttemptCount >= maxEnrichmentAttempts {
+		w.logger.Warn().
+			Str(logKeyItemID, item.ItemID).
+			Int("attempts", item.AttemptCount).
+			Err(err).
+			Msg("max enrichment attempts reached, marking as error")
+		w.updateStatus(ctx, item.ID, db.EnrichmentStatusError, err.Error(), nil)
+
+		return
+	}
+
+	// Exponential backoff: delay * 2^attempts, capped at maxRetryDelayMultiplier
+	multiplier := 1 << item.AttemptCount // 2^attempts: 1, 2, 4...
+	if multiplier > maxRetryDelayMultiplier {
+		multiplier = maxRetryDelayMultiplier
+	}
+
+	retryDelay := defaultRetryDelay * time.Duration(multiplier)
+	retryAt := time.Now().Add(retryDelay)
+
+	w.logger.Debug().
+		Str(logKeyItemID, item.ItemID).
+		Int(fieldAttempt, item.AttemptCount).
+		Dur("retry_delay", retryDelay).
+		Err(err).
+		Msg("scheduling enrichment retry with exponential backoff")
+
 	w.updateStatus(ctx, item.ID, db.EnrichmentStatusPending, err.Error(), &retryAt)
 }
 

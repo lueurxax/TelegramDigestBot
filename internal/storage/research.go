@@ -3183,7 +3183,10 @@ func (db *DB) CleanupResearchRetention(ctx context.Context) (ResearchRetentionCo
 }
 
 // RefreshResearchMaterializedViews refreshes research materialized views and derived caches.
+// Operations are staggered with delays to reduce database contention and avoid timeout cascades.
 func (db *DB) RefreshResearchMaterializedViews(ctx context.Context) error {
+	const viewRefreshDelay = 2 * time.Second // Delay between view refreshes to reduce contention
+
 	views := []string{
 		"mv_topic_timeline",
 		"mv_channel_overlap",
@@ -3196,7 +3199,21 @@ func (db *DB) RefreshResearchMaterializedViews(ctx context.Context) error {
 		db.Logger.Error().Err(err).Msg("research derived tables rebuild failed")
 	}
 
-	for _, view := range views {
+	// Check context before starting view refreshes
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context canceled before view refresh: %w", err)
+	}
+
+	for i, view := range views {
+		// Add delay between operations to reduce database contention
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context canceled during view refresh delay: %w", ctx.Err())
+			case <-time.After(viewRefreshDelay):
+			}
+		}
+
 		db.Logger.Info().Str(logFieldView, view).Msg("refreshing materialized view")
 
 		if _, err := db.Pool.Exec(ctx, fmt.Sprintf("REFRESH MATERIALIZED VIEW CONCURRENTLY %s", view)); err != nil {
