@@ -2,6 +2,7 @@ package expandedview
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -172,7 +173,7 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 		// Continue without evidence - it's not critical
 	}
 
-	evidence := evidenceMap[itemID]
+	evidence := dedupeEvidence(evidenceMap[itemID])
 
 	// Fetch cluster context
 	var clusterItems []ClusterItemView
@@ -309,4 +310,131 @@ func getClientIP(r *http.Request) string {
 
 	// Fall back to RemoteAddr
 	return r.RemoteAddr
+}
+
+type evidenceAgg struct {
+	item          db.ItemEvidenceWithSource
+	claimsByKey   map[string]MatchedClaim
+	claimsTouched bool
+}
+
+func dedupeEvidence(evidence []db.ItemEvidenceWithSource) []db.ItemEvidenceWithSource {
+	if len(evidence) <= 1 {
+		return evidence
+	}
+
+	orderedKeys := make([]string, 0, len(evidence))
+	aggregates := make(map[string]*evidenceAgg, len(evidence))
+
+	for _, ev := range evidence {
+		key := normalizeEvidenceKey(ev)
+		if key == "" {
+			key = ev.EvidenceID
+		}
+
+		entry, exists := aggregates[key]
+		if !exists {
+			aggregates[key] = &evidenceAgg{item: ev}
+			orderedKeys = append(orderedKeys, key)
+
+			continue
+		}
+
+		if ev.AgreementScore > entry.item.AgreementScore {
+			entry.item = ev
+		}
+
+		entry.item.IsContradiction = entry.item.IsContradiction || ev.IsContradiction
+
+		mergeMatchedClaims(entry, ev.MatchedClaimsJSON)
+	}
+
+	result := make([]db.ItemEvidenceWithSource, 0, len(orderedKeys))
+	for _, key := range orderedKeys {
+		entry := aggregates[key]
+		if entry == nil {
+			continue
+		}
+
+		if entry.claimsTouched {
+			entry.item.MatchedClaimsJSON = marshalMatchedClaims(entry.claimsByKey)
+		}
+
+		result = append(result, entry.item)
+	}
+
+	return result
+}
+
+func normalizeEvidenceKey(ev db.ItemEvidenceWithSource) string {
+	if ev.Source.URL != "" {
+		return strings.ToLower(strings.TrimSpace(ev.Source.URL))
+	}
+
+	if ev.Source.Domain == "" && ev.Source.Title == "" {
+		return ""
+	}
+
+	return strings.ToLower(strings.TrimSpace(ev.Source.Domain + "::" + ev.Source.Title))
+}
+
+func mergeMatchedClaims(entry *evidenceAgg, raw []byte) {
+	claims := parseMatchedClaims(raw)
+	if len(claims) == 0 {
+		return
+	}
+
+	if entry.claimsByKey == nil {
+		entry.claimsByKey = make(map[string]MatchedClaim, len(claims))
+	}
+
+	for _, claim := range claims {
+		key := strings.ToLower(strings.TrimSpace(claim.ItemClaim + "::" + claim.EvidenceClaim))
+		if key == "" {
+			continue
+		}
+
+		if existing, ok := entry.claimsByKey[key]; ok {
+			if claim.Score > existing.Score {
+				entry.claimsByKey[key] = claim
+			}
+
+			continue
+		}
+
+		entry.claimsByKey[key] = claim
+	}
+
+	entry.claimsTouched = true
+}
+
+func parseMatchedClaims(data []byte) []MatchedClaim {
+	if len(data) == 0 {
+		return nil
+	}
+
+	var claims []MatchedClaim
+	if err := json.Unmarshal(data, &claims); err != nil {
+		return nil
+	}
+
+	return claims
+}
+
+func marshalMatchedClaims(claimsByKey map[string]MatchedClaim) []byte {
+	if len(claimsByKey) == 0 {
+		return nil
+	}
+
+	claims := make([]MatchedClaim, 0, len(claimsByKey))
+	for _, claim := range claimsByKey {
+		claims = append(claims, claim)
+	}
+
+	encoded, err := json.Marshal(claims)
+	if err != nil {
+		return nil
+	}
+
+	return encoded
 }
