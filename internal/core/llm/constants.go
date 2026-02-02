@@ -122,8 +122,7 @@ const (
 
 	bulletExtractionPrompt = `Identify the %d most important self-contained claims.
 Each claim must be understandable without additional context.
-Target language for output: %s
-Output must be ONLY in the target language; translate if the source is different.
+Target language for output: %s (output ONLY in this language).
 
 If [PRIMARY ARTICLE] is provided, extract claims from it and use MESSAGE only for context.
 If only [SUPPLEMENTAL LINK] is provided, extract claims from MESSAGE and use the link only to clarify details.
@@ -134,7 +133,8 @@ Return ONLY a JSON array (no markdown, no explanation):
 [{"text": "claim text", "relevance_score": 0.0-1.0, "importance_score": 0.0-1.0, "topic": "short topic"}]
 
 Guidelines:
-- Each claim should be a complete, standalone statement
+- Each claim should be a complete, standalone statement (1 sentence, ≤ 180 chars)
+- Do not repeat or paraphrase the same claim
 - relevance_score: how relevant to the channel's typical content (0.0-1.0)
 - importance_score: how newsworthy or significant (0.0-1.0)
 - topic: 1-3 word category (e.g., "Politics", "Technology", "Economy")

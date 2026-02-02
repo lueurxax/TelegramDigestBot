@@ -25,7 +25,8 @@ const (
 
 const defaultGatePrompt = `You are a relevance gate for a Telegram digest pipeline.
 Decide if the message should be summarized for a news digest.
-Return ONLY JSON with keys: decision ("relevant" or "irrelevant"), confidence (0-1), reason (short_snake_case).
+Return ONLY strict JSON with keys: decision ("relevant" or "irrelevant"), confidence (0-1), reason (snake_case).
+Allowed reasons: news, routine, promo, link_only, empty, chatter, other.
 
 Rubric:
 - Relevant if it contains a factual update, news, or meaningful information likely to matter to readers.

@@ -572,10 +572,10 @@ func (w *Worker) buildLLMQueryPrompt(item *db.EnrichmentQueueItem, links []domai
 	var sb strings.Builder
 
 	sb.WriteString("Generate web search queries to corroborate the news item below.\n")
-	sb.WriteString("Return a JSON array of 2-4 concise queries (3-8 words each).\n")
-	sb.WriteString("Use the original language of the item.\n")
-	sb.WriteString("Include key people, organizations, and locations. Avoid filler words.\n")
-	sb.WriteString("Output JSON only.\n\n")
+	sb.WriteString("Return a JSON array of 2-4 distinct queries (3-8 words each).\n")
+	sb.WriteString("Use the original language of the item. No emojis, hashtags, or quotes.\n")
+	sb.WriteString("Include key people, organizations, locations, and specific terms; avoid generic words like \"news\" or \"report\".\n")
+	sb.WriteString("Output JSON only (double quotes, no trailing commas).\n\n")
 
 	if summary != "" {
 		sb.WriteString("Summary: ")

@@ -219,7 +219,7 @@ func (e *Extractor) extractClaimsWithLLM(ctx context.Context, content string) ([
 }
 
 func (e *Extractor) buildClaimExtractionPrompt(content string) string {
-	return `Extract key factual statements from the text below. Return ONLY a valid JSON array, no other text.
+	return `Extract key factual statements from the text below. Return ONLY a valid JSON array, no other text. Do NOT copy the example content.
 
 Each object must have:
 - "text": string (a factual statement from the article, 1-2 sentences)
