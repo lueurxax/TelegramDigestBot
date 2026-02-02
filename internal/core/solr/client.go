@@ -452,6 +452,13 @@ func (c *Client) sendUpdate(ctx context.Context, docs interface{}, commit bool) 
 	}
 	defer resp.Body.Close()
 
+	// Treat 409 Conflict as success for idempotent indexing operations.
+	// A version conflict means another pod already indexed the same document,
+	// which is the desired end state.
+	if resp.StatusCode == httpStatusConflict {
+		return nil
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, errBodyReadLimit))
 		if readErr != nil {

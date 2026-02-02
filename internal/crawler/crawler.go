@@ -194,6 +194,25 @@ func (c *Crawler) processURL(ctx context.Context, doc *solr.Document) {
 		}
 	}()
 
+	// Verify claim is still valid before expensive extraction work.
+	// Due to Solr replication lag, another pod might have claimed this URL
+	// after our ConditionalUpdate appeared to succeed on a stale replica.
+	current, err := c.client.Get(ctx, doc.ID)
+	if err != nil {
+		c.logger.Warn().Err(err).Str(fieldDocID, doc.ID).Msg("Failed to verify claim")
+		return
+	}
+
+	if current.CrawlClaimedBy != c.podName {
+		c.logger.Debug().
+			Str(fieldDocID, doc.ID).
+			Str("claimed_by", current.CrawlClaimedBy).
+			Str("our_pod", c.podName).
+			Msg("Claim lost to another pod, skipping")
+
+		return
+	}
+
 	c.logger.Debug().Str(fieldURL, doc.URL).Int("depth", doc.CrawlDepth).Msg("Processing URL")
 
 	IncrementProcessed()
