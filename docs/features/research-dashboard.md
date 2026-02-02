@@ -182,7 +182,7 @@ Shows how stories move across languages with average time lag.
 GET /research/claims
 ```
 
-Returns claim ledger entries with first-seen timestamps and cluster links.
+Returns claim ledger entries with first-seen timestamps and cluster links. In the HTML view, the Origin Cluster column links to `/research/cluster/<id>`.
 
 ### Weekly Diff
 

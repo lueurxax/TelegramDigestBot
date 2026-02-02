@@ -1,13 +1,14 @@
 # Gemini Context: Telegram Noise-Reduction Digest Bot
 
 ## Project Overview
-This project is a modular Telegram automation system written in Go. It ingests messages from tracked channels (using MTProto), filters them, and generates summarized digests using LLMs (OpenAI, etc.).
+This project is a modular Telegram automation system written in Go. It ingests messages from tracked channels (using MTProto), filters them, and generates summarized digests using LLMs.
 
 ### Key Features
 *   **MTProto Reader**: Ingests messages as a real user.
 *   **Processing Pipeline**: Deduplication (pgvector), relevance scoring, summarization.
-*   **LLM Integration**: Uses OpenAI (GPT-4o), Anthropic, and Google Generative AI.
+*   **LLM Integration**: Multi-provider routing with fallback chains.
 *   **Architecture**: Microservices-like components (Control Bot, Reader, Worker, Scheduler) interacting via PostgreSQL.
+*   **Research Dashboard**: Web UI for archive search, claims, clusters, and analytics.
 
 ## Architecture & Components
 The system is divided into several Go services, typically run via Docker Compose or individually for development.
@@ -33,13 +34,13 @@ The system is divided into several Go services, typically run via Docker Compose
 ## Development Workflow
 
 ### Prerequisites
-*   Go 1.24+
+*   Go 1.25.6+
 *   Docker & Docker Compose
 *   PostgreSQL with `pgvector` extension
 
 ### Key Commands (Makefile)
 *   **Build**: `make build` (Outputs to `bin/telegram-digest-bot`)
-*   **Test**: `make test` (Runs `go test -race -cover ./...`)
+*   **Test**: `make test` (Runs `go test ./...` with coverage if available)
 *   **Lint**: `make lint` (Uses `golangci-lint`)
 *   **Generate SQL**: `make generate` (Runs `sqlc generate`)
 *   **Migrations**: `make migrate-up` / `make migrate-down`
@@ -50,6 +51,10 @@ You can run individual components using the `go run` commands defined in the Mak
 *   `make run-reader`
 *   `make run-worker`
 *   `make run-digest`
+
+## Authoritative Rules
+
+Follow the repository guidelines in [CLAUDE.md](CLAUDE.md) (linting rules, SQLC patterns, and project conventions).
 
 ### Database
 *   Uses **PostgreSQL** as the primary store.

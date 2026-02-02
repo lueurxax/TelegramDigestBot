@@ -23,3 +23,7 @@ See [CLAUDE.md](CLAUDE.md) for complete project guidelines including:
 - Channel discovery system documentation
 - SQL and sqlc patterns
 - Linting guidelines and common fixes
+
+## Contributor Notes
+
+- Run `make lint` before every commit. This is required for all changes.
