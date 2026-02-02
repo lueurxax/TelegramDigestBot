@@ -295,7 +295,19 @@ func (p *googleProvider) parseProcessBatchResponse(responseText string, messages
 	} else {
 		// Try array format
 		if err := json.Unmarshal([]byte(responseText), &results); err != nil {
-			return nil, fmt.Errorf(errParseResponse, err)
+			// Log with response preview for debugging
+			preview := responseText
+			if len(preview) > 200 {
+				preview = preview[:200] + "..."
+			}
+
+			p.logger.Warn().
+				Err(err).
+				Str("response_preview", preview).
+				Int("message_count", len(messages)).
+				Msg("failed to parse ProcessBatch response")
+			// Return empty results instead of error - graceful fallback
+			return []BatchResult{}, nil
 		}
 	}
 
