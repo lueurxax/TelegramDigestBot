@@ -1,3 +1,4 @@
+-- +goose NO TRANSACTION
 -- +goose Up
 -- Add index on items.language for cluster_language_links query performance
 CREATE INDEX CONCURRENTLY IF NOT EXISTS items_language_idx
