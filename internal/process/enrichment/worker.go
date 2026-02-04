@@ -1708,6 +1708,10 @@ func (w *Worker) saveClaimsWithDedup(ctx context.Context, sourceID string, claim
 	}
 
 	for _, claim := range claims {
+		if strings.TrimSpace(claim.Text) == "" {
+			continue
+		}
+
 		embedding := w.generateClaimEmbedding(ctx, claim.Text)
 
 		// Skip claims without embeddings only when embedding client is configured
@@ -1721,35 +1725,53 @@ func (w *Worker) saveClaimsWithDedup(ctx context.Context, sourceID string, claim
 			continue
 		}
 
-		// Check for similar existing claim (only if we have an embedding)
-		if len(embedding) > 0 {
-			existing, err := w.db.FindSimilarClaim(ctx, sourceID, embedding, similarity)
-			if err != nil {
-				w.logger.Warn().Err(err).Msg("failed to check for similar claim")
-			} else if existing != nil {
-				w.logger.Debug().
-					Str("existing_id", existing.ID).
-					Str(logFieldClaimText, truncateText(claim.Text, maxLogClaimLen)).
-					Msg("skipping duplicate claim")
-
-				continue
-			}
+		if w.isDuplicateClaim(ctx, sourceID, embedding, claim.Text, similarity) {
+			continue
 		}
 
-		dbClaim := &db.EvidenceClaim{
-			EvidenceID:  sourceID,
-			ClaimText:   claim.Text,
-			EntitiesRaw: claim.EntitiesJSON(),
-		}
+		w.persistClaim(ctx, sourceID, claim, embedding)
+	}
+}
 
-		// Only set embedding if we have one
-		if len(embedding) > 0 {
-			dbClaim.Embedding = pgvector.NewVector(embedding)
-		}
+// isDuplicateClaim checks if a similar claim already exists for the given source.
+func (w *Worker) isDuplicateClaim(ctx context.Context, sourceID string, embedding []float32, text string, similarity float32) bool {
+	if len(embedding) == 0 {
+		return false
+	}
 
-		if _, err := w.db.SaveEvidenceClaim(ctx, dbClaim); err != nil {
-			w.logger.Warn().Err(err).Msg("failed to save evidence claim")
-		}
+	existing, err := w.db.FindSimilarClaim(ctx, sourceID, embedding, similarity)
+	if err != nil {
+		w.logger.Warn().Err(err).Msg("failed to check for similar claim")
+
+		return false
+	}
+
+	if existing != nil {
+		w.logger.Debug().
+			Str("existing_id", existing.ID).
+			Str(logFieldClaimText, truncateText(text, maxLogClaimLen)).
+			Msg("skipping duplicate claim")
+
+		return true
+	}
+
+	return false
+}
+
+// persistClaim saves a single claim to the database with its embedding.
+func (w *Worker) persistClaim(ctx context.Context, sourceID string, claim ExtractedClaim, embedding []float32) {
+	dbClaim := &db.EvidenceClaim{
+		EvidenceID:  sourceID,
+		ClaimText:   claim.Text,
+		EntitiesRaw: claim.EntitiesJSON(),
+	}
+
+	if len(embedding) > 0 {
+		dbClaim.Embedding = pgvector.NewVector(embedding)
+	}
+
+	if _, err := w.db.SaveEvidenceClaim(ctx, dbClaim); err != nil {
+		w.logger.Warn().Err(err).Msg("failed to save evidence claim")
 	}
 }
 

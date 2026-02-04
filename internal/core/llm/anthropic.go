@@ -435,24 +435,86 @@ func extractTextFromResponse(resp *anthropic.Message) string {
 }
 
 // extractJSON tries to extract JSON from a response that might have extra text.
+// It tries both array and object extraction, validates with json.Valid,
+// and returns the longest valid match to avoid matching inner fragments.
 func extractJSON(text string) string {
-	// Look for JSON object
-	start := strings.Index(text, "{")
-	end := strings.LastIndex(text, "}")
+	arrayResult := extractValidJSONByBracket(text, '[', findMatchingBracket)
+	objectResult := extractValidJSONByBracket(text, '{', findMatchingBrace)
 
-	if start != -1 && end != -1 && end > start {
-		return text[start : end+1]
+	// Return the longest valid match to prefer outer structures over inner fragments
+	switch {
+	case arrayResult != "" && objectResult != "":
+		if len(objectResult) >= len(arrayResult) {
+			return objectResult
+		}
+
+		return arrayResult
+	case arrayResult != "":
+		return arrayResult
+	case objectResult != "":
+		return objectResult
+	default:
+		return text
+	}
+}
+
+// extractValidJSONByBracket scans text for the given opening bracket and uses
+// matchFn to find the corresponding closing bracket. It tries each occurrence
+// of the opening bracket until it finds a valid JSON substring.
+func extractValidJSONByBracket(text string, open byte, matchFn func(string, int) int) string {
+	for i := 0; i < len(text); i++ {
+		if text[i] != open {
+			continue
+		}
+
+		end := matchFn(text, i)
+		if end == -1 {
+			continue
+		}
+
+		candidate := text[i : end+1]
+		if json.Valid([]byte(candidate)) {
+			return candidate
+		}
 	}
 
-	// Look for JSON array
-	start = strings.Index(text, "[")
-	end = strings.LastIndex(text, "]")
+	return ""
+}
 
-	if start != -1 && end != -1 && end > start {
-		return text[start : end+1]
+// findMatchingBrace finds the position of the closing brace matching the opening at start.
+func findMatchingBrace(text string, start int) int {
+	depth := 0
+	inString := false
+	escaped := false
+
+	for i := start; i < len(text); i++ {
+		c := text[i]
+
+		if escaped {
+			escaped = false
+
+			continue
+		}
+
+		switch {
+		case c == '\\' && inString:
+			escaped = true
+		case c == '"':
+			inString = !inString
+		case inString:
+			// Skip characters inside strings
+		case c == '{':
+			depth++
+		case c == '}':
+			depth--
+
+			if depth == 0 {
+				return i
+			}
+		}
 	}
 
-	return text
+	return -1
 }
 
 // buildLangInstructionSimple builds a simple language instruction.

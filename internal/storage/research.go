@@ -58,11 +58,13 @@ const (
 	topicDriftMinEmbedding = 0.6
 	langLinkMinSimilarity  = 0.8
 	langLinkMaxLagSeconds  = 604800
+	langLinkLookbackDays   = 30
 	originTopicLimit       = 5
 	retentionItemsMonths   = 18
 
 	// Log field names.
-	logFieldView = "view"
+	logFieldView  = "view"
+	logFieldTable = "table"
 
 	// Slice preallocation capacity for timeline queries.
 	timelineArgsCapacity = 2
@@ -3229,35 +3231,55 @@ func (db *DB) RefreshResearchMaterializedViews(ctx context.Context) error {
 }
 
 func (db *DB) rebuildResearchDerivedTables(ctx context.Context) error {
+	type rebuildFunc func(context.Context, pgx.Tx) error
+
+	rebuilds := []struct {
+		name string
+		fn   rebuildFunc
+	}{
+		{"cluster_first_appearance", db.rebuildClusterFirstAppearance},
+		{"cluster_topic_history", db.rebuildClusterTopicHistory},
+		{"evidence_claims", db.rebuildEvidenceClaims},
+		{"cluster_language_links", db.rebuildClusterLanguageLinks},
+	}
+
+	var firstErr error
+
+	for _, r := range rebuilds {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context canceled before %s: %w", r.name, err)
+		}
+
+		if err := db.rebuildSingleDerivedTable(ctx, r.name, r.fn); err != nil {
+			db.Logger.Error().Err(err).Str(logFieldTable, r.name).Msg("derived table rebuild failed")
+
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+
+	return firstErr
+}
+
+func (db *DB) rebuildSingleDerivedTable(ctx context.Context, name string, fn func(context.Context, pgx.Tx) error) error {
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+		return fmt.Errorf("begin transaction for %s: %w", name, err)
 	}
 
 	defer func() {
 		_ = tx.Rollback(ctx) //nolint:errcheck
 	}()
 
-	if err := db.rebuildClusterFirstAppearance(ctx, tx); err != nil {
+	if err := fn(ctx, tx); err != nil {
 		return err
 	}
 
-	if err := db.rebuildClusterTopicHistory(ctx, tx); err != nil {
-		return err
-	}
-
-	if err := db.rebuildEvidenceClaims(ctx, tx); err != nil {
-		return err
-	}
-
-	if err := db.rebuildClusterLanguageLinks(ctx, tx); err != nil {
-		return err
-	}
-
-	db.Logger.Info().Msg("committing research derived tables transaction")
+	db.Logger.Info().Str(logFieldTable, name).Msg("committing derived table rebuild")
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit research derived tables: %w", err)
+		return fmt.Errorf("commit %s: %w", name, err)
 	}
 
 	return nil
@@ -3388,6 +3410,7 @@ func (db *DB) rebuildClusterLanguageLinks(ctx context.Context, tx pgx.Tx) error 
 			JOIN raw_messages rm ON i.raw_message_id = rm.id
 			JOIN embeddings e ON e.item_id = i.id
 			WHERE i.language IS NOT NULL AND i.language <> ''
+			  AND rm.tg_date >= NOW() - INTERVAL '%d days'
 		),
 		rep AS (
 			SELECT cluster_id, language, embedding, tg_date
@@ -3417,7 +3440,7 @@ func (db *DB) rebuildClusterLanguageLinks(ctx context.Context, tx pgx.Tx) error 
 		UNION ALL
 		SELECT linked_cluster_id, source_lang, cluster_id, similarity
 		FROM filtered
-	`, ClusterSourceResearch, langLinkMaxLagSeconds, langLinkMinSimilarity)); err != nil {
+	`, ClusterSourceResearch, langLinkLookbackDays, langLinkMaxLagSeconds, langLinkMinSimilarity)); err != nil {
 		return fmt.Errorf("populate cluster_language_links: %w", err)
 	}
 

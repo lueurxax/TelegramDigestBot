@@ -108,6 +108,7 @@ spec:
         app: digest-reader
     spec:
       serviceAccountName: digest-bot
+      terminationGracePeriodSeconds: 45
       containers:
       - name: reader
         image: ghcr.io/lueurxax/telegramdigestbot:7a3853e
