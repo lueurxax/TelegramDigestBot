@@ -85,7 +85,7 @@ data:
   LINK_ENRICHMENT_SCOPE: "summary, relevance, topic, dedup, queries, factcheck"
   ENRICHMENT_LANGUAGE_POLICY: '{
   "default": [ "en" ],
-  "context": [ { "name": "cyprus","languages": [ "el" ],"keywords": [ "cyprus","nicosia","limassol","larnaca","paphos" ] } ],
+  "context": [ { "name": "cyprus","languages": [ "en", "el" ],"keywords": [ "cyprus","nicosia","limassol","larnaca","paphos" ] } ],
   "channel": { "@russiancyprusnews": [ "el" ] }
 }'
   ENRICHMENT_LLM_TIMEOUT: "120s"
