@@ -194,6 +194,14 @@ func (c *Crawler) processURL(ctx context.Context, doc *solr.Document) {
 		}
 	}()
 
+	// Skip documents with empty URLs (likely data corruption or indexing bug)
+	if doc.URL == "" {
+		c.logger.Warn().Str(fieldDocID, doc.ID).Msg("Skipping document with empty URL")
+		c.markError(ctx, doc.ID, "empty URL")
+
+		return
+	}
+
 	// Verify claim is still valid before expensive extraction work.
 	// Due to Solr replication lag, another pod might have claimed this URL
 	// after our ConditionalUpdate appeared to succeed on a stale replica.

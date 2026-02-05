@@ -298,6 +298,10 @@ var errDuplicate = errors.New("url already exists in queue")
 // filterURL checks if a URL should be filtered out.
 // Returns empty string if URL is valid, otherwise returns the skip reason.
 func (s *Seeder) filterURL(rawURL string) string {
+	if strings.TrimSpace(rawURL) == "" {
+		return SkipReasonInvalidScheme
+	}
+
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return SkipReasonInvalidScheme
