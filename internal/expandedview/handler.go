@@ -1,3 +1,13 @@
+// Package expandedview serves detailed item views via HTTP.
+//
+// When users click "Read more" links in digests, they are directed to
+// expanded view pages that show:
+//   - Full item summary and source information
+//   - Evidence from enrichment (corroborating/contradicting sources)
+//   - Fact-check results if available
+//   - Source reliability indicators
+//
+// Access is controlled via signed tokens with configurable TTL.
 package expandedview
 
 import (

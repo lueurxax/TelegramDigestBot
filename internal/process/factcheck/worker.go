@@ -1,3 +1,8 @@
+// Package factcheck implements fact-checking via Google Fact Check API.
+//
+// The Worker processes items from the fact-check queue, querying the
+// Google Fact Check Tools API to find existing fact-checks for claims.
+// Results are cached to avoid repeated API calls for similar claims.
 package factcheck
 
 import (

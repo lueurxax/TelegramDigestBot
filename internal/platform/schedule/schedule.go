@@ -1,3 +1,8 @@
+// Package schedule provides digest schedule parsing and next-run calculation.
+//
+// Schedules are defined as hourly intervals (e.g., "8:00-22:00" for digests
+// every hour from 8am to 10pm). The package handles timezone conversions
+// and calculates the next scheduled digest time.
 package schedule
 
 import (

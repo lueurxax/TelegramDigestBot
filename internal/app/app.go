@@ -1,3 +1,15 @@
+// Package app provides the main application bootstrap and runtime orchestration.
+//
+// The App type wires together all dependencies and exposes methods to run
+// different operational modes:
+//
+//   - Bot mode: Admin Telegram bot for operator commands
+//   - Reader mode: MTProto client that ingests messages from tracked channels
+//   - Worker mode: Processing pipeline for enrichment, dedup, and fact-checking
+//   - Digest mode: Scheduled digest generation and posting
+//   - HTTP mode: Standalone web server for research UI and expanded views
+//
+// Each mode can be run independently or combined based on deployment needs.
 package app
 
 import (

@@ -1,3 +1,13 @@
+// Package research provides a web-based research dashboard for analytics.
+//
+// The Handler serves a UI for:
+//   - Browsing and searching digest items
+//   - Viewing clustering and deduplication results
+//   - Annotating items for quality evaluation
+//   - Analyzing channel performance and rating trends
+//   - Exporting data for external analysis
+//
+// Access requires authentication via signed tokens.
 package research
 
 import (

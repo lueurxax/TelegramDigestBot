@@ -163,6 +163,32 @@ var (
 		Help: "Estimated low-signal rate in recent windows",
 	})
 
+	BulletabilityDecisionTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "digest_bulletability_decision_total",
+		Help: "Total number of bulletability decisions by result and source",
+	}, []string{"result", "source"})
+
+	BulletabilityScore = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "digest_bulletability_score",
+		Help:    "Deterministic bulletability score distribution",
+		Buckets: []float64{0.1, 0.2, 0.35, 0.5, 0.65, 0.8, 1.0},
+	})
+
+	BulletDedupBeforeTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_bullet_dedup_before_total",
+		Help: "Total number of bullets before extraction-time deduplication",
+	})
+
+	BulletDedupAfterTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_bullet_dedup_after_total",
+		Help: "Total number of bullets after extraction-time deduplication",
+	})
+
+	BulletSingleModeTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "digest_bullet_single_mode_total",
+		Help: "Total number of messages forced into single-bullet extraction mode",
+	})
+
 	DiscoveryPending = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "digest_discovery_pending",
 		Help: "Current number of pending channel discoveries",

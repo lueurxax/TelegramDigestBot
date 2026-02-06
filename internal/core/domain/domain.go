@@ -1,3 +1,16 @@
+// Package domain defines the core domain types for the telegram-digest-bot.
+//
+// This package contains the foundational data structures that flow through
+// the entire application:
+//
+//   - RawMessage: Unprocessed messages from Telegram channels
+//   - Item: Processed digest items with scores and summaries
+//   - Bullet: Individual claims extracted from items
+//   - ResolvedLink: External and Telegram link metadata
+//
+// The package also defines interfaces for scoring and grouping (Scorable, Groupable)
+// that enable uniform processing of different entity types in deduplication,
+// clustering, and ranking pipelines.
 package domain
 
 import "time"

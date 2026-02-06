@@ -1,3 +1,11 @@
+// Package crawler implements a web crawler for external link content extraction.
+//
+// The crawler uses Solr as a work queue, fetching URLs that need to be crawled
+// and storing extracted content back. Features include:
+//   - Rate limiting to avoid overwhelming target sites
+//   - Automatic sitemap discovery and seeding
+//   - Content extraction (title, description, text)
+//   - Retry handling for transient failures
 package crawler
 
 import (

@@ -1,3 +1,12 @@
+// Package enrichment implements evidence gathering for digest items.
+//
+// The Worker processes items from the enrichment queue, searching external
+// sources for corroborating or contradicting evidence. Features include:
+//   - Multiple search providers (NewsAPI, EventRegistry, SEARXNG, etc.)
+//   - Language-aware query generation and routing
+//   - Evidence extraction and scoring
+//   - Fact-check tier assignment based on evidence quality
+//   - Translation caching for cross-language searches
 package enrichment
 
 import (

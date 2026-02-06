@@ -1,3 +1,14 @@
+// Package embeddings provides text embedding generation with multi-provider support.
+//
+// The package supports multiple embedding providers with automatic fallback:
+//   - OpenAI text-embedding-ada-002 / text-embedding-3-small
+//   - Cohere embed-v3
+//   - Google text-embedding-004
+//
+// Features include:
+//   - Circuit breaker pattern for provider resilience
+//   - Dimension normalization across providers
+//   - Rate limiting per provider
 package embeddings
 
 import (

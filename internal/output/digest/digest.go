@@ -1,3 +1,14 @@
+// Package digest implements digest generation and scheduling.
+//
+// The package provides:
+//   - Scheduler: Runs periodic digest generation based on configured schedules
+//   - Item selection: Picks relevant items from the processing pipeline
+//   - Clustering: Groups related items together
+//   - Formatting: Renders digest content for Telegram
+//   - Auto-tuning: Adjusts channel weights and relevance thresholds
+//
+// Digests can be rendered as plain text, with cover images, or with inline
+// images per item (rich digest mode).
 package digest
 
 import (
@@ -36,6 +47,8 @@ type RichDigestContent struct {
 	DigestID string
 }
 
+// DigestPoster sends digest content to Telegram.
+// Implemented by *bot.Bot.
 type DigestPoster interface {
 	SendDigest(ctx context.Context, chatID int64, text string, digestID string) (int64, error)
 	SendDigestWithImage(ctx context.Context, chatID int64, text string, digestID string, imageData []byte) (int64, error)
@@ -48,6 +61,9 @@ type ExpandLinkGenerator interface {
 	Generate(itemID string, userID int64) (string, error)
 }
 
+// Scheduler manages periodic digest generation and posting.
+// It runs at configured intervals and handles clustering, selection,
+// and formatting of digest content.
 type Scheduler struct {
 	cfg                 *config.Config
 	database            Repository
@@ -58,6 +74,7 @@ type Scheduler struct {
 	holderID            string // Unique ID for row-based lock ownership
 }
 
+// New creates a new Scheduler with the given dependencies.
 func New(cfg *config.Config, database Repository, bot DigestPoster, llmClient llm.Client, logger *zerolog.Logger) *Scheduler {
 	return &Scheduler{
 		cfg:       cfg,
@@ -78,6 +95,8 @@ func (s *Scheduler) getLockName() string {
 	return s.cfg.LeaderElectionLeaseName
 }
 
+// Run starts the scheduler loop, checking for due digests at the configured interval.
+// It also runs periodic auto-weight and threshold tuning tasks.
 func (s *Scheduler) Run(ctx context.Context) error {
 	s.logger.Info().Msg("Starting digest scheduler")
 

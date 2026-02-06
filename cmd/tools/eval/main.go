@@ -1,3 +1,7 @@
+// Package main provides evaluation tools for measuring digest quality.
+//
+// The eval tool compares labeled data (golden set) against system outputs
+// to calculate precision, recall, and noise rate metrics.
 package main
 
 import (

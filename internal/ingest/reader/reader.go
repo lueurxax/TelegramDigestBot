@@ -1,3 +1,12 @@
+// Package reader implements Telegram message ingestion via MTProto.
+//
+// The Reader connects to Telegram using the gotd/td library and polls
+// tracked channels for new messages. Features include:
+//   - Concurrent message fetching across channels
+//   - Media download and preview extraction
+//   - Channel discovery from forwards and links
+//   - Link extraction and Solr indexing
+//   - Rate limiting and backoff handling
 package reader
 
 import (
@@ -102,6 +111,9 @@ var ErrNoChannelIdentifier = errors.New("channel has no username, ID or invite l
 // ErrUnexpectedInviteType indicates an unexpected invite type was returned.
 var ErrUnexpectedInviteType = errors.New("chat invite returned unexpected type")
 
+// Reader ingests messages from tracked Telegram channels via MTProto.
+// It runs a continuous polling loop, fetching new messages and storing them
+// for pipeline processing.
 type Reader struct {
 	cfg         *config.Config
 	database    Repository
@@ -118,6 +130,7 @@ type Reader struct {
 	solrSem    chan struct{}
 }
 
+// New creates a new Reader with the given dependencies.
 func New(cfg *config.Config, database Repository, linkCache links.LinkCacheRepository, channelRepo links.ChannelRepository, logger *zerolog.Logger) *Reader {
 	// Calculate optimal worker count based on rate limit
 	// With RateLimitRPS=1, we can process 1 channel per second
@@ -157,6 +170,8 @@ func New(cfg *config.Config, database Repository, linkCache links.LinkCacheRepos
 	return r
 }
 
+// Run starts the reader's main loop, authenticating with Telegram and
+// continuously polling tracked channels for new messages.
 func (r *Reader) Run(ctx context.Context) error {
 	client := telegram.NewClient(r.cfg.TGAPIID, r.cfg.TGAPIHash, telegram.Options{
 		SessionStorage: &telegram.FileSessionStorage{

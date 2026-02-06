@@ -1,3 +1,13 @@
+// Package linkextract provides URL extraction from text.
+//
+// The package identifies and classifies links found in Telegram messages:
+//   - Web URLs (http/https)
+//   - Telegram post links (t.me/channel/123)
+//   - Telegram channel links (t.me/channel)
+//   - Telegram invite links (t.me/+abc or t.me/joinchat/abc)
+//   - @mentions (converted to t.me links)
+//
+// Some domains are blocked (e.g., Twitter) due to access restrictions.
 package linkextract
 
 import (

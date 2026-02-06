@@ -1,3 +1,7 @@
+// Package main provides tools for exporting labeled data for evaluation.
+//
+// The labels tool exports items from the database in JSONL format,
+// suitable for building golden datasets for quality evaluation.
 package main
 
 import (

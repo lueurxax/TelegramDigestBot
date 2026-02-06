@@ -1,3 +1,17 @@
+// Package llm provides LLM client interfaces and multi-provider support.
+//
+// The package supports multiple LLM providers with automatic fallback:
+//   - OpenAI (primary)
+//   - Anthropic Claude
+//   - Google Gemini
+//   - Cohere
+//   - OpenRouter
+//
+// Features include:
+//   - Circuit breaker pattern for provider resilience
+//   - Token usage tracking and budget management
+//   - Per-task model configuration
+//   - Prompt caching and customization
 package llm
 
 import (
@@ -12,6 +26,7 @@ import (
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/config"
 )
 
+// BatchResult contains the LLM processing result for a single message.
 type BatchResult struct {
 	Index           int       `json:"index"`
 	RelevanceScore  float32   `json:"relevance_score"`
@@ -23,10 +38,11 @@ type BatchResult struct {
 	Embedding       []float32 `json:"-"`
 }
 
+// MessageInput wraps a RawMessage with additional context for LLM processing.
 type MessageInput struct {
 	domain.RawMessage
-	Context       []string
-	ResolvedLinks []domain.ResolvedLink
+	Context       []string              // Recent messages from the same channel
+	ResolvedLinks []domain.ResolvedLink // Resolved URLs found in the message
 }
 
 // EvidenceSource represents evidence from external sources for context injection.
@@ -65,6 +81,8 @@ type BulletExtractionResult struct {
 	Bullets []ExtractedBullet `json:"bullets"`
 }
 
+// Client defines the interface for LLM operations.
+// Implemented by Registry which provides multi-provider support.
 type Client interface {
 	ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage string, model string, tone string) ([]BatchResult, error)
 	TranslateText(ctx context.Context, text string, targetLanguage string, model string) (string, error)
@@ -89,12 +107,14 @@ type Client interface {
 	RefreshOverride(ctx context.Context, reader SettingsReader, settingKey string)
 }
 
+// RelevanceGateResult contains the outcome of relevance gate evaluation.
 type RelevanceGateResult struct {
 	Decision   string  `json:"decision"`
 	Confidence float32 `json:"confidence"`
 	Reason     string  `json:"reason"`
 }
 
+// PromptStore provides access to customizable prompts from settings.
 type PromptStore interface {
 	GetSetting(ctx context.Context, key string, target interface{}) error
 }

@@ -1,3 +1,13 @@
+// Package bot implements the admin Telegram bot for operator commands.
+//
+// The bot provides commands for:
+//   - Managing tracked channels (/add, /remove, /list)
+//   - Configuring digest settings (/settings, /relevance, /importance)
+//   - Monitoring system status (/status, /errors, /enrichment)
+//   - Managing channel discovery (/discover)
+//   - Previewing digests (/preview)
+//
+// Only users listed in the admin_ids configuration can interact with the bot.
 package bot
 
 import (
@@ -131,6 +141,8 @@ const (
 	ErrSendCallbackResp = "failed to send callback response"
 )
 
+// Bot is the admin Telegram bot that handles operator commands.
+// It provides a command interface for managing the digest system.
 type Bot struct {
 	cfg           *config.Config
 	database      Repository
@@ -140,6 +152,8 @@ type Bot struct {
 	logger        *zerolog.Logger
 }
 
+// New creates a new Bot instance with the given dependencies.
+// The digestBuilder can be nil if digest preview commands are not needed.
 func New(cfg *config.Config, database Repository, digestBuilder DigestBuilder, llmClient llm.Client, logger *zerolog.Logger) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(cfg.BotToken)
 	if err != nil {
@@ -194,6 +208,8 @@ func (b *Bot) initBudgetTracking() {
 	})
 }
 
+// Run starts the bot's main event loop, processing updates from Telegram.
+// It blocks until the context is canceled.
 func (b *Bot) Run(ctx context.Context) error {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
@@ -312,6 +328,7 @@ func parseRatingValue(val string) int16 {
 	}
 }
 
+// SendNotification sends an HTML notification message to all admin users.
 func (b *Bot) SendNotification(ctx context.Context, text string) error {
 	admins := b.getAdmins(ctx)
 
@@ -327,6 +344,8 @@ func (b *Bot) SendNotification(ctx context.Context, text string) error {
 	return nil
 }
 
+// SendDigest sends a text digest to the specified chat, splitting into multiple
+// messages if needed. Returns the first message ID for tracking.
 func (b *Bot) SendDigest(ctx context.Context, chatID int64, text string, digestID string) (int64, error) {
 	parts := SplitHTML(text, MaxMessageSize)
 
@@ -365,6 +384,8 @@ func (b *Bot) SendDigest(ctx context.Context, chatID int64, text string, digestI
 	return firstMsgID, nil
 }
 
+// SendDigestWithImage sends a digest with a cover image to the specified chat.
+// The image is sent first, followed by the text content split into messages.
 func (b *Bot) SendDigestWithImage(ctx context.Context, chatID int64, text string, digestID string, imageData []byte) (int64, error) {
 	firstMsgID := b.sendCoverImage(chatID, imageData)
 

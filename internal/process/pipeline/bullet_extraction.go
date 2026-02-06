@@ -13,15 +13,20 @@ import (
 	linkscore "github.com/lueurxax/telegram-digest-bot/internal/core/links"
 	"github.com/lueurxax/telegram-digest-bot/internal/core/llm"
 	"github.com/lueurxax/telegram-digest-bot/internal/platform/htmlutils"
+	"github.com/lueurxax/telegram-digest-bot/internal/platform/observability"
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
 // extractBullets extracts bullet candidates from a message for scoring.
 // This is a non-fatal operation - failures are logged but don't block the pipeline.
-func (p *Pipeline) extractBullets(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, summary, digestLanguage string, s *pipelineSettings) []llm.ExtractedBullet {
-	maxBullets := p.cfg.BulletBatchSize
-	if maxBullets <= 0 {
-		maxBullets = defaultMaxBullets
+func (p *Pipeline) extractBullets(ctx context.Context, logger zerolog.Logger, c llm.MessageInput, summary, digestLanguage string, s *pipelineSettings, maxBulletsOverride int) []llm.ExtractedBullet {
+	maxBullets := defaultMaxBullets
+	if p.cfg.BulletBatchSize > 0 {
+		maxBullets = p.cfg.BulletBatchSize
+	}
+
+	if maxBulletsOverride > 0 && maxBulletsOverride < maxBullets {
+		maxBullets = maxBulletsOverride
 	}
 
 	linkContext, linkRole := p.buildLinkContext(c, s)
@@ -46,10 +51,13 @@ func (p *Pipeline) extractBullets(ctx context.Context, logger zerolog.Logger, c 
 	}
 
 	extracted.Bullets = p.translateBulletsIfNeeded(ctx, logger, c.ID, extracted.Bullets, digestLanguage)
+	observability.BulletDedupBeforeTotal.Add(float64(len(extracted.Bullets)))
+	deduped := dedupeExtractedBullets(extracted.Bullets)
+	observability.BulletDedupAfterTotal.Add(float64(len(deduped)))
 
-	logger.Debug().Str(LogFieldMsgID, c.ID).Int(LogFieldCount, len(extracted.Bullets)).Msg("bullets extracted")
+	logger.Debug().Str(LogFieldMsgID, c.ID).Int(LogFieldCount, len(deduped)).Msg("bullets extracted")
 
-	return dedupeExtractedBullets(extracted.Bullets)
+	return deduped
 }
 
 func (p *Pipeline) buildLinkContext(c llm.MessageInput, s *pipelineSettings) (string, string) {

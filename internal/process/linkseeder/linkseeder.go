@@ -1,3 +1,12 @@
+// Package linkseeder seeds external URLs into the crawler queue.
+//
+// When the reader ingests Telegram messages, links are extracted and
+// passed to the Seeder which:
+//   - Validates URLs (scheme, domain filtering)
+//   - Deduplicates against existing queue entries
+//   - Enqueues valid URLs for crawling via Solr
+//
+// This enables the crawler to fetch content for links found in messages.
 package linkseeder
 
 import (

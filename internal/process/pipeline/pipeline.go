@@ -1,3 +1,13 @@
+// Package pipeline implements the main message processing workflow.
+//
+// The pipeline processes raw Telegram messages through several stages:
+//   - Filtering: Removes spam, ads, and low-quality content
+//   - Deduplication: Detects and merges duplicate messages
+//   - LLM Processing: Generates summaries, scores, and topic classification
+//   - Bullet Extraction: Extracts key claims from messages
+//   - Enrichment: Enqueues items for fact-checking and evidence gathering
+//
+// The pipeline runs as a continuous loop, processing messages in batches.
 package pipeline
 
 import (
@@ -27,6 +37,8 @@ import (
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 )
 
+// Repository defines the storage operations required by the Pipeline.
+// Implemented by *storage.DB.
 type Repository interface {
 	GetSetting(ctx context.Context, key string, target interface{}) error
 	GetUnprocessedMessages(ctx context.Context, limit int) ([]db.RawMessage, error)
@@ -71,6 +83,8 @@ type Repository interface {
 // Compile-time assertion that *db.DB implements Repository.
 var _ Repository = (*db.DB)(nil)
 
+// LinkResolver resolves URLs to their metadata and content.
+// Implemented by *links.Resolver.
 type LinkResolver interface {
 	ResolveLinks(ctx context.Context, text string, maxLinks int, webTTL, tgTTL time.Duration) ([]domain.ResolvedLink, error)
 }
@@ -99,6 +113,8 @@ type LinkSeedResult struct {
 	Errors    int
 }
 
+// Pipeline processes raw messages through filtering, deduplication, and LLM analysis.
+// It produces scored and summarized items ready for digest generation.
 type Pipeline struct {
 	cfg             *config.Config
 	database        Repository
@@ -173,6 +189,7 @@ const (
 	hoursPerDay            = 24
 )
 
+// New creates a new Pipeline with the given dependencies.
 func New(cfg *config.Config, database Repository, llmClient llm.Client, embeddingClient embeddings.Client, linkResolver LinkResolver, linkSeeder LinkSeeder, logger *zerolog.Logger) *Pipeline {
 	return &Pipeline{
 		cfg:             cfg,
@@ -185,6 +202,9 @@ func New(cfg *config.Config, database Repository, llmClient llm.Client, embeddin
 	}
 }
 
+// Run starts the pipeline's main processing loop.
+// It processes messages in batches at the configured poll interval until
+// the context is canceled.
 func (p *Pipeline) Run(ctx context.Context) error {
 	pollInterval, err := time.ParseDuration(p.cfg.WorkerPollInterval)
 	if err != nil {
@@ -1389,7 +1409,22 @@ func (p *Pipeline) processBullets(ctx context.Context, logger zerolog.Logger, ca
 		return nil, bulletScoreSummary{}
 	}
 
-	extractedBullets := p.extractBullets(ctx, logger, candidate, res.Summary, s.digestLanguage, s)
+	bulletability := p.evaluateBulletability(ctx, logger, candidate, res.Summary, s)
+
+	maxBullets := 0
+	if !bulletability.bulletable {
+		maxBullets = 1
+	}
+
+	logger.Debug().
+		Str(LogFieldMsgID, candidate.ID).
+		Str("source", bulletability.source).
+		Float64("score", bulletability.score).
+		Bool("bulletable", bulletability.bulletable).
+		Int("max_bullets", maxBullets).
+		Msg("bulletability decision")
+
+	extractedBullets := p.extractBullets(ctx, logger, candidate, res.Summary, s.digestLanguage, s, maxBullets)
 	if len(extractedBullets) == 0 {
 		return nil, bulletScoreSummary{}
 	}

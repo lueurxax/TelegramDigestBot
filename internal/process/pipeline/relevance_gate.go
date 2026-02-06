@@ -88,7 +88,7 @@ func (p *Pipeline) evaluateGateLLM(ctx context.Context, logger zerolog.Logger, t
 
 	decision := strings.ToLower(strings.TrimSpace(result.Decision))
 	if decision != DecisionRelevant && decision != DecisionIrrelevant {
-		logger.Warn().Str(LogFieldTask, dropReasonRelevanceGate).Str("decision", result.Decision).Msg("invalid relevance gate decision")
+		logger.Warn().Str(LogFieldTask, dropReasonRelevanceGate).Str(LogFieldDecision, result.Decision).Msg("invalid relevance gate decision")
 		return gateDecision{}, false
 	}
 

@@ -1,3 +1,11 @@
+// Package solr provides a client for interacting with Apache Solr.
+//
+// The Client is used for:
+//   - Crawler work queue management (pending URLs, crawled content)
+//   - Dual-write indexing of Telegram messages
+//   - Full-text search for enrichment queries
+//
+// The client handles JSON serialization, error handling, and retries.
 package solr
 
 import (

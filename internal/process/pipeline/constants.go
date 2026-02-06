@@ -50,6 +50,7 @@ const (
 	LogFieldReady         = "ready"
 	LogFieldDuplicate     = "duplicate"
 	LogFieldSimilarity    = "similarity"
+	LogFieldDecision      = "decision"
 )
 
 const (

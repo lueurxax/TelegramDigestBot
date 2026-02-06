@@ -1,3 +1,10 @@
+// Package config provides configuration loading from environment variables.
+//
+// Configuration is loaded from environment variables (with optional .env file support).
+// Each field in the Config struct corresponds to an environment variable, with
+// sensible defaults provided via struct tags.
+//
+// See .env.example for a complete list of available configuration options.
 package config
 
 import (
@@ -8,6 +15,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Config holds all application configuration loaded from environment variables.
 type Config struct {
 	AppEnv                        string        `env:"APP_ENV" envDefault:"local"`
 	PostgresDSN                   string        `env:"POSTGRES_DSN,required"`
@@ -230,6 +238,8 @@ type Config struct {
 	BulletDedupLookbackHours int     `env:"BULLET_DEDUP_LOOKBACK_HOURS" envDefault:"48"`
 }
 
+// Load reads configuration from environment variables and optional .env file.
+// Required fields will cause an error if not set.
 func Load() (*Config, error) {
 	_ = godotenv.Load() //nolint:errcheck // .env file is optional, error is expected when not present
 

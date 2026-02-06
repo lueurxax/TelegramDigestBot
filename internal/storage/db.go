@@ -1,3 +1,13 @@
+// Package db provides PostgreSQL database access for the telegram-digest-bot.
+//
+// This package contains:
+//   - DB: Connection pool and query interface wrapper
+//   - Repository methods for all domain entities (messages, items, channels, etc.)
+//   - Migration support via goose
+//   - Type conversions between Go and PostgreSQL types
+//
+// The package uses pgx for connection pooling and sqlc-generated queries
+// for type-safe database operations.
 package db
 
 import (
@@ -19,6 +29,8 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
+// DB wraps a PostgreSQL connection pool and provides repository methods
+// for all domain entities.
 type DB struct {
 	Pool    *pgxpool.Pool
 	Queries *sqlc.Queries
@@ -109,6 +121,7 @@ func connectWithRetries(ctx context.Context, config *pgxpool.Config, logger *zer
 	return nil, fmt.Errorf("failed to connect to database after retries: %w", err)
 }
 
+// Close closes the database connection pool.
 func (db *DB) Close() {
 	db.Pool.Close()
 }
@@ -127,6 +140,9 @@ func (l *gooseLogger) Printf(format string, v ...interface{}) {
 	l.logger.Info().Msgf(format, v...)
 }
 
+// Migrate runs database migrations using goose.
+// It acquires an advisory lock to ensure only one migration runs at a time
+// across multiple instances.
 func (db *DB) Migrate(ctx context.Context) error {
 	conn, err := db.Pool.Acquire(ctx)
 	if err != nil {
@@ -187,6 +203,7 @@ func toText(s string) pgtype.Text {
 	return pgtype.Text{String: SanitizeUTF8(s), Valid: s != ""}
 }
 
+// SanitizeUTF8 removes invalid UTF-8 sequences from a string.
 func SanitizeUTF8(s string) string {
 	if s == "" || utf8.ValidString(s) {
 		return s

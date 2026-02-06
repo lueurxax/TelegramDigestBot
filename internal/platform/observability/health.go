@@ -1,3 +1,11 @@
+// Package observability provides health checks and metrics for the application.
+//
+// The Server exposes:
+//   - /healthz: Liveness probe (always returns OK)
+//   - /readyz: Readiness probe (checks database connectivity)
+//   - /metrics: Prometheus metrics endpoint
+//   - /i/*: Optional expanded view handler
+//   - /research/*: Optional research dashboard handler
 package observability
 
 import (

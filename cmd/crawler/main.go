@@ -1,3 +1,8 @@
+// Package main is the entrypoint for the web crawler service.
+//
+// The crawler fetches external URLs found in Telegram messages and
+// extracts content (title, description, text) for use in enrichment.
+// It uses Solr as a work queue and content store.
 package main
 
 import (

@@ -1,3 +1,13 @@
+// Package filters implements message content filtering.
+//
+// The package provides configurable filters to exclude unwanted content:
+//   - Minimum length filter
+//   - Emoji-only message detection
+//   - Boilerplate/CTA detection
+//   - Ad keyword filtering
+//   - Allow/deny pattern matching
+//
+// Filters can operate in mixed, allowlist, or denylist mode.
 package filters
 
 import (
@@ -22,6 +32,7 @@ const (
 	ReasonAllowMiss    = "filter_allow_miss"
 )
 
+// Filterer applies content filters to determine if messages should be excluded.
 type Filterer struct {
 	adsEnabled  bool
 	minLength   int
@@ -31,6 +42,7 @@ type Filterer struct {
 	caser       cases.Caser
 }
 
+// New creates a new Filterer with the given configuration.
 func New(filters []db.Filter, adsEnabled bool, minLength int, adsKeywords []string, mode string) *Filterer {
 	if minLength <= 0 {
 		minLength = 20
@@ -54,15 +66,18 @@ func New(filters []db.Filter, adsEnabled bool, minLength int, adsKeywords []stri
 	}
 }
 
+// IsFiltered returns true if the text should be excluded.
 func (f *Filterer) IsFiltered(text string) bool {
 	filtered, _ := f.FilterReason(text)
 	return filtered
 }
 
+// FilterReason returns whether the text is filtered and the reason code.
 func (f *Filterer) FilterReason(text string) (bool, string) {
 	return f.FilterReasonWithMinLength(text, f.minLength)
 }
 
+// FilterReasonWithMinLength checks filters with a custom minimum length.
 func (f *Filterer) FilterReasonWithMinLength(text string, minLength int) (bool, string) {
 	if minLength > 0 && len(text) < minLength {
 		return true, ReasonMinLength

@@ -1,3 +1,13 @@
+// Package links provides URL resolution and content extraction.
+//
+// The package resolves URLs found in Telegram messages and extracts useful
+// metadata including:
+//   - Page title, description, and author
+//   - Main content text (with boilerplate removal)
+//   - Publication date and word count
+//   - Telegram channel/post metadata for t.me links
+//
+// Results are cached to avoid repeated fetches.
 package links
 
 import (
@@ -23,6 +33,8 @@ const (
 // ErrUnsupportedLinkType indicates a link type that cannot be resolved.
 var ErrUnsupportedLinkType = errors.New("unsupported link type")
 
+// Resolver resolves URLs to their metadata and content.
+// It handles both web URLs and Telegram t.me links.
 type Resolver struct {
 	webFetcher *WebFetcher
 	tgResolver *TelegramResolver
@@ -36,6 +48,7 @@ type Resolver struct {
 	denylist    map[string]bool
 }
 
+// New creates a new Resolver with the given dependencies.
 func New(cfg *config.Config, linkCache LinkCacheRepository, channelRepo ChannelRepository, tgClient *telegram.Client, logger *zerolog.Logger) *Resolver {
 	// Set default RPS if not provided
 	rps := cfg.WebFetchRPS

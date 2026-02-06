@@ -1,3 +1,10 @@
+// Package htmlutils provides HTML processing utilities for Telegram messages.
+//
+// The package handles:
+//   - UTF-16 length calculation (Telegram's native encoding)
+//   - Safe string slicing by UTF-16 code units
+//   - HTML entity encoding/decoding
+//   - Tag stripping and sanitization
 package htmlutils
 
 import (

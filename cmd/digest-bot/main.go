@@ -1,3 +1,15 @@
+// Package main is the entrypoint for the telegram-digest-bot service.
+//
+// The service supports multiple operational modes via the --mode flag:
+//   - bot: Admin Telegram bot for operator commands
+//   - reader: MTProto client that ingests messages from tracked channels
+//   - worker: Processing pipeline for enrichment, dedup, and scoring
+//   - digest: Scheduled digest generation and posting
+//   - http: Standalone web server for research UI and expanded views
+//
+// Example:
+//
+//	go run ./cmd/digest-bot/main.go --mode=worker
 package main
 
 import (
