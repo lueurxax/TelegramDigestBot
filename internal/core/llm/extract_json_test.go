@@ -73,6 +73,26 @@ func TestExtractJSON(t *testing.T) {
 			input: `[{"items":[1,2,3]},{"items":[4,5]}]`,
 			want:  `[{"items":[1,2,3]},{"items":[4,5]}]`,
 		},
+		{
+			name:  "trailing_comma_array",
+			input: `[{"text":"foo"},]`,
+			want:  `[{"text":"foo"}]`,
+		},
+		{
+			name:  "trailing_comma_object",
+			input: `{"a":1,"b":2,}`,
+			want:  `{"a":1,"b":2}`,
+		},
+		{
+			name:  "trailing_comma_nested",
+			input: `[{"items":[1,2,],},]`,
+			want:  `[{"items":[1,2]}]`,
+		},
+		{
+			name:  "trailing_comma_in_markdown",
+			input: "```json\n[{\"text\":\"claim\"},]\n```",
+			want:  `[{"text":"claim"}]`,
+		},
 	}
 
 	for _, tt := range tests {

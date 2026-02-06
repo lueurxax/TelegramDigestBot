@@ -486,6 +486,8 @@ func matchesSkipPattern(rawURL string) bool {
 		"telegram.me/share", "t.me/share", "bsky.app/intent/",
 		"api.whatsapp.com/send", "wa.me/", "mailto:",
 		"vk.com/share.php", "tumblr.com/share", "getpocket.com/save", "share.flipboard.com",
+		// Domains with persistent crawl failures (anti-bot, timeouts)
+		"lists.gnu.org", "tass.ru",
 		// Auth/login pages
 		"/login", "/signin", "/signup", "/register", "/auth/", "/oauth/", "/cas/login",
 		// API endpoints

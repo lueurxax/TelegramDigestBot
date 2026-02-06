@@ -56,6 +56,7 @@ const (
 	researchRefreshInterval          = time.Hour
 	researchRefreshLockID            = int64(94231)
 	researchRefreshTimeout           = 15 * time.Minute
+	advisoryLockReleaseTimeout       = 5 * time.Second
 	researchClusterLookbackDays      = 14
 	researchClusterItemLimit         = 2000
 )
@@ -272,8 +273,13 @@ func (a *App) refreshResearchOnce(ctx context.Context) {
 		return
 	}
 
+	releaseCtx := context.WithoutCancel(refreshCtx)
+
 	defer func() {
-		if err := a.database.ReleaseAdvisoryLock(refreshCtx, researchRefreshLockID); err != nil {
+		ctx, cancel := context.WithTimeout(releaseCtx, advisoryLockReleaseTimeout)
+		defer cancel()
+
+		if err := a.database.ReleaseAdvisoryLock(ctx, researchRefreshLockID); err != nil {
 			a.logger.Warn().Err(err).Msg("release research refresh lock failed")
 		}
 	}()

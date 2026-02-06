@@ -2904,6 +2904,7 @@ const (
 	researchRebuildLookbackDays = 14
 	researchRebuildItemLimit    = 2000
 	researchRebuildTimeout      = 15 * time.Minute
+	advisoryLockReleaseTimeout  = 5 * time.Second
 	researchRebuildLockID       = int64(94231)
 )
 
@@ -2933,8 +2934,13 @@ func (b *Bot) rebuildResearch(ctx context.Context) error {
 		return errResearchRebuildRunning
 	}
 
+	releaseCtx := context.WithoutCancel(rebuildCtx)
+
 	defer func() {
-		if err := dbConn.ReleaseAdvisoryLock(rebuildCtx, researchRebuildLockID); err != nil {
+		ctx, cancel := context.WithTimeout(releaseCtx, advisoryLockReleaseTimeout)
+		defer cancel()
+
+		if err := dbConn.ReleaseAdvisoryLock(ctx, researchRebuildLockID); err != nil {
 			b.logger.Warn().Err(err).Msg("release research rebuild lock failed")
 		}
 	}()

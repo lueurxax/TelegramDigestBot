@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -458,6 +459,9 @@ func extractJSON(text string) string {
 	}
 }
 
+// trailingCommaRe matches trailing commas before closing brackets/braces (common LLM error).
+var trailingCommaRe = regexp.MustCompile(`,\s*([\]\}])`)
+
 // extractValidJSONByBracket scans text for the given opening bracket and uses
 // matchFn to find the corresponding closing bracket. It tries each occurrence
 // of the opening bracket until it finds a valid JSON substring.
@@ -475,6 +479,12 @@ func extractValidJSONByBracket(text string, open byte, matchFn func(string, int)
 		candidate := text[i : end+1]
 		if json.Valid([]byte(candidate)) {
 			return candidate
+		}
+
+		// Try fixing trailing commas before ] or } (common LLM error)
+		sanitized := trailingCommaRe.ReplaceAllString(candidate, "$1")
+		if sanitized != candidate && json.Valid([]byte(sanitized)) {
+			return sanitized
 		}
 	}
 

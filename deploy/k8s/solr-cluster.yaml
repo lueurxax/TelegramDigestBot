@@ -101,7 +101,7 @@ spec:
           initialDelaySeconds: 30
           periodSeconds: 30
           timeoutSeconds: 30
-          failureThreshold: 6
+          failureThreshold: 10
         readinessProbe:
           exec:
             command:
@@ -111,7 +111,7 @@ spec:
           initialDelaySeconds: 10
           periodSeconds: 30
           timeoutSeconds: 25
-          failureThreshold: 5
+          failureThreshold: 8
   volumeClaimTemplates:
   - metadata:
       name: data
