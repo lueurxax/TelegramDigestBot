@@ -186,6 +186,10 @@ const (
 	StatusError   = "error"
 )
 
+// Per-provider timeout for LLM fallback chain.
+// Each provider gets its own timeout budget regardless of how much time previous providers consumed.
+const perProviderTimeout = 90 * time.Second
+
 // Metric gauge values.
 const (
 	MetricValueAvailable   = 1.0

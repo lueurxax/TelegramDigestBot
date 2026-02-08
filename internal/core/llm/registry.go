@@ -186,79 +186,79 @@ func (r *Registry) RefreshOverride(ctx context.Context, reader SettingsReader, s
 
 // ProcessBatch implements Client interface with task-aware fallback.
 func (r *Registry) ProcessBatch(ctx context.Context, messages []MessageInput, targetLanguage, model, tone string) ([]BatchResult, error) {
-	return executeWithTaskFallback(r, TaskTypeSummarize, model, func(p Provider, m string) ([]BatchResult, error) {
-		return p.ProcessBatch(ctx, messages, targetLanguage, m, tone)
+	return executeWithTaskFallback(ctx, r, TaskTypeSummarize, model, func(pCtx context.Context, p Provider, m string) ([]BatchResult, error) {
+		return p.ProcessBatch(pCtx, messages, targetLanguage, m, tone)
 	})
 }
 
 // TranslateText implements Client interface with task-aware fallback.
 func (r *Registry) TranslateText(ctx context.Context, text, targetLanguage, model string) (string, error) {
-	return executeWithTaskFallback(r, TaskTypeTranslate, model, func(p Provider, m string) (string, error) {
-		return p.TranslateText(ctx, text, targetLanguage, m)
+	return executeWithTaskFallback(ctx, r, TaskTypeTranslate, model, func(pCtx context.Context, p Provider, m string) (string, error) {
+		return p.TranslateText(pCtx, text, targetLanguage, m)
 	})
 }
 
 // CompleteText implements Client interface with task-aware fallback.
 func (r *Registry) CompleteText(ctx context.Context, prompt, model string) (string, error) {
-	return executeWithTaskFallback(r, TaskTypeComplete, model, func(p Provider, m string) (string, error) {
-		return p.CompleteText(ctx, prompt, m)
+	return executeWithTaskFallback(ctx, r, TaskTypeComplete, model, func(pCtx context.Context, p Provider, m string) (string, error) {
+		return p.CompleteText(pCtx, prompt, m)
 	})
 }
 
 // GenerateNarrative implements Client interface with task-aware fallback.
 func (r *Registry) GenerateNarrative(ctx context.Context, items []domain.Item, targetLanguage, model, tone string) (string, error) {
-	return executeWithTaskFallback(r, TaskTypeNarrative, model, func(p Provider, m string) (string, error) {
-		return p.GenerateNarrative(ctx, items, targetLanguage, m, tone)
+	return executeWithTaskFallback(ctx, r, TaskTypeNarrative, model, func(pCtx context.Context, p Provider, m string) (string, error) {
+		return p.GenerateNarrative(pCtx, items, targetLanguage, m, tone)
 	})
 }
 
 // GenerateNarrativeWithEvidence implements Client interface with task-aware fallback.
 func (r *Registry) GenerateNarrativeWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, model, tone string) (string, error) {
-	return executeWithTaskFallback(r, TaskTypeNarrative, model, func(p Provider, m string) (string, error) {
-		return p.GenerateNarrativeWithEvidence(ctx, items, evidence, targetLanguage, m, tone)
+	return executeWithTaskFallback(ctx, r, TaskTypeNarrative, model, func(pCtx context.Context, p Provider, m string) (string, error) {
+		return p.GenerateNarrativeWithEvidence(pCtx, items, evidence, targetLanguage, m, tone)
 	})
 }
 
 // SummarizeCluster implements Client interface with task-aware fallback.
 func (r *Registry) SummarizeCluster(ctx context.Context, items []domain.Item, targetLanguage, model, tone string) (string, error) {
-	return executeWithTaskFallback(r, TaskTypeClusterSummary, model, func(p Provider, m string) (string, error) {
-		return p.SummarizeCluster(ctx, items, targetLanguage, m, tone)
+	return executeWithTaskFallback(ctx, r, TaskTypeClusterSummary, model, func(pCtx context.Context, p Provider, m string) (string, error) {
+		return p.SummarizeCluster(pCtx, items, targetLanguage, m, tone)
 	})
 }
 
 // SummarizeClusterWithEvidence implements Client interface with task-aware fallback.
 func (r *Registry) SummarizeClusterWithEvidence(ctx context.Context, items []domain.Item, evidence ItemEvidence, targetLanguage, model, tone string) (string, error) {
-	return executeWithTaskFallback(r, TaskTypeClusterSummary, model, func(p Provider, m string) (string, error) {
-		return p.SummarizeClusterWithEvidence(ctx, items, evidence, targetLanguage, m, tone)
+	return executeWithTaskFallback(ctx, r, TaskTypeClusterSummary, model, func(pCtx context.Context, p Provider, m string) (string, error) {
+		return p.SummarizeClusterWithEvidence(pCtx, items, evidence, targetLanguage, m, tone)
 	})
 }
 
 // GenerateClusterTopic implements Client interface with task-aware fallback.
 func (r *Registry) GenerateClusterTopic(ctx context.Context, items []domain.Item, targetLanguage, model string) (string, error) {
-	return executeWithTaskFallback(r, TaskTypeClusterTopic, model, func(p Provider, m string) (string, error) {
-		return p.GenerateClusterTopic(ctx, items, targetLanguage, m)
+	return executeWithTaskFallback(ctx, r, TaskTypeClusterTopic, model, func(pCtx context.Context, p Provider, m string) (string, error) {
+		return p.GenerateClusterTopic(pCtx, items, targetLanguage, m)
 	})
 }
 
 // RelevanceGate implements Client interface with task-aware fallback.
 func (r *Registry) RelevanceGate(ctx context.Context, text, model, prompt string) (RelevanceGateResult, error) {
-	return executeWithTaskFallback(r, TaskTypeRelevanceGate, model, func(p Provider, m string) (RelevanceGateResult, error) {
-		return p.RelevanceGate(ctx, text, m, prompt)
+	return executeWithTaskFallback(ctx, r, TaskTypeRelevanceGate, model, func(pCtx context.Context, p Provider, m string) (RelevanceGateResult, error) {
+		return p.RelevanceGate(pCtx, text, m, prompt)
 	})
 }
 
 // CompressSummariesForCover implements Client interface with task-aware fallback.
 func (r *Registry) CompressSummariesForCover(ctx context.Context, summaries []string) ([]string, error) {
-	return executeWithTaskFallback(r, TaskTypeCompress, "", func(p Provider, m string) ([]string, error) {
-		return p.CompressSummariesForCover(ctx, summaries, m)
+	return executeWithTaskFallback(ctx, r, TaskTypeCompress, "", func(pCtx context.Context, p Provider, m string) ([]string, error) {
+		return p.CompressSummariesForCover(pCtx, summaries, m)
 	})
 }
 
 // ExtractBullets implements Client interface with task-aware fallback.
 // It extracts key bullet points from a message for bulletized digest output.
 func (r *Registry) ExtractBullets(ctx context.Context, input BulletExtractionInput, targetLanguage, model string) (BulletExtractionResult, error) {
-	return executeWithTaskFallback(r, TaskTypeBulletExtract, model, func(p Provider, m string) (BulletExtractionResult, error) {
-		return p.ExtractBullets(ctx, input, targetLanguage, m)
+	return executeWithTaskFallback(ctx, r, TaskTypeBulletExtract, model, func(pCtx context.Context, p Provider, m string) (BulletExtractionResult, error) {
+		return p.ExtractBullets(pCtx, input, targetLanguage, m)
 	})
 }
 
@@ -354,7 +354,9 @@ func (r *Registry) getProviderChainForTask(taskType TaskType) []ProviderModel {
 }
 
 // executeWithTaskFallback is a generic helper for task-aware fallback execution.
-func executeWithTaskFallback[T any](r *Registry, taskType TaskType, modelOverride string, fn func(Provider, string) (T, error)) (T, error) {
+// Each provider gets its own timeout via context.WithoutCancel to prevent cascade failures
+// where one slow provider exhausts the shared deadline for all subsequent providers.
+func executeWithTaskFallback[T any](ctx context.Context, r *Registry, taskType TaskType, modelOverride string, fn func(context.Context, Provider, string) (T, error)) (T, error) {
 	providerModels := r.getProviderChainForTask(taskType)
 
 	var zero T
@@ -375,8 +377,19 @@ func executeWithTaskFallback[T any](r *Registry, taskType TaskType, modelOverrid
 
 	isFirstProvider := true
 
+	// Derive a non-cancellable base context so each provider gets a fresh timeout
+	// independent of how much time previous providers consumed.
+	baseCtx := context.WithoutCancel(ctx)
+
 	for _, pm := range providerModels {
-		result, success, err := tryProviderExec(r, pm, effectiveModelOverride, taskType, fn)
+		providerCtx, cancel := context.WithTimeout(baseCtx, perProviderTimeout)
+
+		result, success, err := tryProviderExec(r, pm, effectiveModelOverride, taskType, func(p Provider, m string) (T, error) {
+			return fn(providerCtx, p, m)
+		})
+
+		cancel()
+
 		if err != nil {
 			lastErr = err
 

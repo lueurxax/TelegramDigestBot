@@ -636,18 +636,14 @@ func parseBulletResponse(responseText string) ([]ExtractedBullet, error) {
 }
 
 // extractJSONArray extracts a balanced JSON array from text, handling nested brackets.
+// Uses extractValidJSONByBracket which includes trailing-comma sanitization.
 func extractJSONArray(text string) string {
-	start := strings.Index(text, "[")
-	if start == -1 {
-		return text
+	result := extractValidJSONByBracket(text, '[', findMatchingBracket)
+	if result != "" {
+		return result
 	}
 
-	end := findMatchingBracket(text, start)
-	if end == -1 {
-		return extractJSON(text)
-	}
-
-	return text[start : end+1]
+	return text
 }
 
 // findMatchingBracket finds the position of the closing bracket matching the opening at start.
