@@ -488,6 +488,7 @@ type RawMessage struct {
 	DiscoveriesExtracted pgtype.Bool        `json:"discoveries_extracted"`
 	ProcessingStartedAt  pgtype.Timestamptz `json:"processing_started_at"`
 	PreviewText          pgtype.Text        `json:"preview_text"`
+	HasCommentsThread    bool               `json:"has_comments_thread"`
 }
 
 type RawMessageDropLog struct {

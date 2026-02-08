@@ -60,6 +60,7 @@ type Repository interface {
 	EnqueueEnrichment(ctx context.Context, itemID, summary string) error
 	CountPendingEnrichments(ctx context.Context) (int, error)
 	CheckStrictDuplicate(ctx context.Context, hash string, id string) (bool, error)
+	ChannelHasCommentedPostsSince(ctx context.Context, channelID string, since time.Time) (bool, error)
 	FindSimilarItem(ctx context.Context, embedding []float32, threshold float32, minCreatedAt time.Time) (string, error)
 	FindSimilarItemForChannel(ctx context.Context, embedding []float32, channelID string, threshold float32, minCreatedAt time.Time) (string, error)
 	FindSimilarIrrelevantItem(ctx context.Context, embedding []float32, since time.Time) (*db.SimilarIrrelevantItem, error)
@@ -123,6 +124,7 @@ type Pipeline struct {
 	linkResolver    LinkResolver
 	linkSeeder      LinkSeeder
 	logger          *zerolog.Logger
+	commentableChan map[string]bool
 }
 
 type pipelineSettings struct {
@@ -184,6 +186,8 @@ const (
 	dropReasonDedupStrictGlobal   = "dedup_strict_global"
 	bulletLLMBatchSizeLimit       = 5
 
+	channelCommentCapabilityLookback = 30 * 24 * time.Hour
+
 	defaultPromptVersion   = "v1"
 	summaryCacheMaxAgeDays = 30
 	hoursPerDay            = 24
@@ -199,6 +203,7 @@ func New(cfg *config.Config, database Repository, llmClient llm.Client, embeddin
 		linkResolver:    linkResolver,
 		linkSeeder:      linkSeeder,
 		logger:          logger,
+		commentableChan: make(map[string]bool),
 	}
 }
 
@@ -719,6 +724,13 @@ func (p *Pipeline) skipByContentFilters(ctx context.Context, logger zerolog.Logg
 }
 
 func (p *Pipeline) skipByLengthAndFilterer(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings, filterText, previewText string, f *filters.Filterer) bool {
+	if p.shouldDropByCommentsDisabledAdRule(ctx, logger, m, s) {
+		p.recordDrop(ctx, logger, m.ID, filters.ReasonAdsComments, "")
+		p.markProcessed(ctx, logger, m.ID)
+
+		return true
+	}
+
 	lang := detectLanguageForFilter(filterText, previewText)
 	minLength := s.minLengthForLanguage(lang)
 	hasLinks := hasLinkOrPreview(m, previewText)
@@ -743,6 +755,38 @@ func (p *Pipeline) skipByLengthAndFilterer(ctx context.Context, logger zerolog.L
 	}
 
 	return false
+}
+
+func (p *Pipeline) shouldDropByCommentsDisabledAdRule(ctx context.Context, logger zerolog.Logger, m *db.RawMessage, s *pipelineSettings) bool {
+	if !s.adsFilterEnabled {
+		return false
+	}
+
+	if m.HasCommentsThread {
+		p.commentableChan[m.ChannelID] = true
+
+		return false
+	}
+
+	if hasComments, ok := p.commentableChan[m.ChannelID]; ok {
+		return hasComments
+	}
+
+	since := m.TGDate.Add(-channelCommentCapabilityLookback)
+
+	hasComments, err := p.database.ChannelHasCommentedPostsSince(ctx, m.ChannelID, since)
+	if err != nil {
+		logger.Warn().
+			Err(err).
+			Str(LogFieldChannelID, m.ChannelID).
+			Msg("failed to check channel comment capability")
+
+		return false
+	}
+
+	p.commentableChan[m.ChannelID] = hasComments
+
+	return hasComments
 }
 
 func (p *Pipeline) skipMessageAdvanced(ctx context.Context, logger zerolog.Logger, c *llm.MessageInput, s *pipelineSettings) bool {

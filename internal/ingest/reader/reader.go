@@ -1013,17 +1013,19 @@ func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessin
 	mediaJSON, _ := json.Marshal(msg.Media)       //nolint:errchkjson // marshaling TG types for debug logging
 	_, isForward := msg.GetFwdFrom()
 	previewText := links.ExtractPreviewText(mediaJSON)
+	hasCommentsThread := messageHasCommentsThread(msg)
 
 	rawMsg := &db.RawMessage{
-		ChannelID:     hpc.ch.ID,
-		TGMessageID:   int64(msg.ID),
-		TGDate:        time.Unix(int64(msg.Date), 0),
-		Text:          msg.Message,
-		PreviewText:   previewText,
-		EntitiesJSON:  entitiesJSON,
-		MediaJSON:     mediaJSON,
-		CanonicalHash: r.canonicalize(msg.Message),
-		IsForward:     isForward,
+		ChannelID:         hpc.ch.ID,
+		TGMessageID:       int64(msg.ID),
+		TGDate:            time.Unix(int64(msg.Date), 0),
+		Text:              msg.Message,
+		PreviewText:       previewText,
+		EntitiesJSON:      entitiesJSON,
+		MediaJSON:         mediaJSON,
+		CanonicalHash:     r.canonicalize(msg.Message),
+		IsForward:         isForward,
+		HasCommentsThread: hasCommentsThread,
 	}
 
 	age := time.Since(rawMsg.TGDate).Seconds()
@@ -1067,6 +1069,15 @@ func (r *Reader) processSingleMessage(ctx context.Context, hpc *historyProcessin
 	r.startAsyncSolrIndexing(ctx, hpc, msg)
 
 	return true
+}
+
+func messageHasCommentsThread(msg *tg.Message) bool {
+	replies, ok := msg.GetReplies()
+	if !ok {
+		return false
+	}
+
+	return replies.GetComments()
 }
 
 func (r *Reader) startAsyncMediaDownload(ctx context.Context, hpc *historyProcessingContext, msg *tg.Message, rawMsg *db.RawMessage) {

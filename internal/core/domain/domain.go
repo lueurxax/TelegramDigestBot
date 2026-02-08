@@ -40,6 +40,7 @@ type RawMessage struct {
 	MediaData               []byte
 	CanonicalHash           string
 	IsForward               bool
+	HasCommentsThread       bool
 }
 
 // Item represents a processed digest item.

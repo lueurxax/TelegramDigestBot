@@ -14,16 +14,17 @@ type RawMessage = domain.RawMessage
 
 func (db *DB) SaveRawMessage(ctx context.Context, msg *RawMessage) error {
 	if err := db.Queries.SaveRawMessage(ctx, sqlc.SaveRawMessageParams{
-		ChannelID:     toUUID(msg.ChannelID),
-		TgMessageID:   msg.TGMessageID,
-		TgDate:        toTimestamptz(msg.TGDate),
-		Text:          toText(msg.Text),
-		PreviewText:   toText(msg.PreviewText),
-		EntitiesJson:  msg.EntitiesJSON,
-		MediaJson:     msg.MediaJSON,
-		MediaData:     msg.MediaData,
-		CanonicalHash: msg.CanonicalHash,
-		IsForward:     msg.IsForward,
+		ChannelID:         toUUID(msg.ChannelID),
+		TgMessageID:       msg.TGMessageID,
+		TgDate:            toTimestamptz(msg.TGDate),
+		Text:              toText(msg.Text),
+		PreviewText:       toText(msg.PreviewText),
+		EntitiesJson:      msg.EntitiesJSON,
+		MediaJson:         msg.MediaJSON,
+		MediaData:         msg.MediaData,
+		CanonicalHash:     msg.CanonicalHash,
+		IsForward:         msg.IsForward,
+		HasCommentsThread: msg.HasCommentsThread,
 	}); err != nil {
 		return fmt.Errorf("save raw message: %w", err)
 	}
@@ -70,6 +71,7 @@ func (db *DB) GetUnprocessedMessages(ctx context.Context, limit int) ([]RawMessa
 			MediaData:               m.MediaData,
 			CanonicalHash:           m.CanonicalHash,
 			IsForward:               m.IsForward,
+			HasCommentsThread:       m.HasCommentsThread,
 		}
 	}
 
@@ -148,6 +150,20 @@ func (db *DB) CheckStrictDuplicate(ctx context.Context, hash string, id string) 
 	}
 
 	return isDuplicate, nil
+}
+
+// ChannelHasCommentedPostsSince reports whether a channel has at least one message
+// with an active comments thread since the given time.
+func (db *DB) ChannelHasCommentedPostsSince(ctx context.Context, channelID string, since time.Time) (bool, error) {
+	hasComments, err := db.Queries.ChannelHasCommentedPostsSince(ctx, sqlc.ChannelHasCommentedPostsSinceParams{
+		ChannelID: toUUID(channelID),
+		TgDate:    toTimestamptz(since),
+	})
+	if err != nil {
+		return false, fmt.Errorf("channel has commented posts since: %w", err)
+	}
+
+	return hasComments, nil
 }
 
 // CheckAndMarkDiscoveriesExtracted atomically checks if discoveries have been extracted

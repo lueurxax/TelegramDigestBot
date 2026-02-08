@@ -51,6 +51,7 @@ const (
 	LogFieldDuplicate     = "duplicate"
 	LogFieldSimilarity    = "similarity"
 	LogFieldDecision      = "decision"
+	LogFieldChannelID     = "channel_id"
 )
 
 const (

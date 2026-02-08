@@ -28,11 +28,17 @@ const (
 )
 
 type mockRepo struct {
-	settings            map[string]interface{}
-	unprocessedMessages []db.RawMessage
-	filters             []db.Filter
-	savedItems          []*db.Item
-	markedProcessed     []string
+	settings             map[string]interface{}
+	unprocessedMessages  []db.RawMessage
+	filters              []db.Filter
+	savedItems           []*db.Item
+	markedProcessed      []string
+	channelsWithComments map[string]bool
+	saveDropLogCalls     []dropLogCall
+}
+
+type dropLogCall struct {
+	reason string
 }
 
 func (m *mockRepo) GetSetting(_ context.Context, key string, target interface{}) error {
@@ -105,7 +111,8 @@ func (m *mockRepo) SaveRelevanceGateLog(_ context.Context, _, _ string, _ *float
 	return nil
 }
 
-func (m *mockRepo) SaveRawMessageDropLog(_ context.Context, _, _, _ string) error {
+func (m *mockRepo) SaveRawMessageDropLog(_ context.Context, _ string, reason string, _ string) error {
+	m.saveDropLogCalls = append(m.saveDropLogCalls, dropLogCall{reason: reason})
 	return nil
 }
 
@@ -135,6 +142,14 @@ func (m *mockRepo) CountPendingEnrichments(_ context.Context) (int, error) {
 
 func (m *mockRepo) CheckStrictDuplicate(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
+}
+
+func (m *mockRepo) ChannelHasCommentedPostsSince(_ context.Context, channelID string, _ time.Time) (bool, error) {
+	if m.channelsWithComments == nil {
+		return false, nil
+	}
+
+	return m.channelsWithComments[channelID], nil
 }
 
 func (m *mockRepo) FindSimilarItem(_ context.Context, _ []float32, _ float32, _ time.Time) (string, error) {
@@ -1591,8 +1606,11 @@ func TestSkipMessage(t *testing.T) {
 		message               db.RawMessage
 		skipForwards          bool
 		linkEnrichmentEnabled bool
+		adsFilterEnabled      bool
+		channelHasComments    bool
 		seenHashes            map[string]string
 		expectSkip            bool
+		expectDropReason      string
 	}{
 		{
 			name:       "duplicate hash in batch",
@@ -1621,6 +1639,23 @@ func TestSkipMessage(t *testing.T) {
 			expectSkip: false,
 		},
 		{
+			name:               "comments disabled in commentable channel is filtered as ad",
+			message:            db.RawMessage{ID: "1", ChannelID: "ch-1", CanonicalHash: "hash1", Text: "Long enough text for filter", HasCommentsThread: false, TGDate: time.Now()},
+			adsFilterEnabled:   true,
+			channelHasComments: true,
+			seenHashes:         make(map[string]string),
+			expectSkip:         true,
+			expectDropReason:   filters.ReasonAdsComments,
+		},
+		{
+			name:               "comments enabled message in commentable channel is not filtered by ad comments rule",
+			message:            db.RawMessage{ID: "1", ChannelID: "ch-1", CanonicalHash: "hash1", Text: "Long enough text for filter", HasCommentsThread: true, TGDate: time.Now()},
+			adsFilterEnabled:   true,
+			channelHasComments: true,
+			seenHashes:         make(map[string]string),
+			expectSkip:         false,
+		},
+		{
 			name:                  "short message with link passes when enrichment enabled",
 			message:               db.RawMessage{ID: "1", Text: "https://t.me/1"},
 			linkEnrichmentEnabled: true,
@@ -1640,7 +1675,12 @@ func TestSkipMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{}
 
-			repo := &mockRepo{settings: make(map[string]interface{})}
+			repo := &mockRepo{
+				settings: make(map[string]interface{}),
+				channelsWithComments: map[string]bool{
+					tt.message.ChannelID: tt.channelHasComments,
+				},
+			}
 
 			logger := zerolog.Nop()
 
@@ -1649,6 +1689,7 @@ func TestSkipMessage(t *testing.T) {
 			s := &pipelineSettings{
 				skipForwards:          tt.skipForwards,
 				linkEnrichmentEnabled: tt.linkEnrichmentEnabled,
+				adsFilterEnabled:      tt.adsFilterEnabled,
 				minLengthDefault:      20,
 			}
 
@@ -1658,6 +1699,21 @@ func TestSkipMessage(t *testing.T) {
 
 			if skip != tt.expectSkip {
 				t.Errorf("skipMessage() = %v, want %v", skip, tt.expectSkip)
+			}
+
+			if tt.expectDropReason != "" {
+				logged := false
+
+				for _, call := range repo.saveDropLogCalls {
+					if call.reason == tt.expectDropReason {
+						logged = true
+						break
+					}
+				}
+
+				if !logged {
+					t.Errorf("expected drop reason %q to be recorded", tt.expectDropReason)
+				}
 			}
 		})
 	}

@@ -19,6 +19,7 @@ type Querier interface {
 	AddItemLinkLangQueries(ctx context.Context, arg AddItemLinkLangQueriesParams) error
 	AddSettingHistory(ctx context.Context, arg AddSettingHistoryParams) error
 	AddToCluster(ctx context.Context, arg AddToClusterParams) error
+	ChannelHasCommentedPostsSince(ctx context.Context, arg ChannelHasCommentedPostsSinceParams) (bool, error)
 	CheckAndMarkDiscoveriesExtracted(ctx context.Context, arg CheckAndMarkDiscoveriesExtractedParams) (pgtype.UUID, error)
 	CheckStrictDuplicate(ctx context.Context, arg CheckStrictDuplicateParams) (bool, error)
 	ClearDigestErrors(ctx context.Context) error

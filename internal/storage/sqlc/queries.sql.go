@@ -134,6 +134,28 @@ func (q *Queries) AddToCluster(ctx context.Context, arg AddToClusterParams) erro
 	return err
 }
 
+const channelHasCommentedPostsSince = `-- name: ChannelHasCommentedPostsSince :one
+SELECT EXISTS (
+    SELECT 1
+    FROM raw_messages rm
+    WHERE rm.channel_id = $1
+      AND rm.has_comments_thread = TRUE
+      AND rm.tg_date >= $2
+)::boolean
+`
+
+type ChannelHasCommentedPostsSinceParams struct {
+	ChannelID pgtype.UUID        `json:"channel_id"`
+	TgDate    pgtype.Timestamptz `json:"tg_date"`
+}
+
+func (q *Queries) ChannelHasCommentedPostsSince(ctx context.Context, arg ChannelHasCommentedPostsSinceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, channelHasCommentedPostsSince, arg.ChannelID, arg.TgDate)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const checkAndMarkDiscoveriesExtracted = `-- name: CheckAndMarkDiscoveriesExtracted :one
 UPDATE raw_messages
 SET discoveries_extracted = TRUE
@@ -2560,7 +2582,7 @@ claimed AS (
     WHERE rm.id = eligible.id
     RETURNING rm.id
 )
-SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.preview_text, rm.entities_json, rm.media_json, rm.media_data, rm.canonical_hash, rm.is_forward,
+SELECT rm.id, rm.channel_id, rm.tg_message_id, rm.tg_date, rm.text, rm.preview_text, rm.entities_json, rm.media_json, rm.media_data, rm.canonical_hash, rm.is_forward, rm.has_comments_thread,
        c.title as channel_title, c.context as channel_context, c.description as channel_description,
        c.category as channel_category, c.tone as channel_tone, c.update_freq as channel_update_freq,
        c.relevance_threshold as channel_relevance_threshold, c.importance_threshold as channel_importance_threshold,
@@ -2586,6 +2608,7 @@ type GetUnprocessedMessagesRow struct {
 	MediaData                      []byte             `json:"media_data"`
 	CanonicalHash                  string             `json:"canonical_hash"`
 	IsForward                      bool               `json:"is_forward"`
+	HasCommentsThread              bool               `json:"has_comments_thread"`
 	ChannelTitle                   pgtype.Text        `json:"channel_title"`
 	ChannelContext                 pgtype.Text        `json:"channel_context"`
 	ChannelDescription             pgtype.Text        `json:"channel_description"`
@@ -2623,6 +2646,7 @@ func (q *Queries) GetUnprocessedMessages(ctx context.Context, limit int32) ([]Ge
 			&i.MediaData,
 			&i.CanonicalHash,
 			&i.IsForward,
+			&i.HasCommentsThread,
 			&i.ChannelTitle,
 			&i.ChannelContext,
 			&i.ChannelDescription,
@@ -3233,25 +3257,27 @@ func (q *Queries) SaveRating(ctx context.Context, arg SaveRatingParams) error {
 }
 
 const saveRawMessage = `-- name: SaveRawMessage :exec
-INSERT INTO raw_messages (channel_id, tg_message_id, tg_date, text, entities_json, media_json, media_data, preview_text, canonical_hash, is_forward)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO raw_messages (channel_id, tg_message_id, tg_date, text, entities_json, media_json, media_data, preview_text, canonical_hash, is_forward, has_comments_thread)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (channel_id, tg_message_id) DO UPDATE SET
     media_data = COALESCE(raw_messages.media_data, EXCLUDED.media_data),
-    preview_text = COALESCE(raw_messages.preview_text, EXCLUDED.preview_text)
-WHERE raw_messages.media_data IS NULL OR raw_messages.preview_text IS NULL
+    preview_text = COALESCE(raw_messages.preview_text, EXCLUDED.preview_text),
+    has_comments_thread = raw_messages.has_comments_thread OR EXCLUDED.has_comments_thread
+WHERE raw_messages.media_data IS NULL OR raw_messages.preview_text IS NULL OR EXCLUDED.has_comments_thread = TRUE
 `
 
 type SaveRawMessageParams struct {
-	ChannelID     pgtype.UUID        `json:"channel_id"`
-	TgMessageID   int64              `json:"tg_message_id"`
-	TgDate        pgtype.Timestamptz `json:"tg_date"`
-	Text          pgtype.Text        `json:"text"`
-	EntitiesJson  []byte             `json:"entities_json"`
-	MediaJson     []byte             `json:"media_json"`
-	MediaData     []byte             `json:"media_data"`
-	PreviewText   pgtype.Text        `json:"preview_text"`
-	CanonicalHash string             `json:"canonical_hash"`
-	IsForward     bool               `json:"is_forward"`
+	ChannelID         pgtype.UUID        `json:"channel_id"`
+	TgMessageID       int64              `json:"tg_message_id"`
+	TgDate            pgtype.Timestamptz `json:"tg_date"`
+	Text              pgtype.Text        `json:"text"`
+	EntitiesJson      []byte             `json:"entities_json"`
+	MediaJson         []byte             `json:"media_json"`
+	MediaData         []byte             `json:"media_data"`
+	PreviewText       pgtype.Text        `json:"preview_text"`
+	CanonicalHash     string             `json:"canonical_hash"`
+	IsForward         bool               `json:"is_forward"`
+	HasCommentsThread bool               `json:"has_comments_thread"`
 }
 
 func (q *Queries) SaveRawMessage(ctx context.Context, arg SaveRawMessageParams) error {
@@ -3266,6 +3292,7 @@ func (q *Queries) SaveRawMessage(ctx context.Context, arg SaveRawMessageParams) 
 		arg.PreviewText,
 		arg.CanonicalHash,
 		arg.IsForward,
+		arg.HasCommentsThread,
 	)
 	return err
 }

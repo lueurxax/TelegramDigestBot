@@ -28,6 +28,7 @@ const (
 	ReasonBoilerplate  = "filter_boilerplate"
 	ReasonForwardShell = "filter_forward_shell"
 	ReasonAds          = "filter_ads"
+	ReasonAdsComments  = "filter_ads_comments_disabled"
 	ReasonDeny         = "filter_deny"
 	ReasonAllowMiss    = "filter_allow_miss"
 )
