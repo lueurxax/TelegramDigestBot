@@ -154,3 +154,59 @@ Kubernetes manifests are located in `deploy/k8s/`.
    ```bash
    kubectl apply -f deploy/k8s/
    ```
+
+### Re-authenticating the Telegram Session (K8s)
+
+If the reader pod logs show `AUTH_KEY_UNREGISTERED` errors (session revoked by Telegram), you need to re-authenticate interactively. The session file lives on a `ReadWriteOnce` PVC (`tg-session-pvc`), so the reader must be scaled down first.
+
+1. **Scale down the reader** to release the PVC:
+   ```bash
+   kubectl -n digest scale deployment digest-reader --replicas=0
+   ```
+
+2. **Run a temporary interactive pod** with the same image, environment, and PVC:
+   ```bash
+   # Use the currently deployed image tag (check with: kubectl -n digest get deploy digest-reader -o jsonpath='{.spec.template.spec.containers[0].image}')
+   IMAGE_TAG=$(kubectl -n digest get deploy digest-reader -o jsonpath='{.spec.template.spec.containers[0].image}')
+
+   kubectl -n digest run tg-reauth --rm -it \
+     --image="$IMAGE_TAG" \
+     --overrides="{
+       \"spec\": {
+         \"containers\": [{
+           \"name\": \"tg-reauth\",
+           \"image\": \"$IMAGE_TAG\",
+           \"command\": [\"./telegram-digest-bot\"],
+           \"args\": [\"--mode=reader\"],
+           \"stdin\": true,
+           \"tty\": true,
+           \"envFrom\": [
+             {\"configMapRef\": {\"name\": \"digest-config\"}},
+             {\"secretRef\": {\"name\": \"digest-secrets\"}}
+           ],
+           \"volumeMounts\": [{
+             \"name\": \"tg-session\",
+             \"mountPath\": \"/app/data\"
+           }]
+         }],
+         \"volumes\": [{
+           \"name\": \"tg-session\",
+           \"persistentVolumeClaim\": {\"claimName\": \"tg-session-pvc\"}
+         }],
+         \"restartPolicy\": \"Never\"
+       }
+     }"
+   ```
+
+3. **Complete the auth flow** — enter the verification code (and 2FA password if enabled) when prompted. Once you see `Successfully authenticated as user`, press `Ctrl+C`.
+
+4. **Scale the reader back up**:
+   ```bash
+   kubectl -n digest scale deployment digest-reader --replicas=1
+   ```
+
+5. **Verify** ingestion resumes:
+   ```bash
+   kubectl -n digest logs -f deployment/digest-reader --tail=10 | grep "Finished ingestion"
+   # Look for msgs > 0
+   ```
