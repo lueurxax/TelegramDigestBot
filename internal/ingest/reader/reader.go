@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gotd/td/telegram"
@@ -78,7 +79,8 @@ const (
 	errMsgDeactivatePrivateChannel    = "failed to deactivate private channel"
 
 	// TG Errors
-	errChannelPrivate = "CHANNEL_PRIVATE"
+	errChannelPrivate      = "CHANNEL_PRIVATE"
+	errAuthKeyUnregistered = "AUTH_KEY_UNREGISTERED"
 
 	// Telegram link types (used in case statements for link.TelegramType)
 	telegramLinkTypeChannel = "channel"
@@ -108,6 +110,9 @@ var ErrMissingAccessHash = errors.New("missing access_hash for channel")
 // ErrNoChannelIdentifier indicates no username, ID, or invite link is available.
 var ErrNoChannelIdentifier = errors.New("channel has no username, ID or invite link")
 
+// ErrAuthKeyUnregistered indicates the Telegram session has been revoked.
+var ErrAuthKeyUnregistered = errors.New("telegram auth key unregistered")
+
 // ErrUnexpectedInviteType indicates an unexpected invite type was returned.
 var ErrUnexpectedInviteType = errors.New("chat invite returned unexpected type")
 
@@ -128,6 +133,8 @@ type Reader struct {
 	// Solr client for dual-write indexing (optional, nil if disabled)
 	solrClient *solr.Client
 	solrSem    chan struct{}
+	// authFailed tracks whether the Telegram session has been revoked
+	authFailed atomic.Bool
 }
 
 // New creates a new Reader with the given dependencies.
@@ -318,6 +325,7 @@ func (r *Reader) spawnChannelWorker(ctx context.Context, api *tg.Client, ch db.C
 
 func (r *Reader) collectFetchResults(ctx context.Context, results <-chan fetchResult, count int) int {
 	cycleMsgs := 0
+	authErrors := 0
 
 	for i := 0; i < count; i++ {
 		select {
@@ -325,6 +333,10 @@ func (r *Reader) collectFetchResults(ctx context.Context, results <-chan fetchRe
 			return cycleMsgs
 		case result := <-results:
 			if result.err != nil {
+				if r.isAuthError(result.err) {
+					authErrors++
+				}
+
 				r.logger.Error().Str(logFieldChannel, result.channel).Err(result.err).Msg("failed to fetch messages for channel")
 			}
 
@@ -332,7 +344,35 @@ func (r *Reader) collectFetchResults(ctx context.Context, results <-chan fetchRe
 		}
 	}
 
+	r.updateAuthStatus(authErrors, count)
+
 	return cycleMsgs
+}
+
+func (r *Reader) isAuthError(err error) bool {
+	return tgerr.Is(err, errAuthKeyUnregistered)
+}
+
+func (r *Reader) updateAuthStatus(authErrors, totalChannels int) {
+	if authErrors > 0 && authErrors >= totalChannels {
+		if !r.authFailed.Load() {
+			r.logger.Error().Int("auth_errors", authErrors).Msg("all channels returning auth errors, marking as unhealthy")
+		}
+
+		r.authFailed.Store(true)
+	} else if authErrors == 0 {
+		r.authFailed.Store(false)
+	}
+}
+
+// AuthHealthCheck returns an error if the Telegram session is invalid.
+// Used as a readiness check to detect AUTH_KEY_UNREGISTERED state.
+func (r *Reader) AuthHealthCheck() error {
+	if r.authFailed.Load() {
+		return ErrAuthKeyUnregistered
+	}
+
+	return nil
 }
 
 // resolveUnknownDiscoveries attempts to fetch channel info for discoveries with peer IDs but no titles

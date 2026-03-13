@@ -166,7 +166,6 @@ func (db *DB) SaveDigestEntries(ctx context.Context, digestID string, entries []
 
 func (db *DB) SaveDigestError(ctx context.Context, start, end time.Time, chatID int64, err error) error {
 	errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
-
 	if err := db.Queries.SaveDigestError(ctx, sqlc.SaveDigestErrorParams{
 		WindowStart:  toTimestamptz(start),
 		WindowEnd:    toTimestamptz(end),

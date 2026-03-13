@@ -13,12 +13,40 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	db "github.com/lueurxax/telegram-digest-bot/internal/storage"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 )
+
+var (
+	readinessChecks   []func() error
+	readinessChecksMu sync.RWMutex
+)
+
+// RegisterReadinessCheck adds a custom readiness check to the /readyz endpoint.
+// Multiple checks can be registered; all must pass for the pod to be considered ready.
+func RegisterReadinessCheck(check func() error) {
+	readinessChecksMu.Lock()
+	defer readinessChecksMu.Unlock()
+
+	readinessChecks = append(readinessChecks, check)
+}
+
+func runReadinessChecks() error {
+	readinessChecksMu.RLock()
+	defer readinessChecksMu.RUnlock()
+
+	for _, check := range readinessChecks {
+		if err := check(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
 
 const (
 	shutdownTimeout      = 5 * time.Second
@@ -70,6 +98,13 @@ func (s *Server) Start(ctx context.Context) error {
 		if err := s.db.Pool.Ping(r.Context()); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = fmt.Fprintf(w, "DB error: %v", err)
+
+			return
+		}
+
+		if err := runReadinessChecks(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = fmt.Fprintf(w, "Not ready: %v", err)
 
 			return
 		}

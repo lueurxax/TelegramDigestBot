@@ -58,7 +58,7 @@ const (
 	topicDriftMinEmbedding = 0.6
 	langLinkMinSimilarity  = 0.8
 	langLinkMaxLagSeconds  = 604800
-	langLinkLookbackDays   = 30
+	langLinkLookbackDays   = 14
 	originTopicLimit       = 5
 	retentionItemsMonths   = 18
 

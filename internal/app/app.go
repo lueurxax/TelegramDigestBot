@@ -55,7 +55,8 @@ const (
 	logFieldItems                    = "items"
 	researchRefreshInterval          = time.Hour
 	researchRefreshLockID            = int64(94231)
-	researchRefreshTimeout           = 15 * time.Minute
+	researchRefreshTimeout           = 30 * time.Minute
+	researchMaintenanceTimeout       = 5 * time.Minute
 	advisoryLockReleaseTimeout       = 5 * time.Second
 	researchClusterLookbackDays      = 14
 	researchClusterItemLimit         = 2000
@@ -182,6 +183,8 @@ func (a *App) RunReader(ctx context.Context) error {
 	channelRepo := db.NewChannelRepoAdapter(a.database)
 	r := reader.New(a.cfg, a.database, a.database, channelRepo, a.logger)
 
+	observability.RegisterReadinessCheck(r.AuthHealthCheck)
+
 	if err := r.Run(ctx); err != nil {
 		return fmt.Errorf("reader run: %w", err)
 	}
@@ -285,7 +288,13 @@ func (a *App) refreshResearchOnce(ctx context.Context) {
 	}()
 
 	a.runResearchAnalytics(refreshCtx)
-	a.runResearchMaintenance(refreshCtx)
+
+	// Run maintenance with its own context so a slow analytics phase
+	// (e.g. cluster_language_links timeout) does not cancel cleanup operations.
+	maintenanceCtx, maintenanceCancel := context.WithTimeout(ctx, researchMaintenanceTimeout)
+	defer maintenanceCancel()
+
+	a.runResearchMaintenance(maintenanceCtx)
 }
 
 func (a *App) runResearchAnalytics(ctx context.Context) {
