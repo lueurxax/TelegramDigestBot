@@ -440,7 +440,7 @@ spec:
       accessModes: ["ReadWriteOnce"]
       resources:
         requests:
-          storage: 20Gi
+          storage: 50Gi
 ---
 # Job to create the news collection
 apiVersion: batch/v1
@@ -519,22 +519,28 @@ spec:
             - sh
             - -c
             - |
+              set -e
+
+              solr_delete() {
+                echo "Deleting: $1"
+                HTTP_CODE=$(curl -s -o /dev/stderr -w "%{http_code}" \
+                  "http://solr:8983/solr/news/update?commit=true" \
+                  -H "Content-Type: application/json" \
+                  -d "{\"delete\":{\"query\":\"$1\"}}" 2>&1)
+                if [ "$HTTP_CODE" -ne 200 ]; then
+                  echo "ERROR: Solr returned HTTP $HTTP_CODE for query: $1" >&2
+                  return 1
+                fi
+                echo "OK (HTTP $HTTP_CODE)"
+              }
+
               # Delete pending URLs older than 7 days
-              echo "Deleting stale pending documents..."
-              curl -s "http://solr:8983/solr/news/update?commit=true" \
-                -H "Content-Type: application/json" \
-                -d '{"delete":{"query":"crawl_status:pending AND indexed_at:[* TO NOW-7DAYS]"}}'
+              solr_delete "crawl_status:pending AND indexed_at:[* TO NOW-7DAYS]"
 
               # Delete error URLs older than 30 days
-              echo "Deleting old error documents..."
-              curl -s "http://solr:8983/solr/news/update?commit=true" \
-                -H "Content-Type: application/json" \
-                -d '{"delete":{"query":"crawl_status:error AND crawled_at:[* TO NOW-30DAYS]"}}'
+              solr_delete "crawl_status:error AND crawled_at:[* TO NOW-30DAYS]"
 
               # Delete done URLs older than 90 days
-              echo "Deleting old done documents..."
-              curl -s "http://solr:8983/solr/news/update?commit=true" \
-                -H "Content-Type: application/json" \
-                -d '{"delete":{"query":"crawl_status:done AND source:web AND crawled_at:[* TO NOW-90DAYS]"}}'
+              solr_delete "crawl_status:done AND source:web AND crawled_at:[* TO NOW-90DAYS]"
 
               echo "Cleanup complete"

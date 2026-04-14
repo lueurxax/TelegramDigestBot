@@ -56,7 +56,7 @@ func DefaultTaskConfig() map[TaskType]TaskProviderChain {
 			Default: ProviderModel{Provider: ProviderOpenAI, Model: "gpt-5-nano"},
 			Fallbacks: []ProviderModel{
 				{Provider: ProviderGoogle, Model: "gemini-2.0-flash-lite"},
-				{Provider: ProviderOpenRouter, Model: "mistralai/mistral-7b-instruct"},
+				{Provider: ProviderOpenRouter, Model: "mistralai/mistral-small-2603"},
 			},
 		},
 

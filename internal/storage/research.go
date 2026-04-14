@@ -59,6 +59,9 @@ const (
 	langLinkMinSimilarity  = 0.8
 	langLinkMaxLagSeconds  = 604800
 	langLinkLookbackDays   = 14
+	langLinkMaxNeighbors   = 10
+	langLinkIVFListDivisor = 100
+	langLinkIVFProbes      = 10
 	originTopicLimit       = 5
 	retentionItemsMonths   = 18
 
@@ -3394,8 +3397,11 @@ func (db *DB) rebuildClusterLanguageLinks(ctx context.Context, tx pgx.Tx) error 
 		return fmt.Errorf("truncate cluster_language_links: %w", err)
 	}
 
+	// Materialize representative clusters into a temp table so we can build
+	// a pgvector index and avoid the O(N²) cross-join.
 	if _, err := tx.Exec(ctx, fmt.Sprintf(`
-		WITH cluster_rep AS (
+		CREATE TEMP TABLE _lang_link_rep ON COMMIT DROP AS
+		WITH ranked AS (
 			SELECT ci.cluster_id,
 			       i.language,
 			       e.embedding,
@@ -3411,36 +3417,59 @@ func (db *DB) rebuildClusterLanguageLinks(ctx context.Context, tx pgx.Tx) error 
 			JOIN embeddings e ON e.item_id = i.id
 			WHERE i.language IS NOT NULL AND i.language <> ''
 			  AND rm.tg_date >= NOW() - INTERVAL '%d days'
-		),
-		rep AS (
-			SELECT cluster_id, language, embedding, tg_date
-			FROM cluster_rep
-			WHERE rn = 1
-		),
-		pairs AS (
-			SELECT a.cluster_id AS cluster_id,
-			       b.cluster_id AS linked_cluster_id,
-			       a.language AS source_lang,
-			       b.language AS target_lang,
-			       1 - (a.embedding <=> b.embedding) AS similarity,
-			       a.tg_date AS source_date,
-			       b.tg_date AS target_date
-			FROM rep a
-			JOIN rep b ON a.cluster_id < b.cluster_id AND a.language <> b.language
-			WHERE abs(EXTRACT(epoch FROM (a.tg_date - b.tg_date))) <= %d
-		),
-		filtered AS (
-			SELECT cluster_id, linked_cluster_id, source_lang, target_lang, similarity
-			FROM pairs
-			WHERE similarity >= %0.2f
 		)
+		SELECT cluster_id, language, embedding, tg_date
+		FROM ranked WHERE rn = 1
+	`, ClusterSourceResearch, langLinkLookbackDays)); err != nil {
+		return fmt.Errorf("create rep temp table: %w", err)
+	}
+
+	var repCount int
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM _lang_link_rep").Scan(&repCount); err != nil {
+		return fmt.Errorf("count rep clusters: %w", err)
+	}
+
+	db.Logger.Info().Int("rep_clusters", repCount).Msg("language link candidates")
+
+	if repCount < 2 {
+		return nil
+	}
+
+	// Build IVFFlat index for approximate nearest-neighbor search on embeddings.
+	lists := repCount / langLinkIVFListDivisor
+	if lists < 1 {
+		lists = 1
+	}
+
+	if _, err := tx.Exec(ctx, fmt.Sprintf(
+		"CREATE INDEX ON _lang_link_rep USING ivfflat (embedding vector_cosine_ops) WITH (lists = %d)", lists,
+	)); err != nil {
+		return fmt.Errorf("build ivfflat index: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL ivfflat.probes = %d", langLinkIVFProbes)); err != nil {
+		return fmt.Errorf("set ivfflat probes: %w", err)
+	}
+
+	// Lateral join: for each cluster find top-K cross-language neighbors via ANN
+	// index. This replaces the O(N²) self-join with O(N × K) indexed lookups.
+	// Each direction is produced naturally (A finds B, B finds A).
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`
 		INSERT INTO cluster_language_links (cluster_id, language, linked_cluster_id, confidence)
-		SELECT cluster_id, target_lang, linked_cluster_id, similarity
-		FROM filtered
-		UNION ALL
-		SELECT linked_cluster_id, source_lang, cluster_id, similarity
-		FROM filtered
-	`, ClusterSourceResearch, langLinkLookbackDays, langLinkMaxLagSeconds, langLinkMinSimilarity)); err != nil {
+		SELECT a.cluster_id, nn.language, nn.cluster_id, nn.similarity
+		FROM _lang_link_rep a
+		CROSS JOIN LATERAL (
+			SELECT b.cluster_id,
+			       b.language,
+			       1 - (a.embedding <=> b.embedding) AS similarity
+			FROM _lang_link_rep b
+			WHERE b.language <> a.language
+			  AND abs(EXTRACT(epoch FROM (a.tg_date - b.tg_date))) <= %d
+			ORDER BY a.embedding <=> b.embedding
+			LIMIT %d
+		) nn
+		WHERE nn.similarity >= %0.2f
+	`, langLinkMaxLagSeconds, langLinkMaxNeighbors, langLinkMinSimilarity)); err != nil {
 		return fmt.Errorf("populate cluster_language_links: %w", err)
 	}
 

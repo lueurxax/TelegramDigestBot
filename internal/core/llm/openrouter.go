@@ -23,10 +23,10 @@ const (
 	OpenRouterAPIEndpoint = "https://openrouter.ai/api/v1/chat/completions"
 
 	// Model constants.
-	ModelMistral7BInstruct = "mistralai/mistral-7b-instruct"
+	ModelMistralSmall = "mistralai/mistral-small-2603"
 
 	// Default model for OpenRouter LLM.
-	defaultOpenRouterModel = ModelMistral7BInstruct
+	defaultOpenRouterModel = ModelMistralSmall
 
 	// Rate limiter settings.
 	openRouterRateLimiterBurst = 5
@@ -152,17 +152,21 @@ func (p *openRouterProvider) resolveModel(model string) string {
 		return defaultOpenRouterModel
 	}
 
-	// If already an OpenRouter model path, use it directly
+	// If already an OpenRouter model path (contains slash), use it directly
 	if strings.Contains(model, "/") {
 		return model
 	}
 
-	// Map other models to OpenRouter equivalents
+	// If already an OpenRouter-qualified path (contains slash), use as-is
+	lower := strings.ToLower(model)
+
 	switch {
-	case strings.Contains(strings.ToLower(model), "mistral"):
-		return ModelMistral7BInstruct
+	case strings.Contains(lower, "mistral"):
+		return ModelMistralSmall
 	default:
-		return ModelMistral7BInstruct
+		// Unknown models fall back to the default cheap model;
+		// OpenRouter is only used for budget-friendly inference.
+		return defaultOpenRouterModel
 	}
 }
 
