@@ -68,7 +68,7 @@ data:
   ENRICHMENT_NEWSAPI_ENABLED: "true"
   ENRICHMENT_NEWSAPI_TIMEOUT: "30s"
   SEARXNG_ENABLED: "true"
-  SEARXNG_BASE_URL: "http://searxng:8080"
+  SEARXNG_BASE_URL: "http://searxng-svc:8080"
   SEARXNG_TIMEOUT: "30s"
   SEARXNG_ENGINES: "qwant,wikipedia,duckduckgo"
   GDELT_ENABLED: "true"
