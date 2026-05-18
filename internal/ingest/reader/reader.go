@@ -46,6 +46,7 @@ const (
 	noChannelsWaitSeconds  = 30
 	defaultCycleDelay      = 30
 	activeCycleDelay       = 15
+	authFailedBackoffSeconds = 300
 	resolutionSleepShortMs = 200
 	resolutionSleepLongMs  = 500
 
@@ -208,6 +209,34 @@ func (r *Reader) Run(ctx context.Context) error {
 	return nil
 }
 
+// loadActiveChannels fetches the tracked channel list, handling transient errors
+// and empty states with appropriate waits. Returns (channels, skip, err): when
+// skip is true the caller should continue to the next loop iteration.
+func (r *Reader) loadActiveChannels(ctx context.Context) ([]db.Channel, bool, error) {
+	channels, err := r.database.GetActiveChannels(ctx)
+	if err != nil {
+		r.logger.Error().Err(err).Msg("failed to get active channels")
+
+		if waitErr := r.wait(ctx, errorWaitSeconds*time.Second); waitErr != nil {
+			return nil, false, waitErr
+		}
+
+		return nil, true, nil
+	}
+
+	if len(channels) == 0 {
+		r.logger.Info().Msg("No active channels to track. Waiting...")
+
+		if waitErr := r.wait(ctx, noChannelsWaitSeconds*time.Second); waitErr != nil {
+			return nil, false, waitErr
+		}
+
+		return nil, true, nil
+	}
+
+	return channels, false, nil
+}
+
 type fetchResult struct {
 	channel string
 	count   int
@@ -224,24 +253,12 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		default:
 		}
 
-		channels, err := r.database.GetActiveChannels(ctx)
+		channels, skip, err := r.loadActiveChannels(ctx)
 		if err != nil {
-			r.logger.Error().Err(err).Msg("failed to get active channels")
-
-			if err := r.wait(ctx, errorWaitSeconds*time.Second); err != nil {
-				return err
-			}
-
-			continue
+			return err
 		}
 
-		if len(channels) == 0 {
-			r.logger.Info().Msg("No active channels to track. Waiting...")
-
-			if err := r.wait(ctx, noChannelsWaitSeconds*time.Second); err != nil {
-				return err
-			}
-
+		if skip {
 			continue
 		}
 
@@ -251,6 +268,15 @@ func (r *Reader) ingestMessages(ctx context.Context) error {
 		cycleMsgs := r.runIngestionCycle(ctx, api, channels)
 
 		r.logger.Info().Int(logFieldChannels, len(channels)).Int("msgs", cycleMsgs).Dur("duration", time.Since(start)).Msg("Finished ingestion cycle")
+
+		backed, err := r.backoffIfAuthFailed(ctx)
+		if err != nil {
+			return err
+		}
+
+		if backed {
+			continue
+		}
 
 		// Resolve unknown discoveries (channels with peer ID but no title)
 		go r.resolveUnknownDiscoveries(ctx, api)
@@ -363,6 +389,23 @@ func (r *Reader) updateAuthStatus(authErrors, totalChannels int) {
 	} else if authErrors == 0 {
 		r.authFailed.Store(false)
 	}
+}
+
+// backoffIfAuthFailed waits authFailedBackoffSeconds and returns (true, nil) when the
+// session is known to be revoked, stopping discovery goroutines from launching.
+// Returns (false, nil) when auth is healthy, or (true, err) if ctx is canceled.
+func (r *Reader) backoffIfAuthFailed(ctx context.Context) (bool, error) {
+	if !r.authFailed.Load() {
+		return false, nil
+	}
+
+	r.logger.Error().Msg("session auth failed; re-authentication required, backing off")
+
+	if err := r.wait(ctx, authFailedBackoffSeconds*time.Second); err != nil {
+		return true, err
+	}
+
+	return true, nil
 }
 
 // AuthHealthCheck returns an error if the Telegram session is invalid.
@@ -1920,9 +1963,10 @@ func extractServiceMentions(title, sourceType, fromChannelID string) []db.Discov
 		return nil
 	}
 
-	var discoveries []db.Discovery
+	mentions := linkextract.ExtractMentions(title)
+	discoveries := make([]db.Discovery, 0, len(mentions))
 
-	for _, mention := range linkextract.ExtractMentions(title) {
+	for _, mention := range mentions {
 		discoveries = append(discoveries, db.Discovery{
 			Username:      mention,
 			SourceType:    sourceType,

@@ -54,7 +54,7 @@ func (c *Crawler) claimURLs(ctx context.Context, count int) ([]*solr.Document, e
 		return nil, nil
 	}
 
-	var claimed []*solr.Document
+	claimed := make([]*solr.Document, 0, count)
 
 	for _, doc := range resp.Response.Docs {
 		if len(claimed) >= count {

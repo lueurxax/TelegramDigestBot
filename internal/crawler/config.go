@@ -55,9 +55,10 @@ func (c *Config) LoadSeeds() ([]string, error) {
 
 // parseSeeds parses seed URLs from a newline-separated string.
 func parseSeeds(content string) []string {
-	var seeds []string
+	lines := splitLines(content)
+	seeds := make([]string, 0, len(lines))
 
-	for _, line := range splitLines(content) {
+	for _, line := range lines {
 		line = trimLine(line)
 
 		if line == "" || line[0] == '#' {

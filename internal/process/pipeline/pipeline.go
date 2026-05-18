@@ -603,7 +603,7 @@ func (p *Pipeline) prepareCandidates(ctx context.Context, logger zerolog.Logger,
 		deduplicator = dedup.NewStrict(p.database)
 	}
 
-	var candidates []llm.MessageInput
+	candidates := make([]llm.MessageInput, 0, len(messages))
 
 	embeddings := make(map[string][]float32)
 	seenHashes := make(map[string]string) // hash -> msg_id

@@ -57,7 +57,7 @@ var blockedDomains = map[string]bool{
 func ExtractLinks(text string) []Link {
 	matches := urlRegex.FindAllStringIndex(text, -1)
 
-	var links []Link
+	links := make([]Link, 0, len(matches))
 
 	seen := make(map[string]bool)
 

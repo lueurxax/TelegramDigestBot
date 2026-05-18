@@ -186,13 +186,13 @@ func (h *Handler) serveExpandedView(ctx context.Context, w http.ResponseWriter, 
 	evidence := dedupeEvidence(evidenceMap[itemID])
 
 	// Fetch cluster context
-	var clusterItems []ClusterItemView
-
 	_, clusterInfo, err := h.database.GetClusterForItem(ctx, itemID)
 	if err != nil {
 		h.logger.Debug().Err(err).Str(logFieldItemID, itemID).Msg("Failed to fetch cluster context")
 		// Continue without cluster - it's not critical
 	}
+
+	clusterItems := make([]ClusterItemView, 0, len(clusterInfo))
 
 	for _, ci := range clusterInfo {
 		clusterItems = append(clusterItems, ClusterItemView{

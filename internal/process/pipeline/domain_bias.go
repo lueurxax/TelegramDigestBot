@@ -50,7 +50,7 @@ func applyDomainBias(importance float32, c llm.MessageInput, s *pipelineSettings
 func extractDomains(c llm.MessageInput) []string {
 	seen := make(map[string]struct{})
 
-	var domains []string
+	domains := make([]string, 0, len(c.ResolvedLinks))
 
 	for _, link := range c.ResolvedLinks {
 		domain := normalizeDomain(link.Domain)

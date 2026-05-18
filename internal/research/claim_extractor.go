@@ -142,7 +142,7 @@ func (e *ClaimExtractor) scoreSentences(sentences []string, keywords []string) [
 		keywordSet[kw] = true
 	}
 
-	var claims []HeuristicClaim
+	claims := make([]HeuristicClaim, 0, len(sentences))
 
 	for _, sentence := range sentences {
 		sentence = strings.TrimSpace(sentence)
@@ -190,7 +190,7 @@ func (e *ClaimExtractor) scoreSentences(sentences []string, keywords []string) [
 func (e *ClaimExtractor) filterAndDedup(claims []HeuristicClaim) []HeuristicClaim {
 	seen := make(map[string]bool)
 
-	var result []HeuristicClaim
+	result := make([]HeuristicClaim, 0, len(claims))
 
 	for _, claim := range claims {
 		if seen[claim.NormalizedHash] {

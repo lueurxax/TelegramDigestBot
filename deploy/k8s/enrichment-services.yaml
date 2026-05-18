@@ -57,7 +57,7 @@ spec:
     spec:
       initContainers:
       - name: searxng-config-init
-        image: searxng/searxng:latest
+        image: searxng/searxng:2026.5.17-d7e8b7cd1
         command:
         - sh
         - -c
@@ -71,7 +71,10 @@ spec:
           mountPath: /etc/searxng
       containers:
       - name: searxng
-        image: searxng/searxng:latest
+        image: searxng/searxng:2026.5.17-d7e8b7cd1
+        env:
+        - name: SEARXNG_PORT
+          value: "8080"
         ports:
         - containerPort: 8080
         volumeMounts:

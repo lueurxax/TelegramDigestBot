@@ -747,12 +747,13 @@ func truncateContent(content string, maxLen int) string {
 
 // extractLinks extracts all links from HTML content.
 func extractLinks(html string, base *url.URL) []string {
-	var links []string
+	hrefs := findHrefs(html)
+	links := make([]string, 0, len(hrefs))
 
 	seen := make(map[string]bool)
 
 	// Simple href extraction (avoid full HTML parsing for performance)
-	for _, match := range findHrefs(html) {
+	for _, match := range hrefs {
 		link := resolveLink(match, base)
 		if link == "" || seen[link] {
 			continue
