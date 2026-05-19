@@ -3441,6 +3441,11 @@ func (db *DB) rebuildClusterLanguageLinks(ctx context.Context, tx pgx.Tx) error 
 		lists = 1
 	}
 
+	// IVFFlat build scans all rows into memory; raise the session limit to cover it.
+	if _, err := tx.Exec(ctx, "SET LOCAL maintenance_work_mem = '4GB'"); err != nil {
+		return fmt.Errorf("set maintenance_work_mem: %w", err)
+	}
+
 	if _, err := tx.Exec(ctx, fmt.Sprintf(
 		"CREATE INDEX ON _lang_link_rep USING ivfflat (embedding vector_cosine_ops) WITH (lists = %d)", lists,
 	)); err != nil {
